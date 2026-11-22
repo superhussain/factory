@@ -28,6 +28,8 @@
   factory.py bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]
                                             run a reviewer on each case at its head, write review and run.json
                                             for bench score
+  factory.py bench cases <project-slug>
+                                            draft reviewer-benchmark cases from reverted or reworked jobs, print JSON
   factory.py ideas [--limit N] [--max-inflight N] [--project <slug>]
                                             claim the oldest ideas this device can run, print them as JSON
                                             (exit 3 when none are runnable or the cap is full)
@@ -7985,7 +7987,8 @@ def changed_files(wt, base):
     mb = base_read(wt, "merge-base", f"refs/remotes/origin/{base}", "HEAD", text=True)
     if mb.returncode:
         return None
-    diff = base_read(wt, "diff", "--name-only", "--no-renames", "-z", mb.stdout.strip(), "HEAD", text=True)
+    diff = base_read(wt, "diff", "--no-ext-diff", "--no-textconv", "--name-only", "--no-renames", "-z",
+                     mb.stdout.strip(), "HEAD", text=True)
     if diff.returncode:
         return None
     return [p for p in diff.stdout.split("\0") if p]
@@ -8183,14 +8186,14 @@ def spec_budget_paths(text):
     return paths
 
 
-def diff_numstat(wt, base):
-    """{path: added plus deleted lines} the branch changes since origin/<base>, binary files as 0, or None on
-    any git failure."""
-    mb = base_read(wt, "merge-base", f"refs/remotes/origin/{base}", "HEAD", text=True)
+def diff_numstat(wt, ref):
+    """{path: added plus deleted lines} the branch changes since the merge base with ref, binary files as 0, or
+    None on any git failure."""
+    mb = base_read(wt, "merge-base", ref, "HEAD", text=True)
     if mb.returncode:
         return None
-    diff = base_read(wt, "diff", "--numstat", "--no-renames", "-z", mb.stdout.strip(), "HEAD", encoding="utf-8",
-                     errors="replace")
+    diff = base_read(wt, "diff", "--no-ext-diff", "--no-textconv", "--numstat", "--no-renames", "-z",
+                     mb.stdout.strip(), "HEAD", encoding="utf-8", errors="replace")
     if diff.returncode:
         return None
     counts = {}
@@ -8331,6 +8334,9 @@ def pre_review_cmd(target):
     round_n = (board_round if type(board_round) is int and board_round >= 0 else 0) + 1
     meta = frontmatter(project_files(home, slug)[0])[0]
     base, repo = meta.get("base") or "main", meta.get("repo", "")
+    lead = lead_of(job) if job.get("stacked") is True else None
+    budget_ref = f"refs/remotes/origin/{base}" if lead is None else f"refs/heads/factory/{lead}" \
+        if isinstance(lead, str) and JOB_ID.fullmatch(lead) and ".." not in lead else None
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
     folder = home / "jobs" / slug / job_id
@@ -8356,7 +8362,7 @@ def pre_review_cmd(target):
         why = "spec.md has no task Files paths"
     elif reason:
         why = "the base could not be fetched"
-    elif (numstat := diff_numstat(wt, base)) is None:
+    elif budget_ref is None or (numstat := diff_numstat(wt, budget_ref)) is None:
         why = "the branch diff could not be read"
     budget = diff_budget(paths, numstat) if numstat is not None else {
         "result": "none", "files": 0, "lines": 0, "expected_files": 0, "expected_lines": 0, "file_limit": 0,
@@ -8465,8 +8471,8 @@ def diff_ranges(wt, base, repo):
     mb = base_read(wt, "merge-base", f"refs/remotes/origin/{base}", "HEAD", text=True)
     if mb.returncode:
         return None, unreadable
-    diff = base_read(wt, "diff", "-U0", "--no-renames", mb.stdout.strip(), "HEAD", encoding="utf-8",
-                     errors="replace")
+    diff = base_read(wt, "diff", "--no-ext-diff", "--no-textconv", "-U0", "--no-renames", mb.stdout.strip(),
+                     "HEAD", encoding="utf-8", errors="replace")
     if diff.returncode:
         return None, unreadable
     ranges, path, header = {}, None, False
@@ -13634,10 +13640,57 @@ def bench_replay(*args):
         sys.exit(1)
 
 
+BENCH_DRAFT_USAGE = "usage: factory.py bench cases <project-slug>"
+
+
+def bench_draft(*args):
+    """bench cases <project-slug>: print draft cases, with empty defects, for the project's reverted or
+    reworked jobs, each with its PR's head commit from GitHub. Skips print on stderr."""
+    if len(args) != 1 or not SLUG.fullmatch(args[0]):
+        fail(BENCH_DRAFT_USAGE, 2)
+    slug, home = args[0], factory_home()
+    md = project_files(home, slug)[0]
+    if not md.exists():
+        fail(f"bench: no project file for {slug}", 4)
+    repo = frontmatter(md)[0].get("repo", "")
+    jobs = sorted((j for j in read_board(home)["jobs"] if j.get("project") == slug
+                   and isinstance(j.get("outcome"), dict) and j["outcome"].get("result") in ("reverted", "reworked")),
+                  key=lambda j: j["id"])
+    prs = {}
+    for j in jobs:
+        m = GH_PR_PARTS.fullmatch(j.get("pr") or "")
+        if m and f"{m[1]}/{m[2]}".lower() == repo.lower():
+            prs[j["id"]] = int(m[3])
+        else:
+            print(f"factory.py: bench cases skips {j['id']}: PR is not in {repo or 'the project file repo'}",
+                  file=sys.stderr)
+    numbers, heads = sorted(set(prs.values())), {}
+    for i in range(0, len(numbers), 50):
+        found, why = pr_states(repo, numbers[i:i + 50], retro_host())
+        if why:
+            fail(f"bench: {why}", 5)
+        heads.update({n: state[1] for n, state in found.items()})
+    cases = []
+    for j in jobs:
+        if j["id"] not in prs:
+            continue
+        head = heads.get(prs[j["id"]])
+        if isinstance(head, str) and COMMIT.fullmatch(head):
+            cases.append({"id": j["id"], "pr": j["pr"], "head": head, "source": j["outcome"]["result"],
+                          "defects": []})
+        else:
+            print(f"factory.py: bench cases skips {j['id']}: no head commit from GitHub", file=sys.stderr)
+    if not cases:
+        fail(f"bench: no reverted or reworked jobs to draft in {slug}", 3)
+    print(json.dumps({"cases": cases}, indent=2))
+
+
 def bench_cmd(*args):
     """bench score <cases-file> <arm-folder>...: score saved reviewer runs against labeled past defects."""
     if args[:1] == ("replay",):
         return bench_replay(*args[1:])
+    if args[:1] == ("cases",):
+        return bench_draft(*args[1:])
     if len(args) < 3 or args[0] != "score":
         fail(BENCH_USAGE, 2)
     cases = bench_cases(args[1])

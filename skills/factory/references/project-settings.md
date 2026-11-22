@@ -3,7 +3,7 @@
 Project settings defaults to an existing R2 `projects/<slug>.md` configuration.
 Its Document selector also offers the three reference slots below, not repo files,
 device paths, global configuration, or credentials. Keep all configuration agent headings.
-Frontmatter allows one `repo`, `base` and `title`, plus an optional `archive`, `buildkite_org` and `auto_babysit`. `auto_babysit` is a whole number from 1 to 9: pickup starts at most that many babysit sessions on its own per job, see pickup.md. projects.json lists auto_babysit for the dashboard. pr-state and watch --pr also accept a job PR in the archive repo. For an archive PR, pr-state and watch --pr compare its base with the archive repo's default branch. Use an ASCII GitHub
+Frontmatter allows one `repo`, `base` and `title`, plus an optional `archive`, `buildkite_org`, `auto_babysit` and `weekly_tokens`. `auto_babysit` is a whole number from 1 to 9: pickup starts at most that many babysit sessions on its own per job, see pickup.md. projects.json lists auto_babysit for the dashboard. pr-state and watch --pr also accept a job PR in the archive repo. For an archive PR, pr-state and watch --pr compare its base with the archive repo's default branch. Use an ASCII GitHub
 `owner/name` (or empty repo), a simple 1-200-character ASCII ref without traversal,
 empty/dot-ended/`.lock` components, and a 1-160-character title without controls.
 Flat comments and matching quotes are accepted; nested/multiline YAML and unknown

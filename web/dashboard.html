@@ -772,7 +772,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     .detail-head::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: var(--bar-h, 0px); background: var(--panel); z-index: 2; }
     #d-title, #d-star, #d-actions, .detail-head .close { position: relative; z-index: 3; }
     .detail-head .close { background: var(--panel); }
-    #d-meta, #d-pipeline, #d-chat, #d-held, #d-backpressure, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-steer-notes, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
+    #d-meta, #d-pipeline, #d-chat, #d-held, #d-backpressure, #d-not-before, #d-auto-babysit, #d-session-stop, #d-refs, #d-tracer-tasks, #d-steer-notes, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs { position: relative; z-index: 1; }
     #d-tabs { background: var(--panel); border-top: 1px solid var(--line); }
     .pager { margin-top: calc(-1 * var(--head-collapse, 0px)); }
     /* A spacer, not padding: padding taller than the pager would eat the page's scroll range. */
@@ -843,7 +843,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   <div class="detail-resize" id="d-resize" role="separator" aria-orientation="vertical"
        aria-label="Resize job panel" tabindex="0"></div>
   <div class="detail-head">
-    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="meta" id="d-backpressure" hidden></div><div class="meta" id="d-not-before" hidden></div><div class="meta" id="d-auto-babysit" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs tracer-tasks" id="d-steer-notes" hidden><summary></summary><ol role="list"></ol></details></div>
+    <div class="titles"><div class="title" id="d-title"></div><div class="meta" id="d-meta"></div><div class="meta" id="d-pipeline" hidden></div><div class="meta" id="d-chat" hidden></div><div class="meta" id="d-held" hidden></div><div class="meta" id="d-backpressure" hidden></div><div class="meta" id="d-not-before" hidden></div><div class="meta" id="d-auto-babysit" hidden></div><div class="meta" id="d-session-stop" hidden></div><div class="refs" id="d-refs"></div><details class="refs tracer-tasks" id="d-tracer-tasks" hidden><summary></summary><ol role="list"></ol></details><details class="refs tracer-tasks" id="d-steer-notes" hidden><summary></summary><ol role="list"></ol></details></div>
     <div class="links">
       <a class="pr-link" id="d-pr" target="_blank" rel="noopener noreferrer" hidden></a>
       <a class="pr-link" id="d-paseo" hidden></a>
@@ -873,7 +873,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <button class="btn" id="d-start-alone" role="menuitem" tabindex="-1" title="Pickup starts this idea next by itself, with no riders" hidden>Start alone</button>
         <button class="btn" id="d-unbatch" role="menuitem" tabindex="-1" title="Take this rider out of its lead's batch. It goes back to idea, and pickup runs it on its own." hidden>Remove from batch</button>
         <button class="btn" id="d-remove-priority" role="menuitem" tabindex="-1" hidden>Remove priority</button>
-        <button class="btn" id="d-pause" role="menuitem" tabindex="-1" hidden>Pause pickup</button>
+        <button class="btn" id="d-pause" role="menuitem" tabindex="-1" title="Stops new starts and stops this job's running Paseo session" hidden>Pause pickup</button>
         <button class="btn" id="d-resume" role="menuitem" tabindex="-1" hidden>Resume pickup</button>
         <button class="btn" id="d-copy-link" role="menuitem" tabindex="-1" hidden>Copy link</button>
         <button class="btn" id="d-follow-up" role="menuitem" tabindex="-1" hidden>Add follow-up idea</button>
@@ -3391,7 +3391,7 @@ async function saveProjectDocument() {
     } else {
       const allowed = extra
         ? ['body over 1 MiB','invalid document write condition','document needs text/markdown','document must be valid UTF-8','document contains control characters','PUT needs If-Match: "<etag>" or If-None-Match: *','project document: contains control, invisible or bidirectional characters','project document: contains the reserved envelope tag','project document: looks like a secret']
-        : ['project document must be valid UTF-8','project document contains control characters','project document needs closed --- frontmatter','project frontmatter allows one repo, base and title, plus an optional archive, buildkite_org and auto_babysit','invalid project repo','invalid project archive','invalid project buildkite_org','invalid project auto_babysit','invalid project base','invalid project title','body over 1 MiB',
+        : ['project document must be valid UTF-8','project document contains control characters','project document needs closed --- frontmatter','project frontmatter allows one repo, base and title, plus an optional archive, buildkite_org, auto_babysit and weekly_tokens','invalid project repo','invalid project archive','invalid project buildkite_org','invalid project auto_babysit','invalid project weekly_tokens','invalid project base','invalid project title','body over 1 MiB',
           'project document: contains control, invisible or bidirectional characters',
           'project document: contains the reserved envelope tag',
           'project document: looks like a secret'];
@@ -3848,7 +3848,7 @@ $('audit-flags-prev').addEventListener('click', () => auditFlagsMove(-1, $('audi
 $('audit-flags-next').addEventListener('click', () => auditFlagsMove(1, $('audit-flags-next'), $('audit-flags-prev')));
 
 // Cost per merged PR: the Worker's /api/spend rollup, one table per project.
-let spend = null, spendFailed = false;
+let spend = null, spendExpected = [], spendFailed = false;
 
 async function loadSpend() {
   spendFailed = false;
@@ -3856,7 +3856,9 @@ async function loadSpend() {
   try {
     const r = await fetch('./api/spend', { cache: 'no-store' });
     if (r.status !== 200) throw new Error(String(r.status));
-    spend = (await r.json()).rows;
+    const body = await r.json();
+    spend = body.rows;
+    spendExpected = body.expected ?? [];
     spendFailed = false;
   } catch { spend = null; spendFailed = true; }
   renderSpend();
@@ -3867,7 +3869,7 @@ function renderSpend() {
   $('spend-status').textContent = spendFailed ? 'Could not load cost per merged PR. Reload to try again.'
     : spend === null ? 'Loading cost per merged PR…'
     : !rows.length ? 'No merged or closed jobs in the last 8 weeks.'
-    : 'Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged.';
+    : 'Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged. Set weekly_tokens in a project file to see this week\'s share of it and get a nudge at 50, 80 and 100 percent.';
   const num = (n) => n.toLocaleString('en-US');
   const cell = (tag, text) => {
     const el = document.createElement(tag);
@@ -3899,7 +3901,11 @@ function renderSpend() {
     }));
     table.append(body);
     wrap.append(table);
-    return [cell('h4', slug), wrap];
+    const expected = spendExpected.find((e) => e.project === slug);
+    if (!expected) return [cell('h4', slug), wrap];
+    const line = cell('p', 'This week: ' + num(expected.tokens) + ' of ' + num(expected.weekly_tokens) + ' expected tokens (' + expected.percent + '%).');
+    line.className = 'muted spend-expected';
+    return [cell('h4', slug), line, wrap];
   }));
 }
 
@@ -5875,6 +5881,18 @@ function drawerMeta(j) {
     (j.close?.at && !TERMINAL.includes(j.stage) ? ' · closing' : '');
 }
 
+// One sentence per session pickup stopped because the job was paused or closed.
+function sessionStopLine(j) {
+  const lines = [];
+  for (const [key, why] of [['paused', 'paused'], ['close', 'closed']]) {
+    for (const [host, stop] of Object.entries(j[key]?.session_stop || {})) {
+      if (typeof stop?.agent !== 'string' || typeof stop.at !== 'string') continue;
+      lines.push(`Pickup stopped session ${stop.agent} on ${hostName(host)} ${ago(stop.at)} because the job was ${why}.`);
+    }
+  }
+  return lines.join(' ');
+}
+
 // The chat decision, held, not-before and auto-babysit state as drawer lines, so touch, keyboard and screen reader users get what the chip titles say.
 function renderDrawerStatus(j) {
   const paused = backpressureState(j);
@@ -5890,6 +5908,9 @@ function renderDrawerStatus(j) {
   const auto = autoBabysit(j);
   $('d-auto-babysit').textContent = auto ? auto.title : '';
   $('d-auto-babysit').hidden = !auto;
+  const stopped = sessionStopLine(j);
+  $('d-session-stop').textContent = stopped;
+  $('d-session-stop').hidden = !stopped;
 }
 
 async function loadArchivedJob(id) {
@@ -6623,7 +6644,7 @@ let swipeSettling = false;
 // until only the title and tabs remain. An action notice shown above the tabs stops the slide,
 // so it pins under the title with its top margin. The pager sits under them, behind a spacer of the same height.
 // On an idea tab the gallery and file list move into the top of the page, so they scroll with it.
-const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-backpressure, #d-not-before, #d-auto-babysit, #d-refs, #d-tracer-tasks, #d-steer-notes, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
+const HEAD_MOVERS = '#d-meta, #d-pipeline, #d-chat, #d-held, #d-backpressure, #d-not-before, #d-auto-babysit, #d-session-stop, #d-refs, #d-tracer-tasks, #d-steer-notes, #d-agents, #d-tokens, .detail-head .links, .detail-head #d-approve-spec-bar, .detail-head #d-babysit-bar, .detail-head #d-rework-bar, .detail-head #d-approve-as-is-bar, .detail > .err, .detail > .copy-status, #d-assignment, #d-tabs';
 let headCollapse = 0;
 let headShift = 0;
 let headStop = null;
@@ -9762,7 +9783,7 @@ function openBacklogItem(item) {
     a.textContent = r.id;
     head.append(a);
   }
-  for (const id of ['d-star', 'd-pipeline', 'd-chat', 'd-held', 'd-backpressure', 'd-not-before', 'd-auto-babysit', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-approve-spec', 'd-approve-spec-bar', 'd-approve-spec-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-rework', 'd-rework-bar', 'd-approve-as-is', 'd-approve-as-is-bar', 'd-resolve-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
+  for (const id of ['d-star', 'd-pipeline', 'd-chat', 'd-held', 'd-backpressure', 'd-not-before', 'd-auto-babysit', 'd-session-stop', 'd-discard', 'd-follow-tracer', 'd-move-host', 'd-rerun', 'd-rerun-err', 'd-approve-spec', 'd-approve-spec-bar', 'd-approve-spec-err', 'd-babysit', 'd-babysit-bar', 'd-babysit-err', 'd-rework', 'd-rework-bar', 'd-approve-as-is', 'd-approve-as-is-bar', 'd-resolve-err', 'd-prioritize', 'd-remove-priority', 'd-prioritize-err', 'd-pause', 'd-resume', 'd-pause-err', 'd-copy-link', 'd-follow-up', 'd-close-job', 'd-assignment', 'd-pr', 'd-edit-idea-err', 'd-assign-err']) $(id).hidden = true;
   $('d-rerun-status').textContent = '';
   for (const id of ['d-paseo', 'd-paseo-web', 'd-tracer']) setLink($(id), null);
   $('d-tracer-tasks').hidden = true;

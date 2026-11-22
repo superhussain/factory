@@ -637,11 +637,12 @@ Loop step 5 runs `factory.py repeats <slug>/<job-id> <round>` below the round ca
 | Expected lines | expected files x `DIFF_BUDGET_LINES_PER_FILE` (150) |
 | File limit | expected files x `DIFF_BUDGET_FILE_FACTOR` (2) |
 | Line limit | expected lines x `DIFF_BUDGET_LINE_FACTOR` (3) |
-| Branch | `git diff --numstat` merge-base to HEAD, added plus deleted |
+| Branch | `git diff --numstat --no-ext-diff --no-textconv` merge-base to HEAD, added plus deleted |
 
 - The result is `over` when files exceed the file limit or lines exceed the line limit, otherwise `within`.
 - A token with `*` is an `fnmatch` glob, and a token ending in `/` covers everything under it. Absolute paths and `..` never count.
 - Binary files count 0 lines. The section lists up to 20 changed paths no token covers.
+- A stacked rider measures from the merge base with its lead's local branch `factory/<lead>`, so the lead's commits do not count. Without that branch the budget is `none`.
 
 | Case | Budget |
 | --- | --- |
