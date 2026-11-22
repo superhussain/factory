@@ -573,6 +573,8 @@ replayed 1, skipped 1, failed 0 of 2 cases into opus-medium
 A failed case prints `<case-id>: failed: <reason>`. A rerun skips cases that
 already have the review, so it resumes after a failure.
 
+### By hand
+
 Without `claude`, fill a case folder by hand:
 
 1. In the project checkout, run `git worktree add --detach <scratch> <head>`.
