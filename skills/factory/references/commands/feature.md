@@ -114,9 +114,10 @@ feature.
    APPROVE ships the PR and merges it as Rules describes. ESCALATE ships a held PR
    at `pr-open` with `escalated` true and the board note "escalated:" plus the
    decision's reason. The PR URL goes in `pr`, not the note. CHANGES is a normal fix
-   round: run `python3 "$RUNTIME" review-floor "$SLUG/<id>"` before sending the builder `decision.md`.
-   Send it as in step 5 and run the next review round, still under the round cap. One approver CHANGES per build cycle. A second one moves
-   the job to `needs-human`.
+   round: run `python3 "$RUNTIME" review-floor "$SLUG/<id>"` before sending the
+   builder `decision.md`. Send `decision.md` as in step 5 and run the next review
+   round, still under the round cap. One approver CHANGES per build cycle. A second
+   one moves the job to `needs-human`.
 7. After a merge, queue the job for a device build if the project file's Device
    builds section says its diff needs one: patch `{"build": {"state": "queued"}}`.
    Then check the build queue as Builds describes.
