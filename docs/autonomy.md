@@ -414,6 +414,7 @@ flowchart LR
   S --> W
   S --> X[POST /api/backlog/triage/batch]
   S --> V[POST /api/backlog/triage/verdicts]
+  S --> RT[POST /api/backlog/triage/rate]
 ```
 
 Settings, Pipeline holds a `triage` block per scope. A project value replaces the global
@@ -494,14 +495,21 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   `possible duplicate of <id>`. The note is advisory: it never holds, closes or changes the
   queue decision, and no candidates, a missing binding, a failed call or a pick of `none` just
   leave it out. Holds and question items get no check.
-- **Replay.** `factory.py triage replay <slug> [--threshold N]` scores a threshold against what
-  people decided. Its labels are the project's board and archive `backlog` records whose decider
+- **Replay.** `factory.py triage replay <slug> [--threshold N] [--rules-file PATH]` scores a
+  threshold against what people decided. Its labels are the project's board and archive `backlog` records whose decider
   is `person` and decision is `approved` or `denied`, latest `at` per line. Each label is paired with
   the line's stored model hold: a confidence at or above the threshold queues. `agreement` is
   `round(100 * (queue_approved + hold_denied) / scored)`, or null with nothing scored. Rule holds and
   lines with no stored hold count under `unscored`. `model_queued` counts lines triage queued, which
   no person decided, so a higher threshold stays untested. It prints JSON with a row for the current
-  threshold and one for `--threshold` when it differs. It is read only: no model calls and no writes.
+  threshold and one for `--threshold` when it differs. Without `--rules-file` it is read only: no
+  model calls and no writes. With `--rules-file PATH` it reads the file as UTF-8 first, then posts
+  the scored lines 8 at a time to `POST /api/backlog/triage/rate`, which rates each bare line under
+  those rules through clef-flash and stores nothing. The new confidences replace the stored ones,
+  and a line the model gave no usable answer for counts under `unscored.rating_failed`. The JSON
+  adds `rules_file`. Bare lines carry no context, unlike the stored ratings, so compare one rules
+  file against another, not against the threshold-only table. An older Worker answers 404 and
+  replay exits 5.
 - **Floors.** A queued idea still goes through the spec, the reviews F2 requires, the
   approver, merge rules and any `spec-approval` gate.
 - **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
