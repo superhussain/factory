@@ -6358,6 +6358,21 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
 
 PRIORITY_NUDGE = ("The owner prioritized factory job {id}. If your turn ended while work "
                   "on it is still owed, continue with the next step now.")
+IDLE_NUDGE_MINUTES = 20
+IDLE_NUDGE = ("Factory job {id} shows no commit, file or board change for 20 minutes while this session sits "
+              "idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent "
+              "or command that is still running, run factory.py hold for the job with your --session tag, then "
+              "keep waiting.")
+
+
+def read_idle_watch(home):
+    """The jobs dict of <home>/idle-watch.json, {} when the file is missing or malformed."""
+    try:
+        doc = json.loads(Path(home, "idle-watch.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    jobs = doc.get("jobs") if isinstance(doc, dict) and doc.get("version") == 1 else None
+    return jobs if isinstance(jobs, dict) else {}
 
 
 def paseo_send(agent, message):
