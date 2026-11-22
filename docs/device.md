@@ -493,6 +493,9 @@ Bad arguments exit 2 with `usage: factory.py outcomes [record] [<project-slug>]`
 The only git write is the `origin/<base>` remote-tracking ref, and a failed fetch
 exits 5.
 
+The Retros page's Cost per merged PR section shows recorded outcomes as a revert
+count beside tokens per merged PR.
+
 ## Reviewer benchmark
 
 ```text
