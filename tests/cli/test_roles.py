@@ -525,3 +525,15 @@ class RolesTest(IsolatedTestCase):
         ui = flat("factory-review-ui.md")
         self.assertIn("It is never a nit and never goes under `### Fix now`", ui)
         self.assertIn("mark the pair `invalid comparison`", ui)
+
+    def test_assertion_ledger(self):
+        def flat(name):
+            return " ".join((SKILL / "agents" / name).read_text(encoding="utf-8").split())
+        builder = flat("factory-builder.md")
+        self.assertIn("`### Assertion ledger` table with the columns", builder)
+        self.assertIn("Never change `Expected` after the check runs", builder)
+        self.assertIn("`passed`, `failed` or `untested`", builder)
+        review = flat("factory-review-code.md")
+        self.assertIn("Return CHANGES when it is missing", review)
+        self.assertIn("`spec.md#criterion-<n>-<result>`", review)
+        self.assertIn("List each `needs device` row under `## Device check`", flat("factory-approver.md"))

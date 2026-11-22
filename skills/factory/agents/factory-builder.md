@@ -118,7 +118,7 @@ another. Run formatters, linters and other tools only through the repo's own scr
 declared dependencies. Never run `npx <name>` or `pnpm dlx <name>` for a tool the
 manifest does not declare, since that fetches and runs whatever registry package has
 the name. A later run's build.md section gets `Change size: <class>; checks: <commands>`.
-Then run every acceptance check in the spec. Commit after the checks pass.
+Then run every acceptance check in the spec through the assertion ledger. Commit after the checks pass.
 
 Each implementation run permits at most two failed candidate verifications total,
 not two per task or phase. Preserve each command's output and exit status under a
@@ -132,14 +132,23 @@ runtime and model, and the tier, source, and reason the orchestrator gave in you
 prompt. Report them as given; do not guess them.
 Each section holds what changed (with commit hashes),
 each task with its check and result, how each review finding was handled, the
-verification commands with pass or fail, each acceptance criterion with its
-result. Under `### Absorbed`, list each absorbed item with its commit hash. Under
+verification commands with pass or fail, and the assertion ledger below. Under `### Absorbed`, list each absorbed item with its commit hash. Under
 `### Left open`, list each item not done with its reason: outside the spec, large,
 risky, needs its own design, or needs a person. Under `### Tests changed`, list
 each existing test this run weakened, skipped, deleted or special-cased, with its
 file, what changed, and the spec task that changed the behaviour it checks. Never
 weaken a test only to make it pass. Fix the code instead. Write `None.` under an
 empty heading. Report failures plainly.
+
+**Assertion ledger.** Every build.md run section holds a `### Assertion ledger` table
+with the columns `#`, `Criterion`, `Expected`, `Check`, `Result` and `Evidence`, one
+row per spec acceptance criterion in spec order. Write a row's `#`, `Criterion`,
+`Expected` and `Check` before you run its check. `Expected` is the exit status, output
+or state the check must show. Never change `Expected` after the check runs. Then set
+`Result` to `passed`, `failed` or `untested`, and put what you observed in `Evidence`,
+in a few words or a link to `build-evidence.md`. An `untested` row starts `Evidence`
+with its reason: `needs device`, `needs a person`, or the blocker that stopped it.
+Every other check runs.
 
 When spec.md has a `## Repro` section, reproduce before you fix. Run its test or
 steps before you change any source file, then again after the fix. Add a `### Repro`
