@@ -54,13 +54,14 @@ catalog order.
 
 ## Pre-review checks
 
-`factory.py pre-review` runs a job's checks before any reviewer spawns. The check
-list comes only from `.factory/checks.json` on `origin/<base>`, with `<base>` from
-the project file frontmatter. It never reads the job branch's copy and never reads
-a command from R2 (F9), so a branch cannot change which commands run. The checks
-run locally in the job worktree as argv lists with no shell, closed stdin and a
-timeout. A missing or invalid file gives `PRE-REVIEW: NONE` and reviewers work as
-before. Failing tails go to `pre-review.md`, capped at 40 lines per check (F8).
+`factory.py pre-review` runs the commands in `.factory/checks.json` as read from
+`origin/<base>`, where `<base>` comes from the project file. It never reads the
+branch's copy and never takes a command from R2, so a branch cannot change what
+judges it and the Access token cannot run code on a host. The commands still run
+the branch's code, such as its package scripts, and reviewers read that code as
+before. Output tails of failing checks go into `pre-review.md` and reach R2,
+capped at 40 lines per check. A missing or invalid file gives `PRE-REVIEW: NONE`
+and reviewers work as before.
 
 ## Admission rules
 
