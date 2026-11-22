@@ -32,6 +32,10 @@ CHANGES sends the job back to the builder for one more fix round. Use it for gap
 the builder can close:
 a UI change with no screenshots, a criterion that is only claimed when it could be
 shown, or drift from the spec. List each gap as a bullet.
+Check the diff's test files yourself. An existing test that is
+weakened, skipped, deleted or special-cased to pass, with no entry under build.md's
+`### Tests changed` that names the spec task behind it, is a CHANGES gap even when
+review-code passed.
 
 A ux or ui review whose first line is `VERDICT: SKIPPED` counts as passing. Judge
 the whole branch diff against base. If it changes something a person sees that no ux
