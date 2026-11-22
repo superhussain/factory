@@ -8835,7 +8835,7 @@ HEAD_CHECKS_QUERY = ("query=query($o:String!,$r:String!,$sha:GitObjectID!){repos
 
 
 def head_checks(pr, sha):
-    """(checks, problem) for commit sha's checks, as pr_checks returns them, from one gh api graphql call. A repeated name keeps its latest run."""
+    """(checks, problem) for commit sha's checks, as pr_checks returns them, from one gh api graphql call. A repeated name keeps a pending run over a finished one, then its latest run."""
     owner, name = GH_PR.fullmatch(pr)[1].split("/")
     result = gh_cli("api", "graphql", "-f", HEAD_CHECKS_QUERY, "-f", f"o={owner}", "-f", f"r={name}", "-f", f"sha={sha}",
                     "--jq", ".data.repository.object")
@@ -8868,9 +8868,9 @@ def head_checks(pr, sha):
                 raise TypeError
             if not (isinstance(check, str) and isinstance(state, str)):
                 raise TypeError
-            when = when or ""
-            if check not in latest or when > latest[check][0]:
-                latest[check] = when, bucket
+            rank = bucket == "pending", when or ""
+            if check not in latest or rank > latest[check][0]:
+                latest[check] = rank, bucket
     except (ValueError, TypeError, KeyError):
         return [], "printed no check list"
     return [{"name": check, "bucket": latest[check][1]} for check in sorted(latest)], None
