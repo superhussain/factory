@@ -493,6 +493,11 @@ Bad arguments exit 2 with `usage: factory.py outcomes [record] [<project-slug>]`
 The only git write is the `origin/<base>` remote-tracking ref, and a failed fetch
 exits 5.
 
+Pickup runs `outcomes record <slug>` on its first run of each local date that
+`<home>/outcomes-record.json` does not record, for each project whose `paths.md`
+checkout folder exists, and prints one line such as
+`outcomes record alpha: recorded 1 outcomes on the board`.
+
 The Retros page's Cost per merged PR section shows recorded outcomes as a revert
 count beside tokens per merged PR.
 
