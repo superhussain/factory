@@ -2872,6 +2872,24 @@ async function capture(outdir, referencePath) {
     };
     await view("backlog-lesson-desktop", 1440, 900, "light", openLesson);
     await view("backlog-lesson-mobile", 390, 844, "dark", openLesson);
+    const openInboxLesson = async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/inbox";
+      });
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll("#inbox-list .inbox-title")].some((t) =>
+          t.textContent.includes("Lesson: Worker route"),
+        ),
+      );
+      await page.evaluate(() =>
+        [...document.querySelectorAll("#inbox-list .inbox-title")]
+          .find((t) => t.textContent.includes("Lesson: Worker route"))
+          .closest("li")
+          .scrollIntoView({ block: "center" }),
+      );
+    };
+    await view("inbox-lesson-1280", 1280, 900, "light", openInboxLesson);
+    await view("inbox-lesson-390", 390, 844, "dark", openInboxLesson);
     // Both sides refuse the approve. Only the after side shows the link.
     const openRefusal = async (page) => {
       await page.click('.backlog-card[data-index="2"]');

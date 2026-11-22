@@ -247,6 +247,21 @@ Settings history and Restore to draft undo a bullet. Upgrade every pickup host b
 the first `backlog lesson`, since an older runtime's `next` would take a card as an
 idea job.
 
+## Agent lessons
+
+`factory.py lesson <slug>/<job-id> --fact-file <file> [--why-file <file>]` lets the
+orchestrator save what a close or deny taught. Without a why it appends
+`- <fact> (<job-id>, <date>)` to `<slug>/notes.md` through `PUT /api/project-retro`, so it
+counts toward the 2 retro edits per file per day.
+
+| Case | Result |
+| --- | --- |
+| 200 | `added lesson to factory/notes.md version 8: <bullet>` |
+| any other status | `not appended: 429 retro edit cap: 2 per file per day`, then a card |
+| `notes.md` missing or empty | a card, no PUT |
+| `--why-file` given | a card, no PUT |
+| bullet fact already a line | `already in factory/notes.md: <fact>`, nothing written |
+
 ## Retro pipeline edits
 
 A retro reply may carry up to 2 `edits`, each `{"scope", "stage", "note", "summary"}`.
