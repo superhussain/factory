@@ -412,6 +412,68 @@ A bad target, a second argument other than `record`, or `record` without a valid
 `device:` exits 2. `record` exits 4 when the board has no such job and 2 when the
 job belongs to another project; board errors keep their usual exits.
 
+## Post-merge outcomes
+
+```text
+python3 <installed-skill>/runtime/factory.py outcomes [record] [<project-slug>]
+```
+
+`outcomes` sorts every board job at stage `merged` whose `done` falls in the last
+30 days into held, reworked or reverted, optionally for one project. For each
+project it reads the checkout from `paths.md` and `repo` and `base` (default
+`main`) from the project file. It fetches `origin/<base>` once, then asks
+`gh api graphql` for each pull request's merge commit, 50 at a time. It reads the
+commits after the merge on `origin/<base>`, skipping merge commits, and applies
+these rules in order:
+
+| Order | Result | Rule | Evidence |
+| --- | --- | --- | --- |
+| 1 | `reverted` | a commit body contains `This reverts commit <merge oid>` | `commit <sha12>` |
+| 2 | `reworked` | a board job has the ref `{"kind": "rework-of", "id": <job>}` | `rework-of <id>` |
+| 2 | `reworked` | a commit at most 7 days after the merge whose subject contains `fix` or `revert` in any case touches a file the merge changed | `commit <sha12>` |
+| 3 | `held` | none of the above | none |
+
+`reworked` lists every matching ref and commit. Batched riders share their
+lead's pull request, so they get the lead's result.
+
+```text
+outcomes of jobs merged in the last 30 days
+project  held  reworked  reverted  unknown
+alpha       1         1         1        0
+alpha held: 1017-add-x
+alpha reworked: 1018-add-y
+alpha reverted: 1019-add-z
+```
+
+A job the command cannot judge counts as `unknown` and prints its reason, as in
+`alpha unknown: 1020-add-w (no merge commit from GitHub)`:
+
+| Reason | Printed |
+| --- | --- |
+| no checkout | `no checkout of alpha in paths.md on host-a` |
+| the PR is not in the project's repo | `PR is not in example/alpha` |
+| gh fails | gh's failure, such as `gh is not installed on host-a` |
+| GitHub reports no merge commit | `no merge commit from GitHub` |
+| the merge commit is not on `origin/<base>` | `merge commit <sha12> is not on origin/main` |
+
+With no matching jobs it prints `no jobs merged in the last 30 days`.
+
+`outcomes record` prints the same table, then writes each known result to its
+job in one board write and prints `recorded 3 outcomes on the board`:
+
+```json
+"outcome": {"result": "reworked", "at": "2026-01-09T12:00:00Z",
+  "evidence": ["commit 3c4d5e6f7a8b", "rework-of 1021-fix-y"]}
+```
+
+It changes a job only when its result or evidence differs from what is stored,
+never touches the job's `updated`, and skips the write with
+`outcomes unchanged; nothing written` when nothing differs. An `unknown` job is
+never recorded. To clear a value, set `{"outcome": null}` with `factory.py board`.
+Bad arguments exit 2 with `usage: factory.py outcomes [record] [<project-slug>]`.
+The only git write is the `origin/<base>` remote-tracking ref, and a failed fetch
+exits 5.
+
 ## Exit recovery
 
 | Exit | Action |
