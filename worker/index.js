@@ -1310,7 +1310,7 @@ async function pipelineEffective(env, slug) {
   return reply(JSON.stringify(view), 200, "application/json");
 }
 
-const LESSON_LINE = /^- \[ \] ([\w-]+): Lesson: (\S.{0,199})$/;
+const LESSON_LINE = /^- \[ \] ([\w-]+): Lesson: (\S.{0,199})$/u;
 const LESSON_MARK = /^Lesson: from (\w[\w.-]{0,80}), queued (\d{4}-\d\d-\d\d)$/;
 
 // A person's approve of a lesson card: append the card's bullet, built from the stored backlog.md,

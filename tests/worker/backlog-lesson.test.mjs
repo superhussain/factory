@@ -100,6 +100,15 @@ test("a notes.md without a final newline gets one before the bullet", async () =
   assert.equal(s.notes().bytes.toString(), `# Notes\n${BULLET}\n`);
 });
 
+test("a 200-character fact with an emoji is a card, as the CLI counts it", async () => {
+  const fact = "✅" + "x".repeat(198) + "😀";
+  const line = `- [ ] factory: Lesson: ${fact}`;
+  const s = await setup({ backlog: `# Backlog\n${card(line)}` });
+  const r = await s.approve({ line });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(s.notes().bytes.toString(), `${NOTES}- ${fact} (1712-export-csv, 2026-11-22)\n`);
+});
+
 test("a missing notes.md is created as version 1", async () => {
   const s = await setup({ versions: 0 });
   const r = await s.approve();
