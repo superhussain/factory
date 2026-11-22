@@ -7618,10 +7618,26 @@ def run_check(argv, cwd, log, timeout):
 def pre_review_tail(log_text, env):
     """The last PRE_REVIEW_TAIL lines of a failing check's log for pre-review.md: home .env values of
     ENV_SECRET_MIN or more characters and retro_redact's patterns as [redacted], each line printable,
-    at most 300 characters, with ~ as -. Longer values go first, so one holding another leaves no suffix."""
-    for value in sorted(env.values(), key=len, reverse=True):
+    at most 300 characters, with ~ as -. Every match of every value is found on the original text and
+    overlapping matches merge into one [redacted], so values that nest or overlap leave nothing visible."""
+    spans = []
+    for value in env.values():
         if len(value) >= ENV_SECRET_MIN:
-            log_text = log_text.replace(value, "[redacted]")
+            start = log_text.find(value)
+            while start != -1:
+                spans.append((start, start + len(value)))
+                start = log_text.find(value, start + 1)
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    parts, last = [], 0
+    for start, end in merged:
+        parts += [log_text[last:start], "[redacted]"]
+        last = end
+    log_text = "".join(parts) + log_text[last:]
     tail = "\n".join(line[:4000] for line in log_text.splitlines()[-PRE_REVIEW_TAIL:])
     return [printable_line(line, 300).replace("~", "-") for line in retro_redact(tail).split("\n")]
 

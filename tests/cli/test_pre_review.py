@@ -180,6 +180,17 @@ class PreReviewTest(IsolatedTestCase):
         self.assertNotIn("MNOP", text)
         self.assertIn("value [redacted]", text)
 
+    def test_end_overlapping_env_values_are_fully_redacted(self):
+        (self.home / ".env").write_text("FACTORY_TEST_LEFT=alpha-secret-overlap1234\n"  # gitleaks:allow synthetic
+                                        "FACTORY_TEST_RIGHT=overlap1234-beta-secret\n")  # gitleaks:allow synthetic
+        printed = "import sys\nprint('value alpha-secret-overlap1234-beta-secret')\nsys.exit(1)"  # gitleaks:allow
+        self.base([check("overlap", printed)])
+        code, _, _ = self.run_gate()
+        self.assertEqual(code, 1)
+        text = self.out.read_text()
+        self.assertNotIn("secret", text)
+        self.assertIn("value [redacted]\n", text)
+
     def test_timeout_and_missing(self):
         self.base([check("slow", "import time; time.sleep(30)"),
                    {"name": "gone", "run": ["factory-test-no-such-program"]},
