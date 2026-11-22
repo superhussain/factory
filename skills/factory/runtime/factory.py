@@ -6709,6 +6709,10 @@ VISIBLE_GLOBS = ("*.html", "*.htm", "*.css", "*.scss", "*.sass", "*.less", "*.sv
                  "*.jpeg", "*.gif", "*.webp", "*.ico", "*.vue", "*.svelte", "*.jsx", "*.tsx", "*.astro",
                  "*.hbs", "*.njk", "*.ejs", "*.erb", "*.j2", "*.jinja", "*templates/*", "*components/*",
                  "web/*", "public/*", "static/*", "assets/*")
+# Repo-relative fnmatch patterns for CI, check, hook and test-config files the approver must escalate or justify.
+PROTECTED_PATHS = (".github/*", "*/.github/*", "*.gitlab-ci*", "*.circleci/*", "*buildkite*", "*jenkinsfile*",
+                   ".factory/*", ".husky/*", "*.pre-commit-config.yaml", "*lefthook*", "*conftest.py",
+                   "*pytest.ini", "*tox.ini", "*jest.config*", "*vitest.config*", "*playwright.config*")
 VISUAL_CRITERION = re.compile(r"screenshot|captur|before and after|before/after|visual evidence", re.I)
 SKIPPABLE_REVIEWERS = ("ux", "ui")
 REVIEW_PLAN_USAGE = "usage: review-plan <project-slug>/<job-id> <round>"
@@ -6740,6 +6744,11 @@ def visible_globs(project_file):
     """VISIBLE_GLOBS plus every backtick span in the project file's ## UI section."""
     section = markdown_section(project_file.read_text(encoding="utf-8"), "UI") or ""
     return VISIBLE_GLOBS + tuple(re.findall(r"`([^`\n]+)`", section))
+
+
+def touched_protected(paths):
+    """The sorted paths that match a PROTECTED_PATHS glob, compared lowercased."""
+    return sorted(p for p in paths if any(fnmatch.fnmatchcase(p.lower(), g) for g in PROTECTED_PATHS))
 
 
 def plan_reason(spec_text, decision_text, changed, globs):
