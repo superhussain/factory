@@ -102,9 +102,11 @@ class AutonomyHoldTest(IsolatedTestCase):
 
     def test_restore_command(self):
         with patch.object(factory, "now", return_value="2026-11-20T10:00:00Z"):
-            code, _, asked, puts = self.run_restore("alpha", "visible")
+            code, err, asked, puts = self.run_restore("alpha", "visible")
         self.assertEqual(code, 0)
         asked.assert_called_once_with(PROMPT)
+        self.assertEqual(err, "alpha visible restored. PRs already held keep their needs line until a person "
+                              "merges them.\n")
         self.assertEqual(len(puts), 1)
         record = puts[0]["autonomy"]
         self.assertEqual((record["restored"], record["changed"]), ({"alpha/visible": "2026-11-20T10:00:00Z"},
