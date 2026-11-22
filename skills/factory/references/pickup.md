@@ -196,7 +196,9 @@ Each run, in order:
   records nothing.
 - Pushes this host's audit rows for each job at spec, build, review, approve or
   pr-open whose transcripts here changed since `<home>/audit-push.json` records;
-  a failed push prints one warning and the run goes on.
+  a failed push prints one warning and the run goes on. When the push succeeds
+  and this host's token totals for the job changed, it also writes them to
+  `tokens.<device>` and prints `recorded <device> tokens on <job-id>`.
 
 Pickup skips an idea held by a live claim, and any job whose `not_before` is still
 in the future. The board `needs` field is only for input from a human. A session
