@@ -5817,6 +5817,18 @@ def outcome_of(checkout, base, oid, rework_ids):
     return ("reworked", sorted(evidence)) if evidence else ("held", [])
 
 
+def outcome_checkout_problem(checkout, base, device):
+    """Why outcomes cannot read origin/<base> in checkout on device, or None once the fetch worked."""
+    path = Path(checkout)
+    if not path.is_dir():
+        return f"no folder at {checkout} on {device}"
+    top = git(path, "rev-parse", "--show-toplevel")
+    if not top or Path(top).resolve() != path.resolve():
+        return f"{checkout} is not a git checkout on {device}"
+    why = fetch_base(path, base)
+    return f"{why} in {checkout} on {device}" if why else None
+
+
 def pr_signals(repo, numbers, device):
     """({number: (head oid, pr_signal)}, None) for repo's pull requests from one gh api graphql call,
     or (None, why), as pr_states reads them."""
@@ -11441,7 +11453,11 @@ def outcomes_cmd(*args):
                 prs.setdefault(int(m[3]), []).append(j["id"])
         if not prs:
             continue
-        origin_git(checkout, "fetch", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+        problem = outcome_checkout_problem(checkout, base, device)
+        if problem:
+            for ids in prs.values():
+                results.update(dict.fromkeys(ids, ("unknown", [problem])))
+            continue
         oids, why = pr_merge_commits(repo, sorted(prs), device)
         for n, ids in prs.items():
             if why:
