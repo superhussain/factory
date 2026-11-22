@@ -51,6 +51,15 @@ any other build.md line with `BLOCKED:`; put quoted blocks and examples inline i
 backticks. Keep earlier run sections intact. If you are the assigned stronger
 builder and still cannot proceed, write your own block and stop.
 
+**Environment blocks.** When the spec is clear but this machine lacks something a
+task needs, stop there. Start this run's build.md section with
+`BLOCKED-ENV: <kind>: <what is missing>`.
+`<kind>` is `secret`, `tool`, `network` or `service`. `<what is missing>` names the
+piece, such as an env var, a command, a host or a service, and never holds a secret
+value, token or private URL. Commit the tasks already done, list the rest as not
+done, and end the run. A spec gap stays `BLOCKED:`, and a failing check stays a
+failed verification. Never start any other build.md line with `BLOCKED-ENV:`.
+
 **Absorb small open items.** A small issue you find while building costs less to
 fix now than as a new job that must rebuild your context. Fix it in this run, in its
 own commit, when it sits in a file the spec's Tasks name, takes a few lines, carries
