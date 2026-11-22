@@ -37,6 +37,21 @@ spec task that changed the behaviour it checks. Give the test's file:line, what 
 weakened, and the fix: restore the check, or fix the code so the original test
 passes.
 
+Check every test the diff adds. A change-detector test is a CHANGES finding: it
+asserts how the code works instead of what it does, so a refactor breaks it while a
+real bug passes. Flag a new test that asserts mock call order or call counts (such as
+`assert_has_calls`, `call_args_list`, `toHaveBeenNthCalledWith` or
+`toHaveBeenCalledTimes`) without checking an observable result, reads or patches
+private names (a leading underscore or an unexported helper), or snapshots internal
+structure instead of output a caller sees. A test that pins a contract the spec names,
+such as CLI output, a wire format, a stored file or agent prompt copy, is not a change
+detector. A new test that adds no coverage is also a CHANGES finding: it asserts
+nothing, mocks out the code it claims to test, or repeats an existing test's inputs
+and assertions. Judge both by reading the test, since no coverage tool runs. Give the
+test's file:line, what it pins or why it adds nothing, and the fix: assert the
+observable result through the public interface, or delete the test. Use the signature
+`<test path>#change-detector-test` or `<test path>#test-adds-no-coverage`.
+
 When spec.md has a `## Repro` section, return CHANGES unless build.md has a
 `### Repro` table with a `before fix` row that failed and an `after fix` row that
 passed, both running the spec's repro test or steps. Name what is missing. Run the
