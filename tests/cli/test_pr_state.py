@@ -111,15 +111,16 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(json.loads(out), {"pr": 44, "state": "open", "review": "approved", "bots": 0, "checks": "pass",
                                            "queued": False, "conflict": False, "stacked": False, "base": "main",
-                                           "next": "merge", "ci_log": None, "threads": 0, "merge_queue": False})
+                                           "next": "merge", "ci_log": None, "threads": 0, "merge_queue": False,
+                                           "items": [], "capped": [], "rearm": []})
         self.assertEqual(calls[0][:3], ("view", PR, "--json"))
         self.assertIn("baseRefName", calls[0][3])
         self.assertNotIn("isInMergeQueue", calls[0][3])
         self.assertEqual(calls[1], ("checks", PR, "--required", "--json", "name,bucket,link"))
         self.assertEqual(calls[2][0], "graphql")
         self.assertIn("pullRequest(number:$n){isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} "
-                      "reviewThreads(last:100){nodes{isResolved "
-                      "comments(first:100){nodes{authorAssociation author{__typename login}}}}} "
+                      "reviewThreads(last:100){nodes{isResolved path "
+                      "comments(first:100){nodes{authorAssociation body author{__typename login}}}}} "
                       "latestReviews(first:100){nodes{author{__typename login}}}}}}", calls[2][2])
         self.assertEqual(calls[2][3:], ("-f", "o=example", "-f", "r=sample", "-F", "n=44",
                                         "--jq", ".data.repository.pullRequest"))
