@@ -9,6 +9,7 @@ import {
   encryptWith,
   pushKey,
   pushMessage,
+  stalePushes,
   stuckPushes,
   validSubscription,
 } from "../../worker/push.js";
@@ -136,6 +137,31 @@ test("stuckPushes pushes a stale claim once, in its window", () => {
   assert.equal(stuckPushes(jobs, at("10:40")).length, 0);
 });
 
+const DAY_BEFORE = "2026-11-16T05:40:00Z";
+
+test("stalePushes pushes a 24-hour wait once, in its window", () => {
+  const updated = DAY_BEFORE;
+  const jobs = [
+    row("042-sample-retry", "needs-human", { needs: "Approve the spec", updated }),
+    row("043-sample-needs", "build", { needs: "Pick one", updated }),
+    row("044-sample-esc", "pr-open", { escalated: true, updated }),
+    row("045-sample-paused", "needs-human", { paused: { at: SEEN }, updated }),
+    row("046-sample-merged", "merged", { needs: "Old ask", updated }),
+    row("047-sample-build", "build", { updated }),
+  ];
+  const stale = (id) => ({ kind: "stale", id, title: "Synthetic " + id });
+  assert.deepEqual(stalePushes(jobs, at("05:17")), []);
+  assert.deepEqual(stalePushes(jobs, at("06:17")), [
+    stale("042-sample-retry"),
+    stale("043-sample-needs"),
+    stale("044-sample-esc"),
+  ]);
+  assert.deepEqual(stalePushes(jobs, at("07:17")), []);
+  // The window is after its start and at or before its end.
+  assert.equal(stalePushes(jobs, at("05:40")).length, 3);
+  assert.equal(stalePushes(jobs, at("06:40")).length, 0);
+});
+
 test("pushMessage builds the needs, merged and summary payloads", () => {
   assert.deepEqual(
     pushMessage([{ kind: "needs", id: "042-sample-retry", title: "Synthetic retry job" }]),
@@ -161,6 +187,15 @@ test("pushMessage builds the needs, merged and summary payloads", () => {
       title: "Stuck: 042-sample-retry",
       body: "Synthetic retry job",
       tag: "factory-stuck-042-sample-retry",
+      url: "/#042-sample-retry",
+    },
+  );
+  assert.deepEqual(
+    pushMessage([{ kind: "stale", id: "042-sample-retry", title: "Synthetic retry job" }]),
+    {
+      title: "Still needs you: 042-sample-retry",
+      body: "Synthetic retry job",
+      tag: "factory-stale-042-sample-retry",
       url: "/#042-sample-retry",
     },
   );
@@ -550,4 +585,45 @@ test("the hourly cron pushes 042-sample-retry once when its claim goes stale", a
   });
   await run("11:17");
   assert.equal(sent.length, 1);
+});
+
+test("the hourly cron pushes 042-sample-retry once when its wait goes stale", async (t) => {
+  const sent = stubFetch(t);
+  const { env, call } = setup();
+  const phone = await browser("https://fcm.googleapis.com/fcm/send/sample-cron");
+  await call("/api/push/subscriptions", { method: "PUT", body: phone.body });
+  const waiting = { ...RETRY_WAITS, updated: DAY_BEFORE };
+  await env.BUCKET.put("board.json", JSON.stringify({ jobs: [waiting] }));
+  const { scheduled } = (await loadProduction()).default;
+  const cronEnv = { ...serverEnv, BUCKET: env.BUCKET, FACTORY_VAPID_KEY: env.FACTORY_VAPID_KEY };
+  const run = async (hhmm) => {
+    const pending = [];
+    scheduled({ scheduledTime: at(hhmm).getTime() }, cronEnv, {
+      waitUntil: (p) => pending.push(p),
+    });
+    await Promise.allSettled(pending);
+  };
+  await run("06:17");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, phone.body.endpoint);
+  assert.deepEqual(await decrypt(phone, sent[0].body), {
+    title: "Still needs you: 042-sample-retry",
+    body: "Synthetic retry job",
+    tag: "factory-stale-042-sample-retry",
+    url: "/#042-sample-retry",
+  });
+  await run("07:17");
+  assert.equal(sent.length, 1);
+
+  const claim = { device: "device-a", seen: "2026-11-17T01:40:00Z" };
+  const stuck = row("060-sample-unclaimed", "build", { claim });
+  await env.BUCKET.put("board.json", JSON.stringify({ jobs: [stuck, waiting] }));
+  await run("06:17");
+  assert.equal(sent.length, 2);
+  assert.deepEqual(await decrypt(phone, sent[1].body), {
+    title: "2 factory updates",
+    body: "Stuck: 060-sample-unclaimed\nStill needs you: 042-sample-retry",
+    tag: "factory-updates",
+    url: "/",
+  });
 });

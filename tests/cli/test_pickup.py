@@ -1662,8 +1662,10 @@ class PriorityTest(PickupFixture):
         self.export()
         code, out, err = self.pickup()
         self.assertEqual((code, out), (0, ""))
-        self.assertEqual(err, "factory.py: pickup skips priority nudges: paseo did not answer\n")
+        self.assertEqual(err, "factory.py: pickup skips priority nudges: paseo did not answer\n"
+                              "factory.py: pickup skips idle checks: paseo did not answer\n")
         self.assertEqual((self.sent, self.puts()), ([], []))
+        self.assertFalse((self.home / "idle-watch.json").exists())
 
     def test_failed_send_retries_next_run(self):
         self.export()
@@ -1687,6 +1689,183 @@ class PriorityTest(PickupFixture):
         self.assertEqual(self.pickup(), (0, "", ""))
         self.assertEqual(self.puts(), [])
         self.assertNotIn("nudged", self.job("042-sample-export")["priority"])
+
+
+class IdleWatchTest(PickupFixture):
+    NUDGE = ("Factory job 042-sample-export shows no commit, file or board change for 20 minutes while this "
+             "session sits idle. If work on it is still owed, continue with the next step now. If you are "
+             "waiting on an agent or command that is still running, run factory.py hold for the job with your "
+             "--session tag, then keep waiting.")
+    NOTE = "idle: no progress 20 minutes after a nudge to agent synthetic-agent"
+    LINE = "042-sample-export alpha: agent synthetic-agent"
+    send = PriorityTest.send
+
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.statuses = {"synthetic-agent": "idle"}
+        self.sent = []
+        self.send_ok = True
+        patch.object(factory, "paseo_server", return_value="synthetic-server").start()
+        patch.object(factory, "paseo_statuses", side_effect=lambda: self.statuses).start()
+        patch.object(factory, "paseo_send", side_effect=self.send).start()
+
+    def export(self, **extra):
+        job = {"id": "042-sample-export", "stage": "build", "project": "alpha", "updated": "2026-01-01T10:00:00Z",
+               "claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"},
+               "paseo": {"server": "synthetic-server", "agent": "synthetic-agent"}}
+        job.update(extra)
+        self.board["jobs"] = [job]
+        return job
+
+    def watch(self):
+        return json.loads((self.home / "idle-watch.json").read_text(encoding="utf-8"))["jobs"]
+
+    def age(self, *fields):
+        """Move the entry's since or nudged 21 minutes back."""
+        jobs = self.watch()
+        for field in fields:
+            jobs["042-sample-export"][field] = stamp(minutes=-21)
+        (self.home / "idle-watch.json").write_text(json.dumps({"version": 1, "jobs": jobs}), encoding="utf-8")
+
+    def nudged(self):
+        """Record the job, age it and nudge it once."""
+        self.export()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.age("since")
+        self.assertEqual(self.pickup(), (0, f"nudged idle {self.LINE}\n", ""))
+        self.sent.clear()
+
+    def test_first_idle_run_records_only(self):
+        self.export()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.sent, self.puts()), ([], []))
+        entry = self.watch()["042-sample-export"]
+        self.assertEqual({k: entry[k] for k in ("agent", "head", "tree", "updated")},
+                         {"agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z"})
+        self.assertRegex(entry["since"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertNotIn("nudged", entry)
+
+    def test_nudges_once_after_twenty_minutes(self):
+        self.export()
+        self.pickup()
+        self.age("since")
+        self.assertEqual(self.pickup(), (0, f"nudged idle {self.LINE}\n", ""))
+        self.assertEqual(self.sent, [("synthetic-agent", self.NUDGE)])
+        self.assertEqual(self.puts(), [])
+        self.assertIn("nudged", self.watch()["042-sample-export"])
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(len(self.sent), 1)
+
+    def test_dry_run_writes_nothing(self):
+        self.export()
+        self.assertEqual(self.pickup("--dry-run"), (0, f"host {DEVICE}: would launch 0\n", ""))
+        self.assertFalse((self.home / "idle-watch.json").exists())
+        self.pickup()
+        self.age("since")
+        before = (self.home / "idle-watch.json").read_text(encoding="utf-8")
+        self.calls.clear()
+        code, out, err = self.pickup("--dry-run")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"would nudge idle {self.LINE}\nhost {DEVICE}: would launch 0\n")
+        self.assertEqual((self.home / "idle-watch.json").read_text(encoding="utf-8"), before)
+        self.assertEqual((self.sent, self.puts()), ([], []))
+
+    def test_change_resets_the_window(self):
+        wt = self.home / "worktrees" / "alpha" / "042-sample-export"
+        wt.mkdir(parents=True)
+        commit = ["git", "-C", str(wt), "-c", "user.name=Sample", "-c", "user.email=sample@example.test",
+                  "commit", "-q", "--allow-empty", "-m", "sample"]
+        subprocess.run(["git", "init", "-q", str(wt)], check=True)
+        subprocess.run(commit, check=True)
+
+        def board():
+            self.board["jobs"][0]["updated"] = stamp()
+        for name, change in (("head", lambda: subprocess.run(commit, check=True)),
+                             ("tree", lambda: (wt / "sample.txt").write_text("x", encoding="utf-8")),
+                             ("updated", board)):
+            with self.subTest(change=name):
+                self.export(updated="2026-01-01T10:00:00Z")
+                self.pickup()
+                self.age("since", "nudged")
+                old = self.watch()["042-sample-export"]
+                change()
+                self.calls.clear()
+                self.assertEqual(self.pickup(), (0, "", ""))
+                entry = self.watch()["042-sample-export"]
+                self.assertNotEqual(entry[name], old[name])
+                self.assertGreater(entry["since"], old["since"])
+                self.assertNotIn("nudged", entry)
+                self.assertEqual((self.sent, self.puts()), ([], []))
+
+    def test_ineligible_jobs_are_left_alone(self):
+        for name, extra in (("running", {}),
+                            ("other device", {"claim": {"device": "other-host", "session": "a1b2c3",
+                                                        "since": "2026-01-01T10:00:00Z"}}),
+                            ("other server", {"paseo": {"server": "other-server", "agent": "synthetic-agent"}}),
+                            ("gated", {"needs": "Which option?"}),
+                            ("paused", {"paused": {"at": "2026-01-02T12:00:00Z"}}),
+                            ("pr-open", {"stage": "pr-open"})):
+            with self.subTest(job=name):
+                self.statuses = {"synthetic-agent": "running" if name == "running" else "idle"}
+                self.export(**extra)
+                self.pickup()
+                (self.home / "idle-watch.json").write_text(json.dumps({"version": 1, "jobs": {
+                    "042-sample-export": {"agent": "synthetic-agent", "head": "", "tree": "",
+                                          "updated": "2026-01-01T10:00:00Z", "since": stamp(minutes=-41),
+                                          "nudged": stamp(minutes=-21)}}}), encoding="utf-8")
+                self.calls.clear()
+                self.assertEqual(self.pickup(), (0, "", ""))
+                self.assertEqual((self.sent, self.puts()), ([], []))
+                self.assertEqual(self.job("042-sample-export")["stage"], extra.get("stage", "build"))
+
+    def test_needs_human_after_the_second_window(self):
+        self.nudged()
+        self.age("nudged")
+        self.assertEqual(self.pickup(), (0, f"needs-human 042-sample-export alpha: {self.NOTE}\n", ""))
+        job = self.job("042-sample-export")
+        self.assertEqual((job["stage"], job["note"]), ("needs-human", self.NOTE))
+        self.assertNotIn("claim", job)
+        self.assertNotIn("needs", job)
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.watch(), {})
+
+    def test_unsafe_project_is_never_watched(self):
+        self.export(project="../../elsewhere")
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertFalse((self.home / "idle-watch.json").exists())
+        (self.home / "idle-watch.json").write_text(json.dumps({"version": 1, "jobs": {"042-sample-export": {
+            "agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z",
+            "since": stamp(minutes=-21)}}}), encoding="utf-8")
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual((self.sent, self.puts()), ([], []))
+        self.assertEqual(self.watch(), {})
+
+    def test_board_change_wins_over_escalation(self):
+        self.nudged()
+        self.age("nudged")
+
+        def bump():
+            self.board["jobs"][0]["updated"] = stamp()
+            return self.statuses
+        factory.paseo_statuses.side_effect = bump
+        self.calls.clear()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        self.assertEqual(self.puts(), [])
+        self.assertEqual(self.job("042-sample-export")["stage"], "build")
+
+    def test_failed_send_retries(self):
+        self.export()
+        self.pickup()
+        self.age("since")
+        self.send_ok = False
+        code, out, err = self.pickup()
+        self.assertEqual((code, out), (0, ""))
+        self.assertEqual(err, "factory.py: pickup could not nudge idle 042-sample-export: paseo send failed\n")
+        self.assertNotIn("nudged", self.watch()["042-sample-export"])
+        self.send_ok = True
+        self.assertEqual(self.pickup(), (0, f"nudged idle {self.LINE}\n", ""))
+        self.assertEqual(len(self.sent), 2)
 
 
 class PauseTest(PickupFixture):
@@ -2159,9 +2338,18 @@ class AuditPickupTest(PickupFixture):
     def test_token_scan_error_warns(self):
         with patch.object(factory, "usage_totals", side_effect=ValueError("boom")):
             self.assertEqual(self.pickup(), (0, self.line,
-                                             "factory.py: usage: scan failed (ValueError: boom); nothing recorded\n"))
+                                             "factory.py: usage: scan failed on 1017-add-x (ValueError: boom); nothing recorded\n"))
         self.assertEqual(self.board_puts(), 0)
         self.assertEqual(self.record(), {"version": 1, "jobs": {"1017-add-x": factory.audit_stamp("1017-add-x")}})
+
+
+class OrphanPickupHookTest(PickupFixture):
+    def test_pickup_calls_the_hook_once_and_dry_run_never(self):
+        hook = patch.object(factory, "orphan_pickup_scan").start()
+        self.assertEqual(self.pickup("--dry-run"), (0, f"host {DEVICE}: would launch 0\n", ""))
+        hook.assert_not_called()
+        self.assertEqual(self.pickup(), (0, "", ""))
+        hook.assert_called_once_with(self.home)
 
 
 class CloseTest(PickupFixture):

@@ -33,8 +33,10 @@ device's and whose Paseo agent on this host is closed or gone. It also picks an
 It skips any job whose `needs` is set, since that job waits on the user.
 It also drops any stub whose claim is older than `claim_stale_minutes`.
 An idle Paseo agent counts as alive, so `claim_stale_minutes` decides how long an
-idle Paseo session, or a plain native session, keeps its job. Schedule setup and
-refresh are explicit, using the user's chosen route, never a paid fallback.
+idle Paseo session, or a plain native session, keeps its job.
+Pickup's idle watch nudges an idle agent on this host after 20 quiet minutes and
+moves the job to needs-human 20 minutes later; see references/pickup.md.
+Schedule setup and refresh are explicit, using the user's chosen route, never a paid fallback.
 
 `stuck` records each resume in the job's `resumes`. When a job comes back a fourth
 time with the same stage, round, rounds, PR, and worktree `HEAD`, `stuck` moves it

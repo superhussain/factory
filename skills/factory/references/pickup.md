@@ -199,6 +199,12 @@ Each run, in order:
   a failed push prints one warning and the run goes on. When the push succeeds
   and this host's token totals for the job changed, it also writes them to
   `tokens.<device>` and prints `recorded <device> tokens on <job-id>`.
+- Runs the read-only orphan scan on its first run of each local date that
+  `<home>/orphan-scan.json` does not record, and prints one line such as
+  `orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory.py orphans to list them`.
+  The date is recorded before the scan, so a stopped scan prints one warning and
+  waits for the next local date. `pickup --dry-run` skips it. Run
+  `factory.py orphans` for the full list; nothing is removed.
 
 Pickup skips an idea held by a live claim, and any job whose `not_before` is still
 in the future. The board `needs` field is only for input from a human. A session
@@ -435,6 +441,16 @@ changes nothing. Then install one timer per host.
 - `stuck` exits 3, so the resume schedule resumes nothing.
 - Sessions already running keep running. A stop blocks new starts only.
 - A Worker without the `/api/halt` route answers 404, which means not stopped.
+
+## Nudging an idle job
+
+- `pickup` watches each job at `spec`, `build`, `review` or `approve` that this device claimed and whose Paseo agent runs on this host's server. It skips jobs with an ask, a pause, a queued close or a batch lead.
+- The quiet signature is the agent, the worktree's `HEAD`, a hash of `git status --porcelain` and the job's `updated`. It lives in `<home>/idle-watch.json`, never on the board. Any commit, file edit or board write starts the window again.
+- Only an `idle` agent counts. A `running` agent keeps its entry and is skipped that run.
+- After 20 quiet minutes, `pickup` sends the agent one fixed nudge with `paseo send --no-wait` and prints `nudged idle <id> <project>: agent <agent>`. `--dry-run` prints `would nudge idle ...` and writes nothing. A failed send prints `factory.py: pickup could not nudge idle <id>: paseo send failed` on stderr and retries next run.
+- The nudge reads: "Factory job <id> shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory.py hold for the job with your --session tag, then keep waiting."
+- After 20 more quiet minutes, `pickup` moves the job to `needs-human`, releases the claim and prints `needs-human <id> <project>: idle: no progress 20 minutes after a nudge to agent <agent>`. A board change since the read wins, so a fresh `hold` keeps the job.
+- When paseo does not answer, `pickup` prints `factory.py: pickup skips idle checks: paseo did not answer` on stderr.
 
 ## Pausing a job
 

@@ -5,6 +5,7 @@ import { importJWK, SignJWT } from "jose";
 const TERMINAL = ["merged", "closed"];
 const IN_FLIGHT = ["spec", "build", "review", "approve"];
 export const STUCK_MINUTES = 240;
+export const STALE_MINUTES = 1440;
 const PUSH_HOSTS = [
   "fcm.googleapis.com",
   "updates.push.services.mozilla.com",
@@ -148,7 +149,26 @@ export function stuckPushes(jobs, at) {
   return events;
 }
 
-const LINE = { needs: "Needs you: ", merged: "Merged: ", stuck: "Stuck: " };
+/** The stale events for jobs that wait on you and whose update falls in the hour ending
+ * STALE_MINUTES before at, so each wait is pushed by one hourly run. */
+export function stalePushes(jobs, at) {
+  const end = at.getTime() - STALE_MINUTES * 60_000;
+  const events = [];
+  for (const j of jobs.filter(hasId)) {
+    if (!waitsOnYou(j) || parked(j)) continue;
+    const updated = Date.parse(j.updated);
+    if (updated > end - 3_600_000 && updated <= end)
+      events.push({ kind: "stale", id: j.id, title: j.title });
+  }
+  return events;
+}
+
+const LINE = {
+  needs: "Needs you: ",
+  merged: "Merged: ",
+  stuck: "Stuck: ",
+  stale: "Still needs you: ",
+};
 const line = (e) => LINE[e.kind] + String(e.id).slice(0, 80);
 
 /** The notification payload for one write's events. */

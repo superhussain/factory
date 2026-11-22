@@ -109,6 +109,9 @@
                                             the job is merged or closed, whatever its git state; print
                                             leftovers as JSON
                                             (--check: print only)
+  factory.py orphans                        list factory branches, open PRs, worktrees and Paseo workspaces
+                                            that no open board job owns, with a reason each, as JSON;
+                                            never removes anything
   factory.py push <project-slug>[/<job-id>] upload a project file, or a job's changed markdown and images, to R2
   factory.py pull <project-slug>[/<job-id>] download a project, or a job's changed markdown and images from R2
   factory.py idea-images <project-slug>/<job-id>
@@ -3687,6 +3690,15 @@ def explore(slug, *rest):
 
 
 
+def parse_route(value):
+    """(provider, model, effort or None) from "<provider> <model> [<effort>]", or None when it is malformed."""
+    parts = value.split()
+    if len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) or not ROUTE_MODEL.fullmatch(parts[1]) \
+            or parts[2:] and parts[2] not in ROUTE_EFFORTS:
+        return None
+    return parts[0], parts[1], parts[2] if len(parts) == 3 else None
+
+
 def read_routes(home):
     """[(name, provider, model, effort or None)] from this host's routes.md, in preference order."""
     path = Path(home, "routes.md")
@@ -3699,11 +3711,10 @@ def read_routes(home):
         # The optional experiment and review lines are config, not routes.
         if name == "experiment" or name in REVIEW_ROUTE_KEYS:
             continue
-        parts = value.split()
-        if not SLUG.fullmatch(name) or len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) \
-                or not ROUTE_MODEL.fullmatch(parts[1]) or parts[2:] and parts[2] not in ROUTE_EFFORTS:
+        route = parse_route(value)
+        if not SLUG.fullmatch(name) or route is None:
             fail(f"bad route {name!r} in {path}: use <name>: <provider> <model> [<effort>]", 2)
-        routes.append((name, parts[0], parts[1], parts[2] if len(parts) == 3 else None))
+        routes.append((name, *route))
     return routes
 
 
@@ -3718,12 +3729,10 @@ def read_review_routes(home):
         if value is None:
             routes[tier] = None
             continue
-        parts = value.split()
-        if len(parts) not in (2, 3) or not SLUG.fullmatch(parts[0]) or not ROUTE_MODEL.fullmatch(parts[1]) \
-                or parts[2:] and parts[2] not in ROUTE_EFFORTS:
+        route = parse_route(value)
+        if route is None:
             fail(f"bad review route {key} in {path}: use {key}: <provider> <model> [<effort>]", 2)
-        routes[tier] = {"name": key, "provider": parts[0], "model": parts[1],
-                        "effort": parts[2] if len(parts) == 3 else None}
+        routes[tier] = {"name": key, "provider": route[0], "model": route[1], "effort": route[2]}
     return routes
 
 
@@ -4816,6 +4825,7 @@ def pickup(*args):
                     print("factory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now", file=sys.stderr)
             retro_pickup_push(home)
             audit_pickup_push(home, data)
+            orphan_pickup_scan(home)
         retro_pickup_catchup(home, dry)
         pickup_pass(home, device, minutes, dry, limit, cap, data)
     finally:
@@ -6413,6 +6423,21 @@ def close_cleanup_pass(home, data, device, paths, settings, dry):
 
 PRIORITY_NUDGE = ("The owner prioritized factory job {id}. If your turn ended while work "
                   "on it is still owed, continue with the next step now.")
+IDLE_NUDGE_MINUTES = 20
+IDLE_NUDGE = ("Factory job {id} shows no commit, file or board change for 20 minutes while this session sits "
+              "idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent "
+              "or command that is still running, run factory.py hold for the job with your --session tag, then "
+              "keep waiting.")
+
+
+def read_idle_watch(home):
+    """The jobs dict of <home>/idle-watch.json, {} when the file is missing or malformed."""
+    try:
+        doc = json.loads(Path(home, "idle-watch.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    jobs = doc.get("jobs") if isinstance(doc, dict) and doc.get("version") == 1 else None
+    return jobs if isinstance(jobs, dict) else {}
 
 
 def paseo_send(agent, message):
@@ -6476,6 +6501,75 @@ def priority_nudge_pass(home, data, device, dry):
             print(f"nudged {line}")
 
 
+def idle_watch_pass(home, data, device, dry):
+    """Nudge the idle Paseo agent of an in-flight job claimed on this host once its worktree and
+    board job sit unchanged for IDLE_NUDGE_MINUTES, and move the job to needs-human when they
+    stay unchanged that long again. The quiet signatures live in <home>/idle-watch.json."""
+    server = paseo_server()
+
+    def due(j):
+        c, link, job_id = j.get("claim"), j.get("paseo"), j.get("id")
+        return (j.get("stage") in IN_FLIGHT and isinstance(c, dict) and c.get("device") == device
+                and server and isinstance(link, dict) and link.get("server") == server
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"])
+                and not gated(j) and not paused(j) and not closing(j) and not lead_of(j))
+
+    old = read_idle_watch(home)
+    watch = {}
+    jobs = [j for j in data["jobs"] if due(j)]
+    statuses = paseo_statuses() if jobs else {}
+    if statuses is None:
+        print("factory.py: pickup skips idle checks: paseo did not answer", file=sys.stderr)
+        return
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=IDLE_NUDGE_MINUTES)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for j in jobs:
+        job_id, project, agent = j["id"], j.get("project"), j["paseo"].get("agent")
+        prev = old.get(job_id) if isinstance(old.get(job_id), dict) else {}
+        if statuses.get(agent) != "idle":
+            if prev:
+                watch[job_id] = prev
+            continue
+        wt = Path(home, "worktrees", project, job_id)
+        there = wt.exists()
+        sig = {"agent": agent, "head": git(wt, "rev-parse", "HEAD") if there else "",
+               "tree": hashlib.sha256(git(wt, "status", "--porcelain").encode()).hexdigest()[:12] if there else "",
+               "updated": j.get("updated")}
+        if any(prev.get(k) != v for k, v in sig.items()) or not isinstance(prev.get("since"), str):
+            watch[job_id] = dict(sig, since=now())
+            continue
+        entry = watch[job_id] = dict(prev)
+        line = f"{job_id} {project}: agent {agent}"
+        if "nudged" not in entry:
+            if entry["since"] >= cutoff:
+                continue
+            if dry:
+                print(f"would nudge idle {line}")
+            elif not paseo_send(agent, IDLE_NUDGE.format(id=job_id)):
+                print(f"factory.py: pickup could not nudge idle {job_id}: paseo send failed", file=sys.stderr)
+            else:
+                entry["nudged"] = now()
+                print(f"nudged idle {line}")
+            continue
+        if dry or not isinstance(entry["nudged"], str) or entry["nudged"] >= cutoff:
+            continue
+        note = f"idle: no progress {IDLE_NUDGE_MINUTES} minutes after a nudge to agent {agent}"
+
+        def change(text, job_id=job_id, stage=j["stage"], updated=j.get("updated"), note=note):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            if (found is None or found.get("stage") != stage or found.get("updated") != updated
+                    or not isinstance(found.get("claim"), dict) or found["claim"].get("device") != device):
+                return None, False
+            patch_job(board, job_id, {"stage": "needs-human", "note": note, "claim": None})
+            return dump_board(board), True
+        if cas(home, "/api/board", change):
+            print(f"needs-human {job_id} {project}: {note}")
+        del watch[job_id]
+    if not dry and watch != old:
+        write_atomic(Path(home, "idle-watch.json"), json.dumps({"version": 1, "jobs": watch}, indent=2) + "\n")
+
+
 def moved_here(j, device):
     """True when the dashboard moved this in-flight job to this host, no pickup has claimed it yet,
     and no stop of it is still queued on this host, as for a rerun."""
@@ -6496,6 +6590,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     close_pass(home, data, device, minutes, dry)
     close_cleanup_pass(home, data, device, paths, settings, dry)
     priority_nudge_pass(home, data, device, dry)
+    idle_watch_pass(home, data, device, dry)
     auto_babysit_pass(home, data, device, minutes, paths, settings, dry)
     babysit_pass(home, data, device, minutes, paths, settings, dry)
     taken = takeover(home, data, device, minutes, paths, settings, dry) if stalls is not None else 0
@@ -6921,7 +7016,10 @@ VISIBLE_GLOBS = ("*.html", "*.htm", "*.css", "*.scss", "*.sass", "*.less", "*.sv
 # Repo-relative fnmatch patterns for CI, check, hook and test-config files the approver must escalate or justify.
 PROTECTED_PATHS = (".github/*", "*/.github/*", "*.gitlab-ci*", "*.circleci/*", "*buildkite*", "*jenkinsfile*",
                    ".factory/*", ".husky/*", "*.pre-commit-config.yaml", "*lefthook*", "*conftest.py",
-                   "*pytest.ini", "*tox.ini", "*jest.config*", "*vitest.config*", "*playwright.config*")
+                   "*pytest.ini", "*tox.ini", "*jest.config*", "*vitest.config*", "*playwright.config*",
+                   "package.json", "*/package.json", "*.gitleaks.toml", "mise.toml", "*/mise.toml", "*.mise.toml",
+                   "*.oxfmtrc*", "nx.json", "tools/verify.py", "tests/cli/support.py", "tests/support/*",
+                   "tools/secret-scan.py", "pnpm-workspace.yaml", "*/pnpm-workspace.yaml", "*.npmrc")
 VISUAL_CRITERION = re.compile(r"screenshot|captur|before and after|before/after|visual evidence", re.I)
 SKIPPABLE_REVIEWERS = ("ux", "ui")
 REVIEW_PLAN_USAGE = "usage: review-plan <project-slug>/<job-id> <round>"
@@ -9362,6 +9460,156 @@ def archive_workspace(target, *flags):
             fail(f"workspace {wks} archived, but agent archive failed: paseo archive {agent} exit {code}")
 
 
+ORPHAN_SCAN_FILE = "orphan-scan.json"
+ORPHAN_KINDS = ("branch", "pr", "worktree", "workspace")
+ORPHAN_NOUNS = {"branch": ("branch", "branches"), "pr": ("open PR", "open PRs"),
+                "worktree": ("worktree", "worktrees"), "workspace": ("Paseo workspace", "Paseo workspaces")}
+
+
+def orphan_reason(jobs, job_id):
+    """Why no open board job owns job_id's leftovers, or None when one does."""
+    job = next((j for j in jobs if j.get("id") == job_id), None)
+    if job is None:
+        return "no job on the board"
+    if job.get("stage") not in TERMINAL:
+        return None
+    return "job merged" if job["stage"] == "merged" else "job closed"
+
+
+def orphan_scan(home):
+    """(orphans, skipped): factory branches on origin, open factory PRs, job worktrees and factory-<id>
+    Paseo workspaces that no open board job owns. Only reads; a source that fails is one skipped line,
+    which never carries a tool's stderr."""
+    jobs = read_board(home)["jobs"]
+    ids = {j.get("id") for j in jobs}
+    orphans, skipped = [], []
+
+    def add(kind, project, job_id, name):
+        reason = orphan_reason(jobs, job_id)
+        if reason:
+            orphans.append({"kind": kind, "project": project, "job": job_id, "name": name, "reason": reason})
+
+    gh_missing = False
+    for slug, path in read_paths(home).items():
+        if not os.path.isdir(path):
+            continue
+        try:
+            r = subprocess.run(["git", "-C", path, "ls-remote", "--heads", "origin", "refs/heads/factory/*"],
+                               capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL,
+                               env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+        except subprocess.TimeoutExpired:
+            skipped.append(f"branches {slug}: git ls-remote timed out after 20 s")
+        except OSError:
+            skipped.append(f"branches {slug}: could not run git")
+        else:
+            if r.returncode:
+                skipped.append(f"branches {slug}: git ls-remote failed (exit {r.returncode})")
+            else:
+                for line in r.stdout.splitlines():
+                    ref = line.split("\t", 1)[-1]
+                    if ref.startswith("refs/heads/factory/"):
+                        name = ref[len("refs/heads/"):]
+                        add("branch", slug, name[len("factory/"):], name)
+        if gh_missing:
+            continue
+        md = project_files(home, slug)[0]
+        repo = frontmatter(md)[0].get("repo", "") if md.exists() else ""
+        if not repo:
+            skipped.append(f"prs {slug}: the project file names no repo")
+            continue
+        r = gh_cli("pr", "list", "-R", repo, "--state", "open", "--json", "number,headRefName,url", "--limit", "500")
+        if r is None:
+            gh_missing = True
+            skipped.append("prs: gh is not on PATH")
+            continue
+        try:
+            prs = json.loads(r[1]) if r[0] == 0 else None
+        except ValueError:
+            prs = None
+        if not isinstance(prs, list):
+            skipped.append(f"prs {slug}: gh pr list failed (exit {r[0]})")
+            continue
+        for pr in prs:
+            head = pr.get("headRefName") if isinstance(pr, dict) else None
+            if isinstance(head, str) and head.startswith("factory/"):
+                add("pr", slug, head[len("factory/"):], pr.get("url"))
+
+    root = home / "worktrees"
+    try:
+        if is_link(root):
+            projects = [root]
+        else:
+            projects = sorted(root.iterdir()) if root.is_dir() else []
+        for project in projects:
+            if is_link(project):
+                skipped.append(f"worktrees: {project} is a symlink or junction")
+                continue
+            for folder in sorted(project.iterdir()) if project.is_dir() else ():
+                if is_link(folder):
+                    skipped.append(f"worktrees: {folder} is a symlink or junction")
+                elif folder.is_dir():
+                    add("worktree", project.name, folder.name, str(folder))
+    except OSError as e:
+        skipped.append(f"worktrees: could not read {e.filename or root}")
+
+    if not shutil.which("paseo"):
+        skipped.append("workspaces: paseo is not on PATH")
+    else:
+        code, out = paseo_run(["workspace", "ls", "--json"])
+        try:
+            spaces = json.loads(out) if not code else None
+        except ValueError:
+            spaces = None
+        if not isinstance(spaces, list):
+            skipped.append(f"workspaces: paseo workspace ls failed (exit {code})")
+            spaces = []
+        for space in spaces:
+            cwd = space.get("cwd") if isinstance(space, dict) else None
+            base = os.path.basename(os.path.normpath(cwd)) if isinstance(cwd, str) else ""
+            if base.startswith("factory-"):
+                rest = base[len("factory-"):]
+                job_id = rest if rest in ids else re.sub(r"-\d+$", "", rest)
+                job = next((j for j in jobs if j.get("id") == job_id), {})
+                add("workspace", job.get("project"), job_id, cwd)
+
+    orphans.sort(key=lambda o: (ORPHAN_KINDS.index(o["kind"]), o["name"]))
+    return orphans, skipped
+
+
+def orphans_cmd():
+    o, s = orphan_scan(factory_home())
+    print(json.dumps({"orphans": o, "skipped": s}, indent=2))
+
+
+def orphan_summary(orphans, skipped):
+    """The one pickup line for a scan's result."""
+    if not orphans and not skipped:
+        return "orphan scan: nothing orphaned"
+    counts = [(k, sum(1 for o in orphans if o["kind"] == k)) for k in ORPHAN_KINDS]
+    kinds = ", ".join(f"{n} {ORPHAN_NOUNS[k][n != 1]}" for k, n in counts if n)
+    line = f"orphan scan: {len(orphans)} orphaned ({kinds})" if orphans else "orphan scan: nothing orphaned"
+    if skipped:
+        line += ", 1 source skipped" if len(skipped) == 1 else f", {len(skipped)} sources skipped"
+    return line + "; run factory.py orphans to list them"
+
+
+def orphan_pickup_scan(home):
+    """Run the orphan scan once per local date and print its summary line. The date is recorded
+    before the scan, so a scan that stops does not retry until the next local date."""
+    today = datetime.now().astimezone().strftime("%Y-%m-%d")
+    try:
+        record = json.loads((home / ORPHAN_SCAN_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        record = None
+    if isinstance(record, dict) and record.get("version") == 1 and record.get("date") == today:
+        return
+    write_atomic(home / ORPHAN_SCAN_FILE, json.dumps({"version": 1, "date": today}) + "\n")
+    try:
+        print(orphan_summary(*orphan_scan(home)))
+    except SystemExit as e:
+        print(f"factory.py: orphan scan stopped (exit {e.code}); it runs again tomorrow", file=sys.stderr)
+
+
 def stuck(*args):
     """Claim up to --limit jobs that a dead session left mid-loop, and print them as JSON
     for the resume schedule. Only this function writes a job's resumes."""
@@ -11457,7 +11705,8 @@ def usage_pickup_record(home, job):
     try:
         totals = usage_totals(home, slug, job_id)
     except Exception as e:
-        print(f"factory.py: usage: scan failed ({type(e).__name__}: {e}); nothing recorded", file=sys.stderr)
+        print(f"factory.py: usage: scan failed on {job_id} ({type(e).__name__}: {e}); nothing recorded",
+              file=sys.stderr)
         return
     tokens = job.get("tokens") if isinstance(job.get("tokens"), dict) else {}
     old = tokens.get(device) if isinstance(tokens.get(device), dict) else {}
@@ -12451,6 +12700,7 @@ COMMANDS["clean"] = (clean_cmd, 2, 3)
 COMMANDS["deny-notes"] = (deny_notes_cmd, 1, 2)
 COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
+COMMANDS["orphans"] = (orphans_cmd, 0, 0)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["pre-review"] = (pre_review_cmd, 1, 1)
