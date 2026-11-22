@@ -7325,7 +7325,7 @@ def pr_behind(pr):
 
 
 def checks_cmd(target, *args):
-    """Print each PR check as `<bucket> <name>` once none is pending, checking every 10 seconds until --timeout."""
+    """Print each PR check as `<bucket> <name>` once none is pending and the head is up to date with its base, updating a behind branch and checking every 10 seconds until --timeout."""
     home, slug, job_id = r2_target(target, True)
     if args and (args[0] != "--timeout" or len(args) != 2 or not re.fullmatch(r"[0-9]+", args[1])
                  or int(args[1]) > 600):
@@ -7338,8 +7338,9 @@ def checks_cmd(target, *args):
     state = gh_pr_view(pr, "--json", "state", "--jq", ".state").strip()
     if state != "OPEN":
         fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
-    start = time.monotonic()
+    start = since = time.monotonic()
     usable = False
+    updated_from = None
     while True:
         checks, problem = pr_checks(pr)
         if problem:
@@ -7348,16 +7349,37 @@ def checks_cmd(target, *args):
             usable = True
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
-            for c in checks:
-                print(f"{c['bucket']} {c['name']}")
             failing = [c["name"] for c in checks if c["bucket"] not in ("pass", "skipping")]
             if failing:
+                for c in checks:
+                    print(f"{c['bucket']} {c['name']}")
                 fail("failing checks: " + ", ".join(failing), 1)
-            return
+            behind, sha, base = pr_behind(pr)
+            if sha != updated_from and not behind:
+                for c in checks:
+                    print(f"{c['bucket']} {c['name']}")
+                return
+            if sha != updated_from:
+                n = pr.rsplit("/", 1)[1]
+                result = gh_pr("update-branch", pr, stderr=True)
+                if result is None:
+                    fail("gh is not installed", 5)
+                code, out, err = result
+                if code == "timeout":
+                    fail("gh pr update-branch timed out after 60 seconds", 5)
+                if code:
+                    fail(f"gh pr update-branch could not bring PR #{n} up to date with {base}: "
+                         f"{printable_line(err or out, 200)}. Merge {base} into the branch and push.", 6)
+                print(f"factory.py: PR #{n} was {behind} commit{'' if behind == 1 else 's'} behind {base}; "
+                      f"gh pr update-branch merged {base} into it, so checks run again on the new head.",
+                      file=sys.stderr)
+                updated_from = sha
+                since = time.monotonic()
         elapsed = time.monotonic() - start
-        if not checks and not usable and elapsed >= min(CHECKS_REGISTER, timeout):
+        waited = time.monotonic() - since
+        if not checks and not usable and waited >= min(CHECKS_REGISTER, timeout):
             fail("gh pr checks never gave a usable reply", 5)
-        if not checks and elapsed >= CHECKS_REGISTER:
+        if not checks and waited >= CHECKS_REGISTER:
             print("no checks reported")
             return
         if elapsed >= timeout:
