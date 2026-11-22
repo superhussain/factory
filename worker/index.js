@@ -1641,6 +1641,50 @@ async function backlogTriageBatch(request, env) {
   return json({ verdicts });
 }
 
+// Rates up to 8 bare backlog lines of one project under candidate rules in one model call.
+// It stores nothing and ignores the saved triage settings, so replay can try rules safely.
+async function backlogTriageRate(request, env) {
+  const body = await readJson(request, MAX_TRIAGE_BATCH);
+  if (body instanceof Response) return body;
+  if (typeof body !== "object" || body === null || Array.isArray(body))
+    return reply("body: must be a JSON object", 400);
+  for (const key of Object.keys(body))
+    if (key !== "rules" && key !== "items") return reply(`${key}: unknown field`, 400);
+  const { rules, items } = body;
+  if (typeof rules !== "string") return reply("rules: must be text", 400);
+  const rulesError = rules && checkOperatorText(rules, "rules");
+  if (rulesError) return reply(rulesError, 400);
+  if (
+    !Array.isArray(items) ||
+    items.length < 1 ||
+    items.length > 8 ||
+    items.some((item) => typeof item !== "string")
+  )
+    return reply("items: must be a list of 1 to 8 backlog items", 400);
+  for (const [i, item] of items.entries()) {
+    const error = triageItemError(item);
+    if (error) return reply(`items[${i}]: ${error.slice("item: ".length)}`, 400);
+  }
+  const slugs = new Set(items.map((item) => backlogItemMatch(item)[1]));
+  if (slugs.size > 1) return reply("items: every item must name the same project", 400);
+  const [slug] = slugs;
+  if (!(await env.BUCKET.head(`projects/${slug}.md`))) return notFound();
+  if (!env.AI)
+    return reply("backlog triage needs the Workers AI binding; deploy the current Worker", 503);
+  const entries = items.map((item, i) => ({ n: i + 1, item }));
+  let result;
+  try {
+    result = await env.AI.run(
+      TRIAGE_MODEL,
+      triageBatchInput(slug, `rules-file:${slug}`, rules, entries),
+    );
+  } catch {
+    return reply("the triage model failed", 502);
+  }
+  const confidences = entries.map(({ n }) => triageBatchConfidence(result, n));
+  return reply(JSON.stringify({ model: TRIAGE_MODEL, confidences }), 200, "application/json");
+}
+
 // Rates one review round's CHANGES findings. The Worker compares the score with the fixed
 // threshold and writes the reason, so review text can move the score but write no words.
 async function reviewEscalation(request, env) {
@@ -3294,6 +3338,8 @@ async function api(request, env, path, principal, ctx) {
   }
   if (path === "/api/backlog/lesson" && method === "POST")
     return backlogLesson(request, env, principal);
+  if (path === "/api/backlog/triage/rate" && method === "POST")
+    return backlogTriageRate(request, env);
   if (path === "/api/backlog/triage/batch" && method === "POST")
     return backlogTriageBatch(request, env);
   if (path === "/api/backlog/triage/verdicts" && method === "POST")
