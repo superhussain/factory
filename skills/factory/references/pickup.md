@@ -119,7 +119,8 @@ Each run, in order:
 - Earned autonomy hold: right after the PR sync, sets `automerge` false, `needs`
   and the note `earned autonomy hold: a person reviews and merges` on each
   automerging, non-escalated `pr-open` job whose project and class have a merged
-  job reverted since the last `factory.py autonomy restore <slug> <class>`. It
+  job reverted since the last `factory.py autonomy restore` or
+  `autonomy promote <slug> <class>`. It
   prints `held <id> <project> PR #<n> for a person`, or on a dry run
   `would hold <id> <project> PR #<n> for a person`. See docs/autonomy.md,
   Earned autonomy hold.

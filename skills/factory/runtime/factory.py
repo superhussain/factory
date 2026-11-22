@@ -155,11 +155,12 @@
   factory.py builds <project-slug>          print the project's build queue and in-flight jobs as JSON
   factory.py stuck [--limit N]              claim up to N (default 1) jobs a dead session left mid-loop,
                                             print them as JSON for the resume schedule
-  factory.py autonomy status|pause|resume|allow <slug>|deny <slug>|self <slug>|restore <slug> <class>
+  factory.py autonomy status|pause|resume|allow <slug>|deny <slug>|self <slug>|restore <slug> <class>|promote <slug> <class>
                                             show or change the explorer kill switch and allowlist;
                                             resume and allow need a human typing at a terminal
   factory.py autonomy report [<project-slug>]  recommend which project and job classes may automerge; writes nothing
   factory.py autonomy restore <project-slug> internal|visible  lift an earned-autonomy hold; a human types at a terminal
+  factory.py autonomy promote <project-slug> internal|visible  lift a hold the class has earned; a human types at a terminal
   factory.py halt status | halt set --reason <text>
                                             show or set the global stop flag that pickup, its takeover
                                             and stuck honor; only a signed-in person clears it
@@ -2998,12 +2999,13 @@ def registered(home):
 
 def autonomy_cmd(sub, slug=None, cls=None):
     """Show or change the board's autonomy record."""
-    if sub not in ("status", "pause", "resume", "report", "allow", "deny", "self", "restore") \
+    lifts = sub in ("restore", "promote")
+    if sub not in ("status", "pause", "resume", "report", "allow", "deny", "self", "restore", "promote") \
             or sub != "report" and (slug is None) != (sub in ("status", "pause", "resume")) \
             or slug is not None and not SLUG.fullmatch(slug) \
-            or (cls in AUTONOMY_CLASSES) != (sub == "restore") or cls is not None and sub != "restore":
+            or (cls in AUTONOMY_CLASSES) != lifts or cls is not None and not lifts:
         fail("usage: autonomy status|pause|resume|report [<slug>]|allow <slug>|deny <slug>|self <slug>"
-             "|restore <slug> internal|visible", 2)
+             "|restore <slug> internal|visible|promote <slug> internal|visible", 2)
     home = factory_home()
     if sub == "report":
         autonomy_report(home, slug)
@@ -3011,8 +3013,18 @@ def autonomy_cmd(sub, slug=None, cls=None):
     if sub == "status":
         print(json.dumps(load_autonomy(read_board(home)), indent=2))
         return
-    if sub in ("allow", "restore") and slug not in registered(home):
+    if (sub == "allow" or lifts) and slug not in registered(home):
         fail(f"no factory project {slug}", 4)
+
+    def promotion(data):
+        gate = autonomy_promotion(data, slug, cls)
+        if gate is None:
+            fail(f"{slug} {cls} is not held, so there is nothing to promote; nothing was changed", 3)
+        if gate["why"]:
+            fail(f"{slug} {cls} cannot be promoted yet: {'; '.join(gate['why'])}; nothing was changed", 3)
+        return gate
+    if sub == "promote":
+        promotion(read_board(home))
     listed = load_autonomy(read_board(home))["projects"] if sub == "allow" else []
     if listed and slug not in listed:
         fail(f"only one project may be on the autonomy allowlist; run autonomy deny {listed[0]} first", 2)
@@ -3023,6 +3035,9 @@ def autonomy_cmd(sub, slug=None, cls=None):
     if sub == "restore":
         human_confirm(f"{slug} {cls}", f"Type {slug} {cls} to let {slug} {cls} APPROVE PRs merge without a person "
                       "again: ", "autonomy restore")
+    if sub == "promote":
+        human_confirm(f"{slug} {cls}", f"Type {slug} {cls} to promote {slug} {cls} so its APPROVE PRs merge without "
+                      "a person: ", "autonomy promote")
     device = holder(home)[0]
 
     def change(text):
@@ -3035,8 +3050,13 @@ def autonomy_cmd(sub, slug=None, cls=None):
             fail("only one project may be on the autonomy allowlist; run autonomy deny <current> first", 2)
         elif sub == "deny":
             record["projects"] = [p for p in record["projects"] if p != slug]
-        elif sub == "restore":
+        elif lifts:
+            gate = promotion(data) if sub == "promote" else None
             record["restored"] = {**autonomy_restored(data), f"{slug}/{cls}": stamp}
+            if gate:
+                until = (stamp_of(stamp) + timedelta(days=AUTONOMY_COOLDOWN_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                record["promoted"] = {**autonomy_promoted(data), f"{slug}/{cls}": {
+                    "at": stamp, "by": device, "jobs": gate["jobs"], "days": gate["days"], "until": until}}
         else:
             key = "projects" if sub == "allow" else "self"
             record[key] = record[key] + [slug] if slug not in record[key] else record[key]
@@ -3044,6 +3064,9 @@ def autonomy_cmd(sub, slug=None, cls=None):
         data["autonomy"], data["updated"] = record, record["changed"]
         return dump_board(data), record
     print(json.dumps(cas(home, "/api/board", change), indent=2))
+    if lifts:
+        print(f"{slug} {cls} {'restored' if sub == 'restore' else 'promoted'}. PRs already held keep their needs line "
+              "until a person merges them.", file=sys.stderr)
 
 
 def check_text(value, lo, hi, multiline=False):
@@ -13242,6 +13265,8 @@ AUTONOMY_MIN_JOBS = 20
 AUTONOMY_MAX_REWORK = 0.10
 AUTONOMY_MAX_ROUNDS = 1.75
 AUTONOMY_MAX_CHANGES = 0.10
+AUTONOMY_PROMOTE_DAYS = 7
+AUTONOMY_COOLDOWN_DAYS = 14
 
 
 def job_class(job):
@@ -13283,6 +13308,44 @@ def autonomy_holds(data):
             continue
         holds.setdefault((project, cls), []).append(str(j.get("id")))
     return {key: sorted(ids) for key, ids in holds.items()}
+
+
+def autonomy_promoted(data):
+    """The board's well-formed {"<slug>/<class>": {"at", "by", "jobs", "days", "until"}} promotions."""
+    record = data.get("autonomy")
+    promoted = record.get("promoted") if isinstance(record, dict) else None
+    if not isinstance(promoted, dict):
+        return {}
+    return {k: v for k, v in promoted.items()
+            if isinstance(k, str) and k.count("/") == 1 and SLUG.fullmatch(k.split("/")[0])
+            and k.split("/")[1] in AUTONOMY_CLASSES and isinstance(v, dict)
+            and stamp_of(v.get("at")) and stamp_of(v.get("until"))}
+
+
+def autonomy_promotion(data, slug, cls):
+    """None when slug cls is not held, else {"since", "days", "jobs", "why"}; an empty why lets it be promoted."""
+    held = autonomy_holds(data).get((slug, cls))
+    if not held:
+        return None
+    reverts = [j for j in data["jobs"] if str(j.get("id")) in held and j.get("project") == slug
+               and job_class(j) == cls and isinstance(j.get("outcome"), dict)
+               and j["outcome"].get("result") == "reverted"]
+    since = max(stamp_of(j["outcome"].get("at")) or stamp_of(j.get("done")) for j in reverts)
+    current = stamp_of(now())
+    days = (current - since).days
+    cell = autonomy_cell([j for j in data["jobs"] if j.get("stage") == "merged" and j.get("project") == slug
+                          and job_class(j) == cls and (stamp_of(j.get("done")) or since) > since])
+    key = f"{slug}/{cls}"
+    record = data.get("autonomy")
+    stored = record.get("promoted") if isinstance(record, dict) else None
+    promoted = autonomy_promoted(data).get(key)
+    until = promoted and stamp_of(promoted["until"])
+    why = ([f"{days} days held, needs {AUTONOMY_PROMOTE_DAYS}"] if days < AUTONOMY_PROMOTE_DAYS else []) + \
+        ([f"cooldown until {promoted['until']}"] if until and current < until else []) + \
+        ([f"promoted record for {key} is malformed"] if isinstance(stored, dict) and key in stored and not promoted
+         else []) + \
+        (cell["why"] if cell["verdict"] != "automerge" else [])
+    return {"since": since.strftime("%Y-%m-%dT%H:%M:%SZ"), "days": days, "jobs": cell["scanned"], "why": why}
 
 
 def autonomy_hold(data, job):
@@ -13332,6 +13395,29 @@ def autonomy_hold_pass(home, data, dry):
             print(f"held {line}")
 
 
+def autonomy_cell(group):
+    """The earned-autonomy metrics and verdict for one project and class's merged jobs."""
+    result = {r: [j["id"] for j in group if isinstance(j.get("outcome"), dict) and j["outcome"].get("result") == r]
+              for r in ("held", "reworked", "reverted")}
+    scanned = sum(len(ids) for ids in result.values())
+    rework = len(result["reworked"]) / scanned if scanned else 0
+    mean = sum(len(j["rounds"]) for j in group) / len(group) if group else 0
+    votes = [v for j in group for entry in j["rounds"] if isinstance(entry, dict)
+             for v in entry.values() if v in ("PASS", "CHANGES")]
+    changes = votes.count("CHANGES") / len(votes) if votes else 0
+    why = ([f"reverted {', '.join(sorted(result['reverted']))}"] if result["reverted"] else []) + \
+        ([f"rework {round(100 * rework)}% over {round(100 * AUTONOMY_MAX_REWORK)}%"]
+         if rework > AUTONOMY_MAX_REWORK else []) + \
+        ([f"rounds {mean:.1f} over {AUTONOMY_MAX_ROUNDS}"] if mean > AUTONOMY_MAX_ROUNDS else []) + \
+        ([f"changes {round(100 * changes)}% over {round(100 * AUTONOMY_MAX_CHANGES)}%"]
+         if changes > AUTONOMY_MAX_CHANGES else [])
+    verdict = "hold" if why else "collect" if scanned < AUTONOMY_MIN_JOBS else "automerge"
+    if verdict == "collect":
+        why.append(f"needs {AUTONOMY_MIN_JOBS - scanned} more scanned jobs")
+    return {"result": result, "scanned": scanned, "rework": rework, "mean": mean, "changes": changes, "why": why,
+            "verdict": verdict}
+
+
 def autonomy_report(home, slug=None):
     """Print an earned-autonomy recommendation per project and job class from recorded outcomes."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=AUTONOMY_DAYS)
@@ -13360,23 +13446,9 @@ def autonomy_report(home, slug=None):
              "recommend")]
     reasons, verdicts = [], {}
     for (project, cls), group in sorted(cells.items()):
-        result = {r: [j["id"] for j in group if isinstance(j.get("outcome"), dict) and j["outcome"].get("result") == r]
-                  for r in ("held", "reworked", "reverted")}
-        scanned = sum(len(ids) for ids in result.values())
-        rework = len(result["reworked"]) / scanned if scanned else 0
-        mean = sum(len(j["rounds"]) for j in group) / len(group)
-        votes = [v for j in group for entry in j["rounds"] if isinstance(entry, dict)
-                 for v in entry.values() if v in ("PASS", "CHANGES")]
-        changes = votes.count("CHANGES") / len(votes) if votes else 0
-        why = ([f"reverted {', '.join(sorted(result['reverted']))}"] if result["reverted"] else []) + \
-            ([f"rework {round(100 * rework)}% over {round(100 * AUTONOMY_MAX_REWORK)}%"]
-             if rework > AUTONOMY_MAX_REWORK else []) + \
-            ([f"rounds {mean:.1f} over {AUTONOMY_MAX_ROUNDS}"] if mean > AUTONOMY_MAX_ROUNDS else []) + \
-            ([f"changes {round(100 * changes)}% over {round(100 * AUTONOMY_MAX_CHANGES)}%"]
-             if changes > AUTONOMY_MAX_CHANGES else [])
-        verdict = "hold" if why else "collect" if scanned < AUTONOMY_MIN_JOBS else "automerge"
-        if verdict == "collect":
-            why.append(f"needs {AUTONOMY_MIN_JOBS - scanned} more scanned jobs")
+        cell = autonomy_cell(group)
+        result, scanned, mean, changes, why, verdict = (cell[k] for k in ("result", "scanned", "mean", "changes",
+                                                                          "why", "verdict"))
         if why:
             reasons.append(f"{project} {cls} {verdict}: {'; '.join(why)}")
         verdicts.setdefault(project, []).append(verdict)
