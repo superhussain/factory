@@ -4167,6 +4167,61 @@ class BatchHoldTest(PickupFixture):
         self.assertEqual([j["id"] for j in self.board["jobs"] if "claim" in j], ["101-wrap-doc-line"])
 
 
+def waiting_jobs(count):
+    """count jobs on project beta that wait on a person: two with needs, one at needs-human, two held PRs."""
+    jobs = [{"id": "201-pick-format", "stage": "spec", "project": "beta", "needs": "Pick a format"},
+            {"id": "202-pick-name", "stage": "build", "project": "beta", "needs": "Pick a name"},
+            {"id": "203-sign-off", "stage": "needs-human", "project": "beta"},
+            {"id": "204-held-pr", "stage": "pr-open", "project": "beta", "escalated": True},
+            {"id": "205-held-pr", "stage": "pr-open", "project": "beta", "escalated": True}]
+    return [dict(j, updated="2026-01-01T00:00:00Z") for j in jobs[:count]]
+
+
+class BackpressureTest(PickupFixture):
+    HOLD = "skip 120-add-csv-export alpha: backpressure ({} waiting on you, pauses at {})"
+
+    def setUp(self):
+        super().setUp()
+        self.views["alpha"] = (200, effective("alpha", None, {"pickup": ON}))
+
+    def dry(self):
+        code, out, err = self.pickup("--dry-run", "--max-inflight", "5")
+        self.assertEqual((code, err), (0, ""))
+        return [line for line in out.splitlines() if line.startswith(("skip ", "would launch ", "host "))]
+
+    def test_five_waiting_hold(self):
+        self.board["jobs"] = waiting_jobs(5) + [idea("120-add-csv-export", "alpha")]
+        self.assertEqual(self.dry(), [self.HOLD.format(5, 5), f"host {DEVICE}: would launch 0"])
+
+    def test_four_waiting_launch(self):
+        self.board["jobs"] = waiting_jobs(4) + [idea("120-add-csv-export", "alpha")]
+        lines = self.dry()
+        self.assertTrue(lines[0].startswith("would launch 120-add-csv-export alpha on primary: "), lines)
+        self.assertEqual(lines[1:], [f"host {DEVICE}: would launch 1"])
+
+    def test_view_threshold(self):
+        self.board["jobs"] = waiting_jobs(4) + [idea("120-add-csv-export", "alpha")]
+        view = effective("alpha", None, {"pickup": ON})
+        self.views["alpha"] = (200, dict(view, backpressure={"needs_you": 2}))
+        self.assertEqual(self.dry(), [self.HOLD.format(4, 2), f"host {DEVICE}: would launch 0"])
+        self.board["jobs"] = waiting_jobs(5) + [idea("120-add-csv-export", "alpha")]
+        for bad in (0, 51, "2", 2.5, None):
+            with self.subTest(bad=bad):
+                self.views["alpha"] = (200, dict(view, backpressure={"needs_you": bad}))
+                self.assertEqual(self.dry(), [self.HOLD.format(5, 5), f"host {DEVICE}: would launch 0"])
+
+    def test_prioritized_and_approved_launch(self):
+        self.board["jobs"] = waiting_jobs(5) + [
+            idea("121-add-pdf-export", "alpha", priority={"at": stamp(minutes=-1)}),
+            {"id": "122-approved-spec", "stage": "build", "project": "alpha", "updated": "2026-01-01T00:00:00Z",
+             "note": factory.DASHBOARD_APPROVED_NOTE}]
+        lines = self.dry()
+        self.assertEqual([line.split(":")[0] for line in lines[:2]],
+                         ["would launch 121-add-pdf-export alpha on primary",
+                          "would launch 122-approved-spec alpha on primary"])
+        self.assertEqual(lines[2:], [f"host {DEVICE}: would launch 2"])
+
+
 class PickupSetupTest(PickupFixture):
     def setUp(self):
         super().setUp()
