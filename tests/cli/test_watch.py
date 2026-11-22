@@ -44,6 +44,8 @@ class WatchTest(IsolatedTestCase):
 
         def gh(*gh_args, stderr=False):
             self.gh_calls.append(gh_args)
+            if "/compare/" in gh_args[0]:
+                return 0, "0\n"
             if gh_args[0].startswith("repos/"):
                 return 0, "main\n"
             reading = readings[min(sum(c[0] == "view" for c in self.gh_calls) - 1, len(readings) - 1)]

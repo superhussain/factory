@@ -74,7 +74,7 @@
   factory.py pr-state <project-slug>/<job-id> [--wait S]
                                             print one JSON reading of the job PR for /factory babysit:
                                             pr, state, review, checks, queued, conflict, items, capped,
-                                            rearm and next; --wait
+                                            rearm, behind and next; --wait
                                             re-reads every 30 seconds for up to S seconds (1 to 600) while
                                             next is wait; a bad pr exits 4, a gh problem 5
   factory.py pr-handled <project-slug>/<job-id> [--rearm] <sig>...
@@ -8184,6 +8184,18 @@ def pr_checks(pr, required=False):
     return [], f"exited {code} with no check list" if code else "printed no check list"
 
 
+def behind_by(pr, base, sha):
+    """How many commits of base the PR head sha lacks, from GitHub's compare API."""
+    if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)):
+        fail("gh pr view printed an unusable headRefOid", 5)
+    repo = GH_PR.fullmatch(pr)[1]
+    behind = gh_answer(gh_cli("api", f"repos/{repo}/compare/{base}...{sha}", "--jq", ".behind_by"),
+                       "gh api compare").strip()
+    if not re.fullmatch(r"[0-9]+", behind):
+        fail("gh api compare printed no behind_by", 5)
+    return int(behind)
+
+
 def pr_behind(pr):
     """(behind_by, head sha, base): how many commits of its base the PR's head lacks, from GitHub's compare API."""
     try:
@@ -8194,12 +8206,7 @@ def pr_behind(pr):
     if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
             and isinstance(base, str) and re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", base)):
         fail("gh pr view printed an unusable headRefOid or baseRefName", 5)
-    repo = GH_PR.fullmatch(pr)[1]
-    behind = gh_answer(gh_cli("api", f"repos/{repo}/compare/{base}...{sha}", "--jq", ".behind_by"),
-                       "gh api compare").strip()
-    if not re.fullmatch(r"[0-9]+", behind):
-        fail("gh api compare printed no behind_by", 5)
-    return int(behind), sha, base
+    return behind_by(pr, base, sha), sha, base
 
 
 def checks_cmd(target, *args):
@@ -8271,7 +8278,7 @@ def checks_cmd(target, *args):
 
 
 PR_STATE_USAGE = "usage: pr-state <project-slug>/<job-id> [--wait S]"
-PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName"
+PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName,headRefOid"
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
 PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
@@ -8433,9 +8440,11 @@ def pr_reading(home, pr, base, buildkite_org, handled=None):
     unanswered = False
     for r in human:
         if r.get("state") in ("CHANGES_REQUESTED", "COMMENTED") and str(r.get("submittedAt") or "") > replied:
-            unanswered = note("review", login(r), login(r), str(r.get("body") or "")) or unanswered
+            unanswered = note("review", login(r), login(r), str(r.get("body") or ""),
+                              str(r.get("submittedAt") or "")) or unanswered
     decision = view.get("reviewDecision") or ""
-    approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
+    approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human)
+                                          and not any(r.get("state") == "CHANGES_REQUESTED" for r in human))
     state = str(view.get("state") or "").lower()
     in_queue = pull.get("isInMergeQueue") is True or isinstance(pull.get("mergeQueueEntry"), dict)
     bots = threads = 0
@@ -8470,6 +8479,8 @@ def pr_reading(home, pr, base, buildkite_org, handled=None):
         rearm += [s for s in handled if s.startswith("conflict:")]
     kinds = {i["sig"].split(":", 1)[0] for i in items}
     stacked = target != base
+    merge_queue = pull.get("isMergeQueueEnabled") is True
+    behind = None
     if state in ("merged", "closed"):
         step = state
     elif capped:
@@ -8489,15 +8500,16 @@ def pr_reading(home, pr, base, buildkite_org, handled=None):
     elif stacked:
         step = "wait-base"
     else:
-        step = "merge"
+        behind = None if merge_queue else behind_by(pr, target, view.get("headRefOid"))
+        step = "update" if behind else "merge"
     failed = next((c for c in listed if c["bucket"] in ("fail", "cancel") and isinstance(c.get("link"), str)
                    and BUILDKITE_BUILD.fullmatch(c["link"])), None) if step == "fix-ci" else None
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
             "base": target, "next": step, "ci_log": buildkite_log(home, failed, buildkite_org) if failed else None,
-            "threads": threads, "merge_queue": pull.get("isMergeQueueEnabled") is True,
-            "items": items, "capped": capped, "rearm": rearm}
+            "threads": threads, "merge_queue": merge_queue,
+            "items": items, "capped": capped, "rearm": rearm, "behind": behind}
 
 
 def pr_state_cmd(target, *args):

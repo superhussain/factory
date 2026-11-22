@@ -13,14 +13,16 @@ JOB = "042-sample-export"
 PR = "https://github.com/example/sample/pull/44"
 HEAD = "2026-01-02T10:00:00Z"
 PARENT = "factory/041-sample-api"
+HEAD_SHA = "a" * 40
 
 
 def review(state, at="2026-01-02T11:00:00Z", login="reviewer-a", association="MEMBER"):
     return {"author": {"login": login}, "authorAssociation": association, "state": state, "submittedAt": at}
 
 
-def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", auto=None, rollup=(), base="main"):
-    return 0, json.dumps({"state": state, "baseRefName": base, "reviewDecision": decision, "latestReviews": list(reviews),
+def view(state="OPEN", decision="APPROVED", reviews=(), merge="CLEAN", auto=None, rollup=(), base="main", sha=HEAD_SHA):
+    return 0, json.dumps({"state": state, "baseRefName": base, "headRefOid": sha, "reviewDecision": decision,
+                          "latestReviews": list(reviews),
                           "mergeStateStatus": merge, "autoMergeRequest": auto, "author": {"login": "pr-owner"},
                           "statusCheckRollup": list(rollup),
                           "commits": [{"committedDate": "2026-01-01T09:00:00Z"}, {"committedDate": HEAD}]})
@@ -82,7 +84,7 @@ class PrStateTest(IsolatedTestCase):
     def sleep(self, seconds):
         self.now += seconds
 
-    def state(self, readings, *args, pr=PR, routes=None, upstream_base="main", handled=None):
+    def state(self, readings, *args, pr=PR, routes=None, upstream_base="main", handled=None, behind=0):
         """Run pr-state with gh answering each (view, checks[, queue]) reading in turn, repeating the last."""
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open"}
         if pr is not None:
@@ -93,6 +95,8 @@ class PrStateTest(IsolatedTestCase):
 
         def gh(*gh_args, stderr=False):
             calls.append(gh_args)
+            if "/compare/" in gh_args[0]:
+                return 0, f"{behind}\n"
             if gh_args[0].startswith("repos/"):
                 return 0, upstream_base + "\n"
             reading = readings[min(sum(c[0] == "view" for c in calls) - 1, len(readings) - 1)]
@@ -121,9 +125,10 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual(json.loads(out), {"pr": 44, "state": "open", "review": "approved", "bots": 0, "checks": "pass",
                                            "queued": False, "conflict": False, "stacked": False, "base": "main",
                                            "next": "merge", "ci_log": None, "threads": 0, "merge_queue": False,
-                                           "items": [], "capped": [], "rearm": []})
+                                           "items": [], "capped": [], "rearm": [], "behind": 0})
         self.assertEqual(calls[0][:3], ("view", PR, "--json"))
         self.assertIn("baseRefName", calls[0][3])
+        self.assertIn("headRefOid", calls[0][3])
         self.assertNotIn("isInMergeQueue", calls[0][3])
         self.assertEqual(calls[1], ("checks", PR, "--required", "--json", "name,bucket,link"))
         self.assertEqual(calls[2][0], "graphql")
@@ -133,6 +138,34 @@ class PrStateTest(IsolatedTestCase):
                       "latestReviews(first:100){nodes{author{__typename login}}}}}}", calls[2][2])
         self.assertEqual(calls[2][3:], ("-f", "o=example", "-f", "r=sample", "-F", "n=44",
                                         "--jq", ".data.repository.pullRequest"))
+        compares = [c for c in calls if "/compare/" in c[0]]
+        self.assertEqual(compares, [(f"repos/example/sample/compare/main...{HEAD_SHA}", "--jq", ".behind_by")])
+
+    def test_behind_pr_reads_update(self):
+        code, out, err, _ = self.state([(view(), checks("pass"))], behind=2)
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["behind"], reading["next"]), (2, "update"))
+
+    def test_merge_queue_skips_the_behind_read(self):
+        code, out, err, calls = self.state([(view(), checks("pass"), graph(merge_queue=True))], behind=2)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((json.loads(out)["behind"], json.loads(out)["next"]), (None, "merge"))
+        self.assertFalse([c for c in calls if "/compare/" in c[0]])
+
+    def test_behind_is_null_before_the_merge_decision(self):
+        code, out, err, calls = self.state([(view(decision="REVIEW_REQUIRED"), checks("pass"))], behind=2)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual((json.loads(out)["behind"], json.loads(out)["next"]), (None, "needs-review"))
+        self.assertFalse([c for c in calls if "/compare/" in c[0]])
+
+    def test_bad_head_sha_exits_5(self):
+        for sha in (None, "a" * 39, "A" * 40, "main"):
+            with self.subTest(sha=sha):
+                code, out, err, calls = self.state([(view(sha=sha), checks("pass"))])
+                self.assertEqual((code, out), (5, ""))
+                self.assertIn("gh pr view printed an unusable headRefOid", err)
+                self.assertFalse([c for c in calls if "/compare/" in c[0]])
 
     def test_unanswered_bot_threads_ask_for_fixes(self):
         code, out, err, _ = self.state([(view(), checks("pass"), graph(threads=[thread("ci-helper")]))])
@@ -228,6 +261,30 @@ class PrStateTest(IsolatedTestCase):
     def test_an_approving_latest_review_counts_when_no_decision(self):
         reading = (view(decision="", reviews=[review("APPROVED")]), checks("pass"))
         self.assertEqual(self.next_of(reading), "merge")
+
+    def test_an_open_change_request_blocks_approval_without_a_decision(self):
+        changes = review("CHANGES_REQUESTED", at="2026-01-02T09:00:00Z", login="reviewer-b")
+        reading = (view(decision="", reviews=[review("APPROVED"), changes]), checks("pass"))
+        self.assertEqual(self.next_of(reading), "needs-review")
+
+    def test_a_repeated_change_request_is_worked_again(self):
+        sig = factory.handled_sig("review", "reviewer-a", "", "2026-01-02T11:00:00Z")
+        login_and_body = factory.handled_sig("review", "reviewer-a", "")
+        later = review("CHANGES_REQUESTED", at="2026-01-02T12:00:00Z")
+        code, out, err, _ = self.state([(view(decision="CHANGES_REQUESTED", reviews=[later]), checks("pass"))],
+                                       handled={sig: {"count": 1, "at": AT}, login_and_body: {"count": 1, "at": AT}})
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["next"], [i["label"] for i in reading["items"]]), ("fix-reviews", ["reviewer-a"]))
+
+    def test_the_same_review_stays_skipped(self):
+        sig = factory.handled_sig("review", "reviewer-a", "", "2026-01-02T11:00:00Z")
+        same = review("CHANGES_REQUESTED")
+        code, out, err, _ = self.state([(view(decision="CHANGES_REQUESTED", reviews=[same]), checks("pass"))],
+                                       handled={sig: {"count": 1, "at": AT}})
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["next"], reading["items"]), ("needs-review", []))
 
     def test_rebase_then_fix_ci_then_wait(self):
         self.assertEqual(self.next_of((view(merge="DIRTY"), checks("fail"))), "rebase")
