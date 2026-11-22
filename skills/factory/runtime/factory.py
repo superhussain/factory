@@ -8208,6 +8208,51 @@ def pr_checks(pr, required=False):
     return [], f"exited {code} with no check list" if code else "printed no check list"
 
 
+HEAD_CHECKS_QUERY = ("query=query($o:String!,$r:String!,$sha:GitObjectID!){repository(owner:$o,name:$r){object(oid:$sha){...on Commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion startedAt} ...on StatusContext{context state createdAt}}}}}}}}")
+
+
+def head_checks(pr, sha):
+    """(checks, problem) for commit sha's checks, as pr_checks returns them, from one gh api graphql call. A repeated name keeps its latest run."""
+    owner, name = GH_PR.fullmatch(pr)[1].split("/")
+    result = gh_cli("api", "graphql", "-f", HEAD_CHECKS_QUERY, "-f", f"o={owner}", "-f", f"r={name}", "-f", f"sha={sha}",
+                    "--jq", ".data.repository.object")
+    if result is None:
+        return [], "gh is not installed"
+    code, out = result
+    if code == "timeout":
+        return [], "timed out after 60 seconds"
+    if code:
+        return [], f"exited {code} with no check list"
+    try:
+        rollup = json.loads(out)["statusCheckRollup"]
+        if rollup is None:
+            return [], None
+        if rollup["contexts"]["pageInfo"]["hasNextPage"]:
+            return [], "listed more than 100 checks"
+        nodes = rollup["contexts"]["nodes"]
+        if not isinstance(nodes, list):
+            raise TypeError
+        latest = {}
+        for node in nodes:
+            if node["__typename"] == "CheckRun":
+                check, when, state = node["name"], node["startedAt"], node["status"]
+                bucket = {"SUCCESS": "pass", "SKIPPED": "skipping", "NEUTRAL": "skipping",
+                          "CANCELLED": "cancel"}.get(node["conclusion"], "fail") if state == "COMPLETED" else "pending"
+            elif node["__typename"] == "StatusContext":
+                check, when, state = node["context"], node["createdAt"], node["state"]
+                bucket = {"SUCCESS": "pass", "PENDING": "pending", "EXPECTED": "pending"}.get(state, "fail")
+            else:
+                raise TypeError
+            if not (isinstance(check, str) and isinstance(state, str)):
+                raise TypeError
+            when = when or ""
+            if check not in latest or when > latest[check][0]:
+                latest[check] = when, bucket
+    except (ValueError, TypeError, KeyError):
+        return [], "printed no check list"
+    return [{"name": check, "bucket": latest[check][1]} for check in sorted(latest)], None
+
+
 def behind_by(pr, base, sha):
     """How many commits of base the PR head sha lacks, from GitHub's compare API."""
     if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)):
@@ -8249,24 +8294,18 @@ def checks_cmd(target, *args):
         fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
     start = since = time.monotonic()
     usable = False
-    updated_from = seen = None
+    updated_from = None
     while True:
-        checks, problem = pr_checks(pr)
+        behind, sha, base = pr_behind(pr)
+        checks, problem = head_checks(pr, sha)
         if problem:
-            print(f"factory.py: warning: gh pr checks gave no usable reply ({problem})", file=sys.stderr)
+            print(f"factory.py: warning: gh api graphql gave no usable check list ({problem})", file=sys.stderr)
         else:
             usable = True
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
             failing = [c["name"] for c in checks if c["bucket"] not in ("pass", "skipping")]
-            done = bool(failing)
-            if not failing:
-                behind, sha, base = pr_behind(pr)
-                # After an update, gh pr checks may still list the old head's checks while pr_behind
-                # already sees the new head, so exit only once an earlier reading saw the same head.
-                done = not behind and sha != updated_from and (updated_from is None or sha == seen)
-                seen = sha
-            if done:
+            if failing or (not behind and sha != updated_from):
                 for c in checks:
                     print(f"{c['bucket']} {c['name']}")
                 if failing:
@@ -8291,7 +8330,7 @@ def checks_cmd(target, *args):
         elapsed = time.monotonic() - start
         waited = time.monotonic() - since
         if not checks and not usable and waited >= min(CHECKS_REGISTER, timeout):
-            fail("gh pr checks never gave a usable reply", 5)
+            fail("gh api graphql never gave a usable check list", 5)
         if not checks and waited >= CHECKS_REGISTER:
             print("no checks reported")
             return

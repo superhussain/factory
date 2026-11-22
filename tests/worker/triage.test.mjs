@@ -1142,6 +1142,7 @@ test("a needs.md push stores clef-flash picks and any failure stores nothing", a
         ],
       },
     ],
+    decider: "model",
   });
 
   const noAi = setup({ reply: NEEDS_REPLY });
