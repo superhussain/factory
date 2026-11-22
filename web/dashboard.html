@@ -3391,7 +3391,7 @@ async function saveProjectDocument() {
     } else {
       const allowed = extra
         ? ['body over 1 MiB','invalid document write condition','document needs text/markdown','document must be valid UTF-8','document contains control characters','PUT needs If-Match: "<etag>" or If-None-Match: *','project document: contains control, invisible or bidirectional characters','project document: contains the reserved envelope tag','project document: looks like a secret']
-        : ['project document must be valid UTF-8','project document contains control characters','project document needs closed --- frontmatter','project frontmatter allows one repo, base and title, plus an optional archive, buildkite_org and auto_babysit','invalid project repo','invalid project archive','invalid project buildkite_org','invalid project auto_babysit','invalid project base','invalid project title','body over 1 MiB',
+        : ['project document must be valid UTF-8','project document contains control characters','project document needs closed --- frontmatter','project frontmatter allows one repo, base and title, plus an optional archive, buildkite_org, auto_babysit and weekly_tokens','invalid project repo','invalid project archive','invalid project buildkite_org','invalid project auto_babysit','invalid project weekly_tokens','invalid project base','invalid project title','body over 1 MiB',
           'project document: contains control, invisible or bidirectional characters',
           'project document: contains the reserved envelope tag',
           'project document: looks like a secret'];
