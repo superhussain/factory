@@ -49,7 +49,8 @@ feature.
    and do not resume the builder. A second exit 1 in one builder run counts as the Rules row for verification
    failing twice. Any other nonzero exit puts its stderr line in the board `note`, and
    the round goes ahead. A disputed-only round skips pre-review, since the head did not
-   move.
+   move. Its JSON `budget` never changes the exit code or the stage. The code reviewer
+   reads it from `pre-review.md`.
    Review round N: create `round-N/`, set stage `review`, `round` N, and append an
    all-`pending` entry to `rounds`. Before spawning anyone, run
    `python3 "$RUNTIME" review-plan "$SLUG/<id>" <N>` and run

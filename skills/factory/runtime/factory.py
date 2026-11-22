@@ -7578,8 +7578,72 @@ def review_plan_cmd(target, round_text):
 CHECKS_FILE = ".factory/checks.json"
 PRE_REVIEW_TIMEOUT = 1800
 PRE_REVIEW_TAIL = 40
+DIFF_BUDGET_LINES_PER_FILE = 150
+DIFF_BUDGET_FILE_FACTOR = 2
+DIFF_BUDGET_LINE_FACTOR = 3
+DIFF_BUDGET_UNLISTED_MAX = 20
 PRE_REVIEW_USAGE = "usage: pre-review <project-slug>/<job-id>"
 CHECK_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,39}")
+SPEC_TASKS = re.compile(r"^## (?:\d+\.\s*)?Tasks\b[^\n]*\n(.*?)(?=^## |\Z)", re.M | re.S)
+
+
+def spec_budget_paths(text):
+    """The distinct safe path tokens from the Tasks section's - Files: lines, in first-seen order.
+    A token may carry * as an fnmatch glob."""
+    section = SPEC_TASKS.search(text + "\n")
+    paths = []
+    for line in section.group(1).splitlines() if section else []:
+        if line.strip().startswith("- Files:"):
+            for t in re.findall(r"`([^`]*)`", line):
+                if REPO_PATH.fullmatch(t.replace("*", "")) and not t.startswith("/") and ".." not in t \
+                        and t not in paths:
+                    paths.append(t)
+    return paths
+
+
+def diff_numstat(wt, base):
+    """{path: added plus deleted lines} the branch changes since origin/<base>, binary files as 0, or None on
+    any git failure."""
+    mb = subprocess.run(["git", "-C", str(wt), "merge-base", f"origin/{base}", "HEAD"],
+                        capture_output=True, text=True)
+    if mb.returncode:
+        return None
+    diff = subprocess.run(["git", "-C", str(wt), "diff", "--numstat", "--no-renames", "-z", mb.stdout.strip(),
+                           "HEAD"], capture_output=True, encoding="utf-8", errors="replace")
+    if diff.returncode:
+        return None
+    counts = {}
+    for record in diff.stdout.split("\0"):
+        if record:
+            added, deleted, path = record.split("\t", 2)
+            counts[path] = sum(int(n) for n in (added, deleted) if n != "-")
+    return counts
+
+
+def budget_covers(token, path):
+    """Whether a spec Files token covers a changed path: a * glob, a directory ending in /, or the exact path."""
+    if "*" in token:
+        return fnmatch.fnmatchcase(path, token)
+    return path.startswith(token) if token.endswith("/") else path == token
+
+
+def diff_budget(paths, numstat):
+    """The pre-review budget object comparing the spec's Files paths with the branch's numstat."""
+    expected_lines = len(paths) * DIFF_BUDGET_LINES_PER_FILE
+    budget = {"files": len(numstat), "lines": sum(numstat.values()), "expected_files": len(paths),
+              "expected_lines": expected_lines, "file_limit": len(paths) * DIFF_BUDGET_FILE_FACTOR,
+              "line_limit": expected_lines * DIFF_BUDGET_LINE_FACTOR,
+              "unlisted": sorted(p for p in numstat if not any(budget_covers(t, p) for t in paths)), "reason": None}
+    over = budget["files"] > budget["file_limit"] or budget["lines"] > budget["line_limit"]
+    return {"result": "over" if over else "within", **budget}
+
+
+def budget_line(budget):
+    """The Budget: line for pre-review.md."""
+    if budget["result"] == "none":
+        return f"Budget: none ({budget['reason']})"
+    return (f"Budget: {budget['result']} (files {budget['files']}, limit {budget['file_limit']}; "
+            f"lines {budget['lines']}, limit {budget['line_limit']})")
 
 
 def load_checks(text):
@@ -7680,13 +7744,28 @@ def pre_review_cmd(target):
 
     head = (git("rev-parse", "HEAD") or "").strip() or None
     checks, reason = [], fetch_base(wt, base, repo)
+    spec, paths, numstat = folder / "spec.md", [], None
+    if is_link(spec):
+        why = "spec.md is a symlink or junction"
+    elif not spec.is_file():
+        why = "the job folder has no spec.md"
+    elif not (paths := spec_budget_paths(spec.read_text(encoding="utf-8", errors="replace"))):
+        why = "spec.md has no task Files paths"
+    elif reason:
+        why = "the base could not be fetched"
+    elif (numstat := diff_numstat(wt, base)) is None:
+        why = "the branch diff could not be read"
+    budget = diff_budget(paths, numstat) if numstat is not None else {
+        "result": "none", "files": 0, "lines": 0, "expected_files": 0, "expected_lines": 0, "file_limit": 0,
+        "line_limit": 0, "unlisted": [], "reason": why}
     if not reason:
         text = git("show", f"origin/{base}:{CHECKS_FILE}")
         checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
     if reason:
-        write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\nReason: {printable_line(reason, 300)}\n")
+        write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\n{budget_line(budget)}\n"
+                                    f"Reason: {printable_line(reason, 300)}\n")
         print(json.dumps({"result": "none", "head": head, "checks": [], "reason": reason, "round": round_n,
-                          "repeats": []}))
+                          "repeats": [], "budget": budget}))
         return
     logs = make_job_temp(slug, job_id) / "pre-review"
     if is_link(logs):
@@ -7699,10 +7778,22 @@ def pre_review_cmd(target):
         results.append({"name": check["name"], "exit": code, "seconds": seconds})
     failed = [r for r in results if r["exit"] != 0]
     result = "fail" if failed else "pass"
-    lines = [f"PRE-REVIEW: {result.upper()}", "", f"Head: {head}",
+    lines = [f"PRE-REVIEW: {result.upper()}", "", f"Head: {head}", budget_line(budget),
              f"Checks: origin/{base}:{CHECKS_FILE} at {checks_sha}", f"Logs: {logs}", "",
              "| Check | Exit | Seconds |", "| --- | --- | --- |"]
     lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} |" for r in results]
+    if budget["result"] == "over":
+        lines += ["", "## Diff budget", "", "| Measure | Spec estimate | Limit | Branch |", "| --- | --- | --- | --- |",
+                  f"| Files | {budget['expected_files']} | {budget['file_limit']} | {budget['files']} |",
+                  f"| Lines | {budget['expected_lines']} | {budget['line_limit']} | {budget['lines']} |"]
+        unlisted = budget["unlisted"]
+        if unlisted:
+            lines += ["", "Files outside the spec's task list:", ""]
+            for p in unlisted[:DIFF_BUDGET_UNLISTED_MAX]:
+                p = printable_line(p, 200)
+                lines.append(f"- `` {p} ``" if "`" in p else f"- `{p}`")
+            if len(unlisted) > DIFF_BUDGET_UNLISTED_MAX:
+                lines.append(f"- and {len(unlisted) - DIFF_BUDGET_UNLISTED_MAX} more")
     env = read_conf(home / ".env") if (home / ".env").exists() else {}
     for r in failed:
         log_text = (logs / f"{r['name']}.log").read_text(encoding="utf-8", errors="replace")
@@ -7724,7 +7815,7 @@ def pre_review_cmd(target):
         write_atomic(str(record_file), json.dumps(record) + "\n")
         repeats = sorted(names & set(record.get(str(round_n - 1), [])))
     print(json.dumps({"result": result, "head": head, "checks": results, "reason": None, "round": round_n,
-                      "repeats": repeats}))
+                      "repeats": repeats, "budget": budget}))
     if failed:
         sys.exit(1)
 
@@ -11045,7 +11136,7 @@ def tracer_call(base, token, method, path, body=None, ok=(200,)):
 
 def spec_tasks(text):
     """The numbered items under the spec's Tasks section as {title, what, path or None}."""
-    section = re.search(r"^## (?:\d+\.\s*)?Tasks\b[^\n]*\n(.*?)(?=^## |\Z)", text + "\n", re.M | re.S)
+    section = SPEC_TASKS.search(text + "\n")
     if not section:
         return []
     tasks = []
