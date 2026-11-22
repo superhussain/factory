@@ -1010,6 +1010,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
         fail("only factory.py pickup sets token_cap. Nothing was written.", 2)
     if "auto_babysit" in patch:
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
+    if "launch_failure" in patch:
+        fail("only factory.py pickup sets launch_failure. Nothing was written.", 2)
     if "handled" in patch:
         fail("only factory.py pr-handled sets handled. Nothing was written.", 2)
     if patch.get("note") in SPEC_APPROVED_NOTES:
@@ -5275,9 +5277,9 @@ def launch_env(given, provider, model):
                 FACTORY_PROMPT=given["prompt"])
 
 
-def launch_failed(home, name, job_id, detail, log_path, release, fatal=True, experiment=False):
+def launch_failed(home, name, job_id, detail, log_path, release, fatal=True, experiment=False, backoff=None):
     """After a failed launch: mark the route limited when its log says so, else exit 1, or with fatal=False log the failure and return.
-    Either way release() drops the claim first."""
+    Either way release() drops the claim first, except that a non-limit failure with backoff() parks the job instead."""
     with open(log_path, "rb") as log:
         log.seek(max(0, os.path.getsize(log_path) - 4096))
         tail = log.read().decode("utf-8", "replace")
@@ -5287,8 +5289,10 @@ def launch_failed(home, name, job_id, detail, log_path, release, fatal=True, exp
         print(f"limited experiment {name} until {until}" if experiment else f"limited {name} until {until}")
         print(f"released {job_id}")
         return
-    release()
+    parked = backoff() if backoff else release()
     print(f"released {job_id}")
+    if parked:
+        print(f"backed off {job_id} until {parked[1]} (launch failure {parked[0]})")
     message = f"launch of {job_id} on {name} failed: {detail}; see {log_path}"
     if fatal:
         fail(message, 1)
@@ -6955,12 +6959,16 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
         if ok:
             print(f"launched {entry['id']} {entry['project']} on {name} session {entry['session']}")
             record_launch(home, entry["id"], launch_row(given, argv, entry["session"]))
+            if j and "launch_failure" in j:
+                clear_launch_failure(home, entry["id"])
             launches += 1
             continue
         limit_name = experiment["name"] if arm == "b" and experiment else name
         launch_failed(home, limit_name, entry["id"], detail, log_path,
                       lambda: release_claim(home, entry["id"], device, entry["session"]),
-                      experiment=bool(experiment) and arm == "b")
+                      experiment=bool(experiment) and arm == "b",
+                      backoff=lambda: back_off_launch(home, entry["id"], device, entry["session"],
+                                                      launch_reason(detail)))
         return
 
 
