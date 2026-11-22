@@ -3935,7 +3935,7 @@ def arm_metrics(arm_jobs, follow_ups, jobs_root):
     for job_id, j in sorted(arm_jobs.items()):
         if not (isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"])
                 and JOB_ID.fullmatch(job_id) and ".." not in job_id
-                and all(k in TRACER_REVIEWERS for entry in j.get("rounds") or [] if isinstance(entry, dict)
+                and all(k in TRACER_REVIEWERS or k == "unverified" for entry in j.get("rounds") or [] if isinstance(entry, dict)
                         for k in entry)):
             coverage_unknown += 1
             continue
@@ -7637,7 +7637,7 @@ def round_wait_cmd(target, *args):
             fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
         return list(rounds)
 
-    written = board_rounds()[n - 1]
+    written = {k: v for k, v in board_rounds()[n - 1].items() if k in REVIEWERS}
     folder = home / "jobs" / slug / job_id
     artifacts = {r: f"round-{n}/review-{r}.md" for r in REVIEWERS}
     start = time.monotonic()
@@ -7649,7 +7649,7 @@ def round_wait_cmd(target, *args):
         verdicts = {r: valid[a][len("VERDICT: "):] if a in valid else "pending" for r, a in artifacts.items()}
         if verdicts != written:
             rounds = board_rounds()
-            rounds[n - 1] = verdicts
+            rounds[n - 1] = {**{k: v for k, v in rounds[n - 1].items() if k not in REVIEWERS}, **verdicts}
             board_write(home, job_id, {"rounds": rounds}, show=False, rewrite_round=n)
             written = verdicts
         bad = {a: line for a, line in lines.items() if line.strip() and a not in valid}
