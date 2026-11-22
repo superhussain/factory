@@ -44,9 +44,15 @@ async function openBoard(browser, origin, pipeline) {
   const page = await browser.newPage();
   page.on("pageerror", (error) => errors.push(String(error)));
   await blockLiveEvents(page);
+  await page.setViewport({ width: 1280, height: 900 });
   await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
   return { page, errors };
 }
+
+const clippedChips = (page) =>
+  page.$$eval(".card .tags .chip", (els) =>
+    els.filter((e) => e.scrollWidth > e.clientWidth).map((e) => e.textContent),
+  );
 
 const pausedChips = (page) =>
   page.$$eval(".card", (cards) =>
@@ -67,6 +73,27 @@ test("backpressure chip shows", { timeout: 120000 }, async () => {
       "122-follow-up": "Paused: 5 waiting on you",
     });
     assert.equal(await page.$('.card[data-id="122-follow-up"] .chip.held'), null);
+    assert.deepEqual(await clippedChips(page), []);
+    // A wrapped chip in the same row must not stretch the one-line Paused chip to its height.
+    // The 40% cap keeps the wrapped chip on the Paused chip's line.
+    const heights = await page.$eval('.card[data-id="120-add-csv-export"] .tags', (tags) => {
+      const paused = tags.querySelector(".chip.backpressure");
+      const before = paused.offsetHeight;
+      const long = document.createElement("span");
+      long.className = "chip";
+      long.style.maxWidth = "40%";
+      long.textContent = "Batches behind 999-synthetic-rider";
+      tags.prepend(long);
+      const after = {
+        paused: paused.offsetHeight,
+        long: long.offsetHeight,
+        sameRow: long.offsetTop === paused.offsetTop,
+      };
+      long.remove();
+      return { before, ...after };
+    });
+    assert.ok(heights.sameRow && heights.long > heights.before, JSON.stringify(heights));
+    assert.equal(heights.paused, heights.before);
     assert.equal(
       await page.$eval('.card[data-id="120-add-csv-export"] .chip.backpressure', (el) => el.title),
       TITLE,
@@ -95,6 +122,7 @@ test("backpressure chip respects the limit", { timeout: 120000 }, async () => {
     );
     assert.deepEqual(await pausedChips(page), {});
     assert.ok(await page.$('.card[data-id="122-follow-up"] .chip.held'));
+    assert.deepEqual(await clippedChips(page), []);
     assert.deepEqual(errors, []);
   });
 });

@@ -544,9 +544,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .card .id { display: flex; gap: 6px; align-items: center; }
   .card .id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .card .id .proj { flex: none; max-width: 50%; margin-top: 0; font-family: var(--font-sans); overflow-wrap: normal; contain: none; }
-  .card .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-  /* A long chip such as "Batches behind <id>" ends in an ellipsis in a narrow column; its title names the lead. */
-  .card .tags .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .card .tags { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 4px; margin-top: 4px; }
+  /* A long chip such as "Batches behind <id>" wraps in a narrow column, so its whole text shows. */
+  .card .tags .chip { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.2; padding: 3px 6px; }
   .card .title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
   .card .meta.branch { color: var(--info); }
   .card .meta.refs { color: var(--ref-fg); }
@@ -600,6 +600,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .notify-toasts[data-position="bottom-left"] { bottom: 16px; left: 16px; }
   .notify-toasts[data-position="bottom-center"] { bottom: calc(16px + var(--board-status-space, 0px)); left: 50%; transform: translateX(-50%); }
   .notify-toasts[data-position="bottom-right"] { bottom: 16px; right: 16px; }
+  .notify-toasts[data-position^="bottom"][data-status-overlap] { bottom: calc(16px + var(--board-status-space, 0px)); }
   .notify-toast.dragging { user-select: none; cursor: grabbing; }
   .notify-toast .notification-link { flex: 1; min-width: 0; border-bottom: 0; }
   @media (max-width: 760px) { .notify-toasts[data-position] { left: 16px; right: 16px; width: auto; transform: none; } .notify-toasts[data-position^="bottom"] { bottom: calc(16px + var(--board-status-space, 0px)); } }
@@ -8156,14 +8157,18 @@ $('board-status').addEventListener('focusin', holdBoardStatus);
 $('board-status').addEventListener('focusout', releaseBoardStatus);
 document.addEventListener('pointerdown', (e) => { if (!$('board-status').contains(e.target)) releaseBoardStatus(); });
 
-// The toast stack moves up once the status line has text, and down when it hides.
+// The toast stack moves up while the status line shares its slot or reaches its corner, and down when it hides.
 function syncToastOffset() {
+  const stack = $('notify-toasts');
   const status = $('board-status');
   if (!status.hidden && !status.textContent) return;
   const h = status.offsetHeight;
-  $('notify-toasts').style.setProperty('--board-status-space', h ? h + 8 + 'px' : '0px');
+  stack.style.setProperty('--board-status-space', h ? h + 8 + 'px' : '0px');
+  const s = status.getBoundingClientRect(), k = stack.getBoundingClientRect();
+  stack.toggleAttribute('data-status-overlap', h > 0 && s.left < k.right && s.right > k.left);
 }
 new ResizeObserver(syncToastOffset).observe($('board-status'));
+window.addEventListener('resize', syncToastOffset);
 
 function showCopyStatus(text) {
   clearCopyStatus();
@@ -10518,6 +10523,7 @@ function applyDisplay() {
   $('theme-color-light').content = THEME_COLORS[theme === 'dark' ? 'dark' : 'light'];
   $('theme-color-dark').content = THEME_COLORS[theme === 'light' ? 'light' : 'dark'];
   $('notify-toasts').dataset.position = toastPosition;
+  syncToastOffset();
   if (theme === frameTheme) return;
   frameTheme = theme;
   // replace() swaps the fragment without a history entry, so Back cannot undo the theme.
