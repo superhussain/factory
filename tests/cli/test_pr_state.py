@@ -262,6 +262,30 @@ class PrStateTest(IsolatedTestCase):
         reading = (view(decision="", reviews=[review("APPROVED")]), checks("pass"))
         self.assertEqual(self.next_of(reading), "merge")
 
+    def test_an_open_change_request_blocks_approval_without_a_decision(self):
+        changes = review("CHANGES_REQUESTED", at="2026-01-02T09:00:00Z", login="reviewer-b")
+        reading = (view(decision="", reviews=[review("APPROVED"), changes]), checks("pass"))
+        self.assertEqual(self.next_of(reading), "needs-review")
+
+    def test_a_repeated_change_request_is_worked_again(self):
+        sig = factory.handled_sig("review", "reviewer-a", "", "2026-01-02T11:00:00Z")
+        login_and_body = factory.handled_sig("review", "reviewer-a", "")
+        later = review("CHANGES_REQUESTED", at="2026-01-02T12:00:00Z")
+        code, out, err, _ = self.state([(view(decision="CHANGES_REQUESTED", reviews=[later]), checks("pass"))],
+                                       handled={sig: {"count": 1, "at": AT}, login_and_body: {"count": 1, "at": AT}})
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["next"], [i["label"] for i in reading["items"]]), ("fix-reviews", ["reviewer-a"]))
+
+    def test_the_same_review_stays_skipped(self):
+        sig = factory.handled_sig("review", "reviewer-a", "", "2026-01-02T11:00:00Z")
+        same = review("CHANGES_REQUESTED")
+        code, out, err, _ = self.state([(view(decision="CHANGES_REQUESTED", reviews=[same]), checks("pass"))],
+                                       handled={sig: {"count": 1, "at": AT}})
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["next"], reading["items"]), ("needs-review", []))
+
     def test_rebase_then_fix_ci_then_wait(self):
         self.assertEqual(self.next_of((view(merge="DIRTY"), checks("fail"))), "rebase")
         for bucket in ("fail", "cancel"):

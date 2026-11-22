@@ -8341,9 +8341,11 @@ def pr_reading(home, pr, base, buildkite_org, handled=None):
     unanswered = False
     for r in human:
         if r.get("state") in ("CHANGES_REQUESTED", "COMMENTED") and str(r.get("submittedAt") or "") > replied:
-            unanswered = note("review", login(r), login(r), str(r.get("body") or "")) or unanswered
+            unanswered = note("review", login(r), login(r), str(r.get("body") or ""),
+                              str(r.get("submittedAt") or "")) or unanswered
     decision = view.get("reviewDecision") or ""
-    approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
+    approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human)
+                                          and not any(r.get("state") == "CHANGES_REQUESTED" for r in human))
     state = str(view.get("state") or "").lower()
     in_queue = pull.get("isInMergeQueue") is True or isinstance(pull.get("mergeQueueEntry"), dict)
     bots = threads = 0
