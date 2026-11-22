@@ -75,3 +75,42 @@ class BacklogLessonTests(TriageFixture):
                     self.assertEqual(err, f"factory.py: {message}\n")
                 self.assertEqual(self.files, before)
                 self.assertEqual(self.posts, [])
+
+    def test_lesson_cards_wait_for_a_person(self):
+        pdf = "- [ ] sample: Add PDF export to reports"
+        lesson = card("sample", "001-capture", "2026-10-27")
+        raw = lesson.split("\n", 1)[0]
+        self.files["/api/backlog"] = f"# Backlog\n{lesson}{pdf}\n"
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            self.module.backlog_triage_pass(self.dir)
+        self.assertEqual(self.reads, [["sample: Add PDF export to reports"]])
+        self.assertIn(lesson, self.files["/api/backlog"])
+
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            found = self.module.first_item(f"# Backlog\n{lesson}", {"sample"}, {"sample": "/x"}, set())
+        self.assertIsNone(found)
+        self.assertEqual(err.getvalue(), f'skipping "sample: Lesson: {FACT}": a lesson card waits for a person\n')
+
+        self.assertEqual(list(self.module.backlog_candidates(f"# Backlog\n{lesson}{pdf}\n", "sample")),
+                         [f"backlog:{self.module.backlog_key(pdf)}"])
+
+        self.files["/api/backlog"] = f"# Backlog\n{lesson}"
+        (self.dir / "config.md").write_text("---\ndevice: wsl\n---\n", encoding="utf-8")
+        key = self.module.backlog_key(raw)
+        before = dict(self.files)
+        for decision, extra in (("approve", []), ("rework", ["--notes-file", self.file("notes.txt", "Shorter.")])):
+            with self.subTest(decision=decision):
+                code, out, err = invoke(self.module, ["backlog", "decide", key, decision, *extra,
+                                                      "--chat-file", self.file("chat.txt", "approve the lesson")])
+                self.assertEqual((code, out), (2, ""))
+                self.assertEqual(err, "factory.py: lesson cards are approved on the dashboard, which adds the bullet "
+                                      "to notes.md; nothing was changed\n")
+                self.assertEqual(self.files, before)
+        code, _, err = invoke(self.module, ["backlog", "decide", key, "deny",
+                                            "--chat-file", self.file("chat.txt", "deny the lesson")])
+        self.assertEqual(code, 0, err)
+        job = self.board()[-1]
+        self.assertEqual((job["stage"], job["note"], job["backlog"]["decision"]),
+                         ("closed", "denied from the backlog", "denied"))
+        self.assertTrue(self.files["/api/backlog"].startswith(f"# Backlog\n- [x] sample: Lesson: {FACT} ({job['id']})\n"))

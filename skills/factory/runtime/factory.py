@@ -1414,8 +1414,11 @@ def first_item(text, projects, paths, skipped, open_ids=frozenset):
                 print(f"skipping {slug}: no checkout on this device", file=sys.stderr)
             continue
         context, feature = context_below(lines, i), m.group(2).rstrip()
-        depends, _ = backlog_depends(text, context)
-        refs, why = backlog_waits(text, context, open_ids() if depends else frozenset())
+        if LESSON_MARK.search(context):
+            why = "a lesson card waits for a person"
+        else:
+            depends, _ = backlog_depends(text, context)
+            refs, why = backlog_waits(text, context, open_ids() if depends else frozenset())
         if why is None:
             return line, slug, feature, suffix_refs(BACKLOG_SUFFIX.search(feature)) + refs
         if line not in skipped:
@@ -1673,7 +1676,7 @@ def backlog_candidates(text, slug):
     found = {}
     for raw, line_slug, feature, context in unchecked_lines(text):
         key = f"backlog:{backlog_key(raw)}"
-        if line_slug != slug or key in found:
+        if line_slug != slug or key in found or LESSON_MARK.search(context):
             continue
         feature = feature.rstrip()
         ref = BACKLOG_SUFFIX.search(feature)
@@ -1713,7 +1716,7 @@ def backlog_triage_pass(home):
             if len(picked) == TRIAGE_SWEEP_LIMIT:
                 break
             if raw in triaged or slug not in projects or any(raw == p[0] for p in picked) \
-                    or RETRO_MARK.search(line[3]) or DEPENDS_ON.search(line[3]):
+                    or RETRO_MARK.search(line[3]) or DEPENDS_ON.search(line[3]) or LESSON_MARK.search(line[3]):
                 continue
             if slug not in enabled:
                 enabled[slug] = triage_enabled(home, slug)
@@ -2439,6 +2442,8 @@ def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None)
         if line and not line.startswith("  "):
             break
         held.append(line[2:])
+    if stored != "denied" and LESSON_MARK.search("\n".join(held)):
+        fail("lesson cards are approved on the dashboard, which adds the bullet to notes.md; nothing was changed", 2)
     answered = backlog_answers(answers, backlog_questions("\n".join(held)), stored)
     depends = []
     if stored == "approved":
