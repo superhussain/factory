@@ -340,8 +340,8 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   changed meanwhile, it drops the row while the row is still an unclaimed idea. The idea
   carries the line's context under `Context from the backlog:`, cut so the idea stays within
   4000 characters, as a dashboard Approve does.
-- **Decider.** Every verdict carries `decider`. The deny and question holds are `rule`, and
-  a threshold verdict is `model`, even when a question hold has a score. Board `backlog` records
+- **Decider.** Every verdict carries `decider`. The deny and question holds are `rule`,
+  even when a question hold has a score, and a threshold verdict is `model`. Board `backlog` records
   carry `decider` too: `person` from the dashboard or `backlog decide`, `model` when triage queued
   the line. Older records infer it: `by: "triage"` means `model` and any other is `person`. An
   older hold with no confidence, or with a deny or question reason, is `rule`.
