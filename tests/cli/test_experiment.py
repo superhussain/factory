@@ -457,14 +457,16 @@ class ReportTest(ReportFixture):
             "mean_review_rounds": 1.5, "changes_verdicts": 1, "stuck_resumes": 2,
             "follow_ups_7d": {"rework_of": ["024-rework"], "surfaced": ["025-surfaced"], "unknown_window": 2},
             "skipped_steps": {"missing_round_review": [], "missing_decision": [], "pr_before_approve": []},
-            "coverage_unknown": 0})
+            "coverage_unknown": 0, "finished": 1, "rounds": {"n": 2, "median": 1.5, "mad": 0.5},
+            "tokens": {"n": 0, "median": None, "mad": None}})
         self.assertEqual(report["b"], {
             "jobs": 4, "merged": 0, "closed": 1, "needs_human": 0, "escalated": 1,
             "mean_review_rounds": 1.0, "changes_verdicts": 2, "stuck_resumes": 0,
             "follow_ups_7d": {"rework_of": [], "surfaced": [], "unknown_window": 0},
             "skipped_steps": {"missing_round_review": ["017-skipped"], "missing_decision": ["014-inline-images"],
                               "pr_before_approve": ["017-skipped"]},
-            "coverage_unknown": 2})
+            "coverage_unknown": 2, "finished": 1, "rounds": {"n": 2, "median": 1.0, "mad": 0.0},
+            "tokens": {"n": 0, "median": None, "mad": None}})
 
     def test_the_report_writes_nothing(self):
         from support import snapshot
@@ -484,6 +486,38 @@ class ReportTest(ReportFixture):
     def test_the_report_rejects_bad_usage(self):
         for args in (["pick", "pilot"], ["report", "al pha"], ["report"]):
             self.assertEqual(invoke(factory, ["experiment", *args])[0], 2)
+
+
+class ReportNoiseTest(ReportFixture):
+    def setUp(self):
+        super().setUp()
+        arms = {"a": ((1, 2, 2, 3, 3), (100, 110, 120, 130, 140)),
+                "b": ((1, 1, 1, 2, 3), (300, 310, 320, 330, 340))}
+        self.board["jobs"] = [
+            idea(f"{40 + i + (5 if arm == 'b' else 0):03d}-pilot-{arm}", stage="merged", round=rnd,
+                 tokens={DEVICE: {"models": {"model-a": {"input": tokens, "output": 0, "cache_write": 0,
+                                                         "cache_read": 0}}}},
+                 experiment={"name": "pilot", "arm": arm})
+            for arm, (rounds, inputs) in arms.items() for i, (rnd, tokens) in enumerate(zip(rounds, inputs))]
+
+    def test_a_short_arm_is_inconclusive(self):
+        self.board["jobs"][-1]["stage"] = "pr-open"
+        code, out, err = self.report()
+        self.assertEqual((code, err), (0, ""))
+        inconclusive = {"diff": None, "noise": None, "reads": "inconclusive"}
+        self.assertEqual(json.loads(out)["comparison"], {
+            "min_finished": 5, "verdict": "inconclusive",
+            "reason": "needs 5 finished jobs per arm: a has 5, b has 4",
+            "rounds": inconclusive, "tokens": inconclusive})
+
+    def test_a_difference_inside_the_noise_is_no_difference(self):
+        code, out, err = self.report()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out)["comparison"], {
+            "min_finished": 5, "verdict": "compared",
+            "reason": "needs 5 finished jobs per arm: a has 5, b has 5",
+            "rounds": {"diff": -1.0, "noise": 1.0, "reads": "no difference"},
+            "tokens": {"diff": 200.0, "noise": 10.0, "reads": "b higher"}})
 
 
 class ReportBoundaryTest(ReportFixture):
