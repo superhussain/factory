@@ -206,7 +206,7 @@ async function offline() {
     stage: "idea",
     updated: now,
     capture_id: "c1",
-    backlog: { line: first.raw, decision: "approved", at: now },
+    backlog: { line: first.raw, decision: "approved", at: now, decider: "person" },
   });
   assert.equal(board.updated, now);
   const same = clone(board);
@@ -233,7 +233,13 @@ async function offline() {
     done: now,
     note: "denied from the backlog",
     capture_id: "c2",
-    backlog: { line: parsed[1].raw, decision: "denied", at: now, notes: "Not now." },
+    backlog: {
+      line: parsed[1].raw,
+      decision: "denied",
+      at: now,
+      notes: "Not now.",
+      decider: "person",
+    },
     refs: [{ id: "041-recipe.import", kind: "sub-job-of" }],
   });
   assert.equal(
@@ -248,7 +254,13 @@ async function offline() {
     stage: "idea",
     updated: now,
     capture_id: "c4",
-    backlog: { line: first.raw, decision: "approved", at: now, notes: "Use the drawer." },
+    backlog: {
+      line: first.raw,
+      decision: "approved",
+      at: now,
+      notes: "Use the drawer.",
+      decider: "person",
+    },
   });
   board.jobs.pop();
   api.addBacklogJob(board, third, "denied", " \n ", "", "c3", now);
@@ -256,6 +268,7 @@ async function offline() {
     line: third.raw,
     decision: "denied",
     at: now,
+    decider: "person",
   });
 
   // markBacklogLine: marked (CRLF line), already, gone, null.
@@ -522,6 +535,7 @@ async function offline() {
       decision: "rework",
       at: now,
       notes: "Limit it to the weekly report and say which columns.",
+      decider: "person",
     },
   };
   assert.deepEqual(clone(reworkBoard.jobs[1]), rework);
@@ -701,7 +715,14 @@ async function offlineContext() {
     stage: "idea",
     updated: now,
     capture_id: "c1",
-    backlog: { line: one.raw, decision: "approved", at: now, notes: "Use the drawer.", answers },
+    backlog: {
+      line: one.raw,
+      decision: "approved",
+      at: now,
+      notes: "Use the drawer.",
+      answers,
+      decider: "person",
+    },
     refs: [{ id: "001-x", kind: "sub-job-of" }],
   });
   api.addBacklogJob(board, one, "denied", "", answers, "c2", now);
@@ -715,7 +736,7 @@ async function offlineContext() {
     done: now,
     note: "denied from the backlog",
     capture_id: "c2",
-    backlog: { line: one.raw, decision: "denied", at: now, answers },
+    backlog: { line: one.raw, decision: "denied", at: now, answers, decider: "person" },
     refs: [{ id: "001-x", kind: "sub-job-of" }],
   });
   api.addBacklogJob(board, one, "approved", "", answers, "c3", now);
@@ -758,6 +779,7 @@ async function offlineContext() {
     at: now,
     notes: "Narrow it.",
     answers,
+    decider: "person",
   });
   assert.equal(board.jobs[3].idea, "With context");
 
@@ -984,6 +1006,7 @@ async function browserTest(url) {
         decision: "approved",
         at: approved.updated,
         notes: "Use the drawer.",
+        decider: "person",
       },
     });
     assert.ok(
@@ -1048,6 +1071,7 @@ async function browserTest(url) {
         decision: "denied",
         at: denied.updated,
         notes: "Not now, revisit after launch.",
+        decider: "person",
       },
       refs: [{ id: "001-original-idea", kind: "follow-up-of" }],
     });
@@ -1136,6 +1160,7 @@ async function browserTest(url) {
         decision: "rework",
         at: rework.updated,
         notes: "Limit it to the weekly report and say which columns.",
+        decider: "person",
       },
     });
     assert.equal(

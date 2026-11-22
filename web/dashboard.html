@@ -7521,14 +7521,14 @@ function addBacklogJob(board, item, decision, notes, answers, captureId, now) {
     ? { id, project: item.project, title: ideaTitle(item.text), stage: 'idea', updated: now,
         idea: ideaWithContext(item.text, item.context,
           (note ? '\n\nNotes from the backlog decision:\n' + note : '') + (ans ? '\n\nAnswers from the backlog decision:\n' + ans : '')),
-        capture_id: captureId, backlog: { line: item.raw, decision: 'approved', at: now, ...(note ? { notes: note } : {}), ...answered }, ...refs }
+        capture_id: captureId, backlog: { line: item.raw, decision: 'approved', at: now, ...(note ? { notes: note } : {}), ...answered, decider: 'person' }, ...refs }
     : decision === 'rework'
     ? { id, project: item.project, title: ideaTitle(item.text), idea: item.text, stage: 'idea', updated: now,
         note: 'rework requested from the backlog', capture_id: captureId,
-        backlog: { line: item.raw, decision: 'rework', at: now, notes: note, ...answered }, ...refs }
+        backlog: { line: item.raw, decision: 'rework', at: now, notes: note, ...answered, decider: 'person' }, ...refs }
     : { id, project: item.project, title: ideaTitle(item.text), idea: item.text, stage: 'closed', updated: now,
         done: now, note: 'denied from the backlog', capture_id: captureId,
-        backlog: { line: item.raw, decision: 'denied', at: now, ...(note ? { notes: note } : {}), ...answered }, ...refs });
+        backlog: { line: item.raw, decision: 'denied', at: now, ...(note ? { notes: note } : {}), ...answered, decider: 'person' }, ...refs });
   board.updated = now;
   return id;
 }

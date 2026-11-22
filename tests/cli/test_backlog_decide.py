@@ -54,7 +54,7 @@ class BacklogDecideTests(TriageFixture):
             "idea": "Guard the ls alias\n\nAnswers from the backlog decision:\n" + ANSWER
                     + self.footer("Approved", at),
             "backlog": {"line": LINE, "decision": "approved", "at": at, "answers": ANSWER, "via": "chat",
-                        "quote": MESSAGE, "by": "wsl"}})
+                        "quote": MESSAGE, "by": "wsl", "decider": "person"}})
         self.assertEqual(self.files["/api/backlog"],
                          f"# Backlog\n- [x] sample: Guard the ls alias (004-guard-the-ls)\n{CONTEXT}")
 
@@ -79,7 +79,7 @@ class BacklogDecideTests(TriageFixture):
             "idea": "Guard the ls alias" + self.footer("Denied", at), "stage": "closed", "updated": at, "done": at,
             "note": "denied from the backlog",
             "backlog": {"line": LINE, "decision": "denied", "at": at, "answers": "- Guard the ls alias: Drop the alias",
-                        "via": "chat", "quote": MESSAGE, "by": "wsl"}})
+                        "via": "chat", "quote": MESSAGE, "by": "wsl", "decider": "person"}})
         self.files["/api/backlog"] = f"# Backlog\n{LINE} (rework-of 002-ls)\n{CONTEXT}"
         key = self.module.backlog_key(f"{LINE} (rework-of 002-ls)")
         path = self.dir / "none.md"
@@ -94,7 +94,7 @@ class BacklogDecideTests(TriageFixture):
             "idea": "Guard the ls alias" + self.footer("Rework requested", at), "stage": "idea", "updated": at,
             "note": "rework requested from the backlog",
             "backlog": {"line": f"{LINE} (rework-of 002-ls)", "decision": "rework", "at": at,
-                        "notes": "Say which shells.", "via": "chat", "quote": MESSAGE, "by": "wsl"},
+                        "notes": "Say which shells.", "via": "chat", "quote": MESSAGE, "by": "wsl", "decider": "person"},
             "refs": [{"id": "002-ls", "kind": "rework-of"}]})
         self.assertEqual(json.loads(out)["decision"], "rework")
 

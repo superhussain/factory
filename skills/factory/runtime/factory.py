@@ -1959,7 +1959,7 @@ def queue_backlog_item(home, slug, feature, verdict, context=None):
         job = {"id": job_id, "project": slug, "title": text.strip()[:80], "stage": IDEA, "updated": at,
                "idea": idea_with_context(text, context, f"\n\nQueued by backlog triage: {score}. {verdict['reason']}"),
                "backlog": {"line": raw, "decision": "approved", "at": at, "by": "triage",
-                           "triage": {k: verdict[k] for k in ("model", "confidence", "threshold", "reason")}}}
+                           "decider": "model", "triage": {k: verdict[k] for k in ("model", "confidence", "threshold", "reason")}}}
         if duplicate:
             job["backlog"]["triage"]["duplicate"] = duplicate
         refs = suffix_refs(ref)
@@ -2340,7 +2340,8 @@ def backlog_decide(key, decision, answers=None, notes_file=None, chat_file=None)
         at = data["updated"] = now()
         footer = f'\n\n---\n{verb} in chat by {device} at {at}: "{" ".join(quote.split())}"'
         record = {"line": raw, "decision": stored, "at": at, **({"notes": note} if note else {}),
-                  **({"answers": answered} if answered else {}), "via": "chat", "quote": quote, "by": device}
+                  **({"answers": answered} if answered else {}), "via": "chat", "quote": quote, "by": device,
+                  "decider": "person"}
         title = item.strip()[:80]
         if stored == "approved":
             idea = item + (f"\n\nNotes from the backlog decision:\n{note}" if note else "") \
