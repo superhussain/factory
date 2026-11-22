@@ -1977,6 +1977,30 @@ async function capture(outdir, referencePath) {
       return clipOf(page, "#pipeline-triage", "#pipeline-archive");
     };
     await view("pipeline-hold-1280", 1280, 900, "light", openPipelineHold);
+    // The reference has no backpressure fieldset, so its side shows hold straight above archive.
+    const openPipelineBackpressure = async (page, side) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/pipeline";
+      });
+      await page.waitForSelector("#settings-pipeline:not([hidden])");
+      await page.select("#pipeline-scope", "global");
+      await page.waitForFunction(() => !document.getElementById("pipeline-hold-mode").disabled);
+      if (side === "after") {
+        await page.select("#pipeline-backpressure-mode", "on");
+        await page.$eval("#pipeline-backpressure-needs", (el) => {
+          el.value = "3";
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        await page.waitForFunction(
+          () => document.getElementById("pipeline-status").textContent === "Unsaved changes",
+        );
+      }
+      await page.evaluate(() =>
+        document.getElementById("pipeline-hold").scrollIntoView({ block: "start" }),
+      );
+      return clipOf(page, "#pipeline-hold", "#pipeline-archive");
+    };
+    await view("pipeline-backpressure-1280", 1280, 900, "light", openPipelineBackpressure);
     const openHeldCard = async (page) => {
       const wrap = '.card-wrap:has(.card[data-id="102-move-comment"])';
       await page.evaluate(
