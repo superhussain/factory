@@ -72,7 +72,7 @@
   factory.py pr-state <project-slug>/<job-id> [--wait S]
                                             print one JSON reading of the job PR for /factory babysit:
                                             pr, state, review, checks, queued, conflict, items, capped,
-                                            rearm and next; --wait
+                                            rearm, behind and next; --wait
                                             re-reads every 30 seconds for up to S seconds (1 to 600) while
                                             next is wait; a bad pr exits 4, a gh problem 5
   factory.py pr-handled <project-slug>/<job-id> [--rearm] <sig>...
@@ -8179,7 +8179,7 @@ def checks_cmd(target, *args):
 
 
 PR_STATE_USAGE = "usage: pr-state <project-slug>/<job-id> [--wait S]"
-PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName"
+PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName,headRefOid"
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
 PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
@@ -8378,6 +8378,8 @@ def pr_reading(home, pr, base, buildkite_org, handled=None):
         rearm += [s for s in handled if s.startswith("conflict:")]
     kinds = {i["sig"].split(":", 1)[0] for i in items}
     stacked = target != base
+    merge_queue = pull.get("isMergeQueueEnabled") is True
+    behind = None
     if state in ("merged", "closed"):
         step = state
     elif capped:
@@ -8397,15 +8399,16 @@ def pr_reading(home, pr, base, buildkite_org, handled=None):
     elif stacked:
         step = "wait-base"
     else:
-        step = "merge"
+        behind = None if merge_queue else behind_by(pr, target, view.get("headRefOid"))
+        step = "update" if behind else "merge"
     failed = next((c for c in listed if c["bucket"] in ("fail", "cancel") and isinstance(c.get("link"), str)
                    and BUILDKITE_BUILD.fullmatch(c["link"])), None) if step == "fix-ci" else None
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
             "base": target, "next": step, "ci_log": buildkite_log(home, failed, buildkite_org) if failed else None,
-            "threads": threads, "merge_queue": pull.get("isMergeQueueEnabled") is True,
-            "items": items, "capped": capped, "rearm": rearm}
+            "threads": threads, "merge_queue": merge_queue,
+            "items": items, "capped": capped, "rearm": rearm, "behind": behind}
 
 
 def pr_state_cmd(target, *args):
