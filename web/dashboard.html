@@ -9950,7 +9950,7 @@ $('notify-toasts').addEventListener('click', (e) => {
 $('notify-toasts').addEventListener('pointerdown', (e) => {
   const li = e.target.closest('.notify-toast');
   if (!e.isPrimary || e.button !== 0 || !li || e.target.closest('.notify-toast-close')) return;
-  toastDrag = { li, id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, lastX: e.clientX, lastT: e.timeStamp, v: 0, active: false };
+  toastDrag = { li, id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, dx: 0, active: false };
 });
 $('notify-toasts').addEventListener('pointermove', (e) => {
   const d = toastDrag;
@@ -9964,9 +9964,6 @@ $('notify-toasts').addEventListener('pointermove', (e) => {
     d.li.classList.add('dragging');
     d.li.style.transition = 'none';
   }
-  if (e.timeStamp > d.lastT) d.v = (e.clientX - d.lastX) / (e.timeStamp - d.lastT);
-  d.lastX = e.clientX;
-  d.lastT = e.timeStamp;
   d.dx = dx;
   d.li.style.transform = 'translateX(' + dx + 'px)';
   d.li.style.opacity = Math.max(0.2, 1 - Math.abs(dx) / d.li.offsetWidth);
@@ -9981,7 +9978,8 @@ function endToastDrag(e) {
   const { li, dx } = d;
   li.classList.remove('dragging');
   li.style.transition = 'transform ' + SWIPE_MS + 'ms ' + SWIPE_EASE + ', opacity ' + SWIPE_MS + 'ms ' + SWIPE_EASE;
-  const out = e.type === 'pointerup' && (Math.abs(dx) >= TOAST_DISMISS_X || Math.sign(d.v) === Math.sign(dx) && Math.abs(d.v) >= TOAST_DISMISS_V);
+  // The flick speed averages the whole drag, so a drag that stops before release snaps back.
+  const out = e.type === 'pointerup' && (Math.abs(dx) >= TOAST_DISMISS_X || Math.abs(dx) / (e.timeStamp - d.t) >= TOAST_DISMISS_V);
   if (out) {
     li.style.transform = 'translateX(' + Math.sign(dx) * li.offsetWidth + 'px)';
     li.style.opacity = 0;
