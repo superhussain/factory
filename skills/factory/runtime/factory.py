@@ -5614,13 +5614,13 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
         if line is None and ready:
             line = f"wait babysit {j['id']} {j['project']}: one babysit launch per run"
         elif line is None:
-            ready = True
             agent, state = job_agent(j)
             waits = awaits_permission(agent) if state == "idle" else False
             if waits is not False:
                 print(f"skip babysit {j['id']} {j['project']}: agent {agent} "
                       + ("waits at a permission dialog" if waits else "permission state unknown"))
                 continue
+            ready = True
             route = pick_route(home)
             if state in ("idle", "closed"):
                 if dry:
@@ -10082,7 +10082,7 @@ def stuck(*args):
         return (job.get("stage") in IN_FLIGHT and well_formed(job) and not held(job)
                 and (not c or c.get("device") == device) and dead(job))
 
-    resume = {}  # {id: (stage, clear_needs)} for each new state the stop check could not explain.
+    resume = {}  # {id: (stage, clear_needs, needs)} for each new state the stop check could not explain.
     # Without this host's Paseo server no job counts as stopped, so the board read is skipped.
     if server:
         jobs = read_board(home)["jobs"]
@@ -10099,7 +10099,7 @@ def stuck(*args):
             checks[job["id"]] = {"key": key, "at": now(), "verdict": verdict, "why": why}
             print(f"stop check {job['id']}: {verdict}, {why}", file=sys.stderr)
             if ok:
-                resume[job["id"]] = (job["stage"], clear)
+                resume[job["id"]] = (job["stage"], clear, job.get("needs"))
         if checks != old:
             write_atomic(home / STOP_CHECKS_FILE, json.dumps({"version": 1, "jobs": checks}, indent=2) + "\n")
 
@@ -10112,8 +10112,10 @@ def stuck(*args):
             data["updated"] = now()
         dropped = [f"dropped stub {s.get('id')!r}: no stage, last seen "
                    f"{(s.get('claim') or {}).get('seen') or s.get('updated')}" for s in stubs]
+        # A resume verdict holds only while the fresh row is still stopped, at its stage, with the same ask.
         found = [j for j in data["jobs"] if well_formed(j) and (
-            is_stuck(j) or j["id"] in resume and j.get("stage") == resume[j["id"]][0])]
+            is_stuck(j) or j["id"] in resume and stopped(j) and j.get("stage") == resume[j["id"]][0]
+            and j.get("needs") == resume[j["id"]][2])]
         found.sort(key=lambda j: (j.get("claim") or {}).get("seen") or j.get("updated") or "")
         picked, guarded = [], []
         for job in found:
@@ -10136,7 +10138,8 @@ def stuck(*args):
             job.pop("paseo", None)
             tag = session or secrets.token_hex(3)
             patch = {"claim": new_claim(device, tag), "resumes": {"count": count, "key": key}}
-            if resume.get(job["id"], (None, False))[1]:
+            _, clear, needs = resume.get(job["id"], (None, False, None))
+            if clear and job.get("needs") == needs:
                 patch["needs"] = None
             patch_job(data, job["id"], patch)
             picked.append({"id": job["id"], "project": job["project"], "repo_path": paths[job["project"]],

@@ -3905,6 +3905,20 @@ class PermissionGuardTest(PickupFixture):
                 self.assertNotIn("claim", self.job("042-sample-export"))
                 self.assertEqual((self.sent, self.launched(), self.puts()), ([], [], []))
 
+    def test_a_skipped_babysit_leaves_the_launch_to_the_next_job(self):
+        self.waits = True
+        self.statuses = {"synthetic-agent": "idle", "closed-agent": "closed"}
+        self.board["jobs"] = [babysat("042-sample-export", "alpha", paseo=self.LINK),
+                              babysat("043-sample-export", "alpha",
+                                      paseo={"server": "synthetic-server", "agent": "closed-agent"})]
+        code, out, err = self.pickup()
+        tag = self.job("043-sample-export")["claim"]["session"]
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, "skip babysit 042-sample-export alpha: agent synthetic-agent waits at a permission dialog\n"
+                              f"sent babysit 043-sample-export alpha to agent closed-agent session {tag}\n")
+        self.assertNotIn("claim", self.job("042-sample-export"))
+        self.assertEqual([agent for agent, _ in self.sent], ["closed-agent"])
+
     def test_awaits_permission_reads_paseo_inspect(self):
         patch.stopall()
         for (code, out), want in (((0, '{"PendingPermissions": [{"id": "p1"}]}'), True),
