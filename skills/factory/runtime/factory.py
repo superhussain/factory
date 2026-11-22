@@ -142,6 +142,7 @@
   factory.py autonomy status|pause|resume|allow <slug>|deny <slug>|self <slug>
                                             show or change the explorer kill switch and allowlist;
                                             resume and allow need a human typing at a terminal
+  factory.py autonomy report [<project-slug>]  recommend which project and job classes may automerge; writes nothing
   factory.py halt status | halt set --reason <text>
                                             show or set the global stop flag that pickup, its takeover
                                             and stuck honor; only a signed-in person clears it
@@ -2742,11 +2743,14 @@ def registered(home):
 
 def autonomy_cmd(sub, slug=None):
     """Show or change the board's autonomy record."""
-    if sub not in ("status", "pause", "resume", "allow", "deny", "self") \
-            or (slug is None) != (sub in ("status", "pause", "resume")) \
+    if sub not in ("status", "pause", "resume", "report", "allow", "deny", "self") \
+            or sub != "report" and (slug is None) != (sub in ("status", "pause", "resume")) \
             or slug is not None and not SLUG.fullmatch(slug):
-        fail("usage: autonomy status|pause|resume|allow <slug>|deny <slug>|self <slug>", 2)
+        fail("usage: autonomy status|pause|resume|report [<slug>]|allow <slug>|deny <slug>|self <slug>", 2)
     home = factory_home()
+    if sub == "report":
+        autonomy_report(home, slug)
+        return
     if sub == "status":
         print(json.dumps(load_autonomy(read_board(home)), indent=2))
         return
