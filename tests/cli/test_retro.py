@@ -1413,6 +1413,8 @@ class RetroRoleCardTest(unittest.TestCase):
 NOTE = "Name the acceptance check for each criterion."
 EDIT_SUMMARY = "Spec note: name the test file for each criterion"
 PUT_ROUTE = "PUT /api/pipeline/retro/projects/factory"
+SAVED = ["GET /api/board", "GET /api/pipeline/history/projects/factory", PUT_ROUTE]
+TRIAL_OPENED = "alternate jobs keep the old note until trial settle decides"
 
 
 def edit(**over):
@@ -1442,7 +1444,7 @@ class RetroEditTest(RetroWorkerCase):
         board = {"updated": "2026-11-12T09:00:00Z", "jobs": [],
                  "autonomy": {"paused": paused, "projects": ["factory"], "self": []}}
         routes = {"GET /api/board": (200, board), PUT_ROUTE: (200, b"ok", {"X-Pipeline-Version": "8"}),
-                  **(routes or {})}
+                  "PUT /api/board": (200, b"ok"), **(routes or {})}
         with http_fixture(routes) as server:
             self.config(server.origin)
             code, out, err = invoke(factory, ["retro", "admit", RUN])
@@ -1453,9 +1455,13 @@ class RetroEditTest(RetroWorkerCase):
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(out, f"wrote {self.folder / 'findings.md'}\n"
                               f"edited projects/factory stage_notes.spec to version 8: {EDIT_SUMMARY}\n"
+                              f"trial factory-spec-v8 opened: {TRIAL_OPENED}\n"
                               "no suggestions\n")
-        self.assertEqual([f"{m} {p}" for m, p, _, _ in requests],
-                         ["GET /api/board", "GET /api/pipeline/history/projects/factory", PUT_ROUTE])
+        self.assertEqual([f"{m} {p}" for m, p, _, _ in requests], [*SAVED, "GET /api/board", "PUT /api/board"])
+        trial = json.loads(requests[4][3])["trials"][0]
+        self.assertEqual({k: trial[k] for k in trial if k != "opened"}, {
+            "id": "factory-spec-v8", "project": "factory", "stage": "spec", "version": 8, "run": RUN,
+            "summary": EDIT_SUMMARY, "champion": NOTE, "challenger": edit()["note"], "status": "open"})
         _, _, headers, body = requests[2]
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertEqual(json.loads(body), {
@@ -1486,7 +1492,7 @@ class RetroEditTest(RetroWorkerCase):
                 self.assertIn(f"skipped {line}\n", out)
                 self.assertIn("edited projects/factory stage_notes.spec to version 8", out)
                 self.assertEqual([f"{m} {p}" for m, p, _, _ in requests],
-                                 ["GET /api/board", "GET /api/pipeline/history/projects/factory", PUT_ROUTE])
+                                 [*SAVED, "GET /api/board", "PUT /api/board"])
                 self.assertIn(f"| edits[0] |  | skipped: {line.replace('|', chr(92) + '|')} |  |\n", text)
 
     def test_exactly_600_changed_characters_is_sent(self):
@@ -1496,7 +1502,7 @@ class RetroEditTest(RetroWorkerCase):
         self.assertEqual(factory.retro_changed_chars("a\U0001F600c", "abc"), 2)
         code, out, _, requests, _ = self.admit([edit(note=note)])
         self.assertEqual(code, 0)
-        self.assertEqual(len(requests), 3)
+        self.assertEqual(len(requests), 5)
 
     def test_worker_refusals_are_skipped_without_changing_the_exit_code(self):
         for status, text in ((404, b"not found"), (409, b"autonomy is paused; no retro edit"),
@@ -1514,12 +1520,15 @@ class RetroEditTest(RetroWorkerCase):
         spec_again = edit(note=edit()["note"] + "y" * 600, summary="Spec note: keep it short")
         code, out, err, requests, _ = self.admit([edit(), build])
         self.assertEqual((code, err), (0, ""))
-        puts = [json.loads(body) for m, _, _, body in requests if m == "PUT"]
+        puts = [json.loads(body) for m, p, _, body in requests if f"{m} {p}" == PUT_ROUTE]
         self.assertEqual([b["base_version"] for b in puts], [7, 8])
         self.assertIn("edited projects/factory stage_notes.build to version 8", out)
-        # The 600-character cap measures a repeated stage against the note just saved.
+        self.assertIn("trial factory-build-v8 opened", out)
+        # The 600-character cap measures a repeated stage against the note just saved, and the
+        # trial the first spec edit opened then holds the repeat back.
         _, out, _, requests, _ = self.admit([edit(), spec_again])
-        self.assertEqual(len([m for m, *_ in requests if m == "PUT"]), 2)
+        self.assertEqual(len([p for m, p, *_ in requests if f"{m} {p}" == PUT_ROUTE]), 1)
+        self.assertIn("skipped edits[1]: a trial is open for projects/factory stage_notes.spec\n", out)
 
     def test_device_daily_cap_counts_recent_retro_versions(self):
         now = datetime.now(timezone.utc)
