@@ -349,6 +349,7 @@ when it writes the board.
   `skipped edits[i]: stage-note trials are paused after 2 reverts; a person runs trial resume <slug>`.
   `factory.py trial resume <slug>` needs a human at a terminal typing the slug. It sets
   `resumed` on that project's reverts and prints `stage-note trials resumed for <slug>`.
+  Settings, Pipeline lists each trial and shows a banner with the trial resume command while a project is paused.
 - **Scope.** Retro file edits are not trialled. A host on an older bundle ignores
   `trials`, so its jobs read the current note.
 
