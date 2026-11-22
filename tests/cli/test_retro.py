@@ -1326,6 +1326,11 @@ class RetroRoleCardTest(unittest.TestCase):
                      "denials, classifier friction and recurring red flags"):
             self.assertIn(text, role)
 
+    def test_role_reads_lessons(self):
+        role = (ROOT / "skills/factory/agents/factory-retro.md").read_text(encoding="utf-8")
+        for text in ("`lessons`", "Most rows teach nothing.", "Notes: lesson from <job>"):
+            self.assertIn(text, role)
+
     def test_role_card_fields_pass_admission(self):
         role = (ROOT / "skills/factory/agents/factory-retro.md").read_text(encoding="utf-8")
         table = role.split("| Card field | Limit |\n| --- | --- |\n")[1].split("\n\n")[0]
