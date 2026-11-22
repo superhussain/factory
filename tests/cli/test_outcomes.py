@@ -11,7 +11,7 @@ from support import IsolatedTestCase, http_fixture, invoke, load_runtime
 
 factory = load_runtime()
 RUNNING_EXAMPLE = """\
-outcomes of jobs merged in the last 30 days
+outcomes of jobs merged in the last 90 days
 project  held  reworked  reverted  unknown
 alpha       1         1         1        0
 alpha held: 1017-add-x
@@ -66,7 +66,7 @@ class OutcomesTestCase(IsolatedTestCase):
             merged("1017-add-x", 7), merged("1018-add-y", 8), merged("1019-add-z", 9),
             {"id": "1021-fix-y", "project": "alpha", "stage": "pr-open", "updated": "2026-01-09T12:00:00Z",
              "refs": [{"kind": "rework-of", "id": "1018-add-y"}]},
-            merged("1016-old", 6, days_ago=31)]}
+            merged("1016-old", 6, days_ago=91)]}
 
     def config(self, origin):
         (self.home / "config.md").write_text(f"---\napi_url: {origin}\ndevice: host-a\n---\n", encoding="utf-8")
@@ -109,7 +109,7 @@ class OutcomesOutputTest(OutcomesTestCase):
         self.assertEqual(self.run_cmd("alpha")[0], (0, RUNNING_EXAMPLE, ""))
 
     def test_no_jobs(self):
-        self.assertEqual(self.run_cmd("beta")[0], (0, "no jobs merged in the last 30 days\n", ""))
+        self.assertEqual(self.run_cmd("beta")[0], (0, "no jobs merged in the last 90 days\n", ""))
 
 
 class OutcomesClassifyTest(OutcomesTestCase):

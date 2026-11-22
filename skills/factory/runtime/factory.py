@@ -196,7 +196,7 @@
   factory.py usage record <project-slug>/<job-id>
                                             write those totals to the board job under tokens.<device>
   factory.py outcomes [record] [<project-slug>]
-                                            sort jobs merged in the last 30 days into held, reworked or reverted;
+                                            sort jobs merged in the last 90 days into held, reworked or reverted;
                                             record writes outcome
   factory.py with-cloudflare -- <command> [<arg>...]
                                             run one command with the CLOUDFLARE_* keys of this home's .env
@@ -6450,7 +6450,7 @@ def pr_states(repo, numbers, device):
             for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
-OUTCOME_DAYS = 30
+OUTCOME_DAYS = 90
 OUTCOME_FIX_DAYS = 7
 OUTCOME_SUBJECT = re.compile(r"(?:fix|revert)", re.I)
 
