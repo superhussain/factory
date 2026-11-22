@@ -238,6 +238,7 @@ class ReviewPlanTest(IsolatedTestCase):
         for reason, spec, decision, files in cases:
             with self.subTest(reason):
                 shutil.rmtree(self.wt, ignore_errors=True)
+                shutil.rmtree(self.home / "origin.git", ignore_errors=True)
                 shutil.rmtree(self.folder / "round-1", ignore_errors=True)
                 (self.folder / "spec.md").write_text(spec)
                 if decision:
