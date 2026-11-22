@@ -519,6 +519,25 @@ class ReportNoiseTest(ReportFixture):
             "rounds": {"diff": -1.0, "noise": 1.0, "reads": "no difference"},
             "tokens": {"diff": 200.0, "noise": 10.0, "reads": "b higher"}})
 
+    def test_fewer_tokens_in_arm_b_read_b_lower(self):
+        jobs = self.board["jobs"]
+        for a_job, b_job in zip(jobs[:5], jobs[5:]):
+            a_job["tokens"], b_job["tokens"] = b_job["tokens"], a_job["tokens"]
+        code, out, err = self.report()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out)["comparison"]["tokens"], {"diff": -200.0, "noise": 10.0, "reads": "b lower"})
+
+    def test_malformed_token_records_add_nothing(self):
+        bad = idea("050-pilot-a", stage="merged", round=1, experiment={"name": "pilot", "arm": "a"},
+                   tokens={DEVICE: {"models": {"model-a": {"input": "500", "output": 0, "cache_write": 0,
+                                                           "cache_read": 0}}},
+                           "host-b": "garbage"})
+        self.assertEqual(factory.job_tokens(bad), 0)
+        self.board["jobs"].append(bad)
+        code, out, err = self.report()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out)["a"]["tokens"], {"n": 6, "median": 115.0, "mad": 15.0})
+
 
 class ReportBoundaryTest(ReportFixture):
     def setUp(self):
