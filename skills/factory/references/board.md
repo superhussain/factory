@@ -44,6 +44,7 @@ job's own `$REPO`.
 `pending`, `PASS`, `CHANGES`, or `SKIPPED` (ux and ui only, written by `review-plan`). Reviewer keys are fixed: security, ux, ui, code.
 `factory.py verdict` sets one reviewer's verdict in one write and keeps the rest of `rounds`.
 A `board` patch cannot rewrite a recorded round: it may only keep the stored rounds and append all-pending ones.
+`factory.py grounding` may add `"unverified": ["review-code.md export.py:412 bad-line"]` to a round entry: the review citations whose path or line did not check out. It never changes a verdict.
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
 which ports live jobs hold. Only `factory.py` writes `claim`.
 A `board` patch that would change only `updated` stamps, or only this session's `claim.seen` while the stored one is under 10 minutes old, sends no PUT and prints the stored row.
