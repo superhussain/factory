@@ -95,6 +95,9 @@
   factory.py pre-review <project-slug>/<job-id>
                                             run the base branch's .factory/checks.json in the job
                                             worktree, write pre-review.md, print one JSON line; FAIL exits 1
+  factory.py grounding <project-slug>/<job-id> <round>
+                                            check each path:line a round's reviews cite, write
+                                            round-N/grounding.md and the round's unverified list; flags only
   factory.py stop <worktree>                stop processes running out of a worktree
   factory.py cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
@@ -12804,6 +12807,7 @@ COMMANDS["orphans"] = (orphans_cmd, 0, 0)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
 COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["pre-review"] = (pre_review_cmd, 1, 1)
+COMMANDS["grounding"] = (grounding_cmd, 2, 2)
 COMMANDS["batch"] = (batch_cmd, 1, 1 + MAX_RIDERS)
 COMMANDS["stack"] = (stack_cmd, 2, 2)
 COMMANDS["retro"] = (retro_cmd, 1, 3)
