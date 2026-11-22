@@ -496,6 +496,30 @@ changes nothing. Then install one timer per host.
 
 Numbers use `,` thousands separators, and `pct` is `used * 100 // cap`. The last three lines go to stderr. `--dry-run` writes nothing and never stops an agent.
 
+## Daily token cap
+
+- Set `daily_token_cap: <n>` in `config.md` to stop new launches on this host for the rest of the local day once its job sessions have spent `n` tokens since local midnight. Without it `pickup` never runs the scan.
+- The count reads this host's Claude Code transcripts, not the board `tokens` entries, which lag by whole jobs. It walks only folders whose name matches `factory-<digits>-`, the rule the retro digest uses to tag a job session.
+- It reads each main `*.jsonl` and its `<stem>/subagents/*.jsonl` last written at or after local midnight, and keeps only assistant lines whose `timestamp` is at or after midnight. Each line counts input, output and cache_write tokens, as the job cap does.
+- The scan runs only when the key is set and some idea or approved start is otherwise a launch candidate. At or over the cap, every such candidate is held, its skip line wins over batch or backpressure lines, and no claim is written.
+- Takeovers, babysits, resolves and running sessions are not held. They can push spend past the cap; the cap stops new starts only. Sessions outside a `factory-<digits>-` folder are not counted.
+
+| Case | Result |
+| --- | --- |
+| key absent | off, no scan |
+| `daily_token_cap: lots` | bad config line, off |
+| scan raises | scan error line, launches go on |
+| after local midnight | the count restarts at 0 |
+
+| Case | Line |
+| --- | --- |
+| dry skip | `skip {id} {project}: host {device} daily token cap reached ({used}/{cap} since local midnight)` |
+| stop | `factory.py: pickup launches no new job on {device}: daily token cap reached ({used}/{cap} since local midnight)` |
+| bad config | `factory.py: pickup ignores daily_token_cap in {config}: must be a whole number of at least 1` |
+| scan error | `factory.py: pickup skips the daily token cap: scan failed ({Type})` |
+
+Numbers use `,` thousands separators. The last three lines go to stderr. A real run prints the stop line in place of the skip lines; `--dry-run` prints the skip lines only.
+
 ## Pausing a job
 
 - The dashboard's Pause pickup item sets `paused = {at}` on a job with a project that is not merged or closed. Resume pickup deletes it.

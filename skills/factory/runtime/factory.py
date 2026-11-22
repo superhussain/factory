@@ -6864,7 +6864,7 @@ def token_cap_pass(home, data, device, dry):
     """Warn once when an in-flight job claimed on this host passes TOKEN_WARN_PERCENT of config.md's
     job_token_cap, and move it to needs-human and stop its Paseo agent when it reaches the cap.
     This host scans its own transcripts; other hosts count through their recorded tokens entry."""
-    cap = job_token_cap(home)
+    cap = token_cap(home, "job_token_cap")
     if cap is None:
         return
 
@@ -6933,6 +6933,26 @@ def moved_here(j, device):
     m = j.get("move")
     return (isinstance(m, dict) and m.get("to") == device and "claimed" not in m and j.get("stage") in IN_FLIGHT
             and not any(x["from"] == device for x in queued_stops(m)))
+
+
+def daily_cap_holds(home, device, jobs, free, dry):
+    """{job id: skip line} for every free job once this host's job tokens since local midnight reach
+    daily_token_cap. Off without the key; a failed scan prints one stderr line and holds nothing."""
+    cap = token_cap(home, "daily_token_cap")
+    held = [j for j in jobs if free(j)] if cap else []
+    if not held:
+        return {}
+    try:
+        used = daily_tokens(local_midnight())
+    except Exception as e:
+        print(f"factory.py: pickup skips the daily token cap: scan failed ({type(e).__name__})", file=sys.stderr)
+        return {}
+    if used < cap:
+        return {}
+    reached = f"daily token cap reached ({used:,}/{cap:,} since local midnight)"
+    if not dry:
+        print(f"factory.py: pickup launches no new job on {device}: {reached}", file=sys.stderr)
+    return {j["id"]: f"skip {j['id']} {j.get('project')}: host {device} {reached}" for j in held}
 
 
 def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
@@ -7004,7 +7024,8 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
 
     waiting = sum(1 for j in data["jobs"] if waits_on_you(j))
     holds = {**batch_holds(home, jobs, lambda j: base_skip(j) is None),
-             **backpressure_holds(home, jobs, waiting, lambda j: base_skip(j) is None)}
+             **backpressure_holds(home, jobs, waiting, lambda j: base_skip(j) is None),
+             **daily_cap_holds(home, device, jobs, lambda j: base_skip(j) is None, dry)}
 
     def skip(j):
         """Why this idea is not a candidate, or None."""
@@ -12614,9 +12635,9 @@ def usage_prompt(path):
     return ""
 
 
-def usage_scan(path, main):
+def usage_scan(path, main, since=None):
     """({model: {kind: tokens}}, unreadable line count) for one transcript, each message.id counted once.
-    main=True skips isSidechain lines."""
+    main=True skips isSidechain lines. A str since keeps only lines whose timestamp is at or after it."""
     turns, bad = {}, 0
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -12628,6 +12649,8 @@ def usage_scan(path, main):
                 bad += 1
                 continue
             if not isinstance(e, dict) or e.get("type") != "assistant" or (main and e.get("isSidechain")):
+                continue
+            if isinstance(since, str) and not (isinstance(e.get("timestamp"), str) and e["timestamp"] >= since):
                 continue
             msg = e.get("message")
             if not isinstance(msg, dict) or not isinstance(msg.get("id"), str) or not isinstance(msg.get("usage"), dict):
@@ -12688,6 +12711,26 @@ def usage_totals(home, slug, job_id):
     return {"transcripts": read, "models": dict(sorted(totals.items()))}
 
 
+def daily_tokens(midnight):
+    """Tokens this host's job sessions spent since midnight, from transcript timestamps. Only folders
+    matching RETRO_JOB count. Files last written before midnight and unreadable files are skipped."""
+    root = retro_transcripts()
+    if not root.is_dir():
+        return 0
+    since = midnight.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff, used = midnight.timestamp(), 0
+    for project in sorted(p for p in root.iterdir() if p.is_dir() and RETRO_JOB.search(p.name)):
+        for path in sorted(project.glob("*.jsonl")):
+            subs = sorted((project / path.stem / "subagents").glob("*.jsonl"))
+            for file, main in [(path, True)] + [(sub, False) for sub in subs]:
+                try:
+                    if file.stat().st_mtime >= cutoff:
+                        used += token_count(usage_scan(file, main, since)[0])
+                except OSError:
+                    pass
+    return used
+
+
 def usage_record(home, slug, job_id, device, totals):
     """Write this host's token totals to the board job under tokens.<device>, keeping other hosts' entries."""
     def change(text):
@@ -12736,14 +12779,19 @@ def token_count(models):
                for k, v in counts.items() if k in ("input", "output", "cache_write") and type(v) is int and v >= 0)
 
 
-def job_token_cap(home):
-    """config.md's job_token_cap as an int, else None. A bad value prints one stderr line and is off."""
+def local_midnight():
+    """The start of today in the host's local time zone, as an aware datetime."""
+    return datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def token_cap(home, key):
+    """config.md's key as an int, else None. A bad value prints one stderr line and is off."""
     config = Path(home, "config.md")
-    value = (frontmatter(config)[0] if config.is_file() else {}).get("job_token_cap")
+    value = (frontmatter(config)[0] if config.is_file() else {}).get(key)
     if value is None:
         return None
     if not (value.isdecimal() and int(value) >= 1):
-        print(f"factory.py: pickup ignores job_token_cap in {config}: must be a whole number of at least 1",
+        print(f"factory.py: pickup ignores {key} in {config}: must be a whole number of at least 1",
               file=sys.stderr)
         return None
     return int(value)
