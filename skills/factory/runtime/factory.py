@@ -10749,6 +10749,7 @@ def stuck(*args):
                 and (not c or c.get("device") == device) and dead(job))
 
     resume = {}  # {id: (stage, clear_needs, needs)} for each new state the stop check could not explain.
+    old, checks = {}, {}
     # Without this host's Paseo server no job counts as stopped, so the board read is skipped.
     if server:
         jobs = read_board(home)["jobs"]
@@ -10766,8 +10767,6 @@ def stuck(*args):
             print(f"stop check {job['id']}: {verdict}, {why}", file=sys.stderr)
             if ok:
                 resume[job["id"]] = (job["stage"], clear, job.get("needs"))
-        if checks != old:
-            write_atomic(home / STOP_CHECKS_FILE, json.dumps({"version": 1, "jobs": checks}, indent=2) + "\n")
 
     def change(text):
         data = load_board(text)
@@ -10814,6 +10813,16 @@ def stuck(*args):
             return None, ([], [])
         return dump_board(data), (picked, guarded + dropped)
     picked, guarded = cas(home, "/api/board", change)
+    # A resume verdict counts only for a job this run claimed, so a job cut by --limit is checked again.
+    claimed = {p["id"] for p in picked}
+    for job_id in resume:
+        if job_id not in claimed:
+            if job_id in old:
+                checks[job_id] = old[job_id]
+            else:
+                checks.pop(job_id, None)
+    if checks != old:
+        write_atomic(home / STOP_CHECKS_FILE, json.dumps({"version": 1, "jobs": checks}, indent=2) + "\n")
     for line in guarded:
         print(line, file=sys.stderr)
     if not picked:
