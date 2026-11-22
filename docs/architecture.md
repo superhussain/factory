@@ -143,6 +143,18 @@ method or path under `/api/hosts` returns 404, and no route deletes a host.
 | `PUT /api/hosts/<id>/status` | the bound service token | write the status record; the Worker sets `seen` |
 | `GET /api/hosts/<id>/history` | person | every saved version of the host, newest first, with `saved_by` and `saved_at` |
 
+The global stop flag lives in `halt.json`: `halted`, `reason` (1 to 200
+characters, only while halted), `by_kind` (`person` or `host`), `by` and `at`,
+which the Worker sets. A missing key is not halted, and a record that does not
+parse reads as halted. `pickup` and `stuck` read it on every host and start
+nothing while it is set. Bodies are capped at 16 KiB, and every other method
+returns 404.
+
+| Route | Who | Effect |
+| --- | --- | --- |
+| `GET /api/halt` | any verified principal | the stop record, or `{"halted":false}`; a service never sees a person's email |
+| `PUT /api/halt` | person: set or clear; service token: set only | writes `halt.json`; a repeat set writes nothing |
+
 Retro digest routes store one redacted JSON-lines file per host per day at
 `retro/<id>/<date>.jsonl`, where the date is the host's local date. The bound
 host owns its file and nothing else writes the key. The body is at most 1 MiB of
