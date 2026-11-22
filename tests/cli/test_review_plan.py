@@ -124,6 +124,14 @@ class ReviewPlanTest(IsolatedTestCase):
                          {"round": 1, "head": self.head(), "protected": [".github/workflows/ci.yml"],
                           "tier": "high", "routes": NULL})
 
+    def test_repo_check_config_is_protected(self):
+        self.assertEqual(factory.touched_protected([
+            "tools/assets.mjs", "package.json", "paseo-plugin/package.json", ".gitleaks.toml", "mise.toml",
+            ".oxfmtrc.json", "nx.json", "tools/verify.py", "tests/cli/support.py",
+            "tests/support/browser-server.mjs", "docs/trust.md", "pnpm-lock.yaml"]),
+            [".gitleaks.toml", ".oxfmtrc.json", "mise.toml", "nx.json", "package.json", "paseo-plugin/package.json",
+             "tests/cli/support.py", "tests/support/browser-server.mjs", "tools/verify.py"])
+
     def test_later_round_adds_visible_file(self):
         self.worktree("docs/trust.md")
         self.assertSkipped("1")
