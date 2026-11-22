@@ -19,6 +19,9 @@ UPDATED = ("factory.py: PR #42 was 1 commit behind main; gh pr update-branch mer
            "again on the new head.\n")
 
 
+VISIBLE = {"security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS"}
+
+
 def listed(*checks):
     return [{"bucket": bucket, "name": name} for bucket, name in checks], None
 
@@ -39,7 +42,7 @@ class ChecksTest(IsolatedTestCase):
     def sleep(self, seconds):
         self.now += seconds
 
-    def checks(self, view, polls, *args, pr=PR, extra=None, behind=None, update=(0, "", "")):
+    def checks(self, view, polls, *args, pr=PR, extra=None, behind=None, update=(0, "", ""), others=()):
         """Run checks with gh answering view first. pr_behind gives each behind reading in turn, then head_checks
         gives each (checks, problem) poll in turn, both repeating the last, and update-branch answers update."""
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open"}
@@ -63,7 +66,8 @@ class ChecksTest(IsolatedTestCase):
             calls.append(("head_checks", head_pr, sha))
             return polls[min(sum(c[0] == "head_checks" for c in calls) - 1, len(polls) - 1)]
 
-        with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job]})}) as server:
+        with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job, *others]})}) as server:
+            self.requests = server.requests
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
             with patch.object(factory, "gh_pr", gh), patch.object(factory, "pr_behind", pr_behind), \
                     patch.object(factory, "head_checks", head_checks), \
@@ -231,6 +235,21 @@ class ChecksTest(IsolatedTestCase):
                 self.assertEqual((code, out, calls), (7, "", []))
                 self.assertEqual(err, f"factory.py: {JOB} is escalated on the board, so a person reviews and "
                                       f"merges {PR}. Nothing merges.\n")
+
+    def test_earned_autonomy_hold_exits_8_before_gh(self):
+        reverted = {"id": "040-sample-import", "project": "sample", "stage": "merged", "done": factory.now(),
+                    "rounds": [VISIBLE], "outcome": {"result": "reverted", "at": "2026-01-09T12:00:00Z"}}
+        code, out, err, calls = self.checks(OPEN, [listed(("pass", "test"))], others=[reverted],
+                                            extra={"automerge": True, "rounds": [VISIBLE]})
+        self.assertEqual((code, out, calls), (8, "", []))
+        self.assertEqual(err, f"factory.py: {JOB} is held: earned autonomy holds sample visible PRs after reverted "
+                              "040-sample-import; a person lifts it with factory.py autonomy restore sample visible. "
+                              f"A person reviews and merges {PR}. Nothing merges.\n")
+        puts = [json.loads(body) for method, _, _, body in self.requests if method == "PUT"]
+        self.assertEqual(len(puts), 1)
+        job = next(j for j in puts[0]["jobs"] if j["id"] == JOB)
+        self.assertEqual((job["automerge"], job["note"]), (False, "earned autonomy hold: a person reviews and merges"))
+        self.assertTrue(job["needs"].startswith("review and merge PR #42: earned autonomy holds sample visible"))
 
     def test_unreadable_decision_exits_7(self):
         self.decision(b"\xff\n")
