@@ -11,7 +11,8 @@ factory = load_runtime()
 JOB = "042-sample-export"
 PR = "https://github.com/example/sample/pull/42"
 OPEN = (0, "OPEN\n")
-WARN = "factory.py: warning: gh pr checks gave no usable reply ({})\n"
+WARN = "factory.py: warning: gh api graphql gave no usable check list ({})\n"
+NEVER = "factory.py: gh api graphql never gave a usable check list\n"
 OLD = "a1" * 20
 NEW = "b2" * 20
 UPDATED = ("factory.py: PR #42 was 1 commit behind main; gh pr update-branch merged main into it, so checks run "
@@ -19,7 +20,11 @@ UPDATED = ("factory.py: PR #42 was 1 commit behind main; gh pr update-branch mer
 
 
 def listed(*checks):
-    return 8, json.dumps([{"bucket": bucket, "name": name} for bucket, name in checks])
+    return [{"bucket": bucket, "name": name} for bucket, name in checks], None
+
+
+def unusable(problem):
+    return [], problem
 
 
 class ChecksTest(IsolatedTestCase):
@@ -35,8 +40,8 @@ class ChecksTest(IsolatedTestCase):
         self.now += seconds
 
     def checks(self, view, polls, *args, pr=PR, extra=None, behind=None, update=(0, "", "")):
-        """Run checks with gh answering view first, then each poll in turn, repeating the last. pr_behind gives
-        each behind reading in turn, repeating the last, and update-branch answers update."""
+        """Run checks with gh answering view first. pr_behind gives each behind reading in turn, then head_checks
+        gives each (checks, problem) poll in turn, both repeating the last, and update-branch answers update."""
         job = {"id": JOB, "project": "sample", "title": "Sample export", "stage": "pr-open"}
         job.update(extra or {})
         if pr is not None:
@@ -48,18 +53,20 @@ class ChecksTest(IsolatedTestCase):
             calls.append(gh_args)
             if gh_args[0] == "view":
                 return view
-            if gh_args[0] == "update-branch":
-                return update
-            poll = polls[min(sum(c[0] == "checks" for c in calls) - 1, len(polls) - 1)]
-            return poll + ("",) if stderr and poll and len(poll) == 2 else poll
+            return update
 
         def pr_behind(behind_pr):
             calls.append(("pr_behind", behind_pr))
             return behind[min(sum(c[0] == "pr_behind" for c in calls) - 1, len(behind) - 1)]
 
+        def head_checks(head_pr, sha):
+            calls.append(("head_checks", head_pr, sha))
+            return polls[min(sum(c[0] == "head_checks" for c in calls) - 1, len(polls) - 1)]
+
         with http_fixture({"/api/board": (200, {"updated": "", "jobs": [job]})}) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n")
             with patch.object(factory, "gh_pr", gh), patch.object(factory, "pr_behind", pr_behind), \
+                    patch.object(factory, "head_checks", head_checks), \
                     patch.object(factory.time, "sleep", self.sleep), \
                     patch.object(factory.time, "monotonic", lambda: self.now):
                 result = invoke(factory, ["--home", str(self.home), "checks", f"sample/{JOB}", *args])
@@ -67,12 +74,12 @@ class ChecksTest(IsolatedTestCase):
 
     def test_behind_pr_updates_and_waits(self):
         code, out, err, calls = self.checks(
-            OPEN, [listed(("pass", "ci")), (0, "[]"), listed(("pending", "ci")), listed(("pass", "ci"))],
+            OPEN, [listed(("pass", "ci")), listed(), listed(("pending", "ci")), listed(("pass", "ci"))],
             "--timeout", "540", behind=[(1, OLD, "main"), (0, NEW, "main")])
         self.assertEqual((code, out, err), (0, "pass ci\n", UPDATED))
         self.assertEqual([c for c in calls if c[0] == "update-branch"], [("update-branch", PR)])
-        self.assertEqual(len([c for c in calls if c[0] == "pr_behind"]), 3)
-        self.assertEqual(self.now, 40)
+        self.assertEqual(len([c for c in calls if c[0] == "pr_behind"]), 4)
+        self.assertEqual(self.now, 30)
 
     def test_up_to_date_pr_makes_no_update(self):
         code, out, err, calls = self.checks(OPEN, [listed(("pass", "ci"))])
@@ -84,14 +91,21 @@ class ChecksTest(IsolatedTestCase):
                                             behind=[(1, OLD, "main"), (1, OLD, "main"), (0, NEW, "main")])
         self.assertEqual((code, out, err), (0, "pass ci\n", UPDATED))
         self.assertEqual([c[0] for c in calls].count("update-branch"), 1)
-        self.assertEqual(self.now, 30)
+        self.assertEqual(self.now, 20)
 
-    def test_new_head_needs_a_second_reading_before_exit_0(self):
+    def test_new_head_passing_exits_0_on_first_reading(self):
         code, out, err, calls = self.checks(OPEN, [listed(("pass", "ci"))], "--timeout", "540",
                                             behind=[(1, OLD, "main"), (0, NEW, "main")])
         self.assertEqual((code, out, err), (0, "pass ci\n", UPDATED))
-        self.assertEqual([c[0] for c in calls].count("pr_behind"), 3)
-        self.assertEqual(self.now, 20)
+        self.assertEqual([c[0] for c in calls].count("pr_behind"), 2)
+        self.assertEqual(self.now, 10)
+
+    def test_checks_are_read_for_the_head_sha(self):
+        _, _, _, calls = self.checks(OPEN, [listed(("pass", "ci")), listed(), listed(("pass", "ci"))],
+                                     "--timeout", "540", behind=[(1, OLD, "main"), (1, OLD, "main"), (0, NEW, "main")])
+        polls = [c for c in calls if c[0] in ("pr_behind", "head_checks")]
+        self.assertEqual(polls, [("pr_behind", PR), ("head_checks", PR, OLD)] * 2
+                         + [("pr_behind", PR), ("head_checks", PR, NEW)])
 
     def test_stale_head_at_deadline_exits_3(self):
         code, out, err, _ = self.checks(OPEN, [listed(("pass", "ci"))], "--timeout", "30", behind=[(1, OLD, "main")])
@@ -100,10 +114,11 @@ class ChecksTest(IsolatedTestCase):
         self.assertEqual(self.now, 30)
 
     def test_register_window_restarts_after_update(self):
-        polls = [listed(("pending", "ci"))] * 10 + [listed(("pass", "ci"))] + [(0, "[]")] * 11 + [listed(("pass", "ci"))]
-        code, out, err, _ = self.checks(OPEN, polls, "--timeout", "540", behind=[(1, OLD, "main"), (0, NEW, "main")])
+        polls = [listed(("pending", "ci"))] * 10 + [listed(("pass", "ci"))] + [listed()] * 11 + [listed(("pass", "ci"))]
+        code, out, err, _ = self.checks(OPEN, polls, "--timeout", "540",
+                                        behind=[(1, OLD, "main")] * 11 + [(0, NEW, "main")])
         self.assertEqual((code, out, err), (0, "pass ci\n", UPDATED))
-        self.assertEqual(self.now, 230)
+        self.assertEqual(self.now, 220)
 
     def test_update_failure_exits_6(self):
         code, out, err, _ = self.checks(OPEN, [listed(("pass", "ci"))], behind=[(2, OLD, "main")],
@@ -122,15 +137,15 @@ class ChecksTest(IsolatedTestCase):
         code, out, err, calls = self.checks(OPEN, [listed(("pass", "test"), ("fail", "ci"))],
                                             behind=[(1, OLD, "main")])
         self.assertEqual((code, out, err), (1, "pass test\nfail ci\n", "factory.py: failing checks: ci\n"))
-        self.assertEqual([c[0] for c in calls], ["view", "checks"])
+        self.assertEqual([c[0] for c in calls], ["view", "pr_behind", "head_checks"])
 
     def test_all_pass_prints_each_check_and_exits_0(self):
-        code, out, err, calls = self.checks(OPEN, [(1, ""), listed(("pending", "test"), ("pass", "lint")),
-                                                   (0, json.dumps([{"bucket": "pass", "name": "test"},
-                                                                   {"bucket": "pass", "name": "lint"}]))])
+        code, out, err, calls = self.checks(OPEN, [unusable("exited 1 with no check list"),
+                                                   listed(("pending", "test"), ("pass", "lint")),
+                                                   listed(("pass", "test"), ("pass", "lint"))])
         self.assertEqual((code, out, err), (0, "pass test\npass lint\n", WARN.format("exited 1 with no check list")))
         self.assertEqual(calls[0][:2], ("view", PR))
-        self.assertEqual(calls[1], ("checks", PR, "--json", "name,bucket,link"))
+        self.assertEqual(calls[1:3], [("pr_behind", PR), ("head_checks", PR, "a" * 40)])
         self.assertEqual(self.now, 20)
 
     def test_skipping_counts_as_passing(self):
@@ -138,27 +153,23 @@ class ChecksTest(IsolatedTestCase):
         self.assertEqual((code, out, err), (0, "pass test\nskipping lint\n", ""))
 
     def test_no_checks_after_120_seconds_exits_0(self):
-        for poll in ((0, "[]"), (1, "", "no checks reported on the 'factory/042-sample-export' branch\n")):
-            with self.subTest(poll):
-                self.now = 0.0
-                code, out, err, _ = self.checks(OPEN, [poll], "--timeout", "540")
-                self.assertEqual((code, out, err), (0, "no checks reported\n", ""))
-                self.assertEqual(self.now, 120)
+        code, out, err, _ = self.checks(OPEN, [listed()], "--timeout", "540")
+        self.assertEqual((code, out, err), (0, "no checks reported\n", ""))
+        self.assertEqual(self.now, 120)
 
     def test_no_usable_reply_by_120_seconds_exits_5(self):
-        for poll, problem in (((1, ""), "exited 1 with no check list"), (("timeout", ""), "timed out after 60 seconds"),
-                              ((0, "not json"), "printed no check list"), ((0, "{}"), "printed no check list"),
-                              ((1, "", "HTTP 502\n"), "exited 1 with no check list"),
-                              (None, "gh is not installed")):
-            with self.subTest(poll):
+        for problem in ("exited 1 with no check list", "timed out after 60 seconds", "printed no check list",
+                        "listed more than 100 checks", "gh is not installed"):
+            with self.subTest(problem):
                 self.now = 0.0
-                code, out, err, _ = self.checks(OPEN, [poll], "--timeout", "540")
+                code, out, err, _ = self.checks(OPEN, [unusable(problem)], "--timeout", "540")
                 self.assertEqual((code, out), (5, ""))
-                self.assertEqual(err, WARN.format(problem) * 13 + "factory.py: gh pr checks never gave a usable reply\n")
+                self.assertEqual(err, WARN.format(problem) * 13 + NEVER)
                 self.assertEqual(self.now, 120)
 
     def test_one_usable_reply_keeps_exit_0(self):
-        code, out, err, _ = self.checks(OPEN, [(1, ""), (0, "[]"), (1, "")], "--timeout", "540")
+        miss = unusable("exited 1 with no check list")
+        code, out, err, _ = self.checks(OPEN, [miss, listed(), miss], "--timeout", "540")
         self.assertEqual((code, out), (0, "no checks reported\n"))
         self.assertEqual(err, WARN.format("exited 1 with no check list") * 12)
 
@@ -179,22 +190,12 @@ class ChecksTest(IsolatedTestCase):
         self.assertEqual((code, out, err), (3, "", "factory.py: still pending: test\n"))
         self.assertEqual(self.now, 25)
 
-    def test_malformed_list_counts_as_none_listed(self):
-        for body in ('["pass test"]', '[{"name": "test"}]', '[{"bucket": "pass", "name": 7}]',
-                     '[{"bucket": "pass", "name": "lint"}, null]'):
-            with self.subTest(body):
-                self.now = 0.0
-                code, out, err, _ = self.checks(OPEN, [(0, body)], "--timeout", "30")
-                self.assertEqual((code, out, err), (5, "", WARN.format("printed no check list") * 4
-                                                    + "factory.py: gh pr checks never gave a usable reply\n"))
-
     def test_none_listed_at_deadline_before_120_seconds_exits_3(self):
-        code, out, err, _ = self.checks(OPEN, [(0, "[]")], "--timeout", "30")
+        code, out, err, _ = self.checks(OPEN, [listed()], "--timeout", "30")
         self.assertEqual((code, out, err), (3, "", "factory.py: no checks listed yet\n"))
         self.assertEqual(self.now, 30)
-        code, out, err, _ = self.checks(OPEN, [(1, "")], "--timeout", "30")
-        self.assertEqual((code, out, err), (5, "", WARN.format("exited 1 with no check list") * 4
-                                            + "factory.py: gh pr checks never gave a usable reply\n"))
+        code, out, err, _ = self.checks(OPEN, [unusable("exited 1 with no check list")], "--timeout", "30")
+        self.assertEqual((code, out, err), (5, "", WARN.format("exited 1 with no check list") * 4 + NEVER))
 
     def test_bad_pr_exits_4(self):
         for pr, view, why in ((None, OPEN, "no pr"), ("https://github.com/example/other/pull/42", OPEN, "example/sample"),
