@@ -7981,7 +7981,8 @@ def changed_files(wt, base):
     mb = base_read(wt, "merge-base", f"refs/remotes/origin/{base}", "HEAD", text=True)
     if mb.returncode:
         return None
-    diff = base_read(wt, "diff", "--name-only", "--no-renames", "-z", mb.stdout.strip(), "HEAD", text=True)
+    diff = base_read(wt, "diff", "--no-ext-diff", "--no-textconv", "--name-only", "--no-renames", "-z",
+                     mb.stdout.strip(), "HEAD", text=True)
     if diff.returncode:
         return None
     return [p for p in diff.stdout.split("\0") if p]
@@ -8188,8 +8189,8 @@ def diff_numstat(wt, ref):
     mb = base_read(wt, "merge-base", ref, "HEAD", text=True)
     if mb.returncode:
         return None
-    diff = base_read(wt, "diff", "--numstat", "--no-renames", "-z", mb.stdout.strip(), "HEAD", encoding="utf-8",
-                     errors="replace")
+    diff = base_read(wt, "diff", "--no-ext-diff", "--no-textconv", "--numstat", "--no-renames", "-z",
+                     mb.stdout.strip(), "HEAD", encoding="utf-8", errors="replace")
     if diff.returncode:
         return None
     counts = {}
@@ -8467,8 +8468,8 @@ def diff_ranges(wt, base, repo):
     mb = base_read(wt, "merge-base", f"refs/remotes/origin/{base}", "HEAD", text=True)
     if mb.returncode:
         return None, unreadable
-    diff = base_read(wt, "diff", "-U0", "--no-renames", mb.stdout.strip(), "HEAD", encoding="utf-8",
-                     errors="replace")
+    diff = base_read(wt, "diff", "--no-ext-diff", "--no-textconv", "-U0", "--no-renames", mb.stdout.strip(),
+                     "HEAD", encoding="utf-8", errors="replace")
     if diff.returncode:
         return None, unreadable
     ranges, path, header = {}, None, False

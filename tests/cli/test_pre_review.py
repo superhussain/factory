@@ -4,6 +4,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import unittest
 from pathlib import Path
 from unittest import mock
 
@@ -411,6 +412,24 @@ class PreReviewTest(IsolatedTestCase):
         self.assertIn("README.md", factory.diff_ranges(self.wt, "main", "example/sample")[0])
         (self.wt / ".git" / "info" / "grafts").write_text(self.git("rev-parse", "HEAD") + "\n")
         self.assertIn("README.md", factory.changed_files(self.wt, "main"))
+
+    @unittest.skipIf(os.name == "nt", "the driver is a sh script")
+    def test_base_diff_ignores_external_diff_and_textconv(self):
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main")
+        (self.wt / "README.md").write_text("branch\n")
+        self.commit()
+        marker = self.home / "driver-ran"
+        driver = self.home / "driver.sh"
+        driver.write_text(f"#!/bin/sh\necho ran >> '{marker}'\necho FORGED\n")
+        driver.chmod(0o755)
+        self.git("config", "diff.external", str(driver))
+        self.git("config", "diff.forge.textconv", str(driver))
+        (self.wt / ".git" / "info" / "attributes").write_text("* diff=forge\n")
+        self.assertIsNone(factory.fetch_base(self.wt, "main", "example/sample"))
+        self.assertIn("README.md", factory.changed_files(self.wt, "main"))
+        self.assertEqual(factory.diff_numstat(self.wt, "refs/remotes/origin/main")["README.md"], 2)
+        self.assertEqual(factory.diff_ranges(self.wt, "main", "example/sample")[0]["README.md"], [(1, 1)])
+        self.assertFalse(marker.exists())
 
     def spec(self):
         (self.folder / "spec.md").write_text(SPEC)
