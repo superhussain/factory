@@ -139,6 +139,9 @@
   factory.py autonomy status|pause|resume|allow <slug>|deny <slug>|self <slug>
                                             show or change the explorer kill switch and allowlist;
                                             resume and allow need a human typing at a terminal
+  factory.py halt status | halt set --reason <text>
+                                            show or set the global stop flag that pickup, its takeover
+                                            and stuck honor; only a signed-in person clears it
   factory.py suggest admit <file>           turn an explorer's suggestions file into idea cards that
                                             wait on a human (exit 3 when paused or none admitted)
   factory.py suggest approve <job-id> <A|B|C> [--chat-file <file>]
@@ -4186,6 +4189,50 @@ def host_max_inflight(home, device):
     return cap if type(cap) is int and 0 <= cap <= 5 else None
 
 
+def read_halt(home):
+    """The Worker's halt record when the factory is stopped, else None. A Worker without the
+    route (404) is not stopped. An unreadable reply counts as stopped."""
+    status, _, text = api(home, "GET", "/api/halt", ok=(200, 404))
+    if status == 404:
+        return None
+    try:
+        record = json.loads(text)
+    except ValueError:
+        record = None
+    if not isinstance(record, dict) or type(record.get("halted")) is not bool:
+        return {"halted": True, "reason": "the Worker's halt reply is unreadable"}
+    return record if record["halted"] else None
+
+
+def halt_line(record):
+    by = record.get("by") if isinstance(record.get("by"), str) else "a person"
+    at = record.get("at") if isinstance(record.get("at"), str) else "an unknown time"
+    reason = record.get("reason") if isinstance(record.get("reason"), str) else "no reason given"
+    return (f"factory stopped by {printable_line(by, 80)} at {printable_line(at, 40)}: "
+            f"{printable_line(reason, 200)}")
+
+
+def halt_cmd(*args):
+    """Show or set the global stop flag. Only a signed-in person clears it, from the dashboard."""
+    home = factory_home()
+    if args == ("status",):
+        status, _, text = api(home, "GET", "/api/halt", ok=(200, 404))
+        if status == 404:
+            fail("this Worker has no /api/halt route; deploy the Worker first", 4)
+        print(json.dumps(json.loads(text), indent=2))
+        return
+    if len(args) == 3 and args[:2] == ("set", "--reason"):
+        error = check_text(args[2], 1, 200)
+        if error:
+            fail(f"--reason {error}", 2)
+        _, _, text = api(home, "PUT", "/api/halt", json.dumps({"halted": True, "reason": args[2]}),
+                         ok=(200,), headers={"Content-Type": "application/json"})
+        print(json.dumps(json.loads(text), indent=2))
+        return
+    fail("usage: halt status | halt set --reason <text>; only a signed-in person resumes the factory, "
+         "from the dashboard", 2)
+
+
 def read_launchers(home):
     """{route: [argv template]} from this host's launchers.json."""
     path = Path(home, "launchers.json")
@@ -4737,6 +4784,13 @@ def pickup(*args):
             data = None
 
     try:
+        halt = read_halt(home)
+        if halt:
+            if dry:
+                print(f"skip all: {halt_line(halt)}")
+            else:
+                print(f"factory.py: pickup launches nothing; {halt_line(halt)}", file=sys.stderr)
+            return
         data = None if os.path.lexists(home / "tracer.json") else read_board(home)
         if not dry:
             for tracer_pass, stopped in (
@@ -9315,6 +9369,10 @@ def stuck(*args):
     limit = int(args[1]) if args else 1
     home = factory_home()
     device, session, minutes = holder(home)
+    halt = read_halt(home)
+    if halt:
+        print(f"factory.py: stuck resumes nothing; {halt_line(halt)}", file=sys.stderr)
+        sys.exit(3)
     paths, server = read_paths(home), paseo_server()
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
     statuses = []  # [result] once paseo has been asked, so cas retries reuse it.
@@ -12367,6 +12425,7 @@ COMMANDS = {"where": (where, 0, 1), "init": (init, 0, 1), "claim": (claim, 3, 3)
 COMMANDS["adopt-home"] = (adopt_home_cmd, 1, 1)
 COMMANDS["doctor"] = (doctor_cmd, 0, 0)
 COMMANDS["autonomy"] = (autonomy_cmd, 1, 2)
+COMMANDS["halt"] = (halt_cmd, 1, 3)
 COMMANDS["suggest"] = (suggest_cmd, 2, 5)
 COMMANDS["control"] = (control_cmd, 4, 6)
 COMMANDS["routes"] = (routes_cmd, 1, 4)

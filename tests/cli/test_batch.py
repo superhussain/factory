@@ -64,6 +64,8 @@ class BatchTest(IsolatedTestCase):
         self.text = factory.dump_board({"updated": "", "jobs": rows})
 
     def api(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
+        if path == "/api/halt":
+            return 404, {}, ""
         if path == "/api/backlog":
             if method == "PUT":
                 self.backlog_puts += 1

@@ -247,7 +247,7 @@ class PickupFixture(BoardFixture):
         patch.object(factory, "checkout_problem", return_value=None).start()
 
     def request(self, home, method, path, body=None, ok=(200,), headers=None, raw=False):
-        if path == "/api/hosts":
+        if path in ("/api/hosts", "/api/halt"):
             return 404, {}, ""
         if path == "/api/pipeline/effective/alpha":
             return 200, {}, json.dumps({
