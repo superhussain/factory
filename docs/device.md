@@ -179,6 +179,9 @@ with its reason: `no job on the board`, `job merged` or `job closed`. It prints
 `{"orphans": [...], "skipped": [...]}` and only reads; a source that fails becomes one
 `skipped` line. Pickup runs it once per local date, recorded in `<home>/orphan-scan.json`,
 and prints one `orphan scan:` summary line.
+A workspace with no board job gets the `project` of the first `paths.md` checkout, by slug,
+whose `git rev-parse --git-common-dir` matches the workspace's, since a Paseo worktree path
+carries no slug. A workspace whose folder is gone, or matches no checkout, reports `null`.
 Within one command, the runtime reuses a 200 answer from /projects.json, /api/pipeline/global or /api/pipeline/effective/<slug> for up to 60 seconds. A pipeline or project write clears it.
 
 ## Cloudflare credentials for one command

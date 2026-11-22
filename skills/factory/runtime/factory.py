@@ -9493,11 +9493,25 @@ def orphan_reason(jobs, job_id):
     return "job merged" if job["stage"] == "merged" else "job closed"
 
 
+def workspace_project(cwd, paths):
+    """The paths.md slug whose checkout shares cwd's git common dir, first by slug, else None.
+    git before 2.31 lacks --path-format, so a relative answer resolves against the folder asked."""
+    def common(path):
+        out = git(path, "rev-parse", "--git-common-dir")
+        return os.path.normcase(str(Path(path, out).resolve())) if out else None
+
+    target = common(cwd)
+    if target is None:
+        return None
+    return next((slug for slug, path in sorted(paths.items()) if common(path) == target), None)
+
+
 def orphan_scan(home):
     """(orphans, skipped): factory branches on origin, open factory PRs, job worktrees and factory-<id>
     Paseo workspaces that no open board job owns. Only reads; a source that fails is one skipped line,
     which never carries a tool's stderr."""
     jobs = read_board(home)["jobs"]
+    paths = read_paths(home)
     ids = {j.get("id") for j in jobs}
     orphans, skipped = [], []
 
@@ -9507,7 +9521,7 @@ def orphan_scan(home):
             orphans.append({"kind": kind, "project": project, "job": job_id, "name": name, "reason": reason})
 
     gh_missing = False
-    for slug, path in read_paths(home).items():
+    for slug, path in paths.items():
         if not os.path.isdir(path):
             continue
         try:
@@ -9587,7 +9601,7 @@ def orphan_scan(home):
                 rest = base[len("factory-"):]
                 job_id = rest if rest in ids else re.sub(r"-\d+$", "", rest)
                 job = next((j for j in jobs if j.get("id") == job_id), {})
-                add("workspace", job.get("project"), job_id, cwd)
+                add("workspace", job.get("project") or workspace_project(cwd, paths), job_id, cwd)
 
     orphans.sort(key=lambda o: (ORPHAN_KINDS.index(o["kind"]), o["name"]))
     return orphans, skipped

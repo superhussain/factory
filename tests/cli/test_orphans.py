@@ -79,6 +79,18 @@ class OrphanScanTest(IsolatedTestCase):
         self.gh.assert_called_once_with("pr", "list", "-R", "example/factory", "--state", "open",
                                         "--json", "number,headRefName,url", "--limit", "500")
 
+    def test_infers_workspace_project(self):
+        lost = self.root / "paseo" / "a1b2c3" / "factory-1998-lost"
+        self.git("-C", str(self.checkout), "worktree", "add", "-q", "--detach", str(lost))
+        gone = str(self.root / "paseo" / "d4e5f6" / "factory-1997-gone")
+        self.paseo.return_value = (0, json.dumps([{"cwd": str(lost)}, {"cwd": gone}]))
+        workspaces = [o for o in self.orphans()["orphans"] if o["kind"] == "workspace"]
+        self.assertEqual(workspaces, [
+            {"kind": "workspace", "project": "factory", "job": "1998-lost", "name": str(lost),
+             "reason": "no job on the board"},
+            {"kind": "workspace", "project": None, "job": "1997-gone", "name": gone, "reason": "no job on the board"},
+        ])
+
     def test_scan_only_reads(self):
         before = snapshot(self.home)
         heads = self.git("-C", str(self.remote), "for-each-ref", "refs/heads")
