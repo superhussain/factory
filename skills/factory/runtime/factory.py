@@ -8184,6 +8184,50 @@ def pr_checks(pr, required=False):
     return [], f"exited {code} with no check list" if code else "printed no check list"
 
 
+HEAD_CHECKS_QUERY = ("query=query($o:String!,$r:String!,$sha:GitObjectID!){repository(owner:$o,name:$r){object(oid:$sha){...on Commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion startedAt} ...on StatusContext{context state createdAt}}}}}}}}")
+
+
+def head_checks(pr, sha):
+    """(checks, problem) for commit sha's checks, as pr_checks returns them, from one gh api graphql call. A repeated name keeps its latest run."""
+    owner, name = GH_PR.fullmatch(pr)[1].split("/")
+    result = gh_cli("api", "graphql", "-f", HEAD_CHECKS_QUERY, "-f", f"o={owner}", "-f", f"r={name}", "-f", f"sha={sha}",
+                    "--jq", ".data.repository.object")
+    if result is None:
+        return [], "gh is not installed"
+    code, out = result
+    if code == "timeout":
+        return [], "timed out after 60 seconds"
+    if code:
+        return [], f"exited {code} with no check list"
+    try:
+        rollup = json.loads(out)["statusCheckRollup"]
+        if rollup is None:
+            return [], None
+        if rollup["contexts"]["pageInfo"]["hasNextPage"]:
+            return [], "listed more than 100 checks"
+        nodes = rollup["contexts"]["nodes"]
+        if not isinstance(nodes, list):
+            raise TypeError
+        latest = {}
+        for node in nodes:
+            if node["__typename"] == "CheckRun":
+                check, when, state = node["name"], node["startedAt"], node["status"]
+                bucket = {"SUCCESS": "pass", "SKIPPED": "skipping", "NEUTRAL": "skipping",
+                          "CANCELLED": "cancel"}.get(node["conclusion"], "fail") if state == "COMPLETED" else "pending"
+            elif node["__typename"] == "StatusContext":
+                check, when, state = node["context"], node["createdAt"], node["state"]
+                bucket = {"SUCCESS": "pass", "PENDING": "pending", "EXPECTED": "pending"}.get(state, "fail")
+            else:
+                raise TypeError
+            if not all(isinstance(v, str) for v in (check, when, state)):
+                raise TypeError
+            if check not in latest or when > latest[check][0]:
+                latest[check] = when, bucket
+    except (ValueError, TypeError, KeyError):
+        return [], "printed no check list"
+    return [{"name": check, "bucket": latest[check][1]} for check in sorted(latest)], None
+
+
 def pr_behind(pr):
     """(behind_by, head sha, base): how many commits of its base the PR's head lacks, from GitHub's compare API."""
     try:

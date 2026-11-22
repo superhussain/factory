@@ -294,3 +294,74 @@ class PrBehindTest(IsolatedTestCase):
                 with self.assertRaises(SystemExit) as raised, contextlib.redirect_stderr(io.StringIO()):
                     self.behind(view, compare)
                 self.assertEqual(raised.exception.code, 5)
+
+
+def rollup(*nodes, more=False):
+    return 0, json.dumps({"statusCheckRollup": {"contexts": {"pageInfo": {"hasNextPage": more}, "nodes": list(nodes)}}})
+
+
+def run(name, status="COMPLETED", conclusion="SUCCESS", started="2026-01-01T00:00:00Z"):
+    return {"__typename": "CheckRun", "name": name, "status": status, "conclusion": conclusion, "startedAt": started}
+
+
+def status(context, state, created="2026-01-01T00:00:00Z"):
+    return {"__typename": "StatusContext", "context": context, "state": state, "createdAt": created}
+
+
+class HeadChecksTest(IsolatedTestCase):
+    def head(self, reply):
+        calls = []
+
+        def gh_cli(*args, stderr=False):
+            calls.append(args)
+            return reply
+
+        with patch.object(factory, "gh_cli", gh_cli):
+            return factory.head_checks(PR, NEW), calls
+
+    def test_query_names_the_sha(self):
+        result, calls = self.head(rollup(run("ci")))
+        self.assertEqual(result, ([{"name": "ci", "bucket": "pass"}], None))
+        self.assertEqual(calls, [("api", "graphql", "-f", factory.HEAD_CHECKS_QUERY, "-f", "o=example", "-f", "r=sample",
+                                  "-f", f"sha={NEW}", "--jq", ".data.repository.object")])
+        self.assertIn("object(oid:$sha)", factory.HEAD_CHECKS_QUERY)
+
+    def test_buckets(self):
+        result, _ = self.head(rollup(
+            run("a", status="IN_PROGRESS", conclusion=None), run("b", status="QUEUED", conclusion=None),
+            run("c"), run("d", conclusion="SKIPPED"), run("e", conclusion="NEUTRAL"), run("f", conclusion="CANCELLED"),
+            run("g", conclusion="FAILURE"), run("h", conclusion="TIMED_OUT"), run("i", conclusion=None),
+            run("j", conclusion="STALE"), status("k", "SUCCESS"), status("l", "PENDING"), status("m", "EXPECTED"),
+            status("n", "FAILURE"), status("o", "ERROR")))
+        self.assertEqual(result, ([{"name": n, "bucket": b} for n, b in (
+            ("a", "pending"), ("b", "pending"), ("c", "pass"), ("d", "skipping"), ("e", "skipping"), ("f", "cancel"),
+            ("g", "fail"), ("h", "fail"), ("i", "fail"), ("j", "fail"), ("k", "pass"), ("l", "pending"),
+            ("m", "pending"), ("n", "fail"), ("o", "fail"))], None))
+
+    def test_repeated_name_keeps_latest(self):
+        result, _ = self.head(rollup(
+            run("ci", conclusion="FAILURE", started="2026-01-01T00:00:10Z"), run("ci", started="2026-01-01T00:00:05Z"),
+            status("lint", "PENDING", "2026-01-01T00:00:01Z"), status("lint", "SUCCESS", "2026-01-01T00:00:02Z"),
+            run("build", status="QUEUED", conclusion=None, started="2026-01-01T00:00:09Z"),
+            run("build", started="2026-01-01T00:00:03Z")))
+        self.assertEqual(result, ([{"name": "build", "bucket": "pending"}, {"name": "ci", "bucket": "fail"},
+                                   {"name": "lint", "bucket": "pass"}], None))
+
+    def test_unusable_replies(self):
+        for reply, problem in ((None, "gh is not installed"), (("timeout", ""), "timed out after 60 seconds"),
+                               ((1, ""), "exited 1 with no check list"), ((0, "not json"), "printed no check list"),
+                               ((0, "null"), "printed no check list"), ((0, "[]"), "printed no check list"),
+                               ((0, '{"statusCheckRollup": {"contexts": {"pageInfo": {"hasNextPage": false}, '
+                                    '"nodes": {}}}}'), "printed no check list"),
+                               (rollup(run("ci"), more=True), "listed more than 100 checks")):
+            with self.subTest(reply):
+                self.assertEqual(self.head(reply)[0], ([], problem))
+        self.assertEqual(self.head((0, '{"statusCheckRollup": null}'))[0], ([], None))
+
+    def test_malformed_list_counts_as_none_listed(self):
+        for node in ("pass test", None, {"__typename": "CheckRun", "status": "COMPLETED", "startedAt": "x"},
+                     {**run("ci"), "name": 7}, {**run("ci"), "startedAt": None},
+                     {"__typename": "StatusContext", "context": "ci", "state": "SUCCESS"},
+                     {"__typename": "Other", "name": "ci"}):
+            with self.subTest(node):
+                self.assertEqual(self.head(rollup(run("lint"), node))[0], ([], "printed no check list"))
