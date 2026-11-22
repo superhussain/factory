@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -108,6 +109,42 @@ class UsageTranscriptsTest(UsageTestCase):
             ("-home-u-dev-factory/o2.jsonl", True),
             ("-home-u-dev-factory/o2/subagents/agent-c1.jsonl", False)})
         self.assertEqual(found("1018-add-y"), {("-home-u-dev-factory/o2/subagents/agent-c2.jsonl", False)})
+
+
+def stamped(line, ts):
+    return dict(line, timestamp=ts)
+
+
+class DailyTokensTest(UsageTestCase):
+    MIDNIGHT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def setUp(self):
+        super().setUp()
+        self.job = self.projects / "-home-u--paseo-worktrees-ab12-factory-1017-add-x"
+        d2 = stamped(turn("d2", OPUS, 10, 20, 30, 40), "2026-01-01T00:00:00.250Z")
+        self.day = write(self.job / "day.jsonl",
+                         stamped(turn("d1", OPUS, 1, 2, 3, 4), "2025-12-31T23:59:59.900Z"), d2, d2)
+
+    def test_window(self):
+        self.assertEqual(factory.daily_tokens(self.MIDNIGHT), 60)
+
+    def test_outside_a_job_folder(self):
+        write(self.projects / "-home-u-dev-factory/day.jsonl",
+              stamped(turn("d3", OPUS, 500, 0, 0, 0), "2026-01-01T01:00:00.000Z"))
+        self.assertEqual(factory.daily_tokens(self.MIDNIGHT), 60)
+
+    def test_subagent(self):
+        write(self.job / "day/subagents/agent-d.jsonl",
+              stamped(turn("d4", OPUS, 0, 5, 0, 0, side=True), "2026-01-01T02:00:00.000Z"))
+        self.assertEqual(factory.daily_tokens(self.MIDNIGHT), 65)
+
+    def test_no_root(self):
+        os.environ["CLAUDE_CONFIG_DIR"] = str(self.root / "missing")
+        self.assertEqual(factory.daily_tokens(self.MIDNIGHT), 0)
+
+    def test_since_filter(self):
+        self.assertEqual(factory.usage_scan(self.day, True, "2026-01-01T00:00:00"),
+                         ({OPUS: {"input": 10, "output": 20, "cache_write": 30, "cache_read": 40}}, 0))
 
 
 class UsageCommandTest(UsageTestCase):

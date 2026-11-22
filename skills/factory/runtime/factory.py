@@ -12591,6 +12591,26 @@ def usage_totals(home, slug, job_id):
     return {"transcripts": read, "models": dict(sorted(totals.items()))}
 
 
+def daily_tokens(midnight):
+    """Tokens this host's job sessions spent since midnight, from transcript timestamps. Only folders
+    matching RETRO_JOB count. Files last written before midnight and unreadable files are skipped."""
+    root = retro_transcripts()
+    if not root.is_dir():
+        return 0
+    since = midnight.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    cutoff, used = midnight.timestamp(), 0
+    for project in sorted(p for p in root.iterdir() if p.is_dir() and RETRO_JOB.search(p.name)):
+        for path in sorted(project.glob("*.jsonl")):
+            subs = sorted((project / path.stem / "subagents").glob("*.jsonl"))
+            for file, main in [(path, True)] + [(sub, False) for sub in subs]:
+                try:
+                    if file.stat().st_mtime >= cutoff:
+                        used += token_count(usage_scan(file, main, since)[0])
+                except OSError:
+                    pass
+    return used
+
+
 def usage_record(home, slug, job_id, device, totals):
     """Write this host's token totals to the board job under tokens.<device>, keeping other hosts' entries."""
     def change(text):
