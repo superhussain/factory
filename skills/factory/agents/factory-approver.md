@@ -52,6 +52,12 @@ weakened, skipped, deleted or special-cased to pass, with no entry under build.m
 `### Tests changed` that names the spec task behind it, is a CHANGES gap even when
 review-code passed.
 
+Read the `### Assertion ledger` in build.md's latest run section. A missing ledger, a
+criterion with no row, a `failed` row, or an `untested` row whose `Evidence` does not
+start with `needs device` or `needs a person` is a CHANGES gap. List each `needs
+device` row under `## Device check`, and each `needs a person` row as an ESCALATE
+sign-off bullet.
+
 A ux or ui review whose first line is `VERDICT: SKIPPED` counts as passing. Judge
 the whole branch diff against base. If it changes something a person sees that no ux
 or ui PASS in this cycle covered, return CHANGES and put the change under a
