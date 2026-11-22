@@ -9905,7 +9905,8 @@ function updateBacklogBar() {
   $('backlog-submit').textContent = pick === 'approved' ? 'Approve item' : pick === 'denied' ? 'Deny item' : rework ? 'Rework item' : 'Submit decision';
   $('backlog-submit').disabled = !pick || blank || left > 0 || backlogSaving || gone;
   $('backlog-status').textContent = gone ? 'This item is no longer in the backlog. It was decided or edited elsewhere.'
-    : backlogSaving ? 'Saving decision.' : !pick ? 'Choose Approve, Deny or Rework to submit.' : blank ? 'Add notes that say what to change.'
+    : backlogSaving ? 'Saving decision.'
+    : !pick ? ($('backlog-form').querySelector('input[value=rework]') ? 'Choose Approve, Deny or Rework to submit.' : 'Choose Approve or Deny to submit.') : blank ? 'Add notes that say what to change.'
     : left ? 'Answer every question to approve or deny. ' + (total - left) + ' of ' + total + ' answered.' : '';
   $('backlog-notes-label').textContent = rework ? 'Notes (required for Rework)' : 'Notes (optional)';
   $('backlog-notes').setAttribute('aria-required', rework ? 'true' : 'false');
