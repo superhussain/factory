@@ -275,7 +275,11 @@ shared project lists both.
   evidence (`missing_round_review`, `missing_decision`, `pr_before_approve`),
   and `coverage_unknown` where a job's local evidence is incomplete. It is
   read-only and writes nothing. Role dispatch does not read the field: only
-  pickup's launch path and the report do.
+  pickup's launch path and the report do. It also prints `comparison`:
+  `inconclusive` until each arm has 5 finished (merged or closed) jobs, then for
+  review rounds and tokens the median difference against a MAD noise figure,
+  where a difference inside the noise reads `no difference`. It is advisory and
+  nothing reads it.
 
 ## Launcher examples
 
