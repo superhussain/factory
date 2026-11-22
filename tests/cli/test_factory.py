@@ -2018,6 +2018,25 @@ class StopCheckTest(IsolatedTestCase):
         self.assertNotIn("needs", self.saved())
         self.assertEqual(self.saved()["claim"]["device"], "test")
 
+    def test_a_board_change_before_the_write_wins(self):
+        """The stop check reads one board; the claim write rechecks the row cas hands it."""
+        needs = b"# Needs\n"
+        sha12 = hashlib.sha256(needs).hexdigest()[:12]
+        self.store["/api/jobs/sample/001-test/needs.md"] = needs
+        self.store["/api/jobs/sample/001-test/answers.md"] = f"For needs.md sha256 {sha12}, submitted.\n".encode()
+        asked = dict(self.job, needs="Pick an export format in #001-test/needs")
+        real = factory.cas
+        for name, fresh in (("paused", dict(self.job, paused={"at": "2026-01-02T12:00:00Z"})),
+                            ("new ask", dict(asked, needs="A new question in #001-test/needs"))):
+            with self.subTest(name), patch.object(factory, "cas", side_effect=lambda *a, fresh=fresh: (
+                    self.save(fresh), real(*a))[1]):
+                (self.home / "stop-checks.json").unlink(missing_ok=True)
+                self.save(self.job if name == "paused" else asked)
+                code, out, err = self.stuck()
+                self.assertEqual((code, out), (3, ""))
+                self.assertIn("stop check 001-test: resume", err)
+                self.assertEqual(self.saved(), fresh)
+
 
 class TracerStartIdeaTest(IsolatedTestCase):
     setUp = IdeaTest.setUp
