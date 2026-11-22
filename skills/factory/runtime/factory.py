@@ -7725,6 +7725,28 @@ def run_check(argv, cwd, log, timeout):
     return code, round(time.monotonic() - start)
 
 
+TRANSIENT_LOG = re.compile(r"ECONNRESET|ETIMEDOUT|EAI_AGAIN|Connection reset by peer|Temporary failure in name resolution"
+                           r"|Could not resolve host|429 Too Many Requests|502 Bad Gateway|503 Service Unavailable"
+                           r"|504 Gateway Timeout")
+
+
+def failure_class(code, log):
+    """A check result's class: None on a pass, else budget, structural, canceled, transient or deterministic.
+    The transient match reads the last 65536 bytes of the log file."""
+    if code == 0:
+        return None
+    if code == "timeout":
+        return "budget"
+    if code in ("missing", 126, 127):
+        return "structural"
+    if code < 0 or code in (130, 143):
+        return "canceled"
+    with open(log, "rb") as f:
+        f.seek(max(0, f.seek(0, os.SEEK_END) - 65536))
+        tail = f.read().decode("utf-8", errors="replace")
+    return "transient" if TRANSIENT_LOG.search(tail) else "deterministic"
+
+
 def pre_review_tail(log_text, env):
     """The last PRE_REVIEW_TAIL lines of a failing check's log for pre-review.md: home .env values of
     ENV_SECRET_MIN or more characters and retro_redact's patterns as [redacted], each line printable,
@@ -7809,14 +7831,21 @@ def pre_review_cmd(target):
     checks_sha = (git("rev-parse", f"origin/{base}") or "").strip()
     results = []
     for check in checks:
-        code, seconds = run_check(check["run"], wt, logs / f"{check['name']}.log", PRE_REVIEW_TIMEOUT)
-        results.append({"name": check["name"], "exit": code, "seconds": seconds})
+        log = logs / f"{check['name']}.log"
+        code, seconds = run_check(check["run"], wt, log, PRE_REVIEW_TIMEOUT)
+        kind, retried = failure_class(code, log), False
+        if kind == "transient":
+            os.replace(log, logs / f"{check['name']}.attempt-1.log")
+            code, seconds = run_check(check["run"], wt, log, PRE_REVIEW_TIMEOUT)
+            kind, retried = failure_class(code, log), True
+        results.append({"name": check["name"], "exit": code, "seconds": seconds, "class": kind, "retried": retried})
     failed = [r for r in results if r["exit"] != 0]
     result = "fail" if failed else "pass"
     lines = [f"PRE-REVIEW: {result.upper()}", "", f"Head: {head}", budget_line(budget),
              f"Checks: origin/{base}:{CHECKS_FILE} at {checks_sha}", f"Logs: {logs}", "",
-             "| Check | Exit | Seconds |", "| --- | --- | --- |"]
-    lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} |" for r in results]
+             "| Check | Exit | Seconds | Class |", "| --- | --- | --- | --- |"]
+    lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} | {r['class'] or '-'}"
+              f"{', retried' if r['retried'] else ''} |" for r in results]
     if budget["result"] == "over":
         lines += ["", "## Diff budget", "", "| Measure | Spec estimate | Limit | Branch |", "| --- | --- | --- | --- |",
                   f"| Files | {budget['expected_files']} | {budget['file_limit']} | {budget['files']} |",
@@ -7836,8 +7865,8 @@ def pre_review_cmd(target):
         lines += ["", f"## {r['name']}", "", "~~~text", *tail, "~~~"]
     write_atomic(str(out_file), "\n".join(lines) + "\n")
     repeats = []
-    if failed:
-        names = {r["name"] for r in failed}
+    names = {r["name"] for r in failed if r["class"] == "deterministic"}
+    if names:
         record_file = make_job_temp(slug, job_id) / "pre-review-failures.json"
         try:
             record = json.loads(record_file.read_text(encoding="utf-8"))
@@ -7848,7 +7877,7 @@ def pre_review_cmd(target):
             record = {}
         record[str(round_n)] = sorted(names | set(record.get(str(round_n), [])))
         write_atomic(str(record_file), json.dumps(record) + "\n")
-        repeats = sorted(names & set(record.get(str(round_n - 1), [])))
+        repeats = sorted(names & {n for k, v in record.items() if k.isdecimal() and int(k) < round_n for n in v})
     print(json.dumps({"result": result, "head": head, "checks": results, "reason": None, "round": round_n,
                       "repeats": repeats, "budget": budget}))
     if failed:
