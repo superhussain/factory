@@ -27,6 +27,18 @@ class RepeatsTest(IsolatedTestCase):
         patcher = patch.object(self.module, "factory_home", lambda: self.dir)
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.board = {"updated": "", "jobs": [{"id": "042-csv-export", "project": "sample", "stage": "review"}]}
+        self.puts = 0
+        patcher = patch.object(self.module, "cas", self.cas)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def cas(self, home, path, change):
+        new, result = change(json.dumps(self.board))
+        if new is not None:
+            self.board = json.loads(new)
+            self.puts += 1
+        return result
 
     def write(self, n, **texts):
         folder = self.job / f"round-{n}"
@@ -84,6 +96,33 @@ class RepeatsTest(IsolatedTestCase):
         self.assertEqual((code, out), (4, None))
         self.assertEqual(err, f"factory.py: {path} is missing: the round is not complete\n")
 
+    def test_a_repeat_is_recorded_on_the_board(self):
+        row = {"round": 2, "first": 1, "reviewer": "code", "signature": "worker/export.js#missing-person-check",
+               "at": "2026-11-18T10:00:00Z"}
+        with patch.object(self.module, "now", lambda: "2026-11-18T10:00:00Z"):
+            self.assertEqual(self.check(), (0, REPEAT, ""))
+            self.assertEqual(self.board["jobs"][0]["repeated"], [row])
+            self.assertEqual(self.check(), (0, REPEAT, ""))
+        self.assertEqual(self.board["jobs"][0]["repeated"], [row])
+        self.assertEqual(self.puts, 1)
+        self.write(1)
+        self.assertEqual(self.check(), (0, CONTINUE, ""))
+        self.assertEqual(self.puts, 1)
+
+    def test_recording_never_changes_the_verdict(self):
+        for jobs in ([], [{"id": "042-csv-export", "project": "other"}]):
+            self.board = {"updated": "", "jobs": jobs}
+            self.assertEqual(self.check(), (0, REPEAT, ""))
+            self.assertEqual((self.board["jobs"], self.puts), (jobs, 0))
+
+        def failing(home, path, change):
+            self.module.fail("/api/board kept changing under us; gave up after 20 tries", 5)
+        with patch.object(self.module, "cas", failing):
+            code, verdict, err = self.check()
+        self.assertEqual((code, verdict), (0, REPEAT))
+        self.assertTrue(err.endswith("factory.py: 042-csv-export repeats were not recorded on the board; "
+                                     "the review loop goes on\n"), err)
+
 
 def changes(slug):
     return f"VERDICT: CHANGES\n\nThe export still fails.\nSignature: worker/export.js#{slug}\n"
@@ -95,6 +134,7 @@ CHURN = [{"path": "worker/export.js", "rounds": [2, 3, 4]}]
 
 class ChurnTest(IsolatedTestCase):
     setUp = RepeatsTest.setUp
+    cas = RepeatsTest.cas
     write = RepeatsTest.write
     check = RepeatsTest.check
 

@@ -2000,6 +2000,8 @@ def escalation_cmd(target, round_text):
 
 
 SIGNATURE = re.compile(r"(?:[-*] )?Signature: ([A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5})")
+REPEATED_MAX = 20
+REPEATED_SIGNATURE = re.compile(r"[A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5}")
 
 
 def changes_signatures(text):
@@ -2025,6 +2027,34 @@ def build_disputes(text):
     return {(int(m[1]), m[2], m[3]) for m in map(DISPUTE_ROW.match, (line.strip() for line in text.splitlines())) if m}
 
 
+def record_repeats(home, slug, job_id, round_n, repeats):
+    """Save a round's repeats on the board job's repeated list, keeping the newest REPEATED_MAX, in one board
+    write. A missing job or a job of another project is left alone; a failed write warns instead of ending."""
+    at = now()
+    new = [{"round": round_n, "first": r["first"], "reviewer": r["reviewer"], "signature": r["signature"], "at": at}
+           for r in repeats]
+    keys = {(r["round"], r["reviewer"], r["signature"]) for r in new}
+
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None or job.get("project") != slug:
+            return None, None
+        old = job.get("repeated") if isinstance(job.get("repeated"), list) else []
+        kept = [r for r in old if not isinstance(r, dict)
+                or (r.get("round"), r.get("reviewer"), r.get("signature")) not in keys]
+        rows = (kept + new)[-REPEATED_MAX:]
+        if rows == old:
+            return None, None
+        patch_job(data, job_id, {"repeated": rows})
+        return dump_board(data), None
+    try:
+        cas(home, "/api/board", change)
+    except SystemExit:
+        print(f"factory.py: {job_id} repeats were not recorded on the board; the review loop goes on",
+              file=sys.stderr)
+
+
 def repeats_cmd(target, round_text):
     """Print one JSON verdict on whether a reviewer repeats a CHANGES signature from any earlier round."""
     home, slug, job_id = r2_target(target, True)
@@ -2048,6 +2078,8 @@ def repeats_cmd(target, round_text):
     wt = home / "worktrees" / slug / job_id
     churn = churn_files(job, wt, n) if n >= 4 else []
     decision = "repeat" if repeats else "churn" if churn else "continue"
+    if repeats:
+        record_repeats(home, slug, job_id, n, repeats)
     print(json.dumps({"decision": decision, "round": n, "previous": n - 1 if n > 1 else None,
                       "repeats": repeats, "churn": churn}))
 
