@@ -486,11 +486,22 @@ Loop step 5 runs `factory.py repeats <slug>/<job-id> <round>` below the round ca
 | --- | --- |
 | Round 1, or no `round-<N-1>/` folder | `continue` |
 | CHANGES review with no signature lines | `continue`, round cap still applies |
-| Previous review was PASS | not a repeat |
+| A PASS round between the two | `repeat` |
 | Disputed-only round, reviewer keeps the finding | `repeat`: a person settles the dispute |
 | Same file changed in rounds N-2, N-1 and N | `churn` |
 | Missing round head or rewritten history | `continue` |
+| Files only a base-branch merge changed | `continue` |
 | Corrupt `pre-review-failures.json` | read as `{}` and rewritten |
+
+### Failure classes
+
+| Exit or log | Class | Loop |
+| --- | --- | --- |
+| `"timeout"` | `budget` | builder |
+| `"missing"`, 126, 127 | `structural` | needs-human |
+| negative, 130, 143 | `canceled` | needs-human |
+| log tail matches `TRANSIENT_LOG` | `transient` | retry once, then builder |
+| any other nonzero | `deterministic` | builder, counts toward repeats |
 
 ## Diff budget
 

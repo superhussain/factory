@@ -334,7 +334,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   the last allowed round of a cycle still has a CHANGES verdict, the job goes to
   `needs-human` with a note naming the reviewers that still want changes. A `/factory rework` starts a new cycle, so count
   rounds since the latest rework.
-- Repeat stop: the same reviewer `Signature:` in two consecutive rounds, or the same pre-review check failing in two consecutive rounds, or the same file changed in three consecutive fix rounds, sends the job to `needs-human` as loop steps 4 and 5 describe, even below the round cap.
+- Repeat stop: the same reviewer `Signature:` in any two rounds, or the same pre-review check failing deterministically in any two rounds, or the same file changed in three consecutive fix rounds, sends the job to `needs-human` as loop steps 4 and 5 describe, even below the round cap. Pre-review retries only a transient failure, once.
 - The builder is named `builder-<job-id>`. Before every dispatch (initial, fix,
   approver CHANGES, rework, recovery, handoff resume), assess the remaining work
   and pick a builder tier by the selection rule below. Pass the chosen tier, its
