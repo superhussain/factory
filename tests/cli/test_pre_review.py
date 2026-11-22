@@ -132,6 +132,15 @@ class PreReviewTest(IsolatedTestCase):
         self.assertIn("Authorization: [redacted]", text)
         self.assertIn("synthetic-secret-0123456789", (self.logs / "leak.log").read_text())
 
+    def test_nested_env_values_are_redacted_longest_first(self):
+        (self.home / ".env").write_text("FACTORY_TEST_SHORT=abcdefghijkl\nFACTORY_TEST_LONG=abcdefghijklMNOP\n")
+        self.base([check("nested", "import sys\nprint('value abcdefghijklMNOP')\nsys.exit(1)")])
+        code, _, _ = self.run_gate()
+        self.assertEqual(code, 1)
+        text = self.out.read_text()
+        self.assertNotIn("MNOP", text)
+        self.assertIn("value [redacted]", text)
+
     def test_timeout_and_missing(self):
         self.base([check("slow", "import time; time.sleep(30)"),
                    {"name": "gone", "run": ["factory-test-no-such-program"]},

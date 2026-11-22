@@ -7122,8 +7122,8 @@ def run_check(argv, cwd, log, timeout):
 def pre_review_tail(log_text, env):
     """The last PRE_REVIEW_TAIL lines of a failing check's log for pre-review.md: home .env values of
     ENV_SECRET_MIN or more characters and retro_redact's patterns as [redacted], each line printable,
-    at most 300 characters, with ~ as -."""
-    for value in env.values():
+    at most 300 characters, with ~ as -. Longer values go first, so one holding another leaves no suffix."""
+    for value in sorted(env.values(), key=len, reverse=True):
         if len(value) >= ENV_SECRET_MIN:
             log_text = log_text.replace(value, "[redacted]")
     tail = "\n".join(line[:4000] for line in log_text.splitlines()[-PRE_REVIEW_TAIL:])
