@@ -1250,6 +1250,7 @@ async function projectRetroPut(request, env, principal, slug, name) {
   const error =
     (name === "project.md" ? validateProjectDocument(next) : validateProjectMarkdown(next)) ??
     checkOperatorText(next, "project document", "document") ??
+    (name === "notes.md" ? checkOperatorText(body.replace, "replace", "note") : null) ??
     checkSummary(body.summary);
   if (error) return reply(error, 400);
   const cond = new Headers(current ? { "If-Match": current.httpEtag } : { "If-None-Match": "*" });
