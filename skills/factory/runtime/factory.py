@@ -10030,23 +10030,52 @@ def stuck(*args):
         agents = statuses[0]
         return agents is not None and agents.get(link.get("agent"), "closed") == "closed"
 
+    def held(job):
+        # A move nobody has claimed yet belongs to its target host's pickup.
+        return (paused(job) or closing(job) or lead_of(job) or waiting_until(job)
+                or isinstance(job.get("move"), dict) and "claimed" not in job["move"])
+
     def is_stuck(job):
-        if paused(job) or closing(job) or lead_of(job) or waiting_until(job):
+        if held(job):
             return False
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
             return False
-        # A move nobody has claimed yet belongs to its target host's pickup.
-        if isinstance(job.get("move"), dict) and "claimed" not in job["move"]:
-            return False
         c = job.get("claim")
         if job.get("stage") in IN_FLIGHT:
-            if stale(c.get("seen") if c else job.get("updated")):
-                return True
-            return bool(c) and c.get("device") == device and dead(job)
+            return stale(c.get("seen") if c else job.get("updated"))
         if job.get("stage") == "pr-open" and job.get("automerge") is True and job.get("escalated") is not True:
             return stale(job.get("updated")) or dead(job)
         return False
+
+    def well_formed(job):
+        # The id goes into a shell command and a prompt, so take only well-formed ones.
+        return (isinstance(job.get("id"), str) and JOB_ID.fullmatch(job["id"]) and ".." not in job["id"]
+                and paths.get(job.get("project")))
+
+    def stopped(job):
+        c = job.get("claim")
+        return (job.get("stage") in IN_FLIGHT and well_formed(job) and not held(job)
+                and (not c or c.get("device") == device) and dead(job))
+
+    jobs = read_board(home)["jobs"]
+    old = read_stop_checks(home)
+    checks = {k: v for k, v in old.items()
+              if any(j.get("id") == k and j.get("stage") not in TERMINAL for j in jobs)}
+    resume = {}  # {id: (stage, clear_needs)} for each new state the stop check could not explain.
+    for job in (j for j in jobs if stopped(j)):
+        state = stop_state(home, job)
+        key = stop_key(state)
+        if (checks.get(job["id"]) or {}).get("key") == key:
+            continue
+        ok, why, clear = stop_verdict(home, job, state)
+        verdict = "resume" if ok else "explained"
+        checks[job["id"]] = {"key": key, "at": now(), "verdict": verdict, "why": why}
+        print(f"stop check {job['id']}: {verdict}, {why}", file=sys.stderr)
+        if ok:
+            resume[job["id"]] = (job["stage"], clear)
+    if checks != old:
+        write_atomic(home / STOP_CHECKS_FILE, json.dumps({"version": 1, "jobs": checks}, indent=2) + "\n")
 
     def change(text):
         data = load_board(text)
@@ -10057,9 +10086,8 @@ def stuck(*args):
             data["updated"] = now()
         dropped = [f"dropped stub {s.get('id')!r}: no stage, last seen "
                    f"{(s.get('claim') or {}).get('seen') or s.get('updated')}" for s in stubs]
-        # The id goes into a shell command and a prompt, so take only well-formed ones.
-        found = [j for j in data["jobs"] if isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
-                 and ".." not in j["id"] and paths.get(j.get("project")) and is_stuck(j)]
+        found = [j for j in data["jobs"] if well_formed(j) and (
+            is_stuck(j) or j["id"] in resume and j.get("stage") == resume[j["id"]][0])]
         found.sort(key=lambda j: (j.get("claim") or {}).get("seen") or j.get("updated") or "")
         picked, guarded = [], []
         for job in found:
@@ -10081,7 +10109,10 @@ def stuck(*args):
             # The paseo link belongs to the dead session. The resumed session's first hold sets its own.
             job.pop("paseo", None)
             tag = session or secrets.token_hex(3)
-            patch_job(data, job["id"], {"claim": new_claim(device, tag), "resumes": {"count": count, "key": key}})
+            patch = {"claim": new_claim(device, tag), "resumes": {"count": count, "key": key}}
+            if resume.get(job["id"], (None, False))[1]:
+                patch["needs"] = None
+            patch_job(data, job["id"], patch)
             picked.append({"id": job["id"], "project": job["project"], "repo_path": paths[job["project"]],
                            "session": tag, "stage": job["stage"]})
         if not picked and not guarded and not stubs:
