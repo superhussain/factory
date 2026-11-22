@@ -123,7 +123,7 @@ class BacklogTriageTests(TriageFixture):
             "idea": "Add CSV export to reports\n\nQueued by backlog triage: confidence 86% (threshold 80%). "
                     "Rated by clef-flash against the project rules.",
             "backlog": {"line": f"- [ ] {ITEM}", "decision": "approved", "at": at, "by": "triage",
-                        "triage": {"model": QUEUE["model"], "confidence": 86, "threshold": 80,
+                        "decider": "model", "triage": {"model": QUEUE["model"], "confidence": 86, "threshold": 80,
                                    "reason": "Rated by clef-flash against the project rules."}},
         })
         self.assertEqual(self.files["/api/backlog"], f"# Backlog\n- [x] {ITEM} (008-add-csv-export)\n")
