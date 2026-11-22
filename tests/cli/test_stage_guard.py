@@ -102,6 +102,8 @@ class ApproveGuardTest(GuardFixture):
     def test_verdict_still_writes_changes_at_approve(self):
         self.board["jobs"][0]["stage"] = "approve"
         self.board["jobs"][0]["rounds"][1]["code"] = "PASS"
+        (self.folder / "round-2").mkdir(parents=True)
+        (self.folder / "round-2" / "review-code.md").write_text("VERDICT: CHANGES\n", encoding="utf-8")
         self.assertEqual(self.verdict("2", "code", "CHANGES")[0], 0)
         self.assertEqual((self.puts, self.job()["stage"], self.job()["rounds"][1]["code"]),
                          (1, "approve", "CHANGES"))

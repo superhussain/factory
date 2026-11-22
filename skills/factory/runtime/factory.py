@@ -1052,6 +1052,9 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
             rounds = (found or {}).get("rounds")
             if not isinstance(rounds, list) or len(rounds) < n or not isinstance(rounds[n - 1], dict):
                 fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
+            refusal = verdict_file_refusal(factory, slug, job_id, n, reviewer, value)
+            if refusal:
+                fail(refusal, 4)
             patch["rounds"] = list(rounds)
             patch["rounds"][n - 1] = {**rounds[n - 1], reviewer: value}
         if found is None:
@@ -8084,6 +8087,21 @@ def round_wait_cmd(target, *args):
 
 
 VERDICT_USAGE = "usage: verdict <project-slug>/<job-id> <round> <reviewer> <PASS|CHANGES|SKIPPED|pending>"
+
+
+def verdict_file_refusal(home, slug, job_id, n, reviewer, value):
+    """Why the board cannot record value for reviewer in round n, or None: anything but pending needs
+    round-<n>/review-<reviewer>.md in the job folder to start with that VERDICT: line."""
+    if value == "pending":
+        return None
+    name = f"round-{n}/review-{reviewer}.md"
+    line = job_file_lines(home / "jobs" / slug / job_id, [name]).get(name)
+    if line is None:
+        return f"{job_id} round {n} {reviewer} cannot be {value}: {name} is not in the job folder. Nothing was written."
+    if line != f"VERDICT: {value}":
+        return (f"{job_id} round {n} {reviewer} cannot be {value}: the first line of {name} is not "
+                f"VERDICT: {value}. Nothing was written.")
+    return None
 
 
 def verdict_cmd(target, round_text, reviewer, value):

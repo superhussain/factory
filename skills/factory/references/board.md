@@ -45,6 +45,7 @@ job's own `$REPO`.
 `round` is 0 before the first review. `rounds[i]` is round i+1. Verdicts are
 `pending`, `PASS`, `CHANGES`, or `SKIPPED` (ux and ui only, written by `review-plan`). Reviewer keys are fixed: security, ux, ui, code.
 `factory.py verdict` sets one reviewer's verdict in one write and keeps the rest of `rounds`.
+It refuses PASS, CHANGES or SKIPPED unless `round-<n>/review-<reviewer>.md` in the job folder starts with that `VERDICT:` line.
 A `board` patch cannot rewrite a recorded round: it may only keep the stored rounds and append all-pending ones.
 `factory.py grounding` may add `"unverified": ["review-code.md export.py:412 bad-line"]` to a round entry: the review citations whose path or line did not check out. It never changes a verdict.
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
