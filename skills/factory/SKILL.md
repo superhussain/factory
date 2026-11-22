@@ -32,8 +32,8 @@ The board, claims, branches, and job files are shared across runtimes. Read
 OpenCode, another non-Claude runtime, or Paseo, and before handing a job off.
 Source roles have no model pins. Native metadata is user-owned. Use only the
 runtime's configured available role routing and the builder selection
-rule in Rules. Follow the routing precedence in the execution reference; do not
-rewrite model pins or settings or invent provider IDs.
+rule in the execution reference. Follow the routing precedence in the execution
+reference; do not rewrite model pins or settings or invent provider IDs.
 
 Every new factory task claims a job and writes its first board patch before work
 starts. Every runtime pushes each artifact and records each stage and verdict.
@@ -83,7 +83,8 @@ Never keep a separate OpenCode backlog or treat a chat-only task as dashboard wo
 ```
 
 Builder tier follows task complexity and plan clarity under the builder selection
-rule in Rules. A blocked run skips review. The round cap still applies first.
+rule in the execution reference. A blocked run skips review. The round cap still
+applies first.
 
 The factory runs on its own. A human sees a job only when it escalates, hits the
 round cap, repeats a finding or failing check, churns a file, fails twice, blocks twice on its environment, or its review findings need a person. Everything else specs,
@@ -337,30 +338,16 @@ Every job field, with an example row and who writes it, is in [board fields](ref
 - Repeat stop: the same reviewer `Signature:` in any two rounds, or the same pre-review check failing deterministically in any two rounds, or the same file changed in three consecutive fix rounds, sends the job to `needs-human` as loop steps 4 and 5 describe, even below the round cap. Pre-review retries only a transient failure, once.
 - The builder is named `builder-<job-id>`. Before every dispatch (initial, fix,
   approver CHANGES, rework, recovery, handoff resume), assess the remaining work
-  and pick a builder tier by the selection rule below. Pass the chosen tier, its
-  source (project file, active routing configuration, or Paseo profile), and the reason in
-  the dispatch prompt. The builder records them with its actual runtime/model in
+  and pick a builder tier by
+  [builder selection](references/execution.md#builder-selection). Pass the chosen
+  tier, its source (project file, active routing configuration, or Paseo profile),
+  and the reason in the dispatch prompt. The builder records them with its actual runtime/model in
   its own `build.md` run section. Read the latest recorded choice across sessions
   and keep it while its reason still applies. A downgrade needs a recorded reason
   that the remaining work is now bounded. Old quotes and a mutable board `note`
   are not authoritative routing state.
-- Builder selection. Resolve tiers through the active runtime's routing configuration or
-  profile as the execution reference describes. Never copy model IDs here.
-
-  | Situation | Dispatch |
-  | --- | --- |
-  | Bounded task, clear files and checks, known fix | Start on the user's configured available implementation workhorse. |
-  | Unclear design, unknown root cause, tricky concurrency, or work beyond the plan | Pick an allowed stronger design, debugging, or implementation tier from the active sheet. Complexity does not waive opt-in, named-only, high-stakes, or demonstrated-failure requirements. |
-  | Current builder blocks, or its verification fails twice | End that run. Assess the next allowed rung with the concrete failure evidence. Add no retries beyond the existing failure and review budgets. |
-  | Builder writes `BLOCKED-ENV:` | Same tier, one fresh builder, then `needs-human`, as [feature](references/commands/feature.md) step 3 says. |
-  | Historical or quoted block, or two CHANGES rounds | Neither permanently selects the highest tier. Reassess the remaining work from the latest evidence. The review cap still stops the cycle first. |
-  | An allowed stronger worker still blocks, or no permitted route can proceed | Move the job to `needs-human` with the reason. Do not loop through providers or relax restrictions. |
-
-  A block is a line starting `BLOCKED:` written by a builder in its own run
-  section of `build.md`, not a quote or example. A blocked run gets no review
-  round. Only an explicitly assigned stronger builder may resolve an in-scope
-  design gap, and it records the decision. It never overrides scope, permissions,
-  or human gates.
+- Builder selection: pick the tier from the table in [execution](references/execution.md#builder-selection),
+  which also defines a block. Never copy model IDs here.
 - A model change always stops the old writer and starts a fresh builder from a new
   `prompt "$SLUG/<id>" build --out` file, per the agent-prompt rule above, with
   the latest round or rework file on a short line after the pointer. Resume with
