@@ -138,8 +138,8 @@ Unverified means the cited path or line did not check out. The finding may still
         text = ("See ./src/a.py:3, src/b.py:4-9 and src/c.md:1,5,7 and ./src/a.py:3 again. "
                 "Not https://example.com:443/a.py:3, localhost:8220, /abs/path.py:3, ../up.py:2 or a.py:x.")
         self.assertEqual(factory.find_citations(text), [
-            ("./src/a.py:3", "src/a.py", [3]), ("src/b.py:4-9", "src/b.py", [4, 9]),
-            ("src/c.md:1,5,7", "src/c.md", [1, 5, 7])])
+            ("./src/a.py:3", "src/a.py", [3], None), ("src/b.py:4-9", "src/b.py", [4, 9], (4, 9)),
+            ("src/c.md:1,5,7", "src/c.md", [1, 5, 7], None)])
 
     def test_skipped_ignored(self):
         self.review("code", "VERDICT: SKIPPED\n\nsrc/nope.py:1\n")
@@ -163,6 +163,10 @@ Unverified means the cited path or line did not check out. The finding may still
                                 True), ("ok", "src/export.py", ""))
         self.assertEqual(ground("src/export.py", [90], self.wt, self.folder, tracked, {"src/export.py": [(40, 75)]},
                                 True)[2], "more than 10 lines from every change to src/export.py")
+        self.assertEqual(ground("src/export.py", [20, 100], self.wt, self.folder, tracked,
+                                {"src/export.py": [(40, 75)]}, True, (20, 100)), ("ok", "src/export.py", ""))
+        self.assertEqual(ground("src/export.py", [20, 100], self.wt, self.folder, tracked,
+                                {"src/export.py": [(40, 75)]}, True)[0], "off-diff")
 
     def test_unreadable_diff(self):
         self.git("remote", "remove", "origin")

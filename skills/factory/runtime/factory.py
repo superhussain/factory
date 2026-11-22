@@ -7297,7 +7297,8 @@ CITATION = re.compile(r"(?<![\w./:-])((?:[\w.-]+/)*[\w-][\w.-]*\.[A-Za-z][A-Za-z
 
 
 def find_citations(text):
-    """[(citation, path, lines)] for each distinct path:line a review cites, in order of first appearance."""
+    """[(citation, path, lines, span)] for each distinct path:line a review cites, in order of first appearance.
+    span is (start, end) for a path:a-b range, else None."""
     found, seen = [], set()
     for m in CITATION.finditer(text):
         path = m[1]
@@ -7307,7 +7308,7 @@ def find_citations(text):
             continue
         seen.add(m[0])
         lines = [int(m[2])] + ([int(m[3])] if m[3] else []) + [int(x) for x in m[4].split(",") if x]
-        found.append((m[0], path, lines))
+        found.append((m[0], path, lines, (lines[0], lines[1]) if m[3] else None))
     return found
 
 
@@ -7340,7 +7341,7 @@ def diff_ranges(wt, base):
     return ranges, None
 
 
-def ground_citation(path, lines, wt, folder, tracked, ranges, near):
+def ground_citation(path, lines, wt, folder, tracked, ranges, near, span=None):
     """(status, resolved, reason) for one cited path and its lines: ok, no-file, bad-line or off-diff."""
     def regular(root, rel):
         file = root / rel
@@ -7366,8 +7367,9 @@ def ground_citation(path, lines, wt, folder, tracked, ranges, near):
         changed = [r for f in files for r in ranges.get(f, [])]
         if not changed:
             return "off-diff", resolved, f"{resolved} is not changed on this branch"
-        if not any(start - GROUNDING_NEAR <= line <= end + GROUNDING_NEAR
-                   for line in lines for start, end in changed):
+        spans = [(line, line) for line in lines] + ([span] if span else [])
+        if not any(start - GROUNDING_NEAR <= hi and lo <= end + GROUNDING_NEAR
+                   for lo, hi in spans for start, end in changed):
             return "off-diff", resolved, f"more than {GROUNDING_NEAR} lines from every change to {resolved}"
     return "ok", resolved, ""
 
@@ -7416,9 +7418,9 @@ def grounding_cmd(target, round_text):
         if (text.splitlines() or [""])[0] == "VERDICT: SKIPPED":
             continue
         files += 1
-        for citation, cited, lines in find_citations(text):
+        for citation, cited, lines, span in find_citations(text):
             checked += 1
-            status, _, reason = ground_citation(cited, lines, wt, folder, tracked, ranges, name == "code")
+            status, _, reason = ground_citation(cited, lines, wt, folder, tracked, ranges, name == "code", span)
             if status != "ok":
                 rows.append({"review": review, "citation": citation, "status": status, "reason": reason})
 
