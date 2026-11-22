@@ -1,11 +1,17 @@
 import json
+import os
+import stat
+import subprocess
+import sys
 import tempfile
+import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from support import IsolatedTestCase, invoke, load_runtime
 
-USAGE = "factory.py: usage: factory.py bench score <cases-file> <arm-folder>...\n"
+USAGE = ("factory.py: usage: factory.py bench score <cases-file> <arm-folder>... | "
+         "bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]\n")
 HEAD = "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
 
 
@@ -234,3 +240,245 @@ class BenchErrorTest(BenchCase):
             with self.subTest(name=name):
                 self.assertFails(["score", cases_file, folders[0], folder], 2,
                                  f"bench: arm name {name} must be unique letters, digits, ., _ or -")
+
+
+FAKE_CLAUDE = """import json, os, sys
+from pathlib import Path
+prompt = sys.stdin.read()
+log = Path(os.environ["FAKE_LOG"])
+calls = json.loads(log.read_text()) if log.exists() else []
+calls.append({"argv": sys.argv[1:], "cwd": os.getcwd(), "stdin": prompt,
+              "ceiling": os.environ.get("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS")})
+log.write_text(json.dumps(calls))
+your = next(line.split(": ", 1)[1] for line in prompt.splitlines() if line.startswith("Your file: "))
+Path(your).write_text("VERDICT: CHANGES\\n\\n- `worker/export.js:44` drops the header row.\\n")
+session = sys.argv[sys.argv.index("--session-id") + 1]
+transcript = Path(os.environ["CLAUDE_CONFIG_DIR"], "projects", "fake", session + ".jsonl")
+transcript.parent.mkdir(parents=True, exist_ok=True)
+transcript.write_text(json.dumps({"type": "assistant", "message": {"id": "m1", "model": "claude-opus-5-5", "usage": {
+    "input_tokens": 200000, "output_tokens": 20000, "cache_creation_input_tokens": 30000,
+    "cache_read_input_tokens": 999}}}) + "\\n")
+print("fake review done")
+sys.exit(int(os.environ.get("FAKE_EXIT", "0")))
+"""
+REVIEW = "VERDICT: CHANGES\n\n- `worker/export.js:44` drops the header row.\n"
+MODELS = {"claude-opus-5-5": {"input": 200000, "output": 20000, "cache_write": 30000, "cache_read": 999}}
+SUMMARY = "replayed {}, skipped {}, failed {} of 1 cases into opus-medium\n"
+
+
+class BenchReplayCase(BenchCase):
+    def setUp(self):
+        super().setUp()
+        self.root = self.root.resolve()
+        self.repo = self.root / "alpha"
+        self.repo.mkdir()
+        self.git("init", "-q")
+        self.git("symbolic-ref", "HEAD", "refs/heads/main")
+        (self.repo / "worker").mkdir()
+        (self.repo / "worker/export.js").write_text("export const rows = [];\n", encoding="utf-8")
+        self.git("add", ".")
+        self.git("commit", "-qm", "start")
+        self.base = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-qb", "factory/1018-add-y")
+        (self.repo / "worker/export.js").write_text("export const rows = [1];\n", encoding="utf-8")
+        self.git("commit", "-qam", "add y")
+        self.head = self.git("rev-parse", "HEAD")
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "Merge pull request #18", "factory/1018-add-y")
+        self.merge = self.git("rev-parse", "HEAD")
+
+        self.home = self.root / "home"
+        (self.home / "projects").mkdir(parents=True)
+        self.project = self.home / "projects/alpha.md"
+        self.project.write_text("---\nrepo: example/alpha\n---\n", encoding="utf-8")
+        (self.home / "config.md").write_text("---\ndevice: host-a\n---\n", encoding="utf-8")
+        (self.home / "paths.md").write_text(f"---\nalpha: {self.repo}\n---\n", encoding="utf-8")
+        self.job = self.home / "jobs/alpha/1018-add-y"
+        self.job.mkdir(parents=True)
+        (self.job / "spec.md").write_text("# Add y\n", encoding="utf-8")
+        (self.job / "build.md").write_text("# Build\n", encoding="utf-8")
+
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        claude = bin_dir / "claude"
+        claude.write_text(f"#!{sys.executable}\n" + FAKE_CLAUDE, encoding="utf-8")
+        claude.chmod(claude.stat().st_mode | stat.S_IXUSR)
+        self.log = self.root / "claude-calls.json"
+        os.environ.update(FACTORY_HOME=str(self.home), CLAUDE_CONFIG_DIR=str(self.root / "claude"),
+                          FAKE_LOG=str(self.log), PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+        self.cases = self.root / "reviewer-cases.json"
+        self.cases.write_text(json.dumps({"cases": [{
+            "id": "1018-add-y", "pr": "https://github.com/example/alpha/pull/18", "head": self.head,
+            "source": "reworked", "defects": [{"path": "worker/export.js", "lines": [40, 52], "severity": "high"}]}]}),
+            encoding="utf-8")
+        self.arm = self.root / "opus-medium"
+        self.merges = {18: self.merge}
+        self.gh_calls = []
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", str(self.repo), *args], check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    def merge_commits(self, repo, numbers, device):
+        self.gh_calls.append((repo, numbers, device))
+        return (None, self.merges) if isinstance(self.merges, str) else (self.merges, None)
+
+    def replay(self, *flags, arm=None):
+        clock = Mock(wraps=time)
+        clock.monotonic.side_effect = [100.0, 400.0]
+        with patch.object(self.module, "pr_merge_commits", self.merge_commits), \
+                patch.object(self.module, "time", clock):
+            return self.bench("replay", str(self.cases), str(arm or self.arm), *flags)
+
+    def calls(self):
+        return json.loads(self.log.read_text()) if self.log.exists() else []
+
+
+class BenchReplayTest(BenchReplayCase):
+    def test_running_example(self):
+        code, out, err = self.replay("--role", "review-code", "--model", "claude-opus-5-5")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, "1018-add-y: wrote review-code.md (VERDICT: CHANGES), 300 s, 250000 tokens\n"
+                         + SUMMARY.format(1, 0, 0))
+        case_dir = self.arm / "1018-add-y"
+        self.assertEqual((case_dir / "review-code.md").read_text(encoding="utf-8"), REVIEW)
+        self.assertEqual(json.loads((case_dir / "run.json").read_text(encoding="utf-8")), {
+            "role": "review-code", "model": "claude-opus-5-5", "head": self.head, "base": self.base, "exit": 0,
+            "seconds": 300, "models": MODELS})
+        self.assertEqual((case_dir / "replay.log").read_text(encoding="utf-8"), "fake review done\n")
+        if os.name == "posix":
+            self.assertEqual(stat.S_IMODE((case_dir / "replay.log").stat().st_mode), 0o600)
+        self.assertEqual(self.gh_calls, [("example/alpha", [18], "host-a")])
+
+    def test_claude_call(self):
+        (self.home / "projects/alpha.documents.md").write_text("notes\n", encoding="utf-8")
+        code, _, _ = self.replay("--role", "review-code", "--model", "claude-opus-5-5")
+        self.assertEqual(code, 0)
+        [call] = self.calls()
+        tmp = Path(call["cwd"]).parent
+        self.assertTrue(tmp.name.startswith("factory-bench-1018-add-y-"))
+        self.assertEqual(Path(call["cwd"]).name, "wt")
+        session = call["argv"][call["argv"].index("--session-id") + 1]
+        self.assertEqual(call["argv"], [
+            "-p", "--agent", "factory-review-code", "--session-id", session, "--permission-mode", "dontAsk",
+            "--allowedTools", "Read", "Grep", "Glob", "Write", "Bash(git:*)", "--add-dir", str(tmp / "job"),
+            "--model", "claude-opus-5-5"])
+        self.assertEqual(call["ceiling"], "0")
+        self.assertEqual(call["stdin"], "\n".join([
+            "Job id: 1018-add-y",
+            f"Job folder: {tmp / 'job'}",
+            f"Worktree: {tmp / 'wt'} (detached at {self.head}, base commit {self.base})",
+            f"Project file: {self.project}",
+            f"Project documents: {self.home / 'projects/alpha.documents.md'}",
+            f"Round folder: {tmp / 'job/round-1'}",
+            f"Your file: {tmp / 'job/round-1/review-code.md'}",
+            "",
+            "This is a reviewer benchmark replay. The pull request already merged; review it as if it were open. "
+            f"There is no branch factory/1018-add-y: run git diff {self.base}...{self.head} wherever your "
+            "instructions name the branch diff. There is no pre-review.md, and Bash runs only git. "
+            "Write only Your file.\n"]))
+        self.assertFalse(tmp.exists())
+        self.assertEqual(len(self.git("worktree", "list").splitlines()), 1)
+
+    def test_alias_without_model(self):
+        code, _, err = self.replay("--role", "factory-review-code")
+        self.assertEqual((code, err), (0, ""))
+        [call] = self.calls()
+        self.assertNotIn("--model", call["argv"])
+        self.assertNotIn("Project documents", call["stdin"])
+        run_json = json.loads((self.arm / "1018-add-y/run.json").read_text(encoding="utf-8"))
+        self.assertIsNone(run_json["model"])
+
+    def test_score_reads_replay(self):
+        self.assertEqual(self.replay("--role", "review-code")[0], 0)
+        code, out, err = self.bench("score", str(self.cases), str(self.arm))
+        self.assertEqual((code, err), (0, ""))
+        arm = json.loads(out)["arms"][0]
+        self.assertEqual((arm["caught"], arm["weighted_recall"], arm["missed"]), (1, 1.0, []))
+        self.assertEqual((arm["tokens"], arm["seconds"], arm["runs"]), (250000, 300, 1))
+
+    def test_rerun_skips(self):
+        self.assertEqual(self.replay("--role", "review-code")[0], 0)
+        code, out, err = self.replay("--role", "review-code")
+        self.assertEqual((code, out, err), (0, "1018-add-y: skipped, review-code.md already exists\n"
+                                            + SUMMARY.format(0, 1, 0), ""))
+        self.assertEqual(len(self.calls()), 1)
+
+    def test_claude_failure_keeps_run_json(self):
+        os.environ["FAKE_EXIT"] = "3"
+        code, out, err = self.replay("--role", "review-code")
+        self.assertEqual((code, out, err), (1, "1018-add-y: failed: claude exited 3, see replay.log\n"
+                                            + SUMMARY.format(0, 0, 1), ""))
+        case_dir = self.arm / "1018-add-y"
+        self.assertFalse((case_dir / "review-code.md").exists())
+        run_json = json.loads((case_dir / "run.json").read_text(encoding="utf-8"))
+        self.assertEqual((run_json["exit"], run_json["seconds"], run_json["models"]), (3, 300, MODELS))
+        self.assertEqual(len(self.git("worktree", "list").splitlines()), 1)
+
+
+class BenchReplayErrorTest(BenchReplayCase):
+    def assertFails(self, flags, code, message, arm=None):
+        self.assertEqual(self.replay(*flags, arm=arm), (code, "", f"factory.py: {message}\n"))
+        self.assertEqual(self.calls(), [])
+
+    def test_bad_args(self):
+        rows = [[], ["--role"], ["--model", "claude-opus-5-5"], ["--role", "review-code", "--role", "review-code"],
+                ["--role", "review-code", "--effort", "high"], ["--role", "review-code", "extra"]]
+        for flags in rows:
+            with self.subTest(flags=flags):
+                self.assertFails(flags, 2, USAGE[len("factory.py: "):-1])
+        self.assertEqual(self.bench("replay", str(self.cases)), (2, "", USAGE))
+
+    def test_role_not_a_reviewer(self):
+        self.assertFails(["--role", "build"], 2,
+                         "bench: --role must be review-security, review-ux, review-ui or review-code")
+
+    def test_bad_model(self):
+        for model in ("claude opus", "", "x" * 201):
+            with self.subTest(model=model):
+                self.assertFails(["--role", "review-code", "--model", model], 2,
+                                 "bench: --model must be 1 to 200 letters, digits or _ . / : @ [ ] -")
+
+    def test_arm_name(self):
+        self.assertFails(["--role", "review-code"], 2,
+                         "bench: arm name odd name must be unique letters, digits, ., _ or -", self.root / "odd name")
+
+    def test_arm_path_is_a_file(self):
+        self.arm.write_text("not a folder\n", encoding="utf-8")
+        self.assertFails(["--role", "review-code"], 2, f"bench: {self.arm} is not a folder")
+
+    def test_no_claude(self):
+        empty = self.root / "empty"
+        empty.mkdir()
+        os.environ["PATH"] = str(empty)
+        self.assertFails(["--role", "review-code"], 4, "bench: replay needs claude on PATH")
+
+    def test_no_job_folder(self):
+        (self.job / "spec.md").unlink()
+        self.assertFails(["--role", "review-code"], 4,
+                         f"bench: 1018-add-y: no job folder with spec.md under {self.home / 'jobs'}; "
+                         "pull it with factory.py pull <project>/1018-add-y")
+
+    def test_two_job_folders(self):
+        other = self.home / "jobs/beta/1018-add-y"
+        other.mkdir(parents=True)
+        (other / "spec.md").write_text("# Add y\n", encoding="utf-8")
+        self.assertFails(["--role", "review-code"], 2, "bench: 1018-add-y: job folders in more than one project")
+
+    def test_repo_mismatch(self):
+        self.project.write_text("---\nrepo: example/other\n---\n", encoding="utf-8")
+        self.assertFails(["--role", "review-code"], 2,
+                         "bench: 1018-add-y: pr is not in example/other, the repo of project alpha")
+
+    def test_no_checkout(self):
+        (self.home / "paths.md").write_text("---\nbeta: /tmp/beta\n---\n", encoding="utf-8")
+        self.assertFails(["--role", "review-code"], 4, "bench: 1018-add-y: no checkout of alpha in paths.md on host-a")
+
+    def test_gh_failed(self):
+        self.merges = "gh is not installed on host-a"
+        self.assertFails(["--role", "review-code"], 5, "bench: gh is not installed on host-a")
+
+    def test_no_merge_commit(self):
+        self.merges = {18: None}
+        self.assertFails(["--role", "review-code"], 4,
+                         "bench: 1018-add-y: GitHub reports no merge commit for https://github.com/example/alpha/pull/18")
