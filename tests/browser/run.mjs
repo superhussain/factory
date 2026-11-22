@@ -1219,6 +1219,34 @@ async function capture(outdir, referencePath) {
     await view("board-desktop", 1440, 900, "light", async () => {});
     await view("board-desktop-dark", 1440, 900, "dark", async () => {});
     await view("board-mobile", 390, 844, "dark", async () => {});
+    const putHalt = (page, body) =>
+      page.evaluate(
+        (text) =>
+          fetch("./api/halt", {
+            method: "PUT",
+            body: text,
+            headers: { "Content-Type": "application/json" },
+          }),
+        body,
+      );
+    // The after page reads the halt it was just given; the reference page has no banner.
+    const haltBanner = async (page, side) => {
+      await putHalt(page, '{"halted":true,"reason":"Runaway launches on wsl"}');
+      if (side === "after") {
+        await page.evaluate(() => loadHalt());
+        await page.waitForSelector("#halt-banner:not([hidden])");
+      }
+      await putHalt(page, '{"halted":false}');
+    };
+    await view("halt-banner-1440", 1440, 900, "light", haltBanner);
+    await view("halt-banner-390", 390, 844, "dark", haltBanner);
+    await view("settings-halt-1280", 1280, 900, "light", async (page) => {
+      await page.evaluate(() => {
+        location.hash = "#/settings/hosts";
+      });
+      await page.waitForSelector("#settings-hosts:not([hidden])");
+      await putHalt(page, '{"halted":false}');
+    });
     const expandMerged = (page) =>
       page.evaluate(() => document.querySelector('.column-toggle[data-stage="merged"]').click());
     const mergedHeader = async (page) => {
