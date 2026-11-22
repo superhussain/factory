@@ -887,6 +887,20 @@ class RetroAdmitTest(RetroCase):
                                        fixed=[(0, {"title": "t"}, "1700|legacy", "2026-11-15T12:30:00Z")])
         self.assertIn("| 0 | t | 1700\\|legacy | 2026-11-15T12:30:00Z |", text)
 
+    def test_reviewer_accept_rate_section(self):
+        agg = {"from": "2026-11-10", "to": "2026-11-16", "hosts": {"pc": {"sessions": 1}}}
+        doc = {"run": "r1", "findings": []}
+        text = factory.render_findings({**agg, "reviewers": ACCEPT}, doc)
+        self.assertIn("\n".join([
+            "## Reviewer accept rate", "",
+            "CHANGES findings in jobs merged or closed in the window. Disputed counts findings the builder listed "
+            "under Disputed findings in build.md; fixed is the rest.", "",
+            "| Reviewer | CHANGES findings | Fixed | Disputed | Accept rate | Jobs |",
+            "| --- | --- | --- | --- | --- | --- |",
+            "| security | 1 | 1 | 0 | 100% | 1 |",
+            "| code | 2 | 1 | 1 | 50% | 1 |"]), text)
+        self.assertNotIn("## Reviewer accept rate", factory.render_findings(agg, doc))
+
     def test_session_refs_still_validate(self):
         self.assertIsNone(factory.check_session_refs([REF]))
         self.assertEqual(factory.check_session_refs(["host-a/not-hex"]), "must be host/session refs")

@@ -13304,6 +13304,15 @@ def render_findings(agg, doc, rejected=(), edits=(), fixed=(), cards=()):
                   quote(f["fix"]), "", "Sessions: " + ", ".join(f"`{r}`" for r in f["sessions"])]
         if "fixed_by" in f:
             lines += ["", f"Fixed by: `{f['fixed_by']}`, but a session started after its merge."]
+    accept = [(r, s) for r, s in (agg.get("reviewers") or {}).items() if s["changes"] > 0]
+    if accept:
+        lines += ["", "## Reviewer accept rate", "",
+                  "CHANGES findings in jobs merged or closed in the window. Disputed counts findings the builder "
+                  "listed under Disputed findings in build.md; fixed is the rest.", "",
+                  "| Reviewer | CHANGES findings | Fixed | Disputed | Accept rate | Jobs |",
+                  "| --- | --- | --- | --- | --- | --- |"]
+        lines += [f"| {r} | {s['changes']} | {s['fixed']} | {s['disputed']} | {s['accept_pct']}% | {s['jobs']} |"
+                  for r, s in accept]
     if rejected:
         lines += ["", "## Rejected findings", "",
                   "Admission dropped these findings. Their text is not shown; read reply.json to see it.", "",
