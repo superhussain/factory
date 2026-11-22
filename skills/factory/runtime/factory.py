@@ -94,6 +94,7 @@
                                             print one JSON verdict
   factory.py repeats <project-slug>/<job-id> <round>
                                             compare a review round's CHANGES signatures with the round before, print one JSON verdict
+                                              and flag files changed in each of the last 3 fix rounds
   factory.py review-plan <project-slug>/<job-id> <round>
                                             skip the ux and ui reviews of a round that changes nothing a person sees, print one JSON plan
   factory.py pre-review <project-slug>/<job-id>
@@ -2012,8 +2013,11 @@ def repeats_cmd(target, round_text):
         for name in TRACER_REVIEWERS:
             same = review_signatures(folder / f"review-{name}.md") & review_signatures(before / f"review-{name}.md")
             repeats += [{"reviewer": name, "signature": s} for s in sorted(same)]
-    print(json.dumps({"decision": "repeat" if repeats else "continue", "round": n,
-                      "previous": n - 1 if n > 1 else None, "repeats": repeats}))
+    wt = home / "worktrees" / slug / job_id
+    churn = churn_files(job, wt, n) if n >= 4 else []
+    decision = "repeat" if repeats else "churn" if churn else "continue"
+    print(json.dumps({"decision": decision, "round": n, "previous": n - 1 if n > 1 else None,
+                      "repeats": repeats, "churn": churn}))
 
 
 IDEA_LIMIT = 4000
@@ -7474,15 +7478,43 @@ def changed_files(wt, base):
     return [p for p in diff.stdout.split("\0") if p]
 
 
-def round_changed_files(wt, head):
-    """The paths changed since an earlier round's head, or None when that head is not an ancestor of HEAD
+def round_changed_files(wt, head, new="HEAD"):
+    """The paths changed from an earlier round's head to new, or None when that head is not an ancestor of new
     or git fails."""
-    if subprocess.run(["git", "-C", str(wt), "merge-base", "--is-ancestor", head, "HEAD"],
+    if subprocess.run(["git", "-C", str(wt), "merge-base", "--is-ancestor", head, new],
                       capture_output=True).returncode:
         return None
-    diff = subprocess.run(["git", "-C", str(wt), "diff", "--name-only", "--no-renames", "-z", head, "HEAD"],
+    diff = subprocess.run(["git", "-C", str(wt), "diff", "--name-only", "--no-renames", "-z", head, new],
                           capture_output=True, text=True)
     return None if diff.returncode else [p for p in diff.stdout.split("\0") if p]
+
+
+CHURN_ROUNDS = 3
+
+
+def round_head(folder, k):
+    """The head round-k/review-plan.json records, or None for a missing, linked or malformed file."""
+    path = folder / f"round-{k}" / "review-plan.json"
+    if not path.is_file() or is_link(path) or is_link(path.parent):
+        return None
+    try:
+        head = json.loads(path.read_text(encoding="utf-8")).get("head")
+    except (ValueError, AttributeError):
+        return None
+    return head if isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}", head) else None
+
+
+def churn_files(folder, wt, n):
+    """The paths changed in each of the last CHURN_ROUNDS rounds up to n, sorted, or [] on any doubt."""
+    heads = [round_head(folder, k) for k in range(n - CHURN_ROUNDS, n + 1)]
+    if None in heads or not wt.is_dir():
+        return []
+    sets = [round_changed_files(wt, old, new) for old, new in zip(heads, heads[1:])]
+    if None in sets:
+        return []
+    common = set.intersection(*map(set, sets))
+    rounds = list(range(n - CHURN_ROUNDS + 1, n + 1))
+    return [{"path": path, "rounds": rounds} for path in sorted(common)]
 
 
 def previous_head(folder, n):
