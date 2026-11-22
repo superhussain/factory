@@ -31,6 +31,14 @@ feature.
    tier Rules selects from the spec, with its assigned dev-server port if the job
    needs one. It commits on
    the branch and writes `build.md`. Push the branch.
+   After every builder run, read the first line of its build.md run section. When it
+   starts `BLOCKED-ENV:`, start no pre-review or review round and keep the tier. Count
+   the run sections that start `BLOCKED-ENV:` since the latest rework. On one, patch
+   `{"note": "env block: <kind>: <what is missing>; one retry on the same tier"}` and
+   dispatch a fresh builder on the same tier with the line on a short line. On two, run
+   `push "$SLUG/<id>"` and patch
+   `{"stage": "needs-human", "note": "env block: <kind>: <what is missing> (builder blocked twice)", "needs": "provide the missing <kind>: <what is missing>, then run /factory rework <id> <note>"}`
+   from the latest line.
 4. Pre-review: run `python3 "$RUNTIME" hold "$SLUG/<id>"`, then
    `python3 "$RUNTIME" pre-review "$SLUG/<id>"` as a background command, and act on its
    completion notification. Exit 1 means a check failed: patch

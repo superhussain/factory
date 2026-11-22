@@ -326,6 +326,40 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
       await resetStack();
     });
 
+    await t.test(
+      "bottom center toast T4 moves at most once as the status is replaced",
+      async () => {
+        await showWithStatus("bottom-center");
+        await stackAboveStatus();
+        await page.evaluate(() => {
+          const stack = document.getElementById("notify-toasts");
+          const space = () => stack.style.getPropertyValue("--board-status-space");
+          let last = space();
+          window.statusSpaces = [];
+          window.statusObserver = new MutationObserver(() => {
+            if (space() === last) return;
+            last = space();
+            window.statusSpaces.push(last);
+          });
+          window.statusObserver.observe(stack, { attributes: true, attributeFilter: ["style"] });
+        });
+        const next = "Could not pause the factory. Try again.";
+        await page.evaluate((text) => showBoardStatus(text), next);
+        await page.waitForFunction(
+          (text) => document.getElementById("board-status").textContent === text,
+          wait,
+          next,
+        );
+        await stackAboveStatus();
+        const spaces = await page.evaluate(() => {
+          window.statusObserver.disconnect();
+          return window.statusSpaces;
+        });
+        assert.ok(spaces.length <= 1, JSON.stringify(spaces));
+        await resetStack();
+      },
+    );
+
     await t.test("narrow bottom right toast T3 yields, desktop corner stays", async () => {
       await page.setViewport({ width: 390, height: 844 });
       await showWithStatus("bottom-right");
