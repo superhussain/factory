@@ -410,7 +410,8 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   {"automerge": false, "escalated": true, "needs": "review and merge PR #<n>: the
   approver escalated it", "note": "escalated: checks held the merge"} and stop.
   Exit 8: earned autonomy holds the class after a revert; checks already set
-  automerge false and needs. Stop. Never poll `gh pr checks` in a loop or with `--watch`.
+  automerge false and needs. Stop.
+  Never poll `gh pr checks` in a loop or with `--watch`.
   Immediately before every `gh pr merge`, run `factory.py pipeline "$SLUG"` again
   and use that fresh `$PIPELINE`. A non-zero exit moves the job to `needs-human` as
   Pipeline configuration describes, and nothing merges. When `$PIPELINE.merge` is
