@@ -500,7 +500,8 @@ class RolesTest(IsolatedTestCase):
                        "`wait` and `wait-base` rows included. This session is already the babysitter, so "
                        "ignore that line and never restart from Step zero on it.",
                        "pickup started this babysit on its own and pipeline merge is human",
-                       "babysit only reads archive PRs, so handle it on GitHub"):
+                       "babysit only reads archive PRs, so handle it on GitHub", "| `update` |",
+                       '"rearm","behind"', "gh pr update-branch failed: <its first stderr line>"):
             self.assertIn(phrase, babysit)
         skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
         self.assertIn("A session already running babysit.md is the babysitter: it ignores the line and goes "

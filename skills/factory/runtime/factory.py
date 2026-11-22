@@ -74,7 +74,7 @@
   factory.py pr-state <project-slug>/<job-id> [--wait S]
                                             print one JSON reading of the job PR for /factory babysit:
                                             pr, state, review, checks, queued, conflict, items, capped,
-                                            rearm and next; --wait
+                                            rearm, behind and next; --wait
                                             re-reads every 30 seconds for up to S seconds (1 to 600) while
                                             next is wait; a bad pr exits 4, a gh problem 5
   factory.py pr-handled <project-slug>/<job-id> [--rearm] <sig>...
@@ -5764,8 +5764,13 @@ def babysit_pass(home, data, device, minutes, paths, settings, dry):
         if line is None and ready:
             line = f"wait babysit {j['id']} {j['project']}: one babysit launch per run"
         elif line is None:
-            ready = True
             agent, state = job_agent(j)
+            waits = awaits_permission(agent) if state == "idle" else False
+            if waits is not False:
+                print(f"skip babysit {j['id']} {j['project']}: agent {agent} "
+                      + ("waits at a permission dialog" if waits else "permission state unknown"))
+                continue
+            ready = True
             route = pick_route(home)
             if state in ("idle", "closed"):
                 if dry:
@@ -6122,16 +6127,16 @@ def outcome_checkout_problem(checkout, base, device):
     return f"{why} in {checkout} on {device}" if why else None
 
 
-def pr_signals(repo, numbers, device):
+def pr_signals(repo, numbers, device, handled):
     """({number: (head oid, pr_signal)}, None) for repo's pull requests from one gh api graphql call,
-    or (None, why), as pr_states reads them."""
+    or (None, why), as pr_states reads them. handled maps each number to its job's handled entries."""
     owner, name = repo.split("/")
     q = (f'query {{ repository(owner: "{owner}", name: "{name}") {{ '
-         + " ".join(f"p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid author {{ login }} "
-                    "reviewThreads(last: 50) { nodes { isResolved comments(first: 20) { nodes { authorAssociation "
-                    "author { __typename login } } } } } commits(last: 1) { nodes { commit { statusCheckRollup { "
-                    "contexts(first: 50) { nodes { __typename ... on CheckRun { conclusion "
-                    f"isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ state "
+         + " ".join(f"p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid baseRefName author {{ login }} "
+                    "reviewThreads(last: 50) { nodes { isResolved path comments(first: 20) { nodes { "
+                    "authorAssociation body author { __typename login } } } } } commits(last: 1) { nodes { commit { "
+                    "statusCheckRollup { contexts(first: 50) { nodes { __typename ... on CheckRun { name conclusion "
+                    f"isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ context state "
                     f"isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }}" for n in numbers)
          + " } }")
     r = gh_cli("api", "graphql", "-f", "query=" + q)
@@ -6148,15 +6153,22 @@ def pr_signals(repo, numbers, device):
             return None, f"gh api graphql exited {r[0]} (check gh auth status on {device})"
         return None, ("gh api graphql returned no repository "
                       f"(check the project file's repo and gh auth status on {device})")
-    return {n: (found[f"p{n}"].get("headRefOid"), pr_signal(found[f"p{n}"]))
+    return {n: (found[f"p{n}"].get("headRefOid"), pr_signal(found[f"p{n}"], handled.get(n)))
             for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
-def pr_signal(pull):
+def pr_signal(pull, handled=None):
     """What an open pull request needs from babysit, in pr_reading's order: fix-reviews for an open
-    counted review thread, rebase for a merge conflict, fix-ci for a failed required check, else None."""
+    counted review thread, rebase for a merge conflict, fix-ci for a failed required check, else None.
+    handled is the job's handled field, read as pr_reading reads it: a handled thread is skipped, and a
+    conflict or check worked HANDLED_CAP times is no signal."""
     if pull.get("state") != "OPEN":
         return None
+    handled = handled or {}
+
+    def capped(kind, part):
+        sig = handled_sig(kind, part)
+        return sig in handled and handled[sig]["count"] >= HANDLED_CAP
 
     def login(item):
         return str((item.get("author") or {}).get("login") or "")
@@ -6168,16 +6180,19 @@ def pr_signal(pull):
         comments = [c for c in (thread.get("comments") or {}).get("nodes") or [] if isinstance(c, dict)]
         if not comments or any(login(c) == author for c in comments):
             continue
-        if (comments[0].get("author") or {}).get("__typename") == "Bot" \
-                or comments[0].get("authorAssociation") in PR_REVIEWERS:
+        if (comments[0].get("author") or {}).get("__typename") != "Bot" \
+                and comments[0].get("authorAssociation") not in PR_REVIEWERS:
+            continue
+        if handled_sig("thread", str(thread.get("path") or ""), str(comments[0].get("body") or "")) not in handled:
             return "fix-reviews"
-    if pull.get("mergeable") == "CONFLICTING":
+    if pull.get("mergeable") == "CONFLICTING" and not capped("conflict", str(pull.get("baseRefName") or "")):
         return "rebase"
     for node in (pull.get("commits") or {}).get("nodes") or []:
         rollup = ((node or {}).get("commit") or {}).get("statusCheckRollup") or {}
         for c in (rollup.get("contexts") or {}).get("nodes") or []:
             if isinstance(c, dict) and c.get("isRequired") is True \
-                    and (c.get("conclusion") or c.get("state")) in CI_FAILED:
+                    and (c.get("conclusion") or c.get("state")) in CI_FAILED \
+                    and not capped("check", str(c.get("name") or c.get("context") or "")):
                 return "fix-ci"
     return None
 
@@ -6493,7 +6508,8 @@ def auto_babysit_pass(home, data, device, minutes, paths, settings, dry):
             print(f"factory.py: pickup checks {AUTO_BABYSIT_LIMIT} of {len(jobs)} auto-babysit candidates for {repo} "
                   "this run, oldest automatic babysit first", file=sys.stderr)
         jobs = jobs[:AUTO_BABYSIT_LIMIT]
-        signals, why = pr_signals(repo, [n for _, n, _ in jobs], device)
+        signals, why = pr_signals(repo, [n for _, n, _ in jobs], device,
+                                  {n: valid_handled(j.get("handled")) for j, n, _ in jobs})
         if signals is None:
             print(f"factory.py: pickup skips auto-babysit for {repo}: {why}", file=sys.stderr)
             continue
@@ -6709,6 +6725,10 @@ def priority_nudge_pass(home, data, device, dry):
                 print(f"skip nudge {job_id}: agent {agent} is {status or 'missing'}")
             continue
         line = f"{job_id} {j.get('project')}: agent {agent}"
+        waits = awaits_permission(agent)
+        if waits is not False:
+            print(f"skip nudge {line} " + ("waits at a permission dialog" if waits else "permission state unknown"))
+            continue
         if dry:
             print(f"would nudge {line}")
             continue
@@ -6770,7 +6790,11 @@ def idle_watch_pass(home, data, device, dry):
         if "nudged" not in entry:
             if entry["since"] >= cutoff:
                 continue
-            if dry:
+            waits = awaits_permission(agent)
+            if waits is not False:
+                print(f"skip idle nudge {line} "
+                      + ("waits at a permission dialog" if waits else "permission state unknown"))
+            elif dry:
                 print(f"would nudge idle {line}")
             elif not paseo_send(agent, IDLE_NUDGE.format(id=job_id)):
                 print(f"factory.py: pickup could not nudge idle {job_id}: paseo send failed", file=sys.stderr)
@@ -8229,6 +8253,18 @@ def head_checks(pr, sha):
     return [{"name": check, "bucket": latest[check][1]} for check in sorted(latest)], None
 
 
+def behind_by(pr, base, sha):
+    """How many commits of base the PR head sha lacks, from GitHub's compare API."""
+    if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)):
+        fail("gh pr view printed an unusable headRefOid", 5)
+    repo = GH_PR.fullmatch(pr)[1]
+    behind = gh_answer(gh_cli("api", f"repos/{repo}/compare/{base}...{sha}", "--jq", ".behind_by"),
+                       "gh api compare").strip()
+    if not re.fullmatch(r"[0-9]+", behind):
+        fail("gh api compare printed no behind_by", 5)
+    return int(behind)
+
+
 def pr_behind(pr):
     """(behind_by, head sha, base): how many commits of its base the PR's head lacks, from GitHub's compare API."""
     try:
@@ -8239,12 +8275,7 @@ def pr_behind(pr):
     if not (isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
             and isinstance(base, str) and re.fullmatch(r"(?!-)[A-Za-z0-9._/-]{1,255}", base)):
         fail("gh pr view printed an unusable headRefOid or baseRefName", 5)
-    repo = GH_PR.fullmatch(pr)[1]
-    behind = gh_answer(gh_cli("api", f"repos/{repo}/compare/{base}...{sha}", "--jq", ".behind_by"),
-                       "gh api compare").strip()
-    if not re.fullmatch(r"[0-9]+", behind):
-        fail("gh api compare printed no behind_by", 5)
-    return int(behind), sha, base
+    return behind_by(pr, base, sha), sha, base
 
 
 def checks_cmd(target, *args):
@@ -8310,7 +8341,7 @@ def checks_cmd(target, *args):
 
 
 PR_STATE_USAGE = "usage: pr-state <project-slug>/<job-id> [--wait S]"
-PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName"
+PR_STATE_FIELDS = "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName,headRefOid"
 PR_REVIEWERS = ("OWNER", "MEMBER", "COLLABORATOR")
 # gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
 PR_GRAPHQL_QUERY = ("query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n)"
@@ -8472,9 +8503,11 @@ def pr_reading(home, pr, base, buildkite_org, handled=None):
     unanswered = False
     for r in human:
         if r.get("state") in ("CHANGES_REQUESTED", "COMMENTED") and str(r.get("submittedAt") or "") > replied:
-            unanswered = note("review", login(r), login(r), str(r.get("body") or "")) or unanswered
+            unanswered = note("review", login(r), login(r), str(r.get("body") or ""),
+                              str(r.get("submittedAt") or "")) or unanswered
     decision = view.get("reviewDecision") or ""
-    approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human))
+    approved = decision == "APPROVED" or (not decision and any(r.get("state") == "APPROVED" for r in human)
+                                          and not any(r.get("state") == "CHANGES_REQUESTED" for r in human))
     state = str(view.get("state") or "").lower()
     in_queue = pull.get("isInMergeQueue") is True or isinstance(pull.get("mergeQueueEntry"), dict)
     bots = threads = 0
@@ -8509,6 +8542,8 @@ def pr_reading(home, pr, base, buildkite_org, handled=None):
         rearm += [s for s in handled if s.startswith("conflict:")]
     kinds = {i["sig"].split(":", 1)[0] for i in items}
     stacked = target != base
+    merge_queue = pull.get("isMergeQueueEnabled") is True
+    behind = None
     if state in ("merged", "closed"):
         step = state
     elif capped:
@@ -8528,15 +8563,16 @@ def pr_reading(home, pr, base, buildkite_org, handled=None):
     elif stacked:
         step = "wait-base"
     else:
-        step = "merge"
+        behind = None if merge_queue else behind_by(pr, target, view.get("headRefOid"))
+        step = "update" if behind else "merge"
     failed = next((c for c in listed if c["bucket"] in ("fail", "cancel") and isinstance(c.get("link"), str)
                    and BUILDKITE_BUILD.fullmatch(c["link"])), None) if step == "fix-ci" else None
     return {"pr": int(pr.rsplit("/", 1)[1]), "state": state,
             "review": "changes" if unanswered else "approved" if approved else "none", "bots": bots,
             "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked,
             "base": target, "next": step, "ci_log": buildkite_log(home, failed, buildkite_org) if failed else None,
-            "threads": threads, "merge_queue": pull.get("isMergeQueueEnabled") is True,
-            "items": items, "capped": capped, "rearm": rearm}
+            "threads": threads, "merge_queue": merge_queue,
+            "items": items, "capped": capped, "rearm": rearm, "behind": behind}
 
 
 def pr_state_cmd(target, *args):
@@ -9884,6 +9920,17 @@ def paseo_run(args):
     return r.returncode, r.stdout
 
 
+def awaits_permission(agent):
+    """True when paseo inspect lists pending permission requests for agent, False when it lists none,
+    None when the answer is anything else."""
+    code, out = paseo_run(["inspect", agent, "--json"])
+    try:
+        pending = json.loads(out).get("PendingPermissions") if not code else None
+    except (ValueError, AttributeError):
+        return None
+    return bool(pending) if isinstance(pending, list) else None
+
+
 def workspace_leftovers(cwd):
     """What a workspace holds that no remote, other local branch or the branch's creation point keeps, as strings."""
     def git(verb, *args):
@@ -10148,6 +10195,53 @@ def orphan_pickup_scan(home):
         print(f"factory.py: orphan scan stopped (exit {e.code}); it runs again tomorrow", file=sys.stderr)
 
 
+STOP_CHECKS_FILE = "stop-checks.json"
+
+
+def read_stop_checks(home):
+    """The jobs dict of <home>/stop-checks.json, {} when the file is missing or malformed."""
+    try:
+        doc = json.loads(Path(home, STOP_CHECKS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    jobs = doc.get("jobs") if isinstance(doc, dict) and doc.get("version") == 1 else None
+    return jobs if isinstance(jobs, dict) else {}
+
+
+def stop_state(home, job):
+    """What a stopped job's next step depends on: its board fields, its worktree and origin branch heads,
+    and its R2 files with their ETags. No git fetch runs."""
+    job_id, project = job["id"], job["project"]
+    wt = home / "worktrees" / project / job_id
+    there = wt.exists()
+    listed = json.loads(api(home, "GET", f"/api/jobs/{project}/{job_id}/?etags=1")[2])
+    return dict({k: job.get(k) for k in ("stage", "round", "rounds", "pr", "needs", "note")},
+                head=git(wt, "rev-parse", "HEAD") if there else "",
+                origin=git(wt, "rev-parse", "--verify", "-q", f"refs/remotes/origin/factory/{job_id}") if there else "",
+                files=sorted(f"{o['name']} {o['etag']}" for o in listed if isinstance(o, dict)))
+
+
+def stop_key(state):
+    return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def stop_verdict(home, job, state):
+    """(resume, why, clear_needs) for a stopped job's state."""
+    needs = job.get("needs")
+    if not (isinstance(needs, str) and needs.strip()):
+        why = f"stopped at {state['stage']} with no live session"
+        if state["head"] and state["head"] != state["origin"]:
+            why += ", HEAD not on origin"
+        return True, why, False
+    names = {f.rsplit(" ", 1)[0] for f in state["files"]}
+    if f"#{job['id']}/needs" in needs and {"needs.md", "answers.md"} <= names:
+        base = f"/api/jobs/{job['project']}/{job['id']}/"
+        sha12 = hashlib.sha256(api(home, "GET", base + "needs.md")[2].encode("utf-8")).hexdigest()[:12]
+        if f"For needs.md sha256 {sha12}," in api(home, "GET", base + "answers.md")[2]:
+            return True, "ask answered in answers.md, needs still set", True
+    return False, "waits on its ask", False
+
+
 def stuck(*args):
     """Claim up to --limit jobs that a dead session left mid-loop, and print them as JSON
     for the resume schedule. Only this function writes a job's resumes."""
@@ -10176,23 +10270,54 @@ def stuck(*args):
         agents = statuses[0]
         return agents is not None and agents.get(link.get("agent"), "closed") == "closed"
 
+    def held(job):
+        # A move nobody has claimed yet belongs to its target host's pickup.
+        return (paused(job) or closing(job) or lead_of(job) or waiting_until(job)
+                or isinstance(job.get("move"), dict) and "claimed" not in job["move"])
+
     def is_stuck(job):
-        if paused(job) or closing(job) or lead_of(job) or waiting_until(job):
+        if held(job):
             return False
         # A job with an ask is waiting on a human, not stuck. Blank asks don't count.
         if isinstance(job.get("needs"), str) and job["needs"].strip():
             return False
-        # A move nobody has claimed yet belongs to its target host's pickup.
-        if isinstance(job.get("move"), dict) and "claimed" not in job["move"]:
-            return False
         c = job.get("claim")
         if job.get("stage") in IN_FLIGHT:
-            if stale(c.get("seen") if c else job.get("updated")):
-                return True
-            return bool(c) and c.get("device") == device and dead(job)
+            return stale(c.get("seen") if c else job.get("updated"))
         if job.get("stage") == "pr-open" and job.get("automerge") is True and job.get("escalated") is not True:
             return stale(job.get("updated")) or dead(job)
         return False
+
+    def well_formed(job):
+        # The id goes into a shell command and a prompt, so take only well-formed ones.
+        return (isinstance(job.get("id"), str) and JOB_ID.fullmatch(job["id"]) and ".." not in job["id"]
+                and paths.get(job.get("project")))
+
+    def stopped(job):
+        c = job.get("claim")
+        return (job.get("stage") in IN_FLIGHT and well_formed(job) and not held(job)
+                and (not c or c.get("device") == device) and dead(job))
+
+    resume = {}  # {id: (stage, clear_needs, needs)} for each new state the stop check could not explain.
+    # Without this host's Paseo server no job counts as stopped, so the board read is skipped.
+    if server:
+        jobs = read_board(home)["jobs"]
+        old = read_stop_checks(home)
+        checks = {k: v for k, v in old.items()
+                  if any(j.get("id") == k and j.get("stage") not in TERMINAL for j in jobs)}
+        for job in (j for j in jobs if stopped(j)):
+            state = stop_state(home, job)
+            key = stop_key(state)
+            if (checks.get(job["id"]) or {}).get("key") == key:
+                continue
+            ok, why, clear = stop_verdict(home, job, state)
+            verdict = "resume" if ok else "explained"
+            checks[job["id"]] = {"key": key, "at": now(), "verdict": verdict, "why": why}
+            print(f"stop check {job['id']}: {verdict}, {why}", file=sys.stderr)
+            if ok:
+                resume[job["id"]] = (job["stage"], clear, job.get("needs"))
+        if checks != old:
+            write_atomic(home / STOP_CHECKS_FILE, json.dumps({"version": 1, "jobs": checks}, indent=2) + "\n")
 
     def change(text):
         data = load_board(text)
@@ -10203,9 +10328,10 @@ def stuck(*args):
             data["updated"] = now()
         dropped = [f"dropped stub {s.get('id')!r}: no stage, last seen "
                    f"{(s.get('claim') or {}).get('seen') or s.get('updated')}" for s in stubs]
-        # The id goes into a shell command and a prompt, so take only well-formed ones.
-        found = [j for j in data["jobs"] if isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"])
-                 and ".." not in j["id"] and paths.get(j.get("project")) and is_stuck(j)]
+        # A resume verdict holds only while the fresh row is still stopped, at its stage, with the same ask.
+        found = [j for j in data["jobs"] if well_formed(j) and (
+            is_stuck(j) or j["id"] in resume and stopped(j) and j.get("stage") == resume[j["id"]][0]
+            and j.get("needs") == resume[j["id"]][2])]
         found.sort(key=lambda j: (j.get("claim") or {}).get("seen") or j.get("updated") or "")
         picked, guarded = [], []
         for job in found:
@@ -10227,7 +10353,11 @@ def stuck(*args):
             # The paseo link belongs to the dead session. The resumed session's first hold sets its own.
             job.pop("paseo", None)
             tag = session or secrets.token_hex(3)
-            patch_job(data, job["id"], {"claim": new_claim(device, tag), "resumes": {"count": count, "key": key}})
+            patch = {"claim": new_claim(device, tag), "resumes": {"count": count, "key": key}}
+            _, clear, needs = resume.get(job["id"], (None, False, None))
+            if clear and job.get("needs") == needs:
+                patch["needs"] = None
+            patch_job(data, job["id"], patch)
             picked.append({"id": job["id"], "project": job["project"], "repo_path": paths[job["project"]],
                            "session": tag, "stage": job["stage"]})
         if not picked and not guarded and not stubs:

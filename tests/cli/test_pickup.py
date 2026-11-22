@@ -1585,6 +1585,7 @@ class PriorityTest(PickupFixture):
         patch.object(factory, "paseo_server", return_value="synthetic-server").start()
         patch.object(factory, "paseo_statuses", side_effect=lambda: self.statuses).start()
         patch.object(factory, "paseo_send", side_effect=self.send).start()
+        patch.object(factory, "awaits_permission", return_value=False).start()
 
     def send(self, agent, message):
         self.sent.append((agent, message))
@@ -1713,6 +1714,7 @@ class IdleWatchTest(PickupFixture):
         patch.object(factory, "paseo_server", return_value="synthetic-server").start()
         patch.object(factory, "paseo_statuses", side_effect=lambda: self.statuses).start()
         patch.object(factory, "paseo_send", side_effect=self.send).start()
+        patch.object(factory, "awaits_permission", return_value=False).start()
 
     def export(self, **extra):
         job = {"id": "042-sample-export", "stage": "build", "project": "alpha", "updated": "2026-01-01T10:00:00Z",
@@ -3719,6 +3721,7 @@ def babysat(job_id, project, **extra):
 class BabysitTest(PickupFixture):
     def setUp(self):
         super().setUp()
+        patch.object(factory, "awaits_permission", return_value=False).start()
         self.views["alpha"] = (200, effective("alpha", {"pickup": ON}))
 
     def argv(self, job_id, prompt):
@@ -3940,30 +3943,122 @@ class BabysitTest(PickupFixture):
         self.assertEqual(factory.babysit_argv(other, "042-sample-export"), other)
 
 
+class PermissionGuardTest(PickupFixture):
+    LINK = {"server": "synthetic-server", "agent": "synthetic-agent"}
+    ENDS = ((True, "waits at a permission dialog"), (None, "permission state unknown"))
+    send = PriorityTest.send
+
+    def setUp(self):
+        super().setUp()
+        self.views = {"alpha": (200, effective("alpha", {"pickup": ON}))}
+        self.statuses = {"synthetic-agent": "idle"}
+        self.sent = []
+        self.send_ok = True
+        self.waits = False
+        patch.object(factory, "paseo_server", return_value="synthetic-server").start()
+        patch.object(factory, "paseo_statuses", side_effect=lambda: self.statuses).start()
+        patch.object(factory, "paseo_send", side_effect=self.send).start()
+        patch.object(factory, "awaits_permission", side_effect=lambda agent: self.waits).start()
+
+    def build(self, **extra):
+        self.board["jobs"] = [dict({"id": "042-sample-export", "stage": "build", "project": "alpha",
+                                    "updated": "2026-01-01T10:00:00Z", "paseo": self.LINK,
+                                    "claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"}},
+                                   **extra)]
+
+    def test_priority_nudge_skips(self):
+        for waits, end in self.ENDS:
+            with self.subTest(waits=waits):
+                self.waits = waits
+                self.build(priority={"at": "2026-01-02T12:00:00Z"})
+                line = f"skip nudge 042-sample-export alpha: agent synthetic-agent {end}\n"
+                self.assertEqual(self.pickup(), (0, line, ""))
+                self.assertEqual(self.pickup("--dry-run"), (0, line + f"host {DEVICE}: would launch 0\n", ""))
+                self.assertEqual((self.sent, self.puts()), ([], []))
+                self.assertNotIn("nudged", self.job("042-sample-export")["priority"])
+
+    def test_idle_nudge_skips_and_never_moves_to_needs_human(self):
+        for waits, end in self.ENDS:
+            with self.subTest(waits=waits):
+                self.waits = waits
+                self.build()
+                (self.home / "idle-watch.json").write_text(json.dumps({"version": 1, "jobs": {"042-sample-export": {
+                    "agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z",
+                    "since": stamp(minutes=-41)}}}), encoding="utf-8")
+                line = f"skip idle nudge 042-sample-export alpha: agent synthetic-agent {end}\n"
+                self.assertEqual(self.pickup("--dry-run"), (0, line + f"host {DEVICE}: would launch 0\n", ""))
+                for _ in range(2):
+                    self.assertEqual(self.pickup(), (0, line, ""))
+                entry = json.loads((self.home / "idle-watch.json").read_text(encoding="utf-8"))["jobs"]
+                self.assertNotIn("nudged", entry["042-sample-export"])
+                self.assertEqual((self.sent, self.puts()), ([], []))
+                self.assertEqual(self.job("042-sample-export")["stage"], "build")
+
+    def test_babysit_send_skips(self):
+        for waits, end in self.ENDS:
+            with self.subTest(waits=waits):
+                self.waits = waits
+                self.board["jobs"] = [babysat("042-sample-export", "alpha", paseo=self.LINK)]
+                line = f"skip babysit 042-sample-export alpha: agent synthetic-agent {end}\n"
+                self.assertEqual(self.pickup(), (0, line, ""))
+                self.assertEqual(self.pickup("--dry-run"), (0, line + f"host {DEVICE}: would launch 0\n", ""))
+                self.assertNotIn("claim", self.job("042-sample-export"))
+                self.assertEqual((self.sent, self.launched(), self.puts()), ([], [], []))
+
+    def test_a_skipped_babysit_leaves_the_launch_to_the_next_job(self):
+        self.waits = True
+        self.statuses = {"synthetic-agent": "idle", "closed-agent": "closed"}
+        self.board["jobs"] = [babysat("042-sample-export", "alpha", paseo=self.LINK),
+                              babysat("043-sample-export", "alpha",
+                                      paseo={"server": "synthetic-server", "agent": "closed-agent"})]
+        code, out, err = self.pickup()
+        tag = self.job("043-sample-export")["claim"]["session"]
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, "skip babysit 042-sample-export alpha: agent synthetic-agent waits at a permission dialog\n"
+                              f"sent babysit 043-sample-export alpha to agent closed-agent session {tag}\n")
+        self.assertNotIn("claim", self.job("042-sample-export"))
+        self.assertEqual([agent for agent, _ in self.sent], ["closed-agent"])
+
+    def test_awaits_permission_reads_paseo_inspect(self):
+        patch.stopall()
+        for (code, out), want in (((0, '{"PendingPermissions": [{"id": "p1"}]}'), True),
+                                  ((0, '{"PendingPermissions": []}'), False),
+                                  ((0, "{}"), None), ((0, '{"PendingPermissions": "none"}'), None),
+                                  ((0, "[]"), None), ((0, "not json"), None), ((1, ""), None)):
+            with self.subTest(out=out), patch.object(factory, "paseo_run", return_value=(code, out)) as run:
+                self.assertIs(factory.awaits_permission("synthetic-agent"), want)
+                run.assert_called_once_with(["inspect", "synthetic-agent", "--json"])
+
+
 HEAD = "abc1234" + "0" * 33
 
 
-def pull(state="OPEN", threads=(), mergeable="MERGEABLE", contexts=()):
+def pull(state="OPEN", threads=(), mergeable="MERGEABLE", contexts=(), base="main"):
     """A pull request node as pr_signals reads it, by author bot-author."""
-    return {"state": state, "mergeable": mergeable, "headRefOid": HEAD, "author": {"login": "bot-author"},
-            "reviewThreads": {"nodes": [{"isResolved": False, "comments": {"nodes": t}} for t in threads]},
+    return {"state": state, "mergeable": mergeable, "headRefOid": HEAD, "baseRefName": base,
+            "author": {"login": "bot-author"},
+            "reviewThreads": {"nodes": [{"isResolved": False, "path": "web/app.js", "comments": {"nodes": t}}
+                                        for t in threads]},
             "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": list(contexts)}}}}]}}
 
 
-def comment(login, association="NONE", kind="User"):
-    return {"authorAssociation": association, "author": {"__typename": kind, "login": login}}
+def comment(login, association="NONE", kind="User", body="Drop the unused import."):
+    return {"authorAssociation": association, "body": body, "author": {"__typename": kind, "login": login}}
 
 
-FAILED = {"__typename": "CheckRun", "conclusion": "FAILURE", "isRequired": True}
+FAILED = {"__typename": "CheckRun", "name": "lint", "conclusion": "FAILURE", "isRequired": True}
+LINT = "check:da966368ea663ea5"
+THREAD = "thread:892c9835f792e6f5"
+CAPPED = {"count": 3, "at": "2026-01-02T12:00:00Z"}
 
 
 class AutoBabysitTest(PickupFixture):
     def frag(n):
-        return (f"p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid author {{ login }} "
-                "reviewThreads(last: 50) { nodes { isResolved comments(first: 20) { nodes { authorAssociation "
-                "author { __typename login } } } } } commits(last: 1) { nodes { commit { statusCheckRollup { "
-                "contexts(first: 50) { nodes { __typename ... on CheckRun { conclusion "
-                f"isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ state "
+        return (f"p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid baseRefName author {{ login }} "
+                "reviewThreads(last: 50) { nodes { isResolved path comments(first: 20) { nodes { "
+                "authorAssociation body author { __typename login } } } } } commits(last: 1) { nodes { commit { "
+                "statusCheckRollup { contexts(first: 50) { nodes { __typename ... on CheckRun { name conclusion "
+                f"isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ context state "
                 f"isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }}")
 
     QUERY = 'query { repository(owner: "sample", name: "alpha") { ' + frag(7) + " " + frag(8) + " } }"
@@ -3987,8 +4082,8 @@ class AutoBabysitTest(PickupFixture):
         self.race = None
         patch.object(factory, "pr_signals", side_effect=self.read).start()
 
-    def read(self, repo, numbers, device):
-        self.reads.append((repo, list(numbers)))
+    def read(self, repo, numbers, device, handled):
+        self.reads.append((repo, list(numbers), handled))
         if self.race:
             self.job("042-sample-export").update(self.race)
         if self.failure:
@@ -4006,7 +4101,7 @@ class AutoBabysitTest(PickupFixture):
         idle = f"host {DEVICE}: would launch 0\n"
         line = "042-sample-export alpha: PR #7 has a failing required check (1 of 3)"
         self.assertEqual(self.pickup("--dry-run"), (0, f"would auto-babysit {line}\n{idle}", ""))
-        self.assertEqual((self.puts(), self.reads), ([], [("sample/alpha", [7])]))
+        self.assertEqual((self.puts(), self.reads), ([], [("sample/alpha", [7], {7: {}})]))
         code, out, err = self.pickup()
         self.assertEqual((code, err), (0, ""))
         job = self.job("042-sample-export")
@@ -4065,7 +4160,7 @@ class AutoBabysitTest(PickupFixture):
         self.failure = "gh is not installed on host-a"
         self.assertEqual(self.pickup(), (0, "", "factory.py: pickup skips auto-babysit for sample/alpha: "
                                                 "gh is not installed on host-a\n"))
-        self.assertEqual((self.reads, self.puts()), ([("sample/alpha", [7])], []))
+        self.assertEqual((self.reads, self.puts()), ([("sample/alpha", [7], {7: {}})], []))
         self.assertNotIn("babysit", self.job("042-sample-export"))
 
     def test_over_the_limit_reads_the_oldest_first(self):
@@ -4075,7 +4170,7 @@ class AutoBabysitTest(PickupFixture):
         ]
         with patch.object(factory, "AUTO_BABYSIT_LIMIT", 1):
             code, out, err = self.pickup()
-        self.assertEqual((code, self.reads), (0, [("sample/alpha", [8])]))
+        self.assertEqual((code, self.reads), (0, [("sample/alpha", [8], {8: {}})]))
         self.assertEqual(err, "factory.py: pickup checks 1 of 2 auto-babysit candidates for sample/alpha this run, "
                               "oldest automatic babysit first\n")
 
@@ -4130,17 +4225,21 @@ class AutoBabysitTest(PickupFixture):
         self.assertEqual(self.puts(), [])
 
     def test_pr_signals_sends_one_query_per_repo(self):
-        answer = json.dumps({"data": {"repository": {"p7": pull(contexts=[FAILED]), "p8": None}}})
+        answer = json.dumps({"data": {"repository": {"p7": pull(contexts=[FAILED]), "p8": pull(contexts=[FAILED])}}})
         with patch.object(factory, "gh_cli", return_value=(0, answer)) as gh:
-            self.assertEqual(self.pr_signals("sample/alpha", [7, 8], DEVICE), ({7: (HEAD, "fix-ci")}, None))
+            self.assertEqual(self.pr_signals("sample/alpha", [7, 8], DEVICE, {7: {}, 8: {LINT: CAPPED}}),
+                             ({7: (HEAD, "fix-ci"), 8: (HEAD, None)}, None))
         gh.assert_called_once_with("api", "graphql", "-f", "query=" + self.QUERY)
+        answer = json.dumps({"data": {"repository": {"p7": pull(contexts=[FAILED]), "p8": None}}})
+        with patch.object(factory, "gh_cli", return_value=(0, answer)):
+            self.assertEqual(self.pr_signals("sample/alpha", [7, 8], DEVICE, {}), ({7: (HEAD, "fix-ci")}, None))
         for result, why in ((None, "gh is not installed on host-a"),
                             (("timeout", ""), "gh api graphql timed out after 60 seconds on host-a"),
                             ((1, ""), "gh api graphql exited 1 (check gh auth status on host-a)"),
                             ((0, "[]"), "gh api graphql returned no repository (check the project file's repo "
                                         "and gh auth status on host-a)")):
             with self.subTest(result=result), patch.object(factory, "gh_cli", return_value=result):
-                self.assertEqual(self.pr_signals("sample/alpha", [7], DEVICE), (None, why))
+                self.assertEqual(self.pr_signals("sample/alpha", [7], DEVICE, {}), (None, why))
 
     def test_pr_signals_follow_the_reading_order(self):
         reviewer = [comment("reviewer-a", "MEMBER")]
@@ -4158,6 +4257,34 @@ class AutoBabysitTest(PickupFixture):
                 (pull(state="MERGED", mergeable="CONFLICTING", contexts=[FAILED]), None)):
             with self.subTest(node=node):
                 self.assertEqual(factory.pr_signal(node), reason)
+
+    def test_pr_signal_skips_capped_items(self):
+        conflict = factory.handled_sig("conflict", "main")
+        other = dict(FAILED, name="test")
+        for node, handled, reason in (
+                (pull(contexts=[FAILED]), {LINT: CAPPED}, None),
+                (pull(contexts=[FAILED]), {LINT: dict(CAPPED, count=2)}, "fix-ci"),
+                (pull(contexts=[FAILED, other]), {LINT: CAPPED}, "fix-ci"),
+                (pull(mergeable="CONFLICTING"), {conflict: CAPPED}, None),
+                (pull(mergeable="CONFLICTING", contexts=[other]), {conflict: CAPPED}, "fix-ci"),
+                (pull(mergeable="CONFLICTING", base="release"), {conflict: CAPPED}, "rebase"),
+                (pull(mergeable="CONFLICTING"), {conflict: dict(CAPPED, count=2)}, "rebase")):
+            with self.subTest(node=node, handled=handled):
+                self.assertEqual(factory.pr_signal(node, handled), reason)
+
+    def test_pr_signal_skips_handled_threads(self):
+        bot = [comment("review-bot", kind="Bot")]
+        later = [comment("review-bot", kind="Bot", body="Rename x.")]
+        self.assertEqual(factory.pr_signal(pull(threads=[bot]), {THREAD: dict(CAPPED, count=1)}), None)
+        self.assertEqual(factory.pr_signal(pull(threads=[bot, later]), {THREAD: dict(CAPPED, count=1)}),
+                         "fix-reviews")
+        self.assertEqual(factory.pr_signal(pull(threads=[bot], contexts=[FAILED]), {THREAD: dict(CAPPED, count=1)}),
+                         "fix-ci")
+
+    def test_pass_hands_handled_to_pr_signals(self):
+        self.board["jobs"] = [self.export(handled={LINT: CAPPED, "bogus": CAPPED})]
+        self.assertEqual(self.pickup("--dry-run")[0], 0)
+        self.assertEqual(self.reads, [("sample/alpha", [7], {7: {LINT: CAPPED}})])
 
 
 FOLLOW = [{"id": "090-alpha-old", "kind": "follow-up-of"}]

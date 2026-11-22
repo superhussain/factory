@@ -27,10 +27,26 @@ It runs `factory.py stuck --limit 2` and dispatches one configured `/factory rec
 job it prints. A session stalled on a usage limit whose reset is more than `takeover_minutes` away is taken over by `pickup` when `<home>/stalls.json` is set; see references/pickup.md.
 `stuck` claims only jobs whose project has a checkout in this host's
 `paths.md`. It picks a job at spec, build, review, or approve whose claim (or, with
-no claim, `updated`) is older than `claim_stale_minutes`, or whose claim is this
-device's and whose Paseo agent on this host is closed or gone. It also picks an
+no claim, `updated`) is older than `claim_stale_minutes`. It also picks an
 `automerge` PR at `pr-open`, not escalated, that is that old or whose agent is gone.
 It skips any job whose `needs` is set, since that job waits on the user.
+
+A job at spec, build, review, or approve whose claim is this device's or missing, and
+whose Paseo agent on this host is closed or gone, gets a stop check first. Its stop
+state is the board's `stage`, `round`, `rounds`, `pr`, `needs` and `note`, the worktree
+`HEAD`, `origin/factory/<id>` (no fetch) and the job's R2 files with their ETags. `stuck`
+acts once per state: a state whose 12-hex key matches the job's entry in
+`<home>/stop-checks.json` gets no fast resume and waits for the stale path above. A new
+state gets a verdict, recorded in that file and printed on stderr as
+`stop check <id>: resume, <why>` or `stop check <id>: explained, <why>`:
+
+- No `needs`: resume, `stopped at <stage> with no live session`, plus `, HEAD not on origin`
+  when the worktree `HEAD` is not `origin/factory/<id>`.
+- `needs` names `#<id>/needs` and `answers.md` answers the current `needs.md` hash:
+  resume, `ask answered in answers.md, needs still set`. The resume clears `needs`.
+- Any other `needs`: explained, `waits on its ask`.
+
+An entry stays until the job leaves the board or reaches `merged` or `closed`.
 It also drops any stub whose claim is older than `claim_stale_minutes`.
 An idle Paseo agent counts as alive, so `claim_stale_minutes` decides how long an
 idle Paseo session, or a plain native session, keeps its job.
