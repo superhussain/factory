@@ -6133,6 +6133,81 @@ def move_stop_pass(home, data, device, paths, settings, dry, adapter):
                       "accepts, archive it by hand if it still runs" + paseo_archive_tail(a), file=sys.stderr)
 
 
+SESSION_STOP_CLOSED_HOURS = 24
+
+
+def session_stop_reason(j, cutoff):
+    """(board key, why) when the dashboard closed or paused this job and its session should stop, else None.
+    A job closed at or after cutoff still counts, so a close done on another host reaches this one."""
+    stage, c = j.get("stage"), j.get("close")
+    if closing(j) and stage not in TERMINAL:
+        return "close", "the job is closing"
+    if stage == "closed" and isinstance(c, dict) and isinstance(c.get("closed"), str) and c["closed"] >= cutoff:
+        return "close", "the job is closed"
+    if paused(j) and stage not in TERMINAL:
+        return "paused", "the job is paused"
+    return None
+
+
+def session_stop_pass(home, data, device, dry):
+    """Stop this host's linked Paseo agent of each job the dashboard closed or paused, once per host, and record
+    it under close.session_stop or paused.session_stop. A close also releases this host's claim, so close_pass
+    closes the job in the same run."""
+    server = paseo_server()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=SESSION_STOP_CLOSED_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def stopped_here(entry):
+        stops = entry.get("session_stop") if isinstance(entry, dict) else None
+        return isinstance(stops, dict) and device in stops
+
+    def due(j):
+        why, link, c, job_id = session_stop_reason(j, cutoff), j.get("paseo"), j.get("claim"), j.get("id")
+        agent = link.get("agent") if isinstance(link, dict) else None
+        return (why and server and isinstance(link, dict) and link.get("server") == server
+                and isinstance(agent, str) and PASEO_ID.fullmatch(agent) and not agent.startswith("-")
+                and agent != os.environ.get("PASEO_AGENT_ID")
+                and (c is None or isinstance(c, dict) and c.get("device") == device)
+                and not lead_of(j) and not stopped_here(j[why[0]])
+                and isinstance(job_id, str) and JOB_ID.fullmatch(job_id) and ".." not in job_id
+                and isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"]))
+
+    jobs = [j for j in data["jobs"] if due(j)]
+    if not jobs:
+        return
+    statuses = paseo_statuses()
+    if statuses is None:
+        print("factory.py: pickup skips session stops: paseo did not answer", file=sys.stderr)
+        return
+    for j in jobs:
+        job_id, project, agent = j["id"], j["project"], j["paseo"]["agent"]
+        key, why = session_stop_reason(j, cutoff)
+        if statuses.get(agent) in (None, "closed"):
+            continue
+        line = f"session {agent} of {job_id} {project}: {why}"
+        if dry:
+            print(f"would stop {line}")
+            continue
+        if paseo_run(["stop", agent])[0]:
+            print(f"factory.py: pickup could not stop agent {agent} of {job_id}: paseo stop failed", file=sys.stderr)
+            continue
+
+        def change(text, job_id=job_id, key=key, at=j[key].get("at"), agent=agent):
+            board = load_board(text)
+            found = next((x for x in board["jobs"] if x.get("id") == job_id), None)
+            entry = (found or {}).get(key)
+            if not isinstance(entry, dict) or entry.get("at") != at or stopped_here(entry):
+                return None, False
+            patch = {key: {"session_stop": {device: {"agent": agent, "at": now()}}}}
+            if key == "close" and isinstance(found.get("claim"), dict) and found["claim"].get("device") == device:
+                patch["claim"] = None
+            patch_job(board, job_id, patch)
+            return dump_board(board), True
+        if cas(home, "/api/board", change):
+            if key == "close":
+                j.pop("claim", None)
+            print(f"stopped {line}")
+
+
 def prioritized(j):
     """True when the dashboard asked pickup to take this job first."""
     p = j.get("priority")
@@ -7142,6 +7217,7 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
     stalls = read_stalls(home)
     settings = {}
     move_stop_pass(home, data, device, paths, settings, dry, stalls[0] if stalls else None)
+    session_stop_pass(home, data, device, dry)
     pr_sync_pass(home, data, device, minutes, paths, settings, dry)
     autonomy_hold_pass(home, data, dry)
     close_pass(home, data, device, minutes, dry)
