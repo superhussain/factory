@@ -3839,6 +3839,8 @@ def routes_cmd(sub, *args):
 REVIEW_PAST_STAGES = ("approve", "pr-open", "merged", "closed")
 # The window a follow-up of an arm job counts in: 7 days from the original's done, else started.
 WINDOW_SECONDS = 7 * 86400
+# Finished (merged or closed) jobs each arm needs before the report compares arms.
+MIN_ARM_FINISHED = 5
 # decision.md's verdict formats, from SKILL.md. Anything else before the PR ships is a skipped step.
 DECISION_VERDICTS = ("APPROVE", "ESCALATE", "CLOSED:")
 
@@ -3849,6 +3851,31 @@ def stamp_of(value):
         return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
         return None
+
+
+def spread(values):
+    """{n, median, mad} of a list of numbers; median and mad are None when it is empty."""
+    if not values:
+        return {"n": 0, "median": None, "mad": None}
+    m = statistics.median(values)
+    return {"n": len(values), "median": round(m, 1), "mad": round(statistics.median(abs(x - m) for x in values), 1)}
+
+
+def job_tokens(j):
+    """A job's recorded token total over every tokens.<device>.models.<model> dict, or None when
+    no device entry has a models dict. Non-int values are skipped."""
+    if not isinstance(j.get("tokens"), dict):
+        return None
+    total, found = 0, False
+    for entry in j["tokens"].values():
+        models = entry.get("models") if isinstance(entry, dict) else None
+        if not isinstance(models, dict):
+            continue
+        found = True
+        for counts in models.values():
+            if isinstance(counts, dict):
+                total += sum(counts[key] for key in USAGE_TOKENS if type(counts.get(key)) is int)
+    return total if found else None
 
 
 def arm_metrics(arm_jobs, follow_ups, jobs_root):
@@ -3896,6 +3923,8 @@ def arm_metrics(arm_jobs, follow_ups, jobs_root):
                     skipped["pr_before_approve"].append(job_id)
     counts = [j["resumes"]["count"] for j in arm_jobs.values() if isinstance(j.get("resumes"), dict)
               and type(j["resumes"].get("count")) is int]
+    finished = [j for j in arm_jobs.values() if j.get("stage") in ("merged", "closed")]
+    tokens = [t for t in map(job_tokens, finished) if t is not None]
     return {"jobs": len(arm_jobs), "merged": stages.count("merged"), "closed": stages.count("closed"),
             "needs_human": stages.count("needs-human"),
             "escalated": sum(1 for j in arm_jobs.values() if escalated(j)),
@@ -3903,12 +3932,31 @@ def arm_metrics(arm_jobs, follow_ups, jobs_root):
             "changes_verdicts": sum(list(entry.values()).count("CHANGES") for j in arm_jobs.values()
                                     for entry in (j.get("rounds") or []) if isinstance(entry, dict)),
             "stuck_resumes": sum(counts),
-            "follow_ups_7d": follow_ups, "skipped_steps": skipped, "coverage_unknown": coverage_unknown}
+            "follow_ups_7d": follow_ups, "skipped_steps": skipped, "coverage_unknown": coverage_unknown,
+            "finished": len(finished), "rounds": spread(means), "tokens": spread(tokens)}
+
+
+def compare(a, b):
+    """Whether two arm_metrics dicts can be compared, and per metric whether b's median differs
+    from a's by more than the larger arm's median absolute deviation."""
+    ready = a["finished"] >= MIN_ARM_FINISHED and b["finished"] >= MIN_ARM_FINISHED
+    result = {"min_finished": MIN_ARM_FINISHED, "verdict": "compared" if ready else "inconclusive",
+              "reason": f"needs {MIN_ARM_FINISHED} finished jobs per arm: a has {a['finished']}, b has {b['finished']}"}
+    for metric in ("rounds", "tokens"):
+        sa, sb = a[metric], b[metric]
+        if not ready or sa["n"] < MIN_ARM_FINISHED or sb["n"] < MIN_ARM_FINISHED:
+            result[metric] = {"diff": None, "noise": None, "reads": "inconclusive"}
+            continue
+        diff, noise = round(sb["median"] - sa["median"], 1), max(sa["mad"], sb["mad"])
+        reads = "no difference" if abs(diff) <= noise else "b higher" if diff > 0 else "b lower"
+        result[metric] = {"diff": diff, "noise": noise, "reads": reads}
+    return result
 
 
 def experiment_cmd(sub, name):
     """Read-only per-arm outcome report for one owner-model experiment. Attributes by each
-    job's recorded experiment field, never by re-hashing. Prints JSON, writes nothing."""
+    job's recorded experiment field, never by re-hashing. Prints JSON, writes nothing. The
+    comparison block is advisory: nothing reads it."""
     if sub != "report":
         fail("usage: experiment report <name>", 2)
     if not SLUG.fullmatch(name):
@@ -3941,9 +3989,9 @@ def experiment_cmd(sub, name):
                 follow[arm]["unknown_window"] += 1
             elif (age - anchor).total_seconds() <= WINDOW_SECONDS:
                 follow[arm]["rework_of" if ref["kind"] == "rework-of" else "surfaced"].append(j["id"])
-    print(json.dumps({"name": name,
-                      "a": arm_metrics(arm_jobs["a"], follow["a"], Path(home, "jobs")),
-                      "b": arm_metrics(arm_jobs["b"], follow["b"], Path(home, "jobs"))}, indent=2))
+    a = arm_metrics(arm_jobs["a"], follow["a"], Path(home, "jobs"))
+    b = arm_metrics(arm_jobs["b"], follow["b"], Path(home, "jobs"))
+    print(json.dumps({"name": name, "a": a, "b": b, "comparison": compare(a, b)}, indent=2))
 
 
 def release_claim(home, job_id, device, session):
