@@ -537,3 +537,15 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("Return CHANGES when it is missing", review)
         self.assertIn("`spec.md#criterion-<n>-<result>`", review)
         self.assertIn("List each `needs device` row under `## Device check`", flat("factory-approver.md"))
+
+    def test_review_code_new_tests_and_spec_checks(self):
+        def flat(name):
+            return " ".join((SKILL / "agents" / name).read_text(encoding="utf-8").split())
+        review = flat("factory-review-code.md")
+        for phrase in ("Check every test the diff adds.", "`<test path>#change-detector-test`",
+                       "`<test path>#test-adds-no-coverage`", "is not a change detector", "no coverage tool runs",
+                       "`spec.md#criterion-<n>-check-differs`",
+                       "rerun that spec check yourself, never the `Check` cell"):
+            self.assertIn(phrase, review)
+        self.assertNotIn("Rerun one `passed` row's check yourself", review)
+        self.assertIn("Copy `Check` from the spec criterion's check", flat("factory-builder.md"))

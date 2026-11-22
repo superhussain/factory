@@ -152,11 +152,13 @@ empty heading. Report failures plainly.
 **Assertion ledger.** Every build.md run section holds a `### Assertion ledger` table
 with the columns `#`, `Criterion`, `Expected`, `Check`, `Result` and `Evidence`, one
 row per spec acceptance criterion in spec order. Write a row's `#`, `Criterion`,
-`Expected` and `Check` before you run its check. `Expected` is the exit status, output
-or state the check must show. Never change `Expected` after the check runs. Then set
-`Result` to `passed`, `failed` or `untested`, and put what you observed in `Evidence`,
-in a few words or a link to `build-evidence.md`. An `untested` row starts `Evidence`
-with its reason: `needs device`, `needs a person`, or the blocker that stopped it.
+`Expected` and `Check` before you run its check.
+Copy `Check` from the spec criterion's check, adding only a working directory or the
+project file's command prefix. `Expected` is the exit status, output or state the
+check must show. Never change `Expected` after the check runs. Then set `Result` to
+`passed`, `failed` or `untested`, and put what you observed in `Evidence`, in a few
+words or a link to `build-evidence.md`. An `untested` row starts `Evidence` with its
+reason: `needs device`, `needs a person`, or the blocker that stopped it.
 Every other check runs.
 
 When spec.md has a `## Repro` section, reproduce before you fix. Run its test or

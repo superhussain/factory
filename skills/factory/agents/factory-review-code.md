@@ -37,6 +37,21 @@ spec task that changed the behaviour it checks. Give the test's file:line, what 
 weakened, and the fix: restore the check, or fix the code so the original test
 passes.
 
+Check every test the diff adds. A change-detector test is a CHANGES finding: it
+asserts how the code works instead of what it does, so a refactor breaks it while a
+real bug passes. Flag a new test that asserts mock call order or call counts (such as
+`assert_has_calls`, `call_args_list`, `toHaveBeenNthCalledWith` or
+`toHaveBeenCalledTimes`) without checking an observable result, reads or patches
+private names (a leading underscore or an unexported helper), or snapshots internal
+structure instead of output a caller sees. A test that pins a contract the spec names,
+such as CLI output, a wire format, a stored file or agent prompt copy, is not a change
+detector. A new test that adds no coverage is also a CHANGES finding: it asserts
+nothing, mocks out the code it claims to test, or repeats an existing test's inputs
+and assertions. Judge both by reading the test, since no coverage tool runs. Give the
+test's file:line, what it pins or why it adds nothing, and the fix: assert the
+observable result through the public interface, or delete the test. Use the signature
+`<test path>#change-detector-test` or `<test path>#test-adds-no-coverage`.
+
 When spec.md has a `## Repro` section, return CHANGES unless build.md has a
 `### Repro` table with a `before fix` row that failed and an `after fix` row that
 passed, both running the spec's repro test or steps. Name what is missing. Run the
@@ -46,8 +61,13 @@ repro test once yourself to confirm the after-fix row.
 Return CHANGES when it is missing, when a spec acceptance criterion has no row, when a
 row is `failed`, or when an `untested` row's `Evidence` does not start with `needs
 device` or `needs a person`. An `untested` row is excused only when its check truly
-needs a device or a person this environment lacks. Rerun one `passed` row's check
-yourself and compare its output with `Expected`. Give each gap the signature
+needs a device or a person this environment lacks. Compare each row's `Check` cell
+with the check spec.md gives for that criterion. A cell that runs a different or
+narrower command, test or step is a CHANGES finding with the signature
+`spec.md#criterion-<n>-check-differs`. A different working directory, a `git -C` or
+`PYTHONPATH=tests/cli` prefix, or whitespace is not a difference. Pick one `passed`
+row whose spec check is a command, rerun that spec check yourself, never the `Check`
+cell, and compare its output with `Expected`. Give each gap the signature
 `spec.md#criterion-<n>-<result>`, such as `spec.md#criterion-2-untested`, or
 `spec.md#assertion-ledger-missing`.
 
