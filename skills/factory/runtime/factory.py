@@ -9955,6 +9955,53 @@ def orphan_pickup_scan(home):
         print(f"factory.py: orphan scan stopped (exit {e.code}); it runs again tomorrow", file=sys.stderr)
 
 
+STOP_CHECKS_FILE = "stop-checks.json"
+
+
+def read_stop_checks(home):
+    """The jobs dict of <home>/stop-checks.json, {} when the file is missing or malformed."""
+    try:
+        doc = json.loads(Path(home, STOP_CHECKS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    jobs = doc.get("jobs") if isinstance(doc, dict) and doc.get("version") == 1 else None
+    return jobs if isinstance(jobs, dict) else {}
+
+
+def stop_state(home, job):
+    """What a stopped job's next step depends on: its board fields, its worktree and origin branch heads,
+    and its R2 files with their ETags. No git fetch runs."""
+    job_id, project = job["id"], job["project"]
+    wt = home / "worktrees" / project / job_id
+    there = wt.exists()
+    listed = json.loads(api(home, "GET", f"/api/jobs/{project}/{job_id}/?etags=1")[2])
+    return dict({k: job.get(k) for k in ("stage", "round", "rounds", "pr", "needs", "note")},
+                head=git(wt, "rev-parse", "HEAD") if there else "",
+                origin=git(wt, "rev-parse", "--verify", "-q", f"refs/remotes/origin/factory/{job_id}") if there else "",
+                files=sorted(f"{o['name']} {o['etag']}" for o in listed if isinstance(o, dict)))
+
+
+def stop_key(state):
+    return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def stop_verdict(home, job, state):
+    """(resume, why, clear_needs) for a stopped job's state."""
+    needs = job.get("needs")
+    if not (isinstance(needs, str) and needs.strip()):
+        why = f"stopped at {state['stage']} with no live session"
+        if state["head"] and state["head"] != state["origin"]:
+            why += ", HEAD not on origin"
+        return True, why, False
+    names = {f.rsplit(" ", 1)[0] for f in state["files"]}
+    if f"#{job['id']}/needs" in needs and {"needs.md", "answers.md"} <= names:
+        base = f"/api/jobs/{job['project']}/{job['id']}/"
+        sha12 = hashlib.sha256(api(home, "GET", base + "needs.md")[2].encode("utf-8")).hexdigest()[:12]
+        if f"For needs.md sha256 {sha12}," in api(home, "GET", base + "answers.md")[2]:
+            return True, "ask answered in answers.md, needs still set", True
+    return False, "waits on its ask", False
+
+
 def stuck(*args):
     """Claim up to --limit jobs that a dead session left mid-loop, and print them as JSON
     for the resume schedule. Only this function writes a job's resumes."""
