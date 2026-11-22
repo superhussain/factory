@@ -7744,13 +7744,28 @@ def pre_review_cmd(target):
 
     head = (git("rev-parse", "HEAD") or "").strip() or None
     checks, reason = [], fetch_base(wt, base, repo)
+    spec, paths, numstat = folder / "spec.md", [], None
+    if is_link(spec):
+        why = "spec.md is a symlink or junction"
+    elif not spec.is_file():
+        why = "the job folder has no spec.md"
+    elif not (paths := spec_budget_paths(spec.read_text(encoding="utf-8"))):
+        why = "spec.md has no task Files paths"
+    elif reason:
+        why = "the base could not be fetched"
+    elif (numstat := diff_numstat(wt, base)) is None:
+        why = "the branch diff could not be read"
+    budget = diff_budget(paths, numstat) if numstat is not None else {
+        "result": "none", "files": 0, "lines": 0, "expected_files": 0, "expected_lines": 0, "file_limit": 0,
+        "line_limit": 0, "unlisted": [], "reason": why}
     if not reason:
         text = git("show", f"origin/{base}:{CHECKS_FILE}")
         checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
     if reason:
-        write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\nReason: {printable_line(reason, 300)}\n")
+        write_atomic(str(out_file), f"PRE-REVIEW: NONE\n\nHead: {head}\n{budget_line(budget)}\n"
+                                    f"Reason: {printable_line(reason, 300)}\n")
         print(json.dumps({"result": "none", "head": head, "checks": [], "reason": reason, "round": round_n,
-                          "repeats": []}))
+                          "repeats": [], "budget": budget}))
         return
     logs = make_job_temp(slug, job_id) / "pre-review"
     if is_link(logs):
@@ -7763,10 +7778,20 @@ def pre_review_cmd(target):
         results.append({"name": check["name"], "exit": code, "seconds": seconds})
     failed = [r for r in results if r["exit"] != 0]
     result = "fail" if failed else "pass"
-    lines = [f"PRE-REVIEW: {result.upper()}", "", f"Head: {head}",
+    lines = [f"PRE-REVIEW: {result.upper()}", "", f"Head: {head}", budget_line(budget),
              f"Checks: origin/{base}:{CHECKS_FILE} at {checks_sha}", f"Logs: {logs}", "",
              "| Check | Exit | Seconds |", "| --- | --- | --- |"]
     lines += [f"| {r['name']} | {r['exit']} | {r['seconds']} |" for r in results]
+    if budget["result"] == "over":
+        lines += ["", "## Diff budget", "", "| Measure | Spec estimate | Limit | Branch |", "| --- | --- | --- | --- |",
+                  f"| Files | {budget['expected_files']} | {budget['file_limit']} | {budget['files']} |",
+                  f"| Lines | {budget['expected_lines']} | {budget['line_limit']} | {budget['lines']} |"]
+        unlisted = budget["unlisted"]
+        if unlisted:
+            lines += ["", "Files outside the spec's task list:", ""]
+            lines += [f"- `{printable_line(p, 200)}`" for p in unlisted[:DIFF_BUDGET_UNLISTED_MAX]]
+            if len(unlisted) > DIFF_BUDGET_UNLISTED_MAX:
+                lines.append(f"- and {len(unlisted) - DIFF_BUDGET_UNLISTED_MAX} more")
     env = read_conf(home / ".env") if (home / ".env").exists() else {}
     for r in failed:
         log_text = (logs / f"{r['name']}.log").read_text(encoding="utf-8", errors="replace")
@@ -7788,7 +7813,7 @@ def pre_review_cmd(target):
         write_atomic(str(record_file), json.dumps(record) + "\n")
         repeats = sorted(names & set(record.get(str(round_n - 1), [])))
     print(json.dumps({"result": result, "head": head, "checks": results, "reason": None, "round": round_n,
-                      "repeats": repeats}))
+                      "repeats": repeats, "budget": budget}))
     if failed:
         sys.exit(1)
 
