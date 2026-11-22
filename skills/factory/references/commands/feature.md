@@ -31,7 +31,16 @@ feature.
    tier Rules selects from the spec, with its assigned dev-server port if the job
    needs one. It commits on
    the branch and writes `build.md`. Push the branch.
-4. Review round N: create `round-N/`, set stage `review`, `round` N, and append an
+4. Pre-review: run `python3 "$RUNTIME" hold "$SLUG/<id>"`, then
+   `python3 "$RUNTIME" pre-review "$SLUG/<id>"` as a background command, and act on its
+   completion notification. Exit 1 means a check failed: patch
+   `{"stage": "build", "note": "pre-review: <failed check names> failed"}`, resume the
+   builder with `<job folder>/pre-review.md` on a short line, and create no round
+   folder. A second exit 1 in one builder run counts as the Rules row for verification
+   failing twice. Any other nonzero exit puts its stderr line in the board `note`, and
+   the round goes ahead. A disputed-only round skips pre-review, since the head did not
+   move.
+   Review round N: create `round-N/`, set stage `review`, `round` N, and append an
    all-`pending` entry to `rounds`. Before spawning anyone, run
    `python3 "$RUNTIME" review-plan "$SLUG/<id>" <N>` and run
    `python3 "$RUNTIME" verdict "$SLUG/<id>" <N> <r> SKIPPED` for each reviewer `<r>` in its

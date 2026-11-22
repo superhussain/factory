@@ -125,7 +125,7 @@ A job's worktree is `WT="$WORKTREES/<id>"`, on branch `factory/<id>` cut from `$
 | Path | What |
 | --- | --- |
 | `$PROJECT` | project context for every agent |
-| `$JOBS/<id>/` | `spec.md`, `build.md`, `round-N/review-{security,ux,ui,code}.md`, `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, `<file>-evidence.md`, `scratchpad.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
+| `$JOBS/<id>/` | `spec.md`, `build.md`, `pre-review.md` (written by `factory.py pre-review`), `round-N/review-{security,ux,ui,code}.md`, `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, `<file>-evidence.md`, `scratchpad.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
 | `$WT` | the builder's worktree |
 | `$FACTORY/config.md`, `$FACTORY/.env` | device settings and the private Access service token |
 

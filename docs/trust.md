@@ -52,6 +52,17 @@ catalog order.
 | --- | --- |
 | `spec-approval` | A person approves spec.md before the build starts. |
 
+## Pre-review checks
+
+`factory.py pre-review` runs the commands in `.factory/checks.json` as read from
+`origin/<base>`, where `<base>` comes from the project file. It never reads the
+branch's copy and never takes a command from R2, so a branch cannot change what
+judges it and the Access token cannot run code on a host. The commands still run
+the branch's code, such as its package scripts, and reviewers read that code as
+before. Output tails of failing checks go into `pre-review.md` and reach R2,
+capped at 40 lines per check. A missing or invalid file gives `PRE-REVIEW: NONE`
+and reviewers work as before.
+
 ## Admission rules
 
 `checkOperatorText(text, field)` returns `null` or one message
