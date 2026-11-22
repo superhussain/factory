@@ -74,8 +74,12 @@ main checkout's shared `.git/config`. So one `http.*` key there, such as
 with `Reason: the worktree's git config sets url or http keys`. `review-plan` then
 cannot read the diff, so it rates the job tier high and keeps the ux and ui
 reviews. Find the key with
-`git -C <checkout> config --local --get-regexp '^(url|http)\.'`. Move a key you
-need to `git config --global`, which the check does not read.
+`git -C <checkout> config --local --get-regexp '^(url|http)\.'`. An `extraheader`
+that `actions/checkout` left behind carries a GitHub credential, so unset it with
+`git -C <checkout> config --local --unset-all 'http.https://github.com/.extraheader'`
+and never move it to global config, where every repository on the host would send
+it. Move a harmless key you need, such as `http.postBuffer`, to
+`git config --global`, which the check does not read.
 
 ## Review citation check
 
