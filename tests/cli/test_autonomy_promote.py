@@ -114,3 +114,13 @@ class AutonomyPromoteTest(IsolatedTestCase):
         asked.assert_called_once_with(PROMPT)
         self.assertEqual([(method, path) for method, path, _, _ in self.requests if path == "/api/board"],
                          [("GET", "/api/board")] * 2)
+
+    def test_malformed_promoted_map(self):
+        self.assert_refused(board(promoted="bad"),
+                            "alpha visible cannot be promoted yet: autonomy.promoted is not a map; nothing was changed")
+        other = {"alpha/internal": {"at": "x"}}
+        code, _, _, puts = self.run_promote("alpha", "visible", data=board(promoted=other))
+        self.assertEqual(code, 0)
+        self.assertEqual(puts[0]["autonomy"]["promoted"], {
+            "alpha/internal": {"at": "x"},
+            "alpha/visible": {"at": NOW, "by": "device", "jobs": 20, "days": 30, "until": "2026-12-06T10:00:00Z"}})

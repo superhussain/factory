@@ -3084,7 +3084,7 @@ def autonomy_cmd(sub, slug=None, cls=None):
             record["restored"] = {**autonomy_restored(data), f"{slug}/{cls}": stamp}
             if gate:
                 until = (stamp_of(stamp) + timedelta(days=AUTONOMY_COOLDOWN_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
-                record["promoted"] = {**autonomy_promoted(data), f"{slug}/{cls}": {
+                record["promoted"] = {**record.get("promoted", {}), f"{slug}/{cls}": {
                     "at": stamp, "by": device, "jobs": gate["jobs"], "days": gate["days"], "until": until}}
         else:
             key = "projects" if sub == "allow" else "self"
@@ -13373,6 +13373,8 @@ def autonomy_promotion(data, slug, cls):
         ([f"cooldown until {promoted['until']}"] if until and current < until else []) + \
         ([f"promoted record for {key} is malformed"] if isinstance(stored, dict) and key in stored and not promoted
          else []) + \
+        (["autonomy.promoted is not a map"] if isinstance(record, dict) and "promoted" in record
+         and not isinstance(stored, dict) else []) + \
         (cell["why"] if cell["verdict"] != "automerge" else [])
     return {"since": since.strftime("%Y-%m-%dT%H:%M:%SZ"), "days": days, "jobs": cell["scanned"], "why": why}
 
