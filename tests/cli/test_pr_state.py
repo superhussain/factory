@@ -551,6 +551,13 @@ class PrStateTest(IsolatedTestCase):
         self.assertEqual((json.loads(out)["items"], json.loads(out)["next"]),
                          ([{"sig": conflict, "label": "a merge conflict with main", "count": 1}], "rebase"))
 
+    def test_a_listed_item_is_not_rearmed(self):
+        twice = (0, json.dumps([{"bucket": "fail", "name": "lint"}, {"bucket": "pass", "name": "lint"}]))
+        code, out, err, _ = self.state([(view(), twice)], handled={LINT: {"count": 2, "at": AT}})
+        self.assertEqual((code, err), (0, ""))
+        reading = json.loads(out)
+        self.assertEqual((reading["items"], reading["rearm"]), ([{"sig": LINT, "label": "lint", "count": 2}], []))
+
     def test_bad_wait_exits_2(self):
         for args in (["--wait", "0"], ["--wait", "601"], ["--wait"], ["--wait", "x"], ["--timeout", "5"]):
             with self.subTest(args):

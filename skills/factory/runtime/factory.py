@@ -7562,8 +7562,9 @@ def pr_reading(home, pr, base, buildkite_org, handled=None):
     for c in listed:
         if c["bucket"] in ("fail", "cancel"):
             note("check", c["name"], c["name"])
+    listed_sigs = {i["sig"] for i in items + capped}
     rearm = [s for s in dict.fromkeys(handled_sig("check", c["name"]) for c in listed
-                                      if c["bucket"] in ("pass", "skipping")) if s in handled]
+                                      if c["bucket"] in ("pass", "skipping")) if s in handled and s not in listed_sigs]
     if merge_state not in ("DIRTY", "UNKNOWN"):
         rearm += [s for s in handled if s.startswith("conflict:")]
     kinds = {i["sig"].split(":", 1)[0] for i in items}
