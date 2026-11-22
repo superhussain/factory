@@ -131,6 +131,18 @@ test("an unreadable stored record reads as halted", async () => {
   assert.deepEqual(JSON.parse(r.text), { halted: true, reason: HALT_UNREADABLE });
 });
 
+test("a person resume rewrites an unreadable stored record", async () => {
+  const s = setup();
+  await s.bucket.put("halt.json", "not json");
+  const r = await s.halt({ halted: false });
+  assert.equal(r.status, 200);
+  const record = JSON.parse(s.stored());
+  assert.deepEqual(JSON.parse(r.text), record);
+  assert.equal(record.halted, false);
+  assert.equal(record.by_kind, "person");
+  assert.deepEqual(JSON.parse((await s.send("GET", "/api/halt")).text), record);
+});
+
 test("other methods are not found", async () => {
   const s = setup();
   assert.equal((await s.send("DELETE", "/api/halt")).status, 404);
