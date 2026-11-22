@@ -3969,7 +3969,7 @@ def trial_valid(t):
     return (isinstance(t, dict) and isinstance(t.get("project"), str) and bool(SLUG.fullmatch(t["project"]))
             and t.get("stage") in PIPELINE_STAGES and type(t.get("version")) is int
             and type(t.get("champion_version")) is int and t["champion_version"] >= 0
-            and t.get("id") == f"{t['project']}-{t['stage']}-v{t['version']}" and isinstance(t.get("opened"), str))
+            and t.get("id") == f"{t['project']}-{t['stage']}-v{t['version']}" and stamp_of(t.get("opened")) is not None)
 
 
 def open_trial_for(data, slug, stage):

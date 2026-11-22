@@ -281,7 +281,8 @@ Only `retro admit`, `trial settle` and `trial resume` write `trials`.
 A refused revert prints `trial <id> revert failed: <status> <text>` and leaves the trial
 open for the next settle. A revert counts toward the daily retro cap. The board keeps
 open records and the newest 20 settled ones. Settle skips malformed records, including
-one whose `opened` is not a string, and drops non-dict entries from `trials`.
+one whose `opened` is not a board timestamp, and drops non-dict entries from `trials`
+when it writes the board.
 - **Pause.** Two reverted trials without `resumed` pause a project's stage-note edits.
   Settle then prints
   `stage-note trials paused for <slug> after 2 reverts; a person runs trial resume <slug>`,

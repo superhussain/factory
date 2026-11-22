@@ -353,13 +353,14 @@ class TrialSettleTest(TrialWorkerCase):
         self.assertEqual(len(requests), 1)
 
     def test_malformed_records_do_not_crash_settle(self):
-        board = running(["junk", trial(version=9, opened=5), trial()], arm_jobs(b={"rounds": 3}))
+        board = running(["junk", trial(version=9, opened=5), trial(version=10, opened="garbage"), trial()],
+                        arm_jobs(b={"rounds": 3}))
         code, out, err, _, written = self.settle(board)
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(out, f"trial {TRIAL} reverted to version 9: rounds b higher, tokens no difference\n")
         self.assertNotIn("junk", written[0]["trials"])
         self.assertEqual({t["id"]: t["status"] for t in written[0]["trials"]},
-                         {"factory-spec-v9": "open", TRIAL: "reverted"})
+                         {"factory-spec-v9": "open", "factory-spec-v10": "open", TRIAL: "reverted"})
 
     def test_no_open_trials(self):
         code, out, _, requests, _ = self.settle(running([trial(status="kept")]))
