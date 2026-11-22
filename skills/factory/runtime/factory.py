@@ -8262,24 +8262,18 @@ def checks_cmd(target, *args):
         fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
     start = since = time.monotonic()
     usable = False
-    updated_from = seen = None
+    updated_from = None
     while True:
-        checks, problem = pr_checks(pr)
+        behind, sha, base = pr_behind(pr)
+        checks, problem = head_checks(pr, sha)
         if problem:
-            print(f"factory.py: warning: gh pr checks gave no usable reply ({problem})", file=sys.stderr)
+            print(f"factory.py: warning: gh api graphql gave no usable check list ({problem})", file=sys.stderr)
         else:
             usable = True
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
             failing = [c["name"] for c in checks if c["bucket"] not in ("pass", "skipping")]
-            done = bool(failing)
-            if not failing:
-                behind, sha, base = pr_behind(pr)
-                # After an update, gh pr checks may still list the old head's checks while pr_behind
-                # already sees the new head, so exit only once an earlier reading saw the same head.
-                done = not behind and sha != updated_from and (updated_from is None or sha == seen)
-                seen = sha
-            if done:
+            if failing or (not behind and sha != updated_from):
                 for c in checks:
                     print(f"{c['bucket']} {c['name']}")
                 if failing:
@@ -8304,7 +8298,7 @@ def checks_cmd(target, *args):
         elapsed = time.monotonic() - start
         waited = time.monotonic() - since
         if not checks and not usable and waited >= min(CHECKS_REGISTER, timeout):
-            fail("gh pr checks never gave a usable reply", 5)
+            fail("gh api graphql never gave a usable check list", 5)
         if not checks and waited >= CHECKS_REGISTER:
             print("no checks reported")
             return
