@@ -26,7 +26,7 @@
   "stacked": "true on the one rider that ships as a PR stacked on its lead's PR; set only by factory.py stack",
   "build": { "state": "queued | running | done | failed", "runs": ["https://github.com/<repo>/actions/runs/1"] },
   "pipeline": { "global": 3, "project": 2 },
-  "backlog": { "line": "- [ ] <slug>: <feature>", "decision": "approved | denied | rework", "at": "...", "notes": "optional", "answers": "optional", "notes_read": "..." },
+  "backlog": { "line": "- [ ] <slug>: <feature>", "decision": "approved | denied | rework", "at": "...", "notes": "optional", "answers": "optional", "notes_read": "...", "decider": "person | model" },
   "experiment": { "name": "pilot", "arm": "a | b", "provider": "provider-b", "model": "model-b", "effort": "high" },
   "agents": [{ "at": "...", "stage": "spec", "role": "spec", "harness": "claude", "via": "native", "model": "...", "effort": "medium", "session": "a1b2c3", "paseo": {"server": "...", "agent": "..."} }],
   "claim": { "device": "device-one", "session": "a1b2c3", "since": "...", "seen": "..." },
@@ -74,6 +74,7 @@ one board write and ends. `stuck` resumes it after that time.
 `backlog` is set only on jobs decided from the Backlog column or `backlog decide`. It holds
 the backlog line, the decision, when it was made, and any notes typed with the decision.
 Approve also appends the notes to `idea`.
+`decider` says who made the decision: `person` for the dashboard and `backlog decide`, `model` when backlog triage queued the line.
 
 How the dashboard's idea column, Assign project and backlog decision page behave is in [dashboard](dashboard.md).
 

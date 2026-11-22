@@ -340,6 +340,11 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   changed meanwhile, it drops the row while the row is still an unclaimed idea. The idea
   carries the line's context under `Context from the backlog:`, cut so the idea stays within
   4000 characters, as a dashboard Approve does.
+- **Decider.** Every verdict carries `decider`. The deny and question holds are `rule`, and
+  a threshold verdict is `model`, even when a question hold has a score. Board `backlog` records
+  carry `decider` too: `person` from the dashboard or `backlog decide`, `model` when triage queued
+  the line. Older records infer it: `by: "triage"` means `model` and any other is `person`. An
+  older hold with no confidence, or with a deny or question reason, is `rule`.
 - **Hold.** The line waits in the backlog for a person, as before.
   The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board reads the stored verdicts of the lines it lists in one `POST /api/backlog/triage/verdicts` call per 50 lines. It reads again only when the listed lines change, and only for lines with no verdict yet. Opening a line with no verdict reads that line again. A line the Worker would refuse, such as one over 2000 characters, reads as no verdict and leaves the other lines' verdicts intact.
 - **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
@@ -388,6 +393,14 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   `possible duplicate of <id>`. The note is advisory: it never holds, closes or changes the
   queue decision, and no candidates, a missing binding, a failed call or a pick of `none` just
   leave it out. Holds and question items get no check.
+- **Replay.** `factory.py triage replay <slug> [--threshold N]` scores a threshold against what
+  people decided. Its labels are the project's board and archive `backlog` records whose decider
+  is `person` and decision is `approved` or `denied`, latest `at` per line. Each label is paired with
+  the line's stored model hold: a confidence at or above the threshold queues. `agreement` is
+  `round(100 * (queue_approved + hold_denied) / scored)`, or null with nothing scored. Rule holds and
+  lines with no stored hold count under `unscored`. `model_queued` counts lines triage queued, which
+  no person decided, so a higher threshold stays untested. It prints JSON with a row for the current
+  threshold and one for `--threshold` when it differs. It is read only: no model calls and no writes.
 - **Floors.** A queued idea still goes through the spec, the reviews F2 requires, the
   approver, merge rules and any `spec-approval` gate.
 - **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
