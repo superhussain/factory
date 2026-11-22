@@ -18,7 +18,7 @@ This page walks through every dashboard view with a made-up job, `051-sample-ret
 
 ## The job panel
 
-- The tabs are `idea`, `spec`, `build`, `R<n> security`, `R<n> ux`, `R<n> ui`, `R<n> code`, `rework <n>`, `decision`, `needs`, `answers`, `scratchpad` and `audit`.
+- The tabs are `idea`, `spec`, `build`, `Pre-review`, `R<n> security`, `R<n> ux`, `R<n> ui`, `R<n> code`, `rework <n>`, `decision`, `needs`, `answers`, `scratchpad` and `audit`.
 - A page with a walkthrough shows an "Interactive walkthrough" bar with Show and Expand.
 - The Star button stars the job. Stars stay in this browser.
 - Babysit PR sits in the header and in the Job actions menu. It shows only for a `pr-open` job with a PR that is not paused, closing or a batch rider. It asks you to confirm. Then it sets the note `babysitting PR #<n>`, clears needs and escalation, and prioritizes pickup.
