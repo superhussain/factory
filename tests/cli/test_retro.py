@@ -497,6 +497,12 @@ def digest_row(host, session, job="1017", **over):
 
 
 S1, S2, S3 = ("3ae1fc86-0000-4000-8000-00000000000%d" % n for n in (1, 2, 3))
+NO_FINDINGS = {"changes": 0, "fixed": 0, "disputed": 0, "accept_pct": None, "jobs": 0, "project": None, "sessions": []}
+ACCEPT = {"security": {"changes": 1, "fixed": 1, "disputed": 0, "accept_pct": 100, "jobs": 1, "project": "factory",
+                       "sessions": []},
+          "ux": NO_FINDINGS, "ui": NO_FINDINGS,
+          "code": {"changes": 2, "fixed": 1, "disputed": 1, "accept_pct": 50, "jobs": 1, "project": "factory",
+                   "sessions": [f"host-a/{S1}"]}}
 
 
 class RetroAggregateTest(RetroWorkerCase):
@@ -633,7 +639,8 @@ class RetroAggregateTest(RetroWorkerCase):
                           "factory/notes.md": {"version": 4, "text": "- Run pnpm test.\n"},
                           "factory/decisions.md": {"version": 0, "text": "# Decisions\n"},
                           "factory/runbook.md": {"version": 1, "text": "# Runbook\n"}},
-            "merged": [], "red_flags": [], "lessons": []})
+            "merged": [], "red_flags": [], "lessons": [],
+            "reviewers": {r: NO_FINDINGS for r in factory.REVIEWERS}})
         self.assertFalse(any(key.startswith("sample-tools") for key in agg["documents"]))
 
     def test_aggregate_lists_merged_jobs(self):
@@ -722,6 +729,30 @@ class RetroAggregateTest(RetroWorkerCase):
         expected = sorted(jobs, key=lambda j: j["done"], reverse=True)[:20]
         self.assertEqual([r["job"] for r in lessons], [j["id"] for j in expected])
         self.assertEqual(len(lessons), factory.RETRO_LESSONS_MAX)
+
+    def test_aggregate_counts_reviewer_accept_rate(self):
+        today = datetime.now().date()
+        job = {"id": "1740-cap-backlog", "project": "factory", "title": "Cap backlog", "stage": "merged",
+               "done": f"{today.isoformat()}T12:30:00Z",
+               "rounds": [{"security": "CHANGES", "ux": "SKIPPED", "ui": "SKIPPED", "code": "CHANGES"},
+                          {"security": "PASS", "ux": "SKIPPED", "ui": "SKIPPED", "code": "PASS"}]}
+        routes = self.window(7, {0: {"host-a": [digest_row("host-a", S1, job="1740")]}})
+        routes["GET /api/board"] = (200, {"updated": "2026-11-12T09:00:00Z", "jobs": [job],
+                                          "autonomy": {"paused": False, "projects": ["factory"], "self": []}})
+        prefix = "GET /api/jobs/factory/1740-cap-backlog/"
+        routes[prefix + "round-1/review-code.md"] = (200, b"VERDICT: CHANGES\n\n"
+                                                     b"Signature: worker/backlog.js#missing-limit-check\n"
+                                                     b"Signature: worker/backlog.js#unbounded-loop\n")
+        routes[prefix + "round-1/review-security.md"] = (200, b"VERDICT: CHANGES\n\n"
+                                                         b"Signature: worker/backlog.js#unescaped-title\n")
+        routes[prefix + "build.md"] = (200, b"### Disputed findings\n\n| Round | Reviewer | Signature | Reason |\n"
+                                       b"| --- | --- | --- | --- |\n"
+                                       b"| 1 | code | `worker/backlog.js#unbounded-loop` | The loop stops at BACKLOG_MAX. |\n"
+                                       b"| 1 | code | worker/backlog.js#never-raised | Not in the review. |\n")
+        code, out, err = self.aggregate(routes)
+        self.assertEqual((code, err), (0, ""))
+        agg = json.loads(Path(json.loads(out)["aggregate"]).read_text(encoding="utf-8"))
+        self.assertEqual(agg["reviewers"], ACCEPT)
 
     def test_latest_is_the_newest_kept_row(self):
         code, out, err = self.aggregate(self.window(7, {1: {"host-a": [digest_row("host-a", S1)]},

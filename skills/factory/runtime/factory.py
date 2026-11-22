@@ -1984,14 +1984,27 @@ def escalation_cmd(target, round_text):
 SIGNATURE = re.compile(r"(?:[-*] )?Signature: ([A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5})")
 
 
+def changes_signatures(text):
+    """The Signature: lines of a CHANGES review's text, or an empty set for any other review."""
+    lines = text.splitlines()
+    if lines[:1] != ["VERDICT: CHANGES"]:
+        return set()
+    return {m.group(1) for m in map(SIGNATURE.fullmatch, (line.strip() for line in lines)) if m}
+
+
 def review_signatures(path):
     """The Signature: lines of a CHANGES review, or an empty set for any other or missing review."""
     if not path.is_file():
         return set()
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    if lines[:1] != ["VERDICT: CHANGES"]:
-        return set()
-    return {m.group(1) for m in map(SIGNATURE.fullmatch, (line.strip() for line in lines)) if m}
+    return changes_signatures(path.read_text(encoding="utf-8", errors="replace"))
+
+
+DISPUTE_ROW = re.compile(r"\|\s*([1-9][0-9]*)\s*\|\s*(security|ux|ui|code)\s*\|\s*`?([A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5})`?\s*\|")
+
+
+def build_disputes(text):
+    """(round, reviewer, signature) for every Disputed findings row in build.md, across all run sections."""
+    return {(int(m[1]), m[2], m[3]) for m in map(DISPUTE_ROW.match, (line.strip() for line in text.splitlines())) if m}
 
 
 def repeats_cmd(target, round_text):
@@ -12879,6 +12892,52 @@ def retro_lessons(board, projects, rows, since):
     return sorted(out, key=lambda r: r["at"], reverse=True)[:RETRO_LESSONS_MAX]
 
 
+def retro_reviewers(home, board, projects, rows, since):
+    """Per reviewer, the CHANGES findings in jobs of registered projects merged or closed since the window start,
+    and how many the builder disputed in build.md's Disputed findings table."""
+    jobs = sorted((j for j in board["jobs"] if j.get("stage") in ("merged", "closed") and isinstance(j.get("done"), str)
+                   and j["done"][:10] >= since and j.get("project") in projects),
+                  key=lambda j: j["done"], reverse=True)[:RETRO_MERGED_MAX]
+    stats = {r: {"changes": 0, "disputed": 0, "jobs": 0, "counts": {}, "sessions": []} for r in REVIEWERS}
+    for j in jobs:
+        base = f"/api/jobs/{j['project']}/{j['id']}"
+        rounds = j.get("rounds") if isinstance(j.get("rounds"), list) else []
+        found = {}
+        for i, e in enumerate(rounds):
+            if not isinstance(e, dict):
+                continue
+            for r in REVIEWERS:
+                if e.get(r) == "CHANGES":
+                    status, _, text = api(home, "GET", f"{base}/round-{i + 1}/review-{r}.md", ok=(200, 404))
+                    if status == 200:
+                        found[(i + 1, r)] = changes_signatures(text)
+        if not any(found.values()):
+            continue
+        status, _, text = api(home, "GET", f"{base}/build.md", ok=(200, 404))
+        disputes = build_disputes(text) if status == 200 else set()
+        number = j["id"].split("-", 1)[0]
+        refs = list(dict.fromkeys(f"{row['host']}/{row['session']}" for row in rows if str(row.get("job")) == number))
+        for r in REVIEWERS:
+            signed = [(n, s) for (n, reviewer), sigs in found.items() if reviewer == r for s in sigs]
+            if not signed:
+                continue
+            st, hits = stats[r], sum((n, r, s) in disputes for n, s in signed)
+            st["changes"] += len(signed)
+            st["disputed"] += hits
+            st["jobs"] += 1
+            st["counts"][j["project"]] = st["counts"].get(j["project"], 0) + 1
+            if hits:
+                st["sessions"] = list(dict.fromkeys(st["sessions"] + refs))[:5]
+    out = {}
+    for r, st in stats.items():
+        n, counts = st["changes"], st["counts"]
+        out[r] = {"changes": n, "fixed": n - st["disputed"], "disputed": st["disputed"],
+                  "accept_pct": round(100 * (n - st["disputed"]) / n) if n else None, "jobs": st["jobs"],
+                  "project": min(counts, key=lambda p: (-counts[p], p)) if counts else None,
+                  "sessions": st["sessions"]}
+    return out
+
+
 def retro_aggregate(days):
     """Pull every host's digest for the last days into <home>/retro/<run>/ for the retro agent."""
     home = factory_home()
@@ -12994,6 +13053,7 @@ def retro_aggregate(days):
     status, _, text = api(home, "GET", "/api/audit-flags", ok=(200, 404))
     agg["red_flags"] = retro_red_flags(json.loads(text) if status == 200 else {}, board, projects, rows)
     agg["lessons"] = retro_lessons(board, projects, rows, dates[0])
+    agg["reviewers"] = retro_reviewers(home, board, projects, rows, dates[0])
     folder.mkdir(parents=True)
     (folder / "aggregate.json").write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
     (folder / "digest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
