@@ -4157,7 +4157,8 @@ def experiment_arm(job_id, percent):
     return "b" if bucket < percent else "a"
 
 
-# Retro stage-note trials: an open trial that cannot compare after TRIAL_MAX_DAYS keeps its edit,
+# Retro stage-note trials: an open trial that cannot compare after TRIAL_MAX_DAYS keeps its edit;
+# a trial whose revert the Worker still refuses then is settled revert-failed and keeps its edit.
 # TRIAL_PAUSE_REVERTS unresumed reverts pause a project's stage-note edits, and the board keeps
 # the newest TRIAL_KEEP settled records.
 TRIAL_MAX_DAYS = 28
@@ -14255,6 +14256,7 @@ def trial_settle(home):
         result = compare(a, b)
         reads = {metric: result[metric]["reads"] for metric in ("rounds", "tokens")}
         said = f"rounds {reads['rounds']}, tokens {reads['tokens']}"
+        expired = datetime.now(timezone.utc) - stamp_of(t["opened"]) >= timedelta(days=TRIAL_MAX_DAYS)
         update = updates[tid] = {"arms": {arm: sorted(arms[arm]) for arm in arms}, "reads": reads}
         if result["verdict"] == "compared" and "b higher" in reads.values():
             body = {"schema": RETRO_EDIT_SCHEMA, "run": t["run"], "base_version": int(headers["X-Pipeline-Version"]),
@@ -14263,7 +14265,12 @@ def trial_settle(home):
                                     ok=(200, 400, 403, 404, 409, 412, 413, 429),
                                     headers={"Content-Type": "application/json"})
             if status != 200:
-                print(f"trial {tid} revert failed: {status} {printable_line(text, 200)}".strip())
+                why = f"{status} {printable_line(text, 200)}".strip()
+                if expired:
+                    update.update(status="revert-failed", settled=now())
+                    print(f"trial {tid} revert failed after {TRIAL_MAX_DAYS} days: kept the edit: {why}")
+                else:
+                    print(f"trial {tid} revert failed: {why}")
                 continue
             version = int(got["X-Pipeline-Version"])
             update.update(status="reverted", settled=now(), revert_version=version)
@@ -14271,7 +14278,7 @@ def trial_settle(home):
         elif result["verdict"] == "compared":
             update.update(status="kept", settled=now())
             print(f"trial {tid} kept: {said}")
-        elif datetime.now(timezone.utc) - stamp_of(t["opened"]) >= timedelta(days=TRIAL_MAX_DAYS):
+        elif expired:
             update.update(status="inconclusive", settled=now())
             print(f"trial {tid} inconclusive after {TRIAL_MAX_DAYS} days: kept the edit")
         else:
