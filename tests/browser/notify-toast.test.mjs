@@ -280,17 +280,19 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
     });
 
     const STATUS = "Could not resume the factory. Try again.";
-    const showWithStatus = async (position) => {
+    const LONG =
+      "Could not save the board. Another device changed 073-sample-retry and 074-sample-queue while you edited. Reload the board to see their changes, then try again.";
+    const showWithStatus = async (position, text = STATUS) => {
       await page.evaluate((pos) => {
         toastPosition = pos;
         applyDisplay();
         showNotifyToast("spec", "#073-sample-retry", "Synthetic retry limit", "073-sample-retry");
       }, position);
-      await page.evaluate((text) => showBoardStatus(text), STATUS);
+      await page.evaluate((value) => showBoardStatus(value), text);
       await page.waitForFunction(
-        (text) => document.getElementById("board-status").textContent === text,
+        (value) => document.getElementById("board-status").textContent === value,
         wait,
-        STATUS,
+        text,
       );
     };
     const stackAboveStatus = () =>
@@ -369,6 +371,29 @@ test("notification toasts", { timeout: 180000 }, async (t) => {
       await showWithStatus("bottom-right");
       await stackAtBottom();
       await resetStack();
+    });
+
+    await t.test("desktop corner toast T5 yields to a long status", async () => {
+      for (const pos of ["bottom-left", "bottom-right"]) {
+        await showWithStatus(pos, LONG);
+        assert.ok(
+          await page.evaluate(() => {
+            const s = document.getElementById("board-status").getBoundingClientRect();
+            const k = document.getElementById("notify-toasts").getBoundingClientRect();
+            return s.left < k.right && s.right > k.left;
+          }),
+          pos,
+        );
+        await stackAboveStatus();
+        await page.evaluate((text) => showBoardStatus(text), STATUS);
+        await page.waitForFunction(
+          (text) => document.getElementById("board-status").textContent === text,
+          wait,
+          STATUS,
+        );
+        await stackAtBottom();
+        await resetStack();
+      }
     });
 
     assert.deepEqual(errors, []);
