@@ -8,16 +8,30 @@ from unittest.mock import patch
 
 from support import IsolatedTestCase, http_fixture, invoke, load_runtime
 
-import test_retro as retro
-
 factory = load_runtime()
+RUN = "20261111T090000Z-a1b2c3"
 TRIAL = "factory-spec-v8"
-CHAMPION = retro.NOTE
-CHALLENGER = retro.edit()["note"]
+CHAMPION = "Name the acceptance check for each criterion."
+CHALLENGER = CHAMPION + " Put the test file in the Check column."
+EDIT_SUMMARY = "Spec note: name the test file for each criterion"
 PIPELINE_GET = "GET /api/pipeline/projects/factory"
 REVERT_ROUTE = "PUT /api/pipeline/retro/projects/factory"
 PAUSE_LINE = ("stage-note trials paused for factory after 2 reverts; "
               "a person runs trial resume factory")
+
+
+def edit(**over):
+    e = {"scope": "projects/factory", "stage": "spec", "note": CHALLENGER, "summary": EDIT_SUMMARY}
+    e.update(over)
+    return e
+
+
+def reply(edits):
+    finding = {"title": "ls alias crashes in non-interactive shells", "category": "tool-economy", "count": 253,
+               "cost": 250, "sessions": ["host-a/3ae1fc86-0000-4000-8000-000000000001"],
+               "root_cause": "The colorls alias needs a terminal size.",
+               "fix": "Alias ls only in interactive shells.", "project": "sample-tools"}
+    return {"schema": "factory.retro/1", "run": RUN, "findings": [finding], "suggestions": [], "edits": edits}
 
 
 def stamp(**delta):
@@ -25,8 +39,8 @@ def stamp(**delta):
 
 
 def trial(**over):
-    t = {"id": TRIAL, "project": "factory", "stage": "spec", "version": 8, "run": retro.RUN,
-         "summary": retro.EDIT_SUMMARY, "champion": CHAMPION, "challenger": CHALLENGER,
+    t = {"id": TRIAL, "project": "factory", "stage": "spec", "version": 8, "run": RUN,
+         "summary": EDIT_SUMMARY, "champion": CHAMPION, "challenger": CHALLENGER,
          "opened": stamp(days=-3), "status": "open"}
     t.update(over)
     return t
@@ -91,70 +105,73 @@ class TrialHelpersTest(unittest.TestCase):
         self.assertEqual({arm: list(ids) for arm, ids in arms.items()}, {"a": [a], "b": [b]})
 
 
-class TrialOpenTest(retro.RetroWorkerCase):
+class TrialOpenTest(IsolatedTestCase):
     def setUp(self):
-        super().setUp()
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.home = Path(temp.name).resolve()
+        os.environ["FACTORY_HOME"] = str(self.home)
         patcher = patch.object(factory, "retro_upload")
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.folder = self.home / "retro" / retro.RUN
+        self.folder = self.home / "retro" / RUN
         self.folder.mkdir(parents=True)
-        agg = {"schema": "factory.retro-aggregate/1", "run": retro.RUN, "from": "2026-11-05", "to": "2026-11-11",
+        agg = {"schema": "factory.retro-aggregate/1", "run": RUN, "from": "2026-11-05", "to": "2026-11-11",
                "host": "host-a", "projects": ["factory", "sample-tools"], "hosts": {"host-a": {"sessions": 4, "jobs": 2, "ad_hoc": 0}},
                "pipeline": {"global": {"version": 0, "stage_notes": {}},
                             "projects/factory": {"version": 7, "stage_notes": {"spec": CHAMPION}}}}
         (self.folder / "aggregate.json").write_text(json.dumps(agg), encoding="utf-8")
 
     def admit(self, edits, trials=()):
-        (self.folder / "reply.json").write_text(json.dumps(retro.reply(edits=edits)), encoding="utf-8")
+        (self.folder / "reply.json").write_text(json.dumps(reply(edits=edits)), encoding="utf-8")
         routes = {"GET /api/board": (200, running(trials)),
-                  retro.PUT_ROUTE: (200, b"ok", {"X-Pipeline-Version": "8"}), "PUT /api/board": (200, b"ok")}
+                  REVERT_ROUTE: (200, b"ok", {"X-Pipeline-Version": "8"}), "PUT /api/board": (200, b"ok")}
         with http_fixture(routes) as server:
-            self.config(server.origin)
-            code, out, err = invoke(factory, ["retro", "admit", retro.RUN])
+            (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\ndevice: mac\n---\n")
+            code, out, err = invoke(factory, ["retro", "admit", RUN])
         return code, out, err, server.requests, (self.folder / "findings.md").read_text(encoding="utf-8")
 
     def test_saved_edit_opens_a_trial_with_champion_and_challenger(self):
         before = stamp()
-        code, out, err, requests, _ = self.admit([retro.edit()])
+        code, out, err, requests, _ = self.admit([edit()])
         self.assertEqual((code, err), (0, ""))
         self.assertIn(f"trial {TRIAL} opened: alternate jobs keep the old note until trial settle decides\n", out)
         board = json.loads(next(body for m, p, _, body in requests if f"{m} {p}" == "PUT /api/board"))
         record = board["trials"][0]
         self.assertTrue(before <= record.pop("opened") <= stamp())
-        self.assertEqual(record, {"id": TRIAL, "project": "factory", "stage": "spec", "version": 8, "run": retro.RUN,
-                                  "summary": retro.EDIT_SUMMARY, "champion": CHAMPION, "challenger": CHALLENGER,
+        self.assertEqual(record, {"id": TRIAL, "project": "factory", "stage": "spec", "version": 8, "run": RUN,
+                                  "summary": EDIT_SUMMARY, "champion": CHAMPION, "challenger": CHALLENGER,
                                   "status": "open"})
 
     def test_new_stage_opens_with_an_empty_champion(self):
-        build = retro.edit(stage="build", note="Run the tests.", summary="Build note: run the tests")
+        build = edit(stage="build", note="Run the tests.", summary="Build note: run the tests")
         _, out, _, requests, _ = self.admit([build])
         self.assertIn("trial factory-build-v8 opened", out)
         board = json.loads(next(body for m, p, _, body in requests if f"{m} {p}" == "PUT /api/board"))
         self.assertEqual(board["trials"][0]["champion"], "")
 
     def test_open_trial_skips_the_edit_before_the_daily_cap(self):
-        code, out, err, requests, table = self.admit([retro.edit()], [trial()])
+        code, out, err, requests, table = self.admit([edit()], [trial()])
         line = "a trial is open for projects/factory stage_notes.spec"
         self.assertEqual((code, err), (0, ""))
         self.assertIn(f"skipped edits[0]: {line}\n", out)
         self.assertEqual([f"{m} {p}" for m, p, *_ in requests], ["GET /api/board"])
-        self.assertIn(f"| projects/factory | spec | skipped: {line} | {retro.EDIT_SUMMARY} |", table)
+        self.assertIn(f"| projects/factory | spec | skipped: {line} | {EDIT_SUMMARY} |", table)
         # Another stage of the same project is still trialled.
-        build = retro.edit(stage="build", note="Run the tests.", summary="Build note: run the tests")
+        build = edit(stage="build", note="Run the tests.", summary="Build note: run the tests")
         _, out, _, requests, _ = self.admit([build], [trial()])
         self.assertIn("trial factory-build-v8 opened", out)
 
     def test_paused_project_skips_stage_note_edits(self):
         reverts = [trial(id="factory-spec-v5", status="reverted"), trial(id="factory-spec-v6", status="reverted")]
         line = "stage-note trials are paused after 2 reverts; a person runs trial resume factory"
-        code, out, err, requests, table = self.admit([retro.edit()], reverts)
+        code, out, err, requests, table = self.admit([edit()], reverts)
         self.assertEqual((code, err), (0, ""))
         self.assertIn(f"skipped edits[0]: {line}\n", out)
         self.assertEqual([f"{m} {p}" for m, p, *_ in requests], ["GET /api/board"])
         self.assertIn(f"| projects/factory | spec | skipped: {line} |", table)
         reverts[0]["resumed"] = stamp()
-        _, out, _, _, _ = self.admit([retro.edit()], reverts)
+        _, out, _, _, _ = self.admit([edit()], reverts)
         self.assertIn(f"trial {TRIAL} opened", out)
 
 
@@ -247,7 +264,7 @@ class TrialSettleTest(TrialWorkerCase):
         self.assertEqual([f"{m} {p}" for m, p, *_ in requests],
                          ["GET /api/board", PIPELINE_GET, REVERT_ROUTE, "GET /api/board", "PUT /api/board"])
         self.assertEqual(json.loads(requests[2][3]), {
-            "schema": "factory.retro-edit/1", "run": retro.RUN, "base_version": 8, "stage": "spec",
+            "schema": "factory.retro-edit/1", "run": RUN, "base_version": 8, "stage": "spec",
             "note": CHAMPION, "summary": f"Revert trial {TRIAL}"})
         record = written[0]["trials"][0]
         self.assertEqual((record["status"], record["revert_version"]), ("reverted", 9))
