@@ -180,6 +180,11 @@ Each run, in order:
   the provider, model and effort it launched with, its session tag, and `via`
   `paseo` when the launcher program is `paseo`, else `launcher`. An arm `b` row
   carries the experiment's triple.
+- After a launch fails for a reason other than a usage limit, drops the claim and
+  parks the job in one board write: `not_before` 5 minutes out, doubling with each
+  failure in a row up to 4 hours, and `launch_failure` with the `count`, a
+  path-free `reason` and `at`. It prints `backed off <id> until <time> (launch
+  failure <n>)` and exits 1. The next successful launch removes `launch_failure`.
 - Stops after `--limit` launches (default 1) or when a full pass claims nothing.
   It is silent when there is nothing to do, and it never calls a model.
 - Caps in-flight work. On a host with a registry record, the cap is the host's

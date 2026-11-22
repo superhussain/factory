@@ -1010,6 +1010,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
         fail("only factory.py pickup sets token_cap. Nothing was written.", 2)
     if "auto_babysit" in patch:
         fail("only factory.py pickup sets auto_babysit. Nothing was written.", 2)
+    if "launch_failure" in patch:
+        fail("only factory.py pickup sets launch_failure. Nothing was written.", 2)
     if "handled" in patch:
         fail("only factory.py pr-handled sets handled. Nothing was written.", 2)
     if patch.get("note") in SPEC_APPROVED_NOTES:
@@ -4124,6 +4126,8 @@ PAIRING_FAILED = "pairing code is wrong, used or expired"
 SCHEDULERS = ("launchd", "cron", "schtasks", "none")
 PICKUP_SCHEDULER = "launchd" if sys.platform == "darwin" else "schtasks" if sys.platform == "win32" else "cron"
 LAUNCH_WAIT_SECONDS = 30
+LAUNCH_BACKOFF_SECONDS = 300
+LAUNCH_BACKOFF_CAP_SECONDS = 14400
 _DETACHED_RUNNING = []
 LIMIT_TEXT = re.compile(r"(?:usage|rate|session|weekly) limit|limit (?:reached|exceeded)", re.I)
 RESET_IN = re.compile(r"(?:resets|try again) in (\d{1,4}) ?(minutes?|mins?|m|hours?|hrs?|h)\b", re.I)
@@ -4381,7 +4385,7 @@ def launch_idea(home, entry, route, argv, env):
             process = subprocess.Popen(argv, cwd=entry["repo_path"], env=env, stdin=subprocess.DEVNULL,
                                        stdout=log, stderr=subprocess.STDOUT, **detach)
         except OSError as e:
-            return False, str(e), log_path
+            return False, f"cannot start {Path(argv[0]).name}: {e.strerror or type(e).__name__}", log_path
     try:
         code = process.wait(LAUNCH_WAIT_SECONDS)
     except subprocess.TimeoutExpired:
@@ -4391,6 +4395,51 @@ def launch_idea(home, entry, route, argv, env):
         _DETACHED_RUNNING.append(process)
         return True, None, log_path
     return code == 0, f"exit {code}", log_path
+
+
+def launch_backoff_seconds(n):
+    """Seconds pickup parks a job after its nth launch failure in a row: 300, doubling, capped at 4 hours."""
+    return min(LAUNCH_BACKOFF_SECONDS * 2 ** min(n - 1, 6), LAUNCH_BACKOFF_CAP_SECONDS)
+
+
+def launch_reason(detail):
+    """A launch failure detail as one board-safe line of at most 200 characters."""
+    return NOTE_INVISIBLE.sub("", " ".join(detail.split()))[:200]
+
+
+def back_off_launch(home, job_id, device, session, reason):
+    """Drop this session's claim and park the job after a failed launch, in one board write.
+    (count, until), or None when the job is gone or the claim is not this session's."""
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        claim = job.get("claim") if job else None
+        if not claim or not mine(claim, device, session):
+            return None, None
+        record = job.get("launch_failure")
+        prior = record.get("count") if isinstance(record, dict) else None
+        count = (prior if type(prior) is int and prior >= 1 else 0) + 1
+        at = datetime.now(timezone.utc).replace(microsecond=0)
+        until = (at + timedelta(seconds=launch_backoff_seconds(count))).strftime("%Y-%m-%dT%H:%M:%SZ")
+        patch_job(data, job_id, {"claim": None, "not_before": until, "launch_failure": {
+            "count": count, "reason": reason, "at": at.strftime("%Y-%m-%dT%H:%M:%SZ")}})
+        return dump_board(data), (count, until)
+    return cas(home, "/api/board", change)
+
+
+def clear_launch_failure(home, job_id):
+    """Drop a job's launch_failure after a launch succeeds: a failed write warns instead of ending the pass."""
+    def change(text):
+        data = load_board(text)
+        if not any(j.get("id") == job_id and "launch_failure" in j for j in data["jobs"]):
+            return None, None
+        patch_job(data, job_id, {"launch_failure": None})
+        return dump_board(data), None
+    try:
+        cas(home, "/api/board", change)
+    except SystemExit:
+        print(f"factory.py: {job_id} launched, but its launch failure was not cleared; the pass goes on",
+              file=sys.stderr)
 
 
 def limit_minutes(text, now):
@@ -5228,9 +5277,9 @@ def launch_env(given, provider, model):
                 FACTORY_PROMPT=given["prompt"])
 
 
-def launch_failed(home, name, job_id, detail, log_path, release, fatal=True, experiment=False):
+def launch_failed(home, name, job_id, detail, log_path, release, fatal=True, experiment=False, backoff=None):
     """After a failed launch: mark the route limited when its log says so, else exit 1, or with fatal=False log the failure and return.
-    Either way release() drops the claim first."""
+    Either way release() drops the claim first, except that a non-limit failure with backoff() parks the job instead."""
     with open(log_path, "rb") as log:
         log.seek(max(0, os.path.getsize(log_path) - 4096))
         tail = log.read().decode("utf-8", "replace")
@@ -5240,8 +5289,10 @@ def launch_failed(home, name, job_id, detail, log_path, release, fatal=True, exp
         print(f"limited experiment {name} until {until}" if experiment else f"limited {name} until {until}")
         print(f"released {job_id}")
         return
-    release()
+    parked = backoff() if backoff else release()
     print(f"released {job_id}")
+    if parked:
+        print(f"backed off {job_id} until {parked[1]} (launch failure {parked[0]})")
     message = f"launch of {job_id} on {name} failed: {detail}; see {log_path}"
     if fatal:
         fail(message, 1)
@@ -6908,12 +6959,16 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
         if ok:
             print(f"launched {entry['id']} {entry['project']} on {name} session {entry['session']}")
             record_launch(home, entry["id"], launch_row(given, argv, entry["session"]))
+            if j and "launch_failure" in j:
+                clear_launch_failure(home, entry["id"])
             launches += 1
             continue
         limit_name = experiment["name"] if arm == "b" and experiment else name
         launch_failed(home, limit_name, entry["id"], detail, log_path,
                       lambda: release_claim(home, entry["id"], device, entry["session"]),
-                      experiment=bool(experiment) and arm == "b")
+                      experiment=bool(experiment) and arm == "b",
+                      backoff=lambda: back_off_launch(home, entry["id"], device, entry["session"],
+                                                      launch_reason(detail)))
         return
 
 
