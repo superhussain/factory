@@ -136,6 +136,8 @@ class OrphanSummaryTest(unittest.TestCase):
 
 
 class OrphanPickupTest(IsolatedTestCase):
+    orphan_pickup_scan = True
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
