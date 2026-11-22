@@ -13467,7 +13467,9 @@ def bench_replay_plan(home, cases):
         slug = jobs[0].parent.name
         project = project_files(home, slug)[0]
         repo = (frontmatter(project)[0] if project.exists() else {}).get("repo", "")
-        m = GH_PR_PARTS.fullmatch(c["pr"])
+        if not repo:
+            fail(f"bench: {c['id']}: project {slug} has no repo; pull it with factory.py pull {slug}", 4)
+        m =GH_PR_PARTS.fullmatch(c["pr"])
         if f"{m[1]}/{m[2]}".lower() != repo.lower():
             fail(f"bench: {c['id']}: pr is not in {repo}, the repo of project {slug}", 2)
         if not paths.get(slug):
@@ -13544,7 +13546,9 @@ def bench_replay_case(row, arm, role, model):
         if not bench_have_commit(checkout, oid):
             return False, f"commit {oid} is not in {checkout} after fetch"
     base = git(checkout, "merge-base", f"{row['merge']}^1", row["head"])
-    tmp = Path(tempfile.mkdtemp(prefix=f"factory-bench-{row['id']}-"))
+    if not base:
+        return False, f"no merge base of {row['merge']}^1 and {row['head']} in {checkout}"
+    tmp =Path(tempfile.mkdtemp(prefix=f"factory-bench-{row['id']}-"))
     added = subprocess.run(["git", "-C", str(checkout), "worktree", "add", "--detach", str(tmp / "wt"), row["head"]],
                            capture_output=True)
     if added.returncode:
