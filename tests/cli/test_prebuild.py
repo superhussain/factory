@@ -231,7 +231,6 @@ class PrebuildTest(IsolatedTestCase):
             self.assertEqual(self.prebuild(), f"factory.py: prebuild of sample failed (exit 1); log: {self.log}\n")
         self.assertEqual(len(self.calls()), 1)
 
-
     @unittest.skipIf(os.name == "nt", "the driver is a sh script")
     def test_diff_ignores_external_diff_and_textconv(self):
         self.config(["sample"])
