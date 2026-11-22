@@ -7340,7 +7340,7 @@ def checks_cmd(target, *args):
         fail(f"{pr} is {state or 'in no state'}, not OPEN", 4)
     start = since = time.monotonic()
     usable = False
-    updated_from = None
+    updated_from = seen = None
     while True:
         checks, problem = pr_checks(pr)
         if problem:
@@ -7350,16 +7350,20 @@ def checks_cmd(target, *args):
         pending = [c["name"] for c in checks if c["bucket"] == "pending"]
         if checks and not pending:
             failing = [c["name"] for c in checks if c["bucket"] not in ("pass", "skipping")]
-            if failing:
+            done = bool(failing)
+            if not failing:
+                behind, sha, base = pr_behind(pr)
+                # After an update, gh pr checks may still list the old head's checks while pr_behind
+                # already sees the new head, so exit only once an earlier reading saw the same head.
+                done = not behind and sha != updated_from and (updated_from is None or sha == seen)
+                seen = sha
+            if done:
                 for c in checks:
                     print(f"{c['bucket']} {c['name']}")
-                fail("failing checks: " + ", ".join(failing), 1)
-            behind, sha, base = pr_behind(pr)
-            if sha != updated_from and not behind:
-                for c in checks:
-                    print(f"{c['bucket']} {c['name']}")
+                if failing:
+                    fail("failing checks: " + ", ".join(failing), 1)
                 return
-            if sha != updated_from:
+            if behind and sha != updated_from:
                 n = pr.rsplit("/", 1)[1]
                 result = gh_pr("update-branch", pr, stderr=True)
                 if result is None:
@@ -7383,7 +7387,8 @@ def checks_cmd(target, *args):
             print("no checks reported")
             return
         if elapsed >= timeout:
-            fail("still pending: " + ", ".join(pending) if pending else "no checks listed yet", 3)
+            fail("still pending: " + ", ".join(pending) if pending
+                 else "still waiting for checks on the updated head" if updated_from else "no checks listed yet", 3)
         time.sleep(min(CHECKS_INTERVAL, max(0, timeout - elapsed)))
 
 

@@ -71,8 +71,8 @@ class ChecksTest(IsolatedTestCase):
             "--timeout", "540", behind=[(1, OLD, "main"), (0, NEW, "main")])
         self.assertEqual((code, out, err), (0, "pass ci\n", UPDATED))
         self.assertEqual([c for c in calls if c[0] == "update-branch"], [("update-branch", PR)])
-        self.assertEqual(len([c for c in calls if c[0] == "pr_behind"]), 2)
-        self.assertEqual(self.now, 30)
+        self.assertEqual(len([c for c in calls if c[0] == "pr_behind"]), 3)
+        self.assertEqual(self.now, 40)
 
     def test_up_to_date_pr_makes_no_update(self):
         code, out, err, calls = self.checks(OPEN, [listed(("pass", "ci"))])
@@ -84,13 +84,26 @@ class ChecksTest(IsolatedTestCase):
                                             behind=[(1, OLD, "main"), (1, OLD, "main"), (0, NEW, "main")])
         self.assertEqual((code, out, err), (0, "pass ci\n", UPDATED))
         self.assertEqual([c[0] for c in calls].count("update-branch"), 1)
+        self.assertEqual(self.now, 30)
+
+    def test_new_head_needs_a_second_reading_before_exit_0(self):
+        code, out, err, calls = self.checks(OPEN, [listed(("pass", "ci"))], "--timeout", "540",
+                                            behind=[(1, OLD, "main"), (0, NEW, "main")])
+        self.assertEqual((code, out, err), (0, "pass ci\n", UPDATED))
+        self.assertEqual([c[0] for c in calls].count("pr_behind"), 3)
         self.assertEqual(self.now, 20)
+
+    def test_stale_head_at_deadline_exits_3(self):
+        code, out, err, _ = self.checks(OPEN, [listed(("pass", "ci"))], "--timeout", "30", behind=[(1, OLD, "main")])
+        self.assertEqual((code, out, err),
+                         (3, "", UPDATED + "factory.py: still waiting for checks on the updated head\n"))
+        self.assertEqual(self.now, 30)
 
     def test_register_window_restarts_after_update(self):
         polls = [listed(("pending", "ci"))] * 10 + [listed(("pass", "ci"))] + [(0, "[]")] * 11 + [listed(("pass", "ci"))]
         code, out, err, _ = self.checks(OPEN, polls, "--timeout", "540", behind=[(1, OLD, "main"), (0, NEW, "main")])
         self.assertEqual((code, out, err), (0, "pass ci\n", UPDATED))
-        self.assertEqual(self.now, 220)
+        self.assertEqual(self.now, 230)
 
     def test_update_failure_exits_6(self):
         code, out, err, _ = self.checks(OPEN, [listed(("pass", "ci"))], behind=[(2, OLD, "main")],
