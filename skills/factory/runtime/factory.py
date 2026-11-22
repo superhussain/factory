@@ -6807,7 +6807,8 @@ def previous_head(folder, n):
 
 def review_plan_cmd(target, round_text):
     """Write SKIPPED ux and ui reviews for a round that changes nothing a person sees, and print one JSON plan.
-    Any doubt (no worktree, a git failure, no Acceptance criteria section) runs all four reviewers."""
+    Any doubt (no worktree, a git failure, no Acceptance criteria section) runs all four reviewers.
+    It also lists the branch's protected paths for the approver."""
     home, slug, job_id = r2_target(target, True)
     if not re.fullmatch(r"[1-9][0-9]*", round_text):
         fail("round must be a positive integer. " + REVIEW_PLAN_USAGE, 2)
@@ -6842,6 +6843,8 @@ def review_plan_cmd(target, round_text):
         for name in SKIPPABLE_REVIEWERS)
     fixed = round_changed_files(wt, prev[1]) if passed else None
     globs = visible_globs(project_file)
+    branch = changed_files(wt, base) if wt.is_dir() else None
+    protected = touched_protected(branch) if branch is not None else None
     if fixed is not None:
         hit = next(((path, g) for path in fixed for g in globs if fnmatch.fnmatchcase(path, g)), None)
         if re.search(r"^## Visible change[ \t]*$", decision_text, re.M):
@@ -6851,27 +6854,25 @@ def review_plan_cmd(target, round_text):
         else:
             visible, reason = False, (f"none of the {len(fixed)} files changed since round {prev[0]} matches a "
                                       f"visible-file glob, and round {n - 1} ux and ui did not ask for changes")
+    elif branch is None:
+        visible, reason = True, f"the diff against origin/{base} could not be read"
     else:
-        changed = changed_files(wt, base) if wt.is_dir() else None
-        if changed is None:
-            visible, reason = True, f"the diff against origin/{base} could not be read"
-        else:
-            visible, reason = plan_reason((folder / "spec.md").read_text(encoding="utf-8"), decision_text,
-                                          changed, globs)
+        visible, reason = plan_reason((folder / "spec.md").read_text(encoding="utf-8"), decision_text, branch, globs)
     if not visible:
         for path in targets:
             if path.exists():
                 fail(f"{path} already exists; nothing was written", 6)
     if head:
         round_folder.mkdir(exist_ok=True)
-        write_atomic(str(plan_file), json.dumps({"round": n, "head": head}) + "\n")
+        write_atomic(str(plan_file), json.dumps({"round": n, "head": head, "protected": protected}) + "\n")
     if visible:
-        print(json.dumps({"round": n, "run": list(TRACER_REVIEWERS), "skipped": [], "reason": reason}))
+        print(json.dumps({"round": n, "run": list(TRACER_REVIEWERS), "skipped": [], "reason": reason,
+                          "protected": protected}))
         return
     for path in targets:
         write_atomic(str(path), "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: " + reason + ".\n")
     print(json.dumps({"round": n, "run": ["security", "code"], "skipped": list(SKIPPABLE_REVIEWERS),
-                      "reason": reason}))
+                      "reason": reason, "protected": protected}))
 
 
 CHECKS_FILE = ".factory/checks.json"
