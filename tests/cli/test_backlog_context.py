@@ -150,7 +150,7 @@ class BacklogContextTests(IsolatedTestCase):
         self.assertIsNone(self.module.backlog_context_error(example.split("\n", 1)[1]))
 
     def test_bad_usage_exits_2(self):
-        usage = 'factory.py: usage: backlog add "<slug>: <feature>" [--context <file>] | backlog rework <job-id> (feature on stdin)\n'
+        usage = f"factory.py: {self.module.BACKLOG_USAGE}\n"
         for args in (["backlog", "add", ITEM, "--context"], ["backlog", "add", ITEM, "--file", "x"],
                      ["backlog", "add", ITEM, "x"], ["backlog", "add", ITEM, "--context", ""]):
             with self.subTest(args=args):
