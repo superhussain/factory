@@ -2122,6 +2122,40 @@ class AuditPickupTest(PickupFixture):
             "factory.py: audit push stopped (exit 5); the next pickup run retries it\n"), err)
         self.assertFalse((self.home / "audit-push.json").exists())
 
+    def board_puts(self):
+        return self.calls.count(("PUT", "/api/board"))
+
+    def test_refreshes_token_share(self):
+        host_b = {"at": "2026-01-02T12:00:00Z", "transcripts": 1,
+                  "models": {"claude-opus-5-5": {"input": 300, "output": 9100, "cache_write": 52000,
+                                                 "cache_read": 610000}}}
+        models = {"claude-opus-5-5": {"input": 1200, "output": 48000, "cache_write": 210000, "cache_read": 3400000}}
+        self.board["jobs"][0]["tokens"] = {"host-b": host_b}
+        session = next((self.root / "claude/projects").glob("*/*.jsonl"))
+        with open(session, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "assistant", "message": {
+                "id": "u1", "model": "claude-opus-5-5", "usage": {
+                    "input_tokens": 1200, "output_tokens": 48000, "cache_creation_input_tokens": 210000,
+                    "cache_read_input_tokens": 3400000}}}) + "\n")
+        self.assertEqual(self.pickup(), (0, self.line + f"recorded {DEVICE} tokens on 1017-add-x\n", ""))
+        self.assertEqual(self.board_puts(), 1)
+        job = self.board["jobs"][0]
+        self.assertEqual(job["tokens"], {"host-b": host_b,
+                                         DEVICE: {"at": job["updated"], "transcripts": 2, "models": models}})
+        self.assertEqual(self.pickup(), (0, "", ""))
+        later = session.stat().st_mtime_ns + 10 ** 9
+        os.utime(session, ns=(later, later))
+        self.assertEqual(self.pickup(), (0, self.line, ""))
+        self.assertEqual(self.board_puts(), 1)
+        self.assertEqual(len(self.audit_puts()), 2)
+
+    def test_token_scan_error_warns(self):
+        with patch.object(factory, "usage_totals", side_effect=ValueError("boom")):
+            self.assertEqual(self.pickup(), (0, self.line,
+                                             "factory.py: usage: scan failed (ValueError: boom); nothing recorded\n"))
+        self.assertEqual(self.board_puts(), 0)
+        self.assertEqual(self.record(), {"version": 1, "jobs": {"1017-add-x": factory.audit_stamp("1017-add-x")}})
+
 
 class CloseTest(PickupFixture):
     DECISION = "/api/jobs/alpha/042-sample-export/decision.md"

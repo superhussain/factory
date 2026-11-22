@@ -11206,7 +11206,8 @@ def audit_pushed(home):
 
 def audit_pickup_push(home, data):
     """Push this host's audit rows for each in-flight or pr-open job whose transcripts changed since
-    the last recorded push. Best effort: a failed push costs one warning, and the next pickup run retries it."""
+    the last recorded push, and refresh this host's token share. Best effort: a failed push costs one
+    warning, and the next pickup run retries it."""
     if not retro_transcripts().is_dir():
         return
     record, kept = audit_pushed(home), {}
@@ -11221,6 +11222,7 @@ def audit_pickup_push(home, data):
                 continue
             if record.get(job_id) != stamp:
                 audit_push(job_id)
+                usage_pickup_record(home, job)
             kept[job_id] = stamp
     except SystemExit as e:
         print(f"factory.py: audit push stopped (exit {e.code}); the next pickup run retries it", file=sys.stderr)
@@ -11359,6 +11361,27 @@ def usage_record(home, slug, job_id, device, totals):
         job["tokens"] = {**old, device: {"at": job["updated"], **totals}}
         return dump_board(data), None
     cas(home, "/api/board", change)
+
+
+def usage_pickup_record(home, job):
+    """Refresh this host's token share on a board job from pickup. Skips a job without a valid
+    project, a host without a valid device:, a scan with no tokens and an unchanged share."""
+    slug, job_id = job.get("project"), job["id"]
+    config = home / "config.md"
+    device = (frontmatter(config)[0] if config.is_file() else {}).get("device") or ""
+    if not isinstance(slug, str) or not SLUG.fullmatch(slug) or not HOST_NAME.fullmatch(device):
+        return
+    try:
+        totals = usage_totals(home, slug, job_id)
+    except Exception as e:
+        print(f"factory.py: usage: scan failed ({type(e).__name__}: {e}); nothing recorded", file=sys.stderr)
+        return
+    tokens = job.get("tokens") if isinstance(job.get("tokens"), dict) else {}
+    old = tokens.get(device) if isinstance(tokens.get(device), dict) else {}
+    if not totals["models"] or {k: v for k, v in old.items() if k != "at"} == totals:
+        return
+    usage_record(home, slug, job_id, device, totals)
+    print(f"recorded {device} tokens on {job_id}")
 
 
 def usage_cmd(*args):
