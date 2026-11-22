@@ -2173,14 +2173,23 @@ async function capture(outdir, referencePath) {
     };
     await view("grounding-tab-1280", 1280, 900, "light", openGroundingTab);
     await view("grounding-tab-390", 390, 844, "dark", openGroundingTab, true);
-    await view("grounding-chips-1280", 1280, 900, "light", async (page) => {
-      const wrap = '.card-wrap:has(.card[data-id="130-ground-export"])';
-      await page.evaluate(
-        (s) => document.querySelector(s).scrollIntoView({ block: "center", inline: "center" }),
-        wrap,
-      );
-      return clipOf(page, wrap);
-    });
+    // keepViewport, since a full-page capture would lay the board out again and shift the clip.
+    await view(
+      "grounding-chips-1280",
+      1280,
+      900,
+      "light",
+      async (page) => {
+        const wrap = '.card-wrap:has(.card[data-id="130-ground-export"])';
+        await page.evaluate(
+          (s) => document.querySelector(s).scrollIntoView({ block: "center", inline: "center" }),
+          wrap,
+        );
+        return clipOf(page, wrap);
+      },
+      false,
+      true,
+    );
     await view("not-before-launch-1280", 1280, 900, "light", async (page) => {
       await page.evaluate(() => {
         location.hash = "#131-launch-retry";
