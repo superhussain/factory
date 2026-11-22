@@ -414,7 +414,7 @@ flowchart LR
   S --> W
   S --> X[POST /api/backlog/triage/batch]
   S --> V[POST /api/backlog/triage/verdicts]
-  S --> RT[POST /api/backlog/triage/rate]
+  RP[factory.py triage replay --rules-file] --> RT[POST /api/backlog/triage/rate]
 ```
 
 Settings, Pipeline holds a `triage` block per scope. A project value replaces the global
@@ -508,8 +508,8 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   those rules through clef-flash and stores nothing. The new confidences replace the stored ones,
   and a line the model gave no usable answer for counts under `unscored.rating_failed`. The JSON
   adds `rules_file`. Bare lines carry no context, unlike the stored ratings, so compare one rules
-  file against another, not against the threshold-only table. An older Worker answers 404 and
-  replay exits 5.
+  file against another, not against the threshold-only table. An older Worker answers 404, and
+  replay exits 5 and says to deploy the current Worker.
 - **Floors.** A queued idea still goes through the spec, the reviews F2 requires, the
   approver, merge rules and any `spec-approval` gate.
 - **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
