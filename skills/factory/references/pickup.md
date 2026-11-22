@@ -238,6 +238,11 @@ Each run, in order:
   The date is recorded before the scan, so a stopped scan prints one warning and
   waits for the next local date. `pickup --dry-run` skips it. Run
   `factory.py orphans` for the full list; nothing is removed.
+- Runs `outcomes record <slug>` on its first run of each local date that
+  `<home>/outcomes-record.json` does not record, for each project whose
+  `paths.md` checkout folder exists, and prints one line such as
+  `outcomes record alpha: recorded 1 outcomes on the board`. A stopped project
+  prints one warning and waits for the next local date. `pickup --dry-run` skips it.
 
 Pickup skips an idea held by a live claim, and any job whose `not_before` is still
 in the future. The board `needs` field is only for input from a human. A session

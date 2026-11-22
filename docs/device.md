@@ -432,7 +432,7 @@ python3 <installed-skill>/runtime/factory.py outcomes [record] [<project-slug>]
 ```
 
 `outcomes` sorts every board job at stage `merged` whose `done` falls in the last
-30 days into held, reworked or reverted, optionally for one project. For each
+90 days into held, reworked or reverted, optionally for one project. For each
 project it reads the checkout from `paths.md` and `repo` and `base` (default
 `main`) from the project file. It fetches `<base>` from
 `https://github.com/<repo>.git` into `origin/<base>` once, then asks
@@ -451,7 +451,7 @@ these rules in order:
 lead's pull request, so they get the lead's result.
 
 ```text
-outcomes of jobs merged in the last 30 days
+outcomes of jobs merged in the last 90 days
 project  held  reworked  reverted  unknown
 alpha       1         1         1        0
 alpha held: 1017-add-x
@@ -473,7 +473,7 @@ A job the command cannot judge counts as `unknown` and prints its reason, as in
 | GitHub reports no merge commit | `no merge commit from GitHub` |
 | the merge commit is not on `origin/<base>` | `merge commit <sha12> is not on origin/main` |
 
-With no matching jobs it prints `no jobs merged in the last 30 days`. A merged
+With no matching jobs it prints `no jobs merged in the last 90 days`. A merged
 job with no project is left out, and a scan without a project filter prints
 `merged jobs with no project, skipped: <ids>` after the result lines.
 
@@ -492,6 +492,11 @@ never recorded. To clear a value, set `{"outcome": null}` with `factory.py board
 Bad arguments exit 2 with `usage: factory.py outcomes [record] [<project-slug>]`.
 The only git write is the `origin/<base>` remote-tracking ref, and a failed fetch
 exits 5.
+
+Pickup runs `outcomes record <slug>` on its first run of each local date that
+`<home>/outcomes-record.json` does not record, for each project whose `paths.md`
+checkout folder exists, and prints one line such as
+`outcomes record alpha: recorded 1 outcomes on the board`.
 
 The Retros page's Cost per merged PR section shows recorded outcomes as a revert
 count beside tokens per merged PR.

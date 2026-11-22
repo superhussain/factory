@@ -199,7 +199,7 @@
   factory.py usage record <project-slug>/<job-id>
                                             write those totals to the board job under tokens.<device>
   factory.py outcomes [record] [<project-slug>]
-                                            sort jobs merged in the last 30 days into held, reworked or reverted;
+                                            sort jobs merged in the last 90 days into held, reworked or reverted;
                                             record writes outcome
   factory.py with-cloudflare -- <command> [<arg>...]
                                             run one command with the CLOUDFLARE_* keys of this home's .env
@@ -5371,6 +5371,7 @@ def pickup(*args):
             retro_pickup_push(home)
             audit_pickup_push(home, data)
             orphan_pickup_scan(home)
+            outcomes_pickup_record(home)
         retro_pickup_catchup(home, dry)
         pickup_pass(home, device, minutes, dry, limit, cap, data)
     finally:
@@ -6454,7 +6455,7 @@ def pr_states(repo, numbers, device):
             for n in numbers if isinstance(found.get(f"p{n}"), dict)}, None
 
 
-OUTCOME_DAYS = 30
+OUTCOME_DAYS = 90
 OUTCOME_FIX_DAYS = 7
 OUTCOME_SUBJECT = re.compile(r"(?:fix|revert)", re.I)
 
@@ -13347,6 +13348,34 @@ def outcomes_cmd(*args):
     if record:
         changed = outcomes_record(home, results)
         print(f"recorded {changed} outcomes on the board" if changed else "outcomes unchanged; nothing written")
+
+
+OUTCOMES_RECORD_FILE = "outcomes-record.json"
+
+
+def outcomes_pickup_record(home):
+    """Run outcomes record once per local date for each paths.md checkout folder that exists, printing
+    one line per project. The date is recorded first, so a project that stops retries the next local date."""
+    today = datetime.now().astimezone().strftime("%Y-%m-%d")
+    try:
+        record = json.loads((home / OUTCOMES_RECORD_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        record = None
+    if isinstance(record, dict) and record.get("version") == 1 and record.get("date") == today:
+        return
+    write_atomic(home / OUTCOMES_RECORD_FILE, json.dumps({"version": 1, "date": today}) + "\n")
+    for slug, checkout in sorted(read_paths(home).items()):
+        if not (SLUG.fullmatch(slug) and isinstance(checkout, str) and Path(checkout).is_dir()):
+            continue
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                outcomes_cmd("record", slug)
+        except SystemExit as e:
+            print(f"factory.py: outcomes record {slug} stopped (exit {e.code}); it runs again tomorrow",
+                  file=sys.stderr)
+            continue
+        print(f"outcomes record {slug}: {out.getvalue().splitlines()[-1]}")
 
 
 BENCH_WEIGHTS = {"high": 3, "medium": 2, "low": 1}

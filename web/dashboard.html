@@ -3868,6 +3868,8 @@ $('audit-flags-next').addEventListener('click', () => auditFlagsMove(1, $('audit
 
 // Cost per merged PR: the Worker's /api/spend rollup, one table per project.
 let spend = null, spendExpected = [], spendFailed = false;
+const SPEND_LOADED = 'Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged.';
+const SPEND_HINT = ' Set weekly_tokens in a project file to see this week\'s share of it and get a nudge at 50, 80 and 100 percent.';
 
 async function loadSpend() {
   spendFailed = false;
@@ -3888,7 +3890,7 @@ function renderSpend() {
   $('spend-status').textContent = spendFailed ? 'Could not load cost per merged PR. Reload to try again.'
     : spend === null ? 'Loading cost per merged PR…'
     : !rows.length ? 'No merged or closed jobs in the last 8 weeks.'
-    : 'Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged. Set weekly_tokens in a project file to see this week\'s share of it and get a nudge at 50, 80 and 100 percent.';
+    : SPEND_LOADED + (spendExpected.length === 0 ? SPEND_HINT : '');
   const num = (n) => n.toLocaleString('en-US');
   const cell = (tag, text) => {
     const el = document.createElement(tag);

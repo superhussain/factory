@@ -29,6 +29,8 @@ def load_runtime():
 class IsolatedTestCase(unittest.TestCase):
     # Pickup's daily orphan scan reads real git, gh and paseo, so it is a no-op unless a test opts in.
     orphan_pickup_scan = False
+    # Pickup's daily outcomes record reads real git and gh, so it is a no-op unless a test opts in.
+    outcomes_pickup_record = False
 
     def run(self, result=None):
         with tempfile.TemporaryDirectory() as temp:
@@ -48,6 +50,9 @@ class IsolatedTestCase(unittest.TestCase):
                 if not self.orphan_pickup_scan:
                     for module in RUNTIMES:
                         stack.enter_context(patch.object(module, "orphan_pickup_scan", lambda home: None))
+                if not self.outcomes_pickup_record:
+                    for module in RUNTIMES:
+                        stack.enter_context(patch.object(module, "outcomes_pickup_record", lambda home: None))
                 return super().run(result)
 
 
