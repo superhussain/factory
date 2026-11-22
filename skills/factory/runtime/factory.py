@@ -11305,8 +11305,8 @@ def usage_scan(path, main):
 
 
 def usage_transcripts(home, slug, job_id):
-    """[(path, main)] for this host's transcripts that ran in the job's worktree or whose first
-    prompt names the job folder or the job's prompt folder."""
+    """[(path, main)] for this host's transcripts that ran in the job's worktree, plus each main
+    session or subagent elsewhere whose own first prompt names the job folder or the job's prompt folder."""
     root = retro_transcripts()
     if not root.is_dir():
         return []
@@ -11316,10 +11316,12 @@ def usage_transcripts(home, slug, job_id):
     for project in sorted(p for p in root.iterdir() if p.is_dir()):
         for path in sorted(project.glob("*.jsonl")):
             subs = sorted((project / path.stem / "subagents").glob("*.jsonl"))
-            if project in worktrees or named.search(usage_prompt(path)):
+            if project in worktrees:
                 found += [(path, True)] + [(sub, False) for sub in subs]
-            else:
-                found += [(sub, False) for sub in subs if named.search(usage_prompt(sub))]
+                continue
+            if named.search(usage_prompt(path)):
+                found.append((path, True))
+            found += [(sub, False) for sub in subs if named.search(usage_prompt(sub))]
     return found
 
 
