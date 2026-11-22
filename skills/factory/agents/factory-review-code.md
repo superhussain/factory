@@ -22,7 +22,10 @@ and anything the project file's Code section calls out. Items build.md lists und
 scope creep. Read `<job folder>/pre-review.md`. When its first line is
 `PRE-REVIEW: PASS` and its `Head:` line equals `git rev-parse factory/<id>`, cite it
 as the check result and run a command only to confirm a specific finding. Otherwise
-you may re-run the project file's Verify commands in the worktree.
+you may re-run the project file's Verify commands in the worktree. When
+`pre-review.md` has a `## Diff budget` section, the branch changed far more than the
+spec's task list implies. Judge each listed file outside the task list: name the
+acceptance criterion it serves, or report it as scope creep in a CHANGES finding.
 
 Check every existing test the diff changes or deletes. A weakened test is a CHANGES
 finding: a removed or loosened assertion, a deleted test, an added skip, focus or
