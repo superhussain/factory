@@ -45,6 +45,9 @@ class PreReviewTest(IsolatedTestCase):
         self.origin = self.home / "origin.git"
         subprocess.run(["git", "init", "-q", "--bare", str(self.origin)], check=True)
         self.git("remote", "add", "origin", str(self.origin))
+        url = mock.patch.object(factory, "PROJECT_FETCH_URL", str(self.origin))
+        url.start()
+        self.addCleanup(url.stop)
         (self.wt / "README.md").write_text("base\n")
         self.commit()
 
@@ -177,6 +180,17 @@ class PreReviewTest(IsolatedTestCase):
         self.assertNotIn("MNOP", text)
         self.assertIn("value [redacted]", text)
 
+    def test_end_overlapping_env_values_are_fully_redacted(self):
+        (self.home / ".env").write_text("FACTORY_TEST_LEFT=alpha-secret-overlap1234\n"  # gitleaks:allow synthetic
+                                        "FACTORY_TEST_RIGHT=overlap1234-beta-secret\n")  # gitleaks:allow synthetic
+        printed = "import sys\nprint('value alpha-secret-overlap1234-beta-secret')\nsys.exit(1)"  # gitleaks:allow
+        self.base([check("overlap", printed)])
+        code, _, _ = self.run_gate()
+        self.assertEqual(code, 1)
+        text = self.out.read_text()
+        self.assertNotIn("secret", text)
+        self.assertIn("value [redacted]\n", text)
+
     def test_timeout_and_missing(self):
         self.base([check("slow", "import time; time.sleep(30)"),
                    {"name": "gone", "run": ["factory-test-no-such-program"]},
@@ -249,3 +263,49 @@ class PreReviewTest(IsolatedTestCase):
         self.commit([check("lint", "pass")])
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
         self.assertNone("could not fetch origin main")
+
+    def forged(self):
+        forged = self.home / "forged.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(forged)], check=True)
+        self.commit([check("forged", "raise SystemExit(3)")])
+        self.git("push", "-q", str(forged), "HEAD:refs/heads/main")
+        return forged
+
+    def linked(self):
+        checkout = self.home / "checkout"
+        self.wt.rename(checkout)
+        subprocess.run(["git", "-C", str(checkout), "worktree", "add", "-q", "-b", "job", str(self.wt)], check=True,
+                       capture_output=True)
+
+    def test_repointed_origin_is_ignored(self):
+        self.base([check("base", "print('base ran')")])
+        self.git("remote", "set-url", "origin", str(self.forged()))
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([c["name"] for c in json.loads(out)["checks"]], ["base"])
+        self.assertFalse((self.logs / "forged.log").exists())
+
+    def test_url_rewrite_is_none(self):
+        self.base([check("base", "pass")])
+        self.git("config", f"url.{self.forged()}.insteadOf", str(self.origin))
+        self.assertNone("the worktree's git config sets url or http keys")
+
+    def test_bad_repo_is_none(self):
+        self.base([check("base", "pass")])
+        (self.home / "projects" / "sample.md").write_text("---\nrepo: ../x\nbase: main\n---\n")
+        self.assertNone("project file repo '../x' is not owner/name")
+
+    def test_linked_worktree_fetches(self):
+        self.base([check("base", "print('base ran')")])
+        self.linked()
+        code, out, err = self.run_gate()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual([c["name"] for c in json.loads(out)["checks"]], ["base"])
+
+    def test_worktree_config_rewrite_is_none(self):
+        self.base([check("base", "pass")])
+        self.linked()
+        forged = self.forged()
+        self.git("config", "extensions.worktreeConfig", "true")
+        self.git("config", "--worktree", f"url.{forged}.insteadOf", str(self.origin))
+        self.assertNone("the worktree's git config sets url or http keys")

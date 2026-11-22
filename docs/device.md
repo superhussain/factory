@@ -434,7 +434,8 @@ python3 <installed-skill>/runtime/factory.py outcomes [record] [<project-slug>]
 `outcomes` sorts every board job at stage `merged` whose `done` falls in the last
 30 days into held, reworked or reverted, optionally for one project. For each
 project it reads the checkout from `paths.md` and `repo` and `base` (default
-`main`) from the project file. It fetches `origin/<base>` once, then asks
+`main`) from the project file. It fetches `<base>` from
+`https://github.com/<repo>.git` into `origin/<base>` once, then asks
 `gh api graphql` for each pull request's merge commit, 50 at a time. It reads the
 commits after the merge on `origin/<base>`, skipping merge commits, and applies
 these rules in order:

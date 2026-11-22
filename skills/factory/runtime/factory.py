@@ -1052,6 +1052,9 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
             rounds = (found or {}).get("rounds")
             if not isinstance(rounds, list) or len(rounds) < n or not isinstance(rounds[n - 1], dict):
                 fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
+            refusal = verdict_file_refusal(factory, slug, job_id, n, reviewer, value)
+            if refusal:
+                fail(refusal, 4)
             patch["rounds"] = list(rounds)
             patch["rounds"][n - 1] = {**rounds[n - 1], reviewer: value}
         if found is None:
@@ -6115,7 +6118,7 @@ def outcome_of(checkout, base, oid, rework_ids):
     return ("reworked", sorted(evidence)) if evidence else ("held", [])
 
 
-def outcome_checkout_problem(checkout, base, device):
+def outcome_checkout_problem(checkout, base, repo, device):
     """Why outcomes cannot read origin/<base> in checkout on device, or None once the fetch worked."""
     path = Path(checkout)
     if not path.is_dir():
@@ -6123,7 +6126,7 @@ def outcome_checkout_problem(checkout, base, device):
     top = git(path, "rev-parse", "--show-toplevel")
     if not top or Path(top).resolve() != path.resolve():
         return f"{checkout} is not a git checkout on {device}"
-    why = fetch_base(path, base)
+    why = fetch_base(path, base, repo)
     return f"{why} in {checkout} on {device}" if why else None
 
 
@@ -7420,16 +7423,37 @@ def review_tier(spec_text, decision_text, protected):
     return tier, f"spec.md rates the job {tier}"
 
 
-def fetch_base(wt, base):
-    """None once origin/<base> in wt matches the remote, or why it cannot be trusted. A factory/ base is a job
-    branch a builder can push, so it is refused."""
+PROJECT_FETCH_URL = "https://github.com/{repo}.git"
+PROJECT_REPO = re.compile(r"\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z", re.ASCII)
+
+
+def fetch_base(wt, base, repo):
+    """None once origin/<base> in wt matches <base> at the project file's repo, or why it cannot be trusted.
+    It fetches PROJECT_FETCH_URL, never the origin remote, and refuses a worktree whose own git config sets
+    url or http keys, since a builder can edit both. A factory/ base is a job branch a builder can push, so it
+    is refused."""
     if base.startswith("factory/"):
         return f"base {base} is a factory branch"
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}", base) or ".." in base:
         return f"base {base} is not a safe branch name"
-    # git's stderr can carry origin's URL, credentials included, so the reason leaves it out.
+    if not PROJECT_REPO.fullmatch(repo) or ".." in repo:
+        return f"project file repo {repo!r} is not owner/name"
+    scopes = ["--local"]
+    # git ignores config.worktree without the extension, and 2.25 exits 128 on --worktree in a linked worktree.
+    ext = subprocess.run(["git", "-C", str(wt), "config", "--bool", "extensions.worktreeConfig"],
+                         capture_output=True, text=True)
+    if ext.stdout.strip() == "true":
+        scopes.append("--worktree")
+    for scope in scopes:
+        cfg = subprocess.run(["git", "-C", str(wt), "config", scope, "--includes", "--get-regexp",
+                              r"^(url|http)\."], capture_output=True)
+        if cfg.returncode == 0:
+            return "the worktree's git config sets url or http keys"
+        if cfg.returncode != 1:
+            return "could not read the worktree's git config"
+    # git's stderr can carry the URL, credentials included, so the reason leaves it out.
     try:
-        r = subprocess.run(["git", "-C", str(wt), "fetch", "-q", "origin",
+        r = subprocess.run(["git", "-C", str(wt), "fetch", "-q", PROJECT_FETCH_URL.format(repo=repo),
                             f"+refs/heads/{base}:refs/remotes/origin/{base}"], capture_output=True,
                            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}, timeout=120)
     except subprocess.TimeoutExpired:
@@ -7485,7 +7509,8 @@ def review_plan_cmd(target, round_text):
     if not any(j.get("id") == job_id for j in data["jobs"]):
         fail(f"no job {job_id} on the board. Nothing was written.", 4)
     project_file = project_files(home, slug)[0]
-    base = frontmatter(project_file)[0].get("base") or "main"
+    meta = frontmatter(project_file)[0]
+    base, repo = meta.get("base") or "main", meta.get("repo", "")
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
     folder = home / "jobs" / slug / job_id
@@ -7514,7 +7539,7 @@ def review_plan_cmd(target, round_text):
         for name in SKIPPABLE_REVIEWERS)
     fixed = round_changed_files(wt, prev[1]) if passed else None
     globs = visible_globs(project_file)
-    branch = changed_files(wt, base) if wt.is_dir() and not fetch_base(wt, base) else None
+    branch = changed_files(wt, base) if wt.is_dir() and not fetch_base(wt, base, repo) else None
     protected = touched_protected(branch) if branch is not None else None
     if fixed is not None:
         hit = next(((path, g) for path in fixed for g in globs if fnmatch.fnmatchcase(path, g)), None)
@@ -7604,10 +7629,26 @@ def run_check(argv, cwd, log, timeout):
 def pre_review_tail(log_text, env):
     """The last PRE_REVIEW_TAIL lines of a failing check's log for pre-review.md: home .env values of
     ENV_SECRET_MIN or more characters and retro_redact's patterns as [redacted], each line printable,
-    at most 300 characters, with ~ as -. Longer values go first, so one holding another leaves no suffix."""
-    for value in sorted(env.values(), key=len, reverse=True):
+    at most 300 characters, with ~ as -. Every match of every value is found on the original text and
+    overlapping matches merge into one [redacted], so values that nest or overlap leave nothing visible."""
+    spans = []
+    for value in env.values():
         if len(value) >= ENV_SECRET_MIN:
-            log_text = log_text.replace(value, "[redacted]")
+            start = log_text.find(value)
+            while start != -1:
+                spans.append((start, start + len(value)))
+                start = log_text.find(value, start + 1)
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    parts, last = [], 0
+    for start, end in merged:
+        parts += [log_text[last:start], "[redacted]"]
+        last = end
+    log_text = "".join(parts) + log_text[last:]
     tail = "\n".join(line[:4000] for line in log_text.splitlines()[-PRE_REVIEW_TAIL:])
     return [printable_line(line, 300).replace("~", "-") for line in retro_redact(tail).split("\n")]
 
@@ -7621,7 +7662,8 @@ def pre_review_cmd(target):
         fail(f"no job {job_id} on the board. Nothing was written. " + PRE_REVIEW_USAGE, 4)
     board_round = job.get("round")
     round_n = (board_round if type(board_round) is int and board_round >= 0 else 0) + 1
-    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
+    meta = frontmatter(project_files(home, slug)[0])[0]
+    base, repo = meta.get("base") or "main", meta.get("repo", "")
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
     folder = home / "jobs" / slug / job_id
@@ -7637,7 +7679,7 @@ def pre_review_cmd(target):
         return None if proc.returncode else proc.stdout
 
     head = (git("rev-parse", "HEAD") or "").strip() or None
-    checks, reason = [], fetch_base(wt, base)
+    checks, reason = [], fetch_base(wt, base, repo)
     if not reason:
         text = git("show", f"origin/{base}:{CHECKS_FILE}")
         checks, reason = load_checks(text) if text is not None else ([], f"origin/{base} has no {CHECKS_FILE}")
@@ -7711,9 +7753,9 @@ def find_citations(text):
     return found
 
 
-def diff_ranges(wt, base):
+def diff_ranges(wt, base, repo):
     """({path: [(start, end)]}, None) for the lines the branch changes since origin/<base>, or (None, reason)."""
-    reason = fetch_base(wt, base)
+    reason = fetch_base(wt, base, repo)
     if reason:
         return None, reason
     unreadable = f"the diff against origin/{base} could not be read"
@@ -7786,7 +7828,8 @@ def grounding_cmd(target, round_text):
     rounds = (job or {}).get("rounds")
     if not isinstance(rounds, list) or len(rounds) < n or not isinstance(rounds[n - 1], dict):
         fail(f"{job_id} has no rounds entry {n} on the board. Nothing was written.", 4)
-    base = frontmatter(project_files(home, slug)[0])[0].get("base") or "main"
+    meta = frontmatter(project_files(home, slug)[0])[0]
+    base, repo = meta.get("base") or "main", meta.get("repo", "")
     stacked = next((r["id"] for r in riders_of(data, job_id) if r.get("stacked") is True), None)
     wt = home / "worktrees" / slug / (stacked or job_id)
     folder = home / "jobs" / slug / job_id
@@ -7806,7 +7849,7 @@ def grounding_cmd(target, round_text):
 
     head = (git("rev-parse", "HEAD") or "").strip() or None
     tracked = [p for p in (git("ls-files", "-z") or "").split("\0") if p]
-    ranges, diff_reason = diff_ranges(wt, base)
+    ranges, diff_reason = diff_ranges(wt, base, repo)
     rows, checked, files = [], 0, 0
     for name in REVIEWERS:
         review = f"review-{name}.md"
@@ -8071,6 +8114,21 @@ def round_wait_cmd(target, *args):
 
 
 VERDICT_USAGE = "usage: verdict <project-slug>/<job-id> <round> <reviewer> <PASS|CHANGES|SKIPPED|pending>"
+
+
+def verdict_file_refusal(home, slug, job_id, n, reviewer, value):
+    """Why the board cannot record value for reviewer in round n, or None: anything but pending needs
+    round-<n>/review-<reviewer>.md in the job folder to start with that VERDICT: line."""
+    if value == "pending":
+        return None
+    name = f"round-{n}/review-{reviewer}.md"
+    line = job_file_lines(home / "jobs" / slug / job_id, [name]).get(name)
+    if line is None:
+        return f"{job_id} round {n} {reviewer} cannot be {value}: {name} is not in the job folder. Nothing was written."
+    if line != f"VERDICT: {value}":
+        return (f"{job_id} round {n} {reviewer} cannot be {value}: the first line of {name} is not "
+                f"VERDICT: {value}. Nothing was written.")
+    return None
 
 
 def verdict_cmd(target, round_text, reviewer, value):
@@ -12505,7 +12563,7 @@ def outcomes_cmd(*args):
                 prs.setdefault(int(m[3]), []).append(j["id"])
         if not prs:
             continue
-        problem = outcome_checkout_problem(checkout, base, device)
+        problem = outcome_checkout_problem(checkout, base, repo, device)
         if problem:
             for ids in prs.values():
                 results.update(dict.fromkeys(ids, ("unknown", [problem])))

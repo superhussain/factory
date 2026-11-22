@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 from support import IsolatedTestCase, http_fixture, invoke, load_runtime
 
@@ -34,6 +35,9 @@ class ReviewPlanTest(IsolatedTestCase):
         self.folder.mkdir(parents=True)
         (self.folder / "spec.md").write_text(SPEC)
         self.wt = self.home / "worktrees" / "sample" / JOB
+        url = mock.patch.object(factory, "PROJECT_FETCH_URL", str(self.home / "origin.git"))
+        url.start()
+        self.addCleanup(url.stop)
 
     def git(self, *args):
         subprocess.run(["git", "-C", str(self.wt), *args], check=True, capture_output=True)
@@ -257,9 +261,9 @@ class ReviewPlanTest(IsolatedTestCase):
                 elif (self.folder / "decision.md").exists():
                     (self.folder / "decision.md").unlink()
                 self.worktree(*files)
-                if reason == "the protected paths could not be read":
-                    self.git("remote", "remove", "origin")
-                code, out, err = self.plan()
+                fetched = "gone.git" if reason == "the protected paths could not be read" else "origin.git"
+                with mock.patch.object(factory, "PROJECT_FETCH_URL", str(self.home / fetched)):
+                    code, out, err = self.plan()
                 self.assertEqual((code, err), (0, ""))
                 plan = json.loads(out)
                 self.assertEqual((plan["tier"], plan["tier_reason"]), ("high", reason))

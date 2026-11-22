@@ -49,9 +49,15 @@ class BoardFixture(IsolatedTestCase):
     def verdict(self, *args, target=f"factory/{JOB}", session="d4e5f6"):
         return invoke(factory, ["verdict", target, *args, "--session", session])
 
+    def review(self, n, reviewer, text):
+        path = self.home / "jobs" / "factory" / JOB / f"round-{n}" / f"review-{reviewer}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
 
 class VerdictTest(BoardFixture):
     def test_sets_one_verdict(self):
+        self.review(2, "code", "VERDICT: PASS\n\nLooks right.\n")
         code, out, err = self.verdict("2", "code", "PASS")
         self.assertEqual((code, err), (0, ""))
         after = dict(ROUND_2, code="PASS")
@@ -60,10 +66,12 @@ class VerdictTest(BoardFixture):
         self.assertEqual(self.puts, 1)
 
     def test_skipped_for_ux(self):
+        self.review(1, "ux", "VERDICT: SKIPPED\n")
         self.assertEqual(self.verdict("1", "ux", "SKIPPED")[0], 0)
         self.assertEqual(self.job()["rounds"], [dict(ROUND_1, ux="SKIPPED"), ROUND_2])
 
     def test_refuses(self):
+        self.review(2, "code", "VERDICT: PASS\n")
         for args in (("0", "code", "PASS"), ("2", "qa", "PASS"), ("2", "code", "pass"),
                      ("2", "security", "SKIPPED")):
             self.assertEqual(self.verdict(*args), (2, "", USAGE), args)
@@ -79,3 +87,20 @@ class VerdictTest(BoardFixture):
         self.assertTrue(err.startswith(f"factory.py: {JOB} is held by {DEVICE} session d4e5f6 since "), err)
         self.assertEqual(self.puts, 0)
         self.assertEqual(self.job()["rounds"], [ROUND_1, ROUND_2])
+
+    def test_refuses_without_review_file(self):
+        self.assertEqual(self.verdict("2", "code", "PASS"), (4, "", (
+            f"factory.py: {JOB} round 2 code cannot be PASS: round-2/review-code.md is not in the job folder. "
+            "Nothing was written.\n")))
+        self.assertEqual((self.puts, self.job()["rounds"]), (0, [ROUND_1, ROUND_2]))
+
+    def test_refuses_mismatched_review_file(self):
+        self.review(2, "code", "VERDICT: CHANGES\n\n1. Fix the loop.\n")
+        self.assertEqual(self.verdict("2", "code", "PASS"), (4, "", (
+            f"factory.py: {JOB} round 2 code cannot be PASS: the first line of round-2/review-code.md is not "
+            "VERDICT: PASS. Nothing was written.\n")))
+        self.assertEqual((self.puts, self.job()["rounds"]), (0, [ROUND_1, ROUND_2]))
+
+    def test_pending_needs_no_file(self):
+        self.assertEqual(self.verdict("1", "code", "pending")[0], 0)
+        self.assertEqual(self.job()["rounds"], [dict(ROUND_1, code="pending"), ROUND_2])
