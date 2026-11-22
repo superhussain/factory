@@ -57,6 +57,7 @@ const KEYS = [
   "pickup",
   "triage",
   "hold",
+  "backpressure",
   "stage_notes",
   "archive",
   "tracer",
@@ -233,6 +234,10 @@ export function validatePipeline(doc) {
     const error = holdError(doc.hold);
     if (error) return error;
   }
+  if ("backpressure" in doc) {
+    const error = backpressureError(doc.backpressure);
+    if (error) return error;
+  }
   if ("stage_notes" in doc) {
     if (!isObject(doc.stage_notes)) return "stage_notes: must be an object";
     for (const key of Object.keys(doc.stage_notes))
@@ -282,6 +287,16 @@ function holdError(hold) {
   return null;
 }
 
+/** The first error in a pipeline `backpressure` value, or null. The dashboard holds the same copy. */
+function backpressureError(bp) {
+  if (!isObject(bp)) return "backpressure: must be an object";
+  for (const key of Object.keys(bp))
+    if (key !== "needs_you") return `backpressure.${key}: unknown field`;
+  if (!(Number.isInteger(bp.needs_you) && bp.needs_you >= 1 && bp.needs_you <= 50))
+    return "backpressure.needs_you: must be a whole number from 1 to 50";
+  return null;
+}
+
 const pickupOf = (p, activeHosts) =>
   p
     ? { enabled: p.enabled, hosts: p.hosts.filter((host) => !activeHosts || activeHosts.has(host)) }
@@ -325,6 +340,7 @@ export function effectivePipeline(
     pickup: pickupOf(project?.pickup ?? global?.pickup, activeHosts),
     triage: project?.triage ?? global?.triage ?? { enabled: false, threshold: 90, rules: "" },
     hold: project?.hold ?? global?.hold ?? { min_ideas: 5, max_wait_hours: 12 },
+    backpressure: project?.backpressure ?? global?.backpressure ?? { needs_you: 5 },
     stage_notes: stageNotes,
     versions: { global: globalVersion, project: projectVersion },
     floors: FLOORS.map((floor) => floor.id),

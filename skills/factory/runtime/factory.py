@@ -269,6 +269,7 @@ BATCH_REF = "batched-into"
 MAX_RIDERS = 20
 HOLD_MIN_IDEAS = 5
 HOLD_MAX_HOURS = 12
+BACKPRESSURE_NEEDS_YOU = 5
 MAX_CANDIDATES = 40
 BUILD_STATES = ("queued", "running", "done", "failed")
 # Ideas wait on the board with no claim, branch, or files until a pickup moves them to spec.
@@ -4184,6 +4185,36 @@ def hold_config(home, slug):
     return HOLD_MIN_IDEAS, HOLD_MAX_HOURS
 
 
+def backpressure_config(home, slug):
+    """needs_you from the effective pipeline's optional backpressure, else the default."""
+    status, _, text = api(home, "GET", f"/api/pipeline/effective/{slug}", ok=(200, 404, 409))
+    try:
+        bp = json.loads(text).get("backpressure") if status == 200 else None
+    except (ValueError, AttributeError):
+        bp = None
+    if isinstance(bp, dict) and type(bp.get("needs_you")) is int and 1 <= bp["needs_you"] <= 50:
+        return bp["needs_you"]
+    return BACKPRESSURE_NEEDS_YOU
+
+
+def backpressure_holds(home, jobs, waiting, runnable):
+    """{id: skip line} for plain ideas pickup does not launch while waiting jobs reach the project's
+    backpressure.needs_you. Prioritized ideas, approved specs and moved jobs still launch."""
+    limits, lines = {}, {}
+    if waiting < 1:
+        return lines
+    for j in jobs:
+        if j["stage"] != IDEA or prioritized(j) or not runnable(j):
+            continue
+        slug = j["project"]
+        if slug not in limits:
+            limits[slug] = backpressure_config(home, slug)
+        if waiting >= limits[slug]:
+            lines[j["id"]] = \
+                f"skip {j['id']} {slug}: backpressure ({waiting} waiting on you, pauses at {limits[slug]})"
+    return lines
+
+
 def batch_holds(home, jobs, runnable):
     """{id: skip line} for the held ideas pickup does not launch this run. A project's held ideas
     wait until it has min_ideas of them or the oldest has gone max_wait_hours without an update.
@@ -6757,7 +6788,9 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
             return f"skip {j['id']} {project}: experiment {experiment['name']} limited until {exp_limited}"
         return None
 
-    holds = batch_holds(home, jobs, lambda j: base_skip(j) is None)
+    waiting = sum(1 for j in data["jobs"] if waits_on_you(j))
+    holds = {**batch_holds(home, jobs, lambda j: base_skip(j) is None),
+             **backpressure_holds(home, jobs, waiting, lambda j: base_skip(j) is None)}
 
     def skip(j):
         """Why this idea is not a candidate, or None."""
