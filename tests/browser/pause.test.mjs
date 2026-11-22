@@ -156,12 +156,25 @@ test("pause", { timeout: 240000 }, async (t) => {
 
       await t.test(`session stop line ${width}`, async () => {
         await openDrawer(page, "043-sample-stopped");
+        const line = () => page.$eval("#d-session-stop", (el) => el.textContent);
+        assert.equal(await shown(page, "#d-session-stop"), true);
+        assert.equal(
+          await line(),
+          "Pickup stopped session synthetic-agent on host-a 2h ago because the job was paused.",
+        );
         if (width === 390)
           await (
             await page.$(".detail-head")
           ).screenshot({
             path: `${SHOTS}session-stop-390.png`,
           });
+        await openDrawer(page, "046-sample-closing");
+        assert.equal(
+          await line(),
+          "Pickup stopped session synthetic-agent on host-b 3h ago because the job was closed.",
+        );
+        await openDrawer(page, "042-sample-export");
+        assert.equal(await shown(page, "#d-session-stop"), false);
       });
 
       await t.test(`Pause pickup writes paused ${width}`, async () => {
