@@ -59,6 +59,7 @@ tool, flags, target, sessions}`. `sessions` holds the digest refs of that job on
 - A `repeated-finding` row is a lesson only when rows from at least 2 different jobs share its `reviewer` and the part of `signature` after `#`. The fact is `<reviewer> review keeps flagging <that part>, as in <signature>; check for it before review.` Use the newest such row for `<job>` and `at`.
 - Skip a lesson `documents["<project>/notes.md"].text` already holds. Propose at most 1 lesson edit per run, only when `<project>/notes.md` is a key of `documents`. It counts toward the 2 edits.
 - The edit appends one bullet. `find` is the last non-empty line of that text and must occur once, or skip the lesson. `replace` is that line, a line break, then `- <the fact in one sentence of at most 200 characters> (<job>, <first 10 characters of at>)`. `summary` is `Notes: lesson from <job>`.
+- When a lesson passes every rule above but no edit can carry it, because `<project>/notes.md` is not a key of `documents`, its text has no non-empty line, its last non-empty line occurs more than once, or the reply already holds 2 edits, put it in `lesson_cards` instead as `{job, fact, why}`. `why` is one sentence naming what blocked the edit. A run holds at most 1 lesson, as an edit or a card.
 - When the row has `sessions`, also report a finding with category `information-access`, title `Lesson: <the fact in at most 72 characters>` and those sessions.
 
 **Reviewers.**
@@ -69,7 +70,7 @@ tool, flags, target, sessions}`. `sessions` holds the digest refs of that job on
 
 **Reply.** Exactly one `factory.retro/1` JSON object, with no prose and no code fence
 around it. Its keys are `schema` (`"factory.retro/1"`), `run` copied as given,
-`findings`, `suggestions` and, optionally, `edits`.
+`findings`, `suggestions` and, optionally, `edits` and `lesson_cards`.
 
 | Field | Limit |
 | --- | --- |
@@ -84,6 +85,10 @@ around it. Its keys are `schema` (`"factory.retro/1"`), `run` copied as given,
 | `.fixed_by` | optional; the `id` of a job in `merged` in `aggregate` that fixed this error |
 | `suggestions` | 0 to 5 idea cards |
 | `edits` | optional, 0 to 2 stage-note or file edits |
+| `lesson_cards` | optional, 0 to 1 objects |
+| `.job` | the `job` of a row in `lessons` in `aggregate` |
+| `.fact` | 1 to 200 characters, one line |
+| `.why` | 1 to 300 characters, one line |
 
 | Card field | Limit |
 | --- | --- |

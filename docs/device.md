@@ -288,7 +288,11 @@ checks pause, fingerprint dedupe and both caps first, and exits 3 when nothing w
 added. A missing run, reply or `aggregate.json`
 exits 4. A linked `reply.json`, `aggregate.json`, `findings.md` or
 `suggestions.json` exits 2 with `is a link; nothing written`. A reply holding any
-`.env` value of 12 or more characters exits 2 with nothing written. Added lines go
+`.env` value of 12 or more characters exits 2 with nothing written. After any edits,
+each of the reply's at most 1 `lesson_cards` item is queued as a held lesson card (see
+[Lesson cards](autonomy.md#lesson-cards)); a bad card prints `rejected lesson_cards[N]...`,
+and a fact already in `notes.md` or paused autonomy prints `skipped lesson_cards[N]: ...`,
+without changing the exit code. Added lines go
 to the shared backlog, triage never rates them, and a person decides each one on the
 dashboard; the run folder's files stay on this host.
 
