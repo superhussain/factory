@@ -8834,14 +8834,13 @@ def grounding_cmd(target, round_text):
                       "unverified": rows, "diff": diff_reason}))
 
 
-WAIT_ARTIFACT = re.compile(r"spec\.md|spec-evidence\.md|build\.md|decision\.md|walkthrough\.html|build\.walkthrough\.html"
-                           r"|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
+WAIT_ARTIFACT = re.compile(r"spec\.md|spec-evidence\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md")
 WAIT_USAGE = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]"
 
 
 def wait_valid(artifact, line):
     """True when line is a finished first line for artifact."""
-    if artifact in ("spec.md", "spec-evidence.md", "build.md", "walkthrough.html", "build.walkthrough.html"):
+    if artifact in ("spec.md", "spec-evidence.md", "build.md"):
         return bool(line.strip())
     if artifact == "decision.md":
         return line in ("APPROVE", "ESCALATE", "CHANGES") or line.startswith("CLOSED: ")

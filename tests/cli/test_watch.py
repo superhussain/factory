@@ -82,14 +82,6 @@ class WatchTest(IsolatedTestCase):
                                                       "spec-evidence.md": "# Spec evidence: sample export"},
                           "pr": None, "elapsed": 0})
 
-    def test_walkthrough_artifacts(self):
-        self.write("walkthrough.html", "<!doctype html>\n<title>Spec walkthrough</title>\n")
-        self.write("build.walkthrough.html", "<!doctype html>\n<title>Build walkthrough</title>\n")
-        self.assertEqual(self.result("walkthrough.html", "build.walkthrough.html"),
-                         {"event": "files", "files": {"walkthrough.html": "<!doctype html>",
-                                                      "build.walkthrough.html": "<!doctype html>"},
-                          "pr": None, "elapsed": 0})
-
     def test_file_lands_before_timeout(self):
         self.sleeps[212] = lambda: self.write("spec.md", "# Spec: sample export\n")
         self.assertEqual(self.result("spec.md"),

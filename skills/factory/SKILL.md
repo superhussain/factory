@@ -306,9 +306,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
 - Run the agents in the background and act on each completion notification. Then
   read the agent's file. While an agent runs and nothing else can move, run
   `python3 "$RUNTIME" watch "$SLUG/<id>" <artifact>...` with the Bash tool
-  timeout at 600000 ms. It accepts `spec.md`, `spec-evidence.md`, `build.md`,
-  `decision.md`, `walkthrough.html`, `build.walkthrough.html` and
-  `round-N/review-<reviewer>.md`. It refreshes this session's claim when given `--session`;
+  timeout at 600000 ms. It refreshes this session's claim when given `--session`;
   without a session tag it only reads. It then prints one JSON line when every
   named file has a valid first line, or after 540 seconds with `"event": "timeout"`.
   It prints `"event": "malformed"` once a named file keeps an invalid first line for
