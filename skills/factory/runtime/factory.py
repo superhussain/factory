@@ -4162,10 +4162,11 @@ def experiment_arm(job_id, percent):
 
 
 # Retro stage-note trials: an open trial that cannot compare after TRIAL_MAX_DAYS keeps its edit;
-# a trial whose revert the Worker still refuses then is settled revert-failed and keeps its edit.
-# TRIAL_PAUSE_REVERTS unresumed reverts pause a project's stage-note edits, and the board keeps
-# the newest TRIAL_KEEP settled records.
+# a trial whose revert the Worker then refuses with a lasting status (TRIAL_LASTING_REFUSALS) is settled
+# revert-failed and keeps its edit. TRIAL_PAUSE_REVERTS unresumed reverts pause a project's stage-note
+# edits, and the board keeps the newest TRIAL_KEEP settled records.
 TRIAL_MAX_DAYS = 28
+TRIAL_LASTING_REFUSALS = (400, 403, 404, 413)
 TRIAL_PAUSE_REVERTS = 2
 TRIAL_KEEP = 20
 
@@ -14534,7 +14535,7 @@ def trial_settle(home):
                                     headers={"Content-Type": "application/json"})
             if status != 200:
                 why = f"{status} {printable_line(text, 200)}".strip()
-                if expired:
+                if expired and status in TRIAL_LASTING_REFUSALS:
                     update.update(status="revert-failed", settled=now())
                     print(f"trial {tid} revert failed after {TRIAL_MAX_DAYS} days: kept the edit: {why}")
                 else:
