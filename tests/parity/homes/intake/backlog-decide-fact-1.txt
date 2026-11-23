@@ -1,0 +1,1 @@
+  Worker route changes run pnpm test:protocol; pnpm test skips them.

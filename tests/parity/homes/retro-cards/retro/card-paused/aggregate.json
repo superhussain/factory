@@ -1,0 +1,1 @@
+{"schema": "factory.retro-aggregate/1", "run": "card-paused", "from": "2026-11-05", "to": "2026-11-11", "host": "host-a", "projects": ["factory", "sample-tools"], "hosts": {"host-a": {"sessions": 40, "jobs": 12, "ad_hoc": 3}}}

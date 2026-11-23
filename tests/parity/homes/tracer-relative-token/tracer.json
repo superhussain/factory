@@ -1,0 +1,1 @@
+{"version": 1, "projects": {"sample": {"url": "https://tracer.example.invalid/base/", "token_file": "relative/token", "service": "sample"}}}

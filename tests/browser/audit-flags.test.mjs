@@ -623,6 +623,11 @@ test("the red flags table stacks at narrow widths", { timeout: 120000 }, async (
             fits: wrap.scrollWidth <= wrap.clientWidth,
             label: getComputedStyle(cell, "::before").content,
             headVisible: head.width > 1 && head.height > 1,
+            short: [...document.querySelectorAll("#audit-flags-rows td")].filter(
+              (td) =>
+                td.getBoundingClientRect().height <
+                td.parentElement.cells[0].getBoundingClientRect().height,
+            ).length,
           };
         });
       };
@@ -630,7 +635,9 @@ test("the red flags table stacks at narrow widths", { timeout: 120000 }, async (
         fits: true,
         label: '"Time (UTC)"',
         headVisible: false,
+        short: 0,
       });
+      assert.equal((await layout(390)).short, 0);
       assert.equal((await layout(1440)).headVisible, true);
       assert.deepEqual(errors, [], "no page errors");
     } finally {

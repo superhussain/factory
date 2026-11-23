@@ -35,7 +35,7 @@ import {
   escalationInput,
   REVIEWERS,
 } from "./escalation.js";
-import { announce, connectEvents, EVENTS_PATH } from "./events.js";
+import { announce, connectEvents, EVENTS_PATH, HOST_EVENTS_PATH } from "./events.js";
 import {
   boardPushes,
   pushKey,
@@ -3618,6 +3618,19 @@ export async function serveFactory(request, env, principal, ctx) {
     if (request.headers.get("Origin") !== new URL(request.url).origin)
       return reply("forbidden", 403);
     return connectEvents(request, env, principal.exp);
+  }
+  if (path === HOST_EVENTS_PATH) {
+    // A device's service token upgrades here; without exp the room sends it only "changed".
+    if (
+      request.method !== "GET" ||
+      request.headers.get("Upgrade")?.toLowerCase() !== "websocket" ||
+      principal.kind !== "service" ||
+      !env.BoardEvents
+    )
+      return notFound();
+    // Only a paired or active host's token may take one of the room's shared slots.
+    if (!(await boundHost(env, principal))) return reply("forbidden", 403);
+    return connectEvents(request, env);
   }
   if (path.startsWith("/api/")) return api(request, env, path, principal, ctx);
   if (request.method !== "GET") return notFound();

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "experiment/pick",
+      "argv": ["experiment", "pick", "pilot"],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "experiment/report-bad-slug",
+      "argv": ["experiment", "report", "al pha"],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "experiment/report-bare",
+      "argv": ["experiment", "report"],
+      "home": null,
+      "stubs": {}
+    }
+  ]
+}

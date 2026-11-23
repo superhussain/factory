@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "autonomy/report-bad-slug",
+      "argv": ["autonomy", "report", "Bad!"],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "autonomy/report-two-slugs",
+      "argv": ["autonomy", "report", "a", "b"],
+      "home": null,
+      "stubs": {}
+    }
+  ]
+}

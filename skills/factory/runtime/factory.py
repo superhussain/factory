@@ -226,13 +226,25 @@ The board, backlog, and project files live in R2 behind the factory Worker at
 `api_url` in config.md. Job folders and worktrees stay on this device.
 """
 
+import os
+import sys
+
+# Hand off to the Rust binary install.py builds beside this file. FACTORY_RUNTIME=python, or deleting
+# the binary, keeps the Python runtime. Importing this module never hands off.
+if __name__ == "__main__" and os.environ.get("FACTORY_RUNTIME") != "python":
+    _binary = os.path.join(os.path.dirname(os.path.realpath(__file__)), "factory.exe" if os.name == "nt" else "factory")
+    if os.path.isfile(_binary) and os.access(_binary, os.X_OK):
+        if os.name == "nt":
+            import subprocess
+            sys.exit(subprocess.call([_binary, *sys.argv[1:]]))
+        os.execv(_binary, [_binary, *sys.argv[1:]])
+
 import contextlib
 import fnmatch
 import http.client
 import hashlib
 import io
 import json
-import os
 import platform
 import plistlib
 import random
@@ -246,7 +258,6 @@ import ssl
 import stat
 import statistics
 import subprocess
-import sys
 import tarfile
 import tempfile
 import time
@@ -5154,14 +5165,19 @@ def host_os():
 
 
 def bundle_stamp():
-    """{commit, tree} from the bundle.json install.py writes, or None."""
+    """{commit, tree} from the bundle.json install.py writes, or None. A Rust build adds entry and
+    binary_sha256 beside them."""
     try:
         stamp = json.loads(Path(HERE).parent.joinpath("bundle.json").read_text(encoding="utf-8"))
     except (OSError, ValueError, UnicodeError):
         return None
-    if isinstance(stamp, dict) and set(stamp) == {"commit", "tree"} and all(
-            isinstance(v, str) and re.fullmatch(r"[0-9a-f]{7,64}", v) for v in stamp.values()):
-        return stamp
+    if not isinstance(stamp, dict) or set(stamp) - {"entry", "binary_sha256"} != {"commit", "tree"}:
+        return None
+    entry, binary = stamp.get("entry", []), stamp.get("binary_sha256", "0" * 64)
+    if all(isinstance(stamp[k], str) and re.fullmatch(r"[0-9a-f]{7,64}", stamp[k]) for k in ("commit", "tree")) \
+            and isinstance(entry, list) and all(isinstance(a, str) for a in entry) \
+            and isinstance(binary, str) and re.fullmatch(r"[0-9a-f]{64}", binary):
+        return {"commit": stamp["commit"], "tree": stamp["tree"]}
     return None
 
 
@@ -5550,6 +5566,8 @@ def install_timer(home, scheduler):
         plist.parent.mkdir(parents=True, exist_ok=True)
         write_atomic(plist, text)
         setup_run(["launchctl", "bootout", f"gui/{uid}/factory.pickup"])
+        # A disabled label makes bootstrap fail with "5: Input/output error".
+        setup_run(["launchctl", "enable", f"gui/{uid}/factory.pickup"])
         code, out = setup_run(["launchctl", "bootstrap", f"gui/{uid}", str(plist)])
         done = f"installed launchd timer: {plist}"
     elif scheduler == "cron":
@@ -5571,7 +5589,8 @@ def install_timer(home, scheduler):
                                "/TR", str(cmd), "/F"])
         done = f"installed schtasks timer: {cmd}"
     if code:
-        fail(f"could not install the {scheduler} timer: {out.strip()}", 1)
+        label = " factory.pickup" if scheduler == "launchd" else ""
+        fail(f"could not install the {scheduler} timer{label}: {out.strip()}", 1)
     return done
 
 
@@ -9719,7 +9738,7 @@ def read_location(pointer):
         home = Path(value["home"])
         if not home.is_absolute() or str(home.resolve()) != value["home"]:
             raise ValueError()
-        validate_home(home)
+        validate_home(home, deep=False)
         return home
     except (OSError, ValueError, UnicodeError, RuntimeError):
         fail(f"Invalid location pointer: {pointer}.", 2)
@@ -9771,7 +9790,10 @@ def closed_frontmatter(path):
     raise ValueError()
 
 
-def validate_home(home):
+def validate_home(home, deep=True):
+    """Exit 2 naming the first invalid piece of home. deep walks every file under projects/ and jobs/, which adopting
+    a home does; each command resolving the location pointer checks only the top level, since the walk costs
+    seconds on a large home."""
     home = Path(home)
     current = home
     try:
@@ -9790,6 +9812,8 @@ def validate_home(home):
                 continue
             if is_link(current) or not current.is_dir():
                 raise ValueError()
+            if not deep:
+                continue
             stack = [str(current)]
             while stack:
                 current = stack.pop()
