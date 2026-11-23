@@ -29,6 +29,12 @@ class ProcessInvokeTest(IsolatedTestCase):
         for args in (["nope"], ["claim", "a"]):
             with self.subTest(args=args):
                 self.assertEqual(invoke_process(args, dict(os.environ)), invoke(runtime, args))
+        home = os.environ["HOME"]
+        args = ["--home", home, "board", home, "412-fix-login"]
+        with patch.object(runtime.sys, "stdin", io.StringIO("[]")):
+            in_process = invoke(runtime, args)
+        self.assertEqual(in_process, (2, "", "factory.py: stdin must be a JSON object\n"))
+        self.assertEqual(invoke_process(args, dict(os.environ), input="[]"), in_process)
 
 
 @unittest.skipIf(os.name == "nt", "stub launchers are POSIX shell scripts")
@@ -92,7 +98,7 @@ class RunnerTest(unittest.TestCase):
     def test_missing_ids_file_or_bin_exits_2(self):
         with tempfile.TemporaryDirectory() as temp:
             missing = str(Path(temp, "missing"))
-            self.assertEqual(run_main(["--ids", missing]), (2, "", f"parity: no such file {missing}\n"))
+            self.assertEqual(run_main(["--ids", missing]), (2, "", f"parity: no such file or folder {missing}\n"))
             self.assertEqual(run_main(["--bin", missing]), (2, "", f"parity: not executable {missing}\n"))
             self.assertEqual(run_main(["--bin", temp]), (2, "", f"parity: not executable {temp}\n"))
             with patch.object(run, "FACTORY_BIN", missing):
@@ -117,6 +123,13 @@ class RunnerTest(unittest.TestCase):
             "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret",
                         "user-agent": "factory"}}])
         self.assertIn("b'---\\napi_url: {api}\\ndevice: parity\\n---\\n'", fields["home tree"])
+
+    def test_host_access_token_never_reaches_a_side(self):
+        show = [sys.executable, "-c", "import os; print(os.environ.get('FACTORY_ACCESS_CLIENT_ID'), "
+                                      "os.environ.get('FACTORY_ACCESS_CLIENT_SECRET'))"]
+        with patch.dict(os.environ, {"FACTORY_ACCESS_CLIENT_ID": "host-id", "FACTORY_ACCESS_CLIENT_SECRET": "host-secret"}):
+            fields = dict(run.run_side(self.case("main/no-args"), show))
+        self.assertEqual(fields["stdout"], "None None\n")
 
     def test_request_drift_fails(self):
         with tempfile.TemporaryDirectory() as temp:

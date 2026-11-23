@@ -41,7 +41,7 @@
       "stubs": {},
       "routes": {},
       "exit": 2,
-      "from": "tests/cli/test_factory.py::FactoryTest.test_push_records_spec_goal"
+      "from": "tests/cli/test_archive_workspace.py::ArchiveWorkspaceTest.test_bad_target"
     }
   ]
 }
