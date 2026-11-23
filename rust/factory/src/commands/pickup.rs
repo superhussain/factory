@@ -82,6 +82,7 @@ static CHECKOUT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Re::NONE);
 static BUNDLE_HASH: Pattern = Pattern::new("[0-9a-f]{7,64}", Re::NONE);
 static POSITIVE: Pattern = Pattern::new("[1-9][0-9]*", Re::NONE);
 static ENV_ASSIGN: Pattern = Pattern::new("(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=", Re::NONE);
+static COMMIT: Pattern = Pattern::new("[0-9a-f]{40}", Re::ASCII);
 static TRAILING_NUMBER: Pattern = Pattern::new(r"-\d+$", Re::NONE);
 /// An outcomes record line's `<slug> unknown: ` tail: the first unknown job and its reason.
 static OUTCOME_UNKNOWN: Pattern = Pattern::new(r"(\S+) \((.*?)\)(?:, |$)", Re::NONE);
@@ -149,6 +150,8 @@ struct Fakes {
     stop_pids: Option<Rc<dyn Fn(&Path) -> Option<Vec<u32>>>>,
     close_pull_request: Option<Rc<dyn Fn(&Path, &Value, &str) -> Res<(&'static str, String)>>>,
     close_stacked_prs: Option<Rc<dyn Fn(&Path, &str, &[Value], &str) -> Res<()>>>,
+    cleanup_job:
+        Option<Rc<dyn Fn(&str, &Path, &str, bool, Option<&str>) -> (Vec<String>, Vec<String>)>>,
     pickup_scheduler: Option<&'static str>,
     launch_wait_seconds: Option<f64>,
     exe: Option<String>,
@@ -7270,8 +7273,30 @@ fn close_pass(
     Ok(())
 }
 
-/// Run cleanup once per host on each closed or merged job whose worktree or branch this host
-/// still holds. Cleanup itself waits on the worktree slice.
+fn cleanup_job(
+    repo: &str,
+    wt: &Path,
+    branch: &str,
+    drop_pushed: bool,
+    merged_head: Option<&str>,
+) -> (Vec<String>, Vec<String>) {
+    #[cfg(test)]
+    if let Some(f) = fake!(cleanup_job) {
+        return f(repo, wt, branch, drop_pushed, merged_head);
+    }
+    crate::commands::worktree::cleanup_job(repo, wt, branch, drop_pushed, merged_head)
+}
+
+/// True when this host already recorded its cleanup of a job under j[key].
+fn cleaned_here(j: &Value, device: &str, key: &str) -> bool {
+    j[key]
+        .get("cleanup")
+        .and_then(Value::as_object)
+        .is_some_and(|d| d.contains_key(device))
+}
+
+/// Run cleanup once per host on each dashboard-closed job, and each job pickup synced as merged,
+/// whose worktree or branch this host still holds, and record what it left.
 #[allow(clippy::too_many_arguments)]
 fn close_cleanup_pass(
     io: &mut Io,
@@ -7282,7 +7307,7 @@ fn close_cleanup_pass(
     settings: &mut Cache,
     dry: bool,
 ) -> Res<()> {
-    for j in jobs_of(data).to_vec() {
+    for j in ops::board_jobs(data)?.to_vec() {
         let stage = get_str(&j, "stage");
         let (key, field) = if stage == Some("merged") {
             ("github", "merged")
@@ -7290,7 +7315,7 @@ fn close_cleanup_pass(
             ("close", "closed")
         };
         let c = j.get(key).filter(|c| c.is_object());
-        let (Some(job_id), Some(project), Some(_)) = (
+        let (Some(job_id), Some(project), Some(at)) = (
             safe_id(&j),
             get_str(&j, "project").filter(|p| SLUG.is_full(p)),
             c.and_then(|c| get_str(c, field)),
@@ -7300,18 +7325,24 @@ fn close_cleanup_pass(
         if !stage.is_some_and(|s| TERMINAL.contains(&s)) {
             continue;
         }
-        let cleaned = c
-            .unwrap()
-            .get("cleanup")
-            .and_then(Value::as_object)
-            .is_some_and(|d| d.contains_key(device));
-        if cleaned || !has_checkout(paths, Some(project)) {
+        if cleaned_here(&j, device, key) || !has_checkout(paths, Some(project)) {
             continue;
         }
-        let repo = Path::new(lookup(paths, project).unwrap());
+        let repo = lookup(paths, project).unwrap();
         let wt = home.join("worktrees").join(project).join(job_id);
-        let branch = format!("refs/heads/factory/{job_id}");
-        if !wt.exists() && git(repo, &["rev-parse", "--verify", "-q", &branch]).is_empty() {
+        let branch = format!("factory/{job_id}");
+        if !wt.exists()
+            && git(
+                Path::new(repo),
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "-q",
+                    &format!("refs/heads/{branch}"),
+                ],
+            )
+            .is_empty()
+        {
             continue;
         }
         if let Some(reason) = pickup_reason(io, home, project, paths, settings, device, dry)? {
@@ -7324,7 +7355,44 @@ fn close_cleanup_pass(
             outln!(io, "would clean up {job_id} {project}");
             continue;
         }
-        return Err(deferred("close cleanup"));
+        let merged_head = c
+            .and_then(|c| get_str(c, "head"))
+            .filter(|h| key == "github" && COMMIT.is_full(h));
+        let (_, left) = cleanup_job(repo, &wt, &branch, true, merged_head);
+        let done = cas(home, "/api/board", |text| {
+            let mut board = load_board(text)?;
+            ops::board_jobs(&board)?;
+            let Some(b) = job_index(&board, job_id) else {
+                return Ok((None, false));
+            };
+            let found = &board["jobs"][b];
+            if get_str(found, "stage") != stage
+                || !found.get(key).is_some_and(Value::is_object)
+                || get_str(&found[key], field) != Some(at)
+                || cleaned_here(found, device, key)
+            {
+                return Ok((None, false));
+            }
+            let mut patch = Map::new();
+            patch.insert(
+                key.into(),
+                json!({"cleanup": {device: {"at": now(), "left": left}}}),
+            );
+            patch.insert("port".into(), Value::Null);
+            patch_job(&mut board, job_id, &Value::Object(patch));
+            Ok((Some(dump_board(&board)), true))
+        })?;
+        if done {
+            if left.is_empty() {
+                outln!(io, "cleaned up {job_id} {project}");
+            } else {
+                outln!(
+                    io,
+                    "cleaned up {job_id} {project}, left: {}",
+                    left.join("; ")
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -14356,16 +14424,36 @@ exit "$archive_code"
         wt
     }
 
-    /// Cleanup itself waits on the worktree slice. Each test keeps its name, and checks the gate:
-    /// pickup finds the closed job's leftovers, prints the dry lines, then exits 2 where Python cleans up.
+    /// Python's CloseCleanupTest through the real cleanup_job. Its tests that call cleanup_job,
+    /// stop_pids or lsof_exe directly live beside them in worktree.rs.
     mod close_cleanup_test {
         use super::*;
+
+        const LEFT: &str = "branch factory/042-sample-export: not merged into main";
+
+        fn unreachable() -> String {
+            format!("{LEFT} and origin could not be reached")
+        }
+
+        const ID: [&str; 4] = [
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+        ];
+
+        fn commit(wt: &Path, name: &str) {
+            fs::write(wt.join(name), "work\n").unwrap();
+            git_in(wt, &["add", name]);
+            git_in(wt, &[&ID[..], &["commit", "-q", "-m", name]].concat());
+        }
 
         fn setup() -> (Fx, PathBuf, Files) {
             let fx = Fx::new();
             alpha_on(&fx);
             let files = Files::install(&fx);
             let wt = job_worktree(&fx);
+            commit(&wt, "work.txt");
             (fx, wt, files)
         }
 
@@ -14375,62 +14463,150 @@ exit "$archive_code"
                 "close": with(json!({"reason": "Duplicate of 041-sample-report", "at": "2026-01-02T12:00:00Z", "closed": "2026-01-02T12:05:00Z"}), extra)})
         }
 
-        fn gate(fx: &Fx, wt: &Path) {
-            fx.jobs(json!([closed(json!({}))]));
-            assert_deferred_run(fx, &[], "close cleanup");
-            assert!(wt.exists());
-            assert!(fx.job("042-sample-export")["close"]
-                .get("cleanup")
-                .is_none());
-            assert!(fx.puts().is_empty());
+        fn branch_exists(fx: &Fx) -> bool {
+            !git_in(
+                &fx.repo_a,
+                &["branch", "--list", "factory/042-sample-export"],
+            )
+            .is_empty()
+        }
+
+        fn left(fx: &Fx) -> Value {
+            fx.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"].clone()
+        }
+
+        fn with_origin(fx: &Fx, push: bool) {
+            let origin = fx.home.join("origin.git").display().to_string();
+            git_in(&fx.repo_a, &["init", "-q", "--bare", &origin]);
+            git_in(&fx.repo_a, &["remote", "add", "origin", &origin]);
+            if push {
+                git_in(
+                    &fx.repo_a,
+                    &["push", "-q", "origin", "factory/042-sample-export"],
+                );
+            }
         }
 
         #[test]
         fn test_cleanup_keeps_an_unmerged_branch() {
             let (fx, wt, _) = setup();
-            gate(&fx, &wt);
+            fx.jobs(json!([closed(json!({}))]));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    &format!(
+                        "cleaned up 042-sample-export alpha, left: {}\n",
+                        unreachable()
+                    ),
+                    ""
+                )
+            );
+            assert!(!wt.exists());
+            assert!(branch_exists(&fx));
+            let job = fx.job("042-sample-export");
+            let record = &job["close"]["cleanup"][DEVICE];
+            assert_eq!(
+                record.as_object().unwrap().keys().collect::<Vec<_>>(),
+                ["at", "left"]
+            );
+            assert_eq!(record["left"], json!([unreachable()]));
+            assert!(job.get("port").is_none());
+            fx.clear_calls();
+            fx.assert_silent(fx.pickup(&[]));
         }
 
         #[test]
         fn test_cleanup_runs_beside_a_pull_request_close() {
             let (fx, wt, files) = setup();
-            fx.jobs(json!([closed(json!({})), {"id": "043-sample-import", "stage": "build", "project": "alpha", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}}]));
+            let pr = "https://github.com/sample/alpha/pull/8";
+            let decision = "/api/jobs/alpha/043-sample-import/decision.md";
+            fx.set_fakes(|f| {
+                f.close_pull_request = Some(Rc::new(|_, _, _| Ok(("closed", String::new()))))
+            });
+            fx.jobs(json!([closed(json!({})), {"id": "043-sample-import", "stage": "build", "project": "alpha",
+                "round": 1, "branch": "factory/043-sample-import", "pr": pr, "updated": "2026-01-01T00:00:00Z",
+                "close": {"reason": "Duplicate of 041-sample-report", "at": "2026-01-02T12:00:00Z"}}]));
             assert_eq!(
                 fx.pickup(&[]),
                 out_err(
-                    2,
-                    "closed 043-sample-import alpha\n",
-                    "factory.py: pickup close cleanup is not ported to the Rust binary yet\n"
+                    0,
+                    &format!("closed pull request {pr} for 043-sample-import\nclosed 043-sample-import alpha\ncleaned up 042-sample-export alpha, left: {}\n", unreachable()),
+                    ""
                 )
             );
-            assert_eq!(fx.job("043-sample-import")["stage"], "closed");
+            assert_eq!(
+                fx.puts(),
+                [
+                    ("PUT".to_string(), decision.to_string()),
+                    ("PUT".into(), "/api/board".into()),
+                    ("PUT".into(), "/api/board".into())
+                ]
+            );
             assert!(files
-                .get("/api/jobs/alpha/043-sample-import/decision.md")
-                .is_some());
-            assert!(wt.exists());
+                .get(decision)
+                .unwrap()
+                .contains(&format!("- Pull request: {pr}, closed by pickup")));
+            let close = &fx.job("043-sample-import")["close"];
+            assert!(close.get("closed").is_some() && close.get("cleanup").is_none());
+            assert_eq!(left(&fx), json!([unreachable()]));
+            assert!(!wt.exists());
+            fx.clear_calls();
+            fx.assert_silent(fx.pickup(&[]));
         }
 
         #[test]
         fn test_cleanup_deletes_a_branch_origin_holds() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
+            let (fx, _, _) = setup();
+            with_origin(&fx, true);
+            fx.jobs(json!([closed(json!({}))]));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(0, "cleaned up 042-sample-export alpha\n", "")
+            );
+            assert!(!branch_exists(&fx));
+            assert_eq!(left(&fx), json!([]));
         }
 
         #[test]
         fn test_cleanup_keeps_a_branch_ahead_of_origin() {
             let (fx, wt, _) = setup();
-            gate(&fx, &wt);
+            with_origin(&fx, true);
+            commit(&wt, "more.txt");
+            fx.jobs(json!([closed(json!({}))]));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    &format!("cleaned up 042-sample-export alpha, left: {LEFT} and origin is at a different commit\n"),
+                    ""
+                )
+            );
+            assert!(branch_exists(&fx));
         }
 
         #[test]
         fn test_cleanup_keeps_a_branch_origin_lacks() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
+            let (fx, _, _) = setup();
+            with_origin(&fx, false);
+            fx.jobs(json!([closed(json!({}))]));
+            let missing = format!("{LEFT} and origin has no such branch");
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    &format!("cleaned up 042-sample-export alpha, left: {missing}\n"),
+                    ""
+                )
+            );
+            assert!(branch_exists(&fx));
+            assert_eq!(left(&fx), json!([missing]));
         }
 
         #[test]
         fn test_cleanup_keeps_a_branch_checked_out_elsewhere() {
             let (fx, wt, _) = setup();
+            with_origin(&fx, true);
             git_in(
                 &fx.repo_a,
                 &["worktree", "remove", "--force", &wt.display().to_string()],
@@ -14447,53 +14623,70 @@ exit "$archive_code"
                 ],
             );
             fx.jobs(json!([closed(json!({}))]));
-            assert_deferred_run(&fx, &[], "close cleanup");
+            fx.pickup(&[]);
+            assert!(branch_exists(&fx));
+            let left = left(&fx);
+            assert_eq!(left.as_array().unwrap().len(), 1);
+            assert!(left[0]
+                .as_str()
+                .unwrap()
+                .starts_with("branch factory/042-sample-export: checked out in "));
         }
 
+        /// A job pickup synced as merged passes its recorded head, and only a full commit id.
         #[test]
         fn test_merged_head_keeps_a_branch_ahead_of_the_pr() {
-            let (fx, wt, _) = setup();
-            fx.jobs(json!([{"id": "042-sample-export", "stage": "merged", "project": "alpha", "updated": "2026-01-02T12:05:00Z", "github": {"merged": "2026-01-02T12:05:00Z", "head": "a1b2".repeat(10)}}]));
-            assert_deferred_run(&fx, &[], "close cleanup");
-            assert!(wt.exists());
-        }
-
-        #[test]
-        fn test_merged_head_keeps_a_branch_checked_out_elsewhere() {
-            let (fx, wt, _) = setup();
-            git_in(
-                &fx.repo_a,
-                &["worktree", "remove", "--force", &wt.display().to_string()],
+            let (fx, _, _) = setup();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let log = seen.clone();
+            fx.set_fakes(|f| {
+                f.cleanup_job = Some(Rc::new(move |_, _, branch, drop_pushed, head| {
+                    log.borrow_mut().push((
+                        branch.to_string(),
+                        drop_pushed,
+                        head.map(String::from),
+                    ));
+                    (Vec::new(), Vec::new())
+                }))
+            });
+            let head = "a1b2".repeat(10);
+            for (n, given) in [json!(head), json!("a1b2"), Value::Null]
+                .into_iter()
+                .enumerate()
+            {
+                let mut github = json!({"merged": "2026-01-02T12:05:00Z"});
+                if !given.is_null() {
+                    github["head"] = given;
+                }
+                fx.jobs(
+                    json!([{"id": "042-sample-export", "stage": "merged", "project": "alpha",
+                    "updated": "2026-01-02T12:05:00Z", "github": github}]),
+                );
+                assert_eq!(
+                    fx.pickup(&[]),
+                    out_err(0, "cleaned up 042-sample-export alpha\n", ""),
+                    "{n}"
+                );
+            }
+            let branch = "factory/042-sample-export".to_string();
+            assert_eq!(
+                *seen.borrow(),
+                [
+                    (branch.clone(), true, Some(head)),
+                    (branch.clone(), true, None),
+                    (branch, true, None)
+                ]
             );
-            fx.jobs(json!([{"id": "042-sample-export", "stage": "merged", "project": "alpha", "updated": "2026-01-02T12:05:00Z", "github": {"merged": "2026-01-02T12:05:00Z"}}]));
-            assert_deferred_run(&fx, &[], "close cleanup");
-        }
-
-        #[test]
-        fn test_cleanup_job_keeps_a_pushed_branch_by_default() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
-        }
-
-        #[test]
-        fn test_cleanup_skips_ls_remote_without_a_branch_tip() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
+            assert!(fx.job("042-sample-export")["github"]["cleanup"][DEVICE].is_object());
         }
 
         #[test]
         fn test_cleanup_removes_a_merged_job() {
             let (fx, wt, _) = setup();
-            let id = [
-                "-c",
-                "user.name=Test",
-                "-c",
-                "user.email=test@example.invalid",
-            ];
             git_in(
                 &fx.repo_a,
                 &[
-                    &id[..],
+                    &ID[..],
                     &[
                         "merge",
                         "-q",
@@ -14505,36 +14698,40 @@ exit "$archive_code"
                 ]
                 .concat(),
             );
-            gate(&fx, &wt);
+            fx.jobs(json!([closed(json!({}))]));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(0, "cleaned up 042-sample-export alpha\n", "")
+            );
+            assert!(!wt.exists());
+            assert!(!branch_exists(&fx));
+            assert_eq!(left(&fx), json!([]));
         }
 
-        #[test]
-        fn test_cleanup_without_lsof_still_removes_a_merged_job() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
-        }
-
-        #[test]
-        fn test_stop_pids_without_lsof_is_unchecked() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
-        }
-
-        #[test]
-        fn test_lsof_falls_back_to_a_system_folder() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
-        }
-
+        /// Rust cleanup_job cannot fail, so Python's raising cleanup_job is a fake that leaves work:
+        /// pickup records it and still launches.
         #[test]
         fn test_a_cleanup_error_still_launches_ideas() {
             let (fx, _, _) = setup();
+            fx.set_fakes(|f| {
+                f.cleanup_job = Some(Rc::new(|_, _, _, _, _| {
+                    (
+                        Vec::new(),
+                        vec!["worktree made-up: still in use".to_string()],
+                    )
+                }))
+            });
             fx.jobs(json!([
                 closed(json!({})),
                 idea("001-alpha", "alpha", json!({}))
             ]));
-            assert_deferred_run(&fx, &[], "close cleanup");
-            assert!(fx.launched().is_empty());
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(out.starts_with(
+                "cleaned up 042-sample-export alpha, left: worktree made-up: still in use\n"
+            ));
+            assert_eq!(fx.launched().len(), 1);
+            assert_eq!(left(&fx), json!(["worktree made-up: still in use"]));
         }
 
         #[test]
@@ -17475,15 +17672,6 @@ exit "$archive_code"
             )
             .unwrap_err();
             assert_eq!((e.code, e.stderr.as_str()), (2, "factory.py: pickup auto-babysit PR signals is not ported to the Rust binary yet\n"));
-        }
-
-        #[test]
-        fn close_cleanup() {
-            let fx = Fx::new();
-            alpha_on(&fx);
-            fs::create_dir_all(fx.home.join("worktrees/alpha/042-sample-export")).unwrap();
-            fx.jobs(json!([{"id": "042-sample-export", "stage": "closed", "project": "alpha", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z", "closed": "2026-01-02T12:05:00Z"}}]));
-            assert_deferred(fx.pickup(&[]), "close cleanup");
         }
     }
 }
