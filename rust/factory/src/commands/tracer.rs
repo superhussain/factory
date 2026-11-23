@@ -569,7 +569,8 @@ fn tracer_token(slug: &str, path: &Path) -> Res<String> {
     ))
 }
 
-/// The Tracer client: no proxy, no redirects, a 5 second limit on each step.
+/// The Tracer client: no proxy, no redirects, and a 5 second limit on the lookup, the connect,
+/// the request and response heads, and each read and write.
 fn tracer_agent() -> &'static Agent {
     static AGENT: OnceLock<Agent> = OnceLock::new();
     AGENT.get_or_init(|| {
@@ -585,11 +586,12 @@ fn tracer_agent() -> &'static Agent {
             .http_status_as_error(false)
             .user_agent("factory")
             .accept("")
+            .timeout_resolve(limit)
             .timeout_connect(limit)
             .timeout_send_request(limit)
-            .timeout_send_body(limit)
             .timeout_recv_response(limit)
-            .timeout_recv_body(limit)
+            .timeout_per_read(limit)
+            .timeout_per_write(limit)
             .tls_config(tls)
             .build()
             .new_agent()
@@ -2123,6 +2125,65 @@ mod tests {
             (200, json!([]))
         );
         assert_eq!(fake.requests().len(), 1);
+    }
+
+    /// Python's 5 s timeout limits each socket read, so a body that streams for longer still arrives.
+    #[test]
+    fn slow_streaming_body_is_read() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            while reader.read_line(&mut line).unwrap() > 2 {
+                line.clear();
+            }
+            let chunks = ["[", "1", ",", "2", ",", "3", "]"];
+            let head = "HTTP/1.1 200 OK\r\nContent-Length: 7\r\nConnection: close\r\n\r\n";
+            stream.write_all(head.as_bytes()).unwrap();
+            for chunk in chunks {
+                stream.write_all(chunk.as_bytes()).unwrap();
+                stream.flush().unwrap();
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        });
+        let got = tracer_call(&base, TOKEN, "GET", "api/features", None, &[200]);
+        assert_eq!(got.map_err(|e| e.stderr).unwrap(), (200, json!([1, 2, 3])));
+    }
+
+    #[test]
+    fn receipt_rejections() {
+        let feature = |receipt: Value| json!({"id": "factory-1", "scope_approved_at": APPROVED_AT, "scope_receipt": receipt});
+        let good = receipt("factory-1", "FACTORY-1", "001-sample");
+        let changed = |key: &str, value: Value| {
+            let mut r = good.clone();
+            r[key] = value;
+            r
+        };
+        let check = |receipt: Value| {
+            tracer_receipt(&feature(receipt), "factory-1", "FACTORY-1", "001-sample").unwrap()
+        };
+        assert_eq!(check(good.clone()), Some(good.clone()));
+        for (name, bad) in [
+            ("ticket", changed("ticket", json!("FACTORY-7"))),
+            (
+                "approved_at",
+                changed("approved_at", json!("2026-01-03T00:00:00Z")),
+            ),
+            (
+                "short signature",
+                changed("signature", json!(format!("{}==", "A".repeat(85)))),
+            ),
+            ("signature not a string", changed("signature", json!(42))),
+            ("signature missing", {
+                let mut r = good.clone();
+                r.as_object_mut().unwrap().shift_remove("signature");
+                r
+            }),
+        ] {
+            assert_eq!(check(bad), None, "{name}");
+        }
     }
 
     #[test]
