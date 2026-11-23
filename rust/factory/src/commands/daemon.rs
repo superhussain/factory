@@ -147,14 +147,20 @@ fn run(home: &Path) -> Res<()> {
         signal_stop,
         &|msg| {
             log_line(&home, msg);
-            // A person watching the terminal sees why the socket never opens.
-            if terminal && msg.starts_with("connect failed: ") {
+            // A person watching the terminal sees why the socket never opens. Under a service,
+            // stderr is <home>/logs/daemon.log, so every line goes there too.
+            if !terminal {
+                eprintln!("{} {msg}", now());
+            } else if msg.starts_with("connect failed: ") {
                 eprintln!("factory daemon: {msg}");
             }
         },
         &mut |_| {
             let (code, stopped) = run_pickup(&exe, &home, signal_stop);
             log_line(&home, &format!("pickup exited {code}"));
+            if !terminal {
+                eprintln!("{} pickup exited {code}", now());
+            }
             if stopped {
                 ControlFlow::Break(())
             } else {
