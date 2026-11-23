@@ -3,6 +3,7 @@
 
 #[cfg(test)]
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -14,9 +15,12 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
+use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job};
 use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::{
-    BACKLOG_LINE, JOB_ID, REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL, SLUG, WINDOWS,
+    BACKLOG_LINE, BACKPRESSURE_NEEDS_YOU, HOLD_MAX_HOURS, HOLD_MIN_IDEAS, IDEA, IN_FLIGHT, JOB_ID,
+    MAX_RIDERS, NOTE_INVISIBLE, REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL, SLUG, TERMINAL,
+    UNATTENDED, WINDOWS,
 };
 use crate::shared::exit::{exit, fail, Exit, Res};
 use crate::shared::fs::{is_link, read_text, regular_metadata, resolve, write_atomic};
@@ -86,6 +90,16 @@ fn deferred(what: &str) -> Exit {
 type Api = Rc<dyn Fn(&Path, &str, &str, Option<&[u8]>, &[u16], &[(&str, &str)]) -> Res<Response>>;
 #[cfg(test)]
 type Hook = Option<Rc<dyn Fn(&Path)>>;
+#[cfg(test)]
+type Launch = Rc<
+    dyn Fn(
+        &Path,
+        &Entry,
+        &str,
+        &[String],
+        &[(String, String)],
+    ) -> Res<(bool, Option<String>, PathBuf)>,
+>;
 
 /// One field per function or constant the Python pickup tests patch.
 #[cfg(test)]
@@ -108,7 +122,13 @@ struct Fakes {
     pickup_pass: Option<Rc<dyn Fn(&mut Io, &Path) -> Res<()>>>,
     orphan_pickup_scan: Hook,
     outcomes_pickup_record: Hook,
+    pick_route: Option<Rc<dyn Fn(&Path) -> Res<Option<Route>>>>,
+    launch_idea: Option<Launch>,
+    retro_catchup_due: Option<Rc<dyn Fn(&Path, &Local) -> bool>>,
+    daily_tokens: Option<Rc<dyn Fn(i64) -> Result<i64, String>>>,
+    record_agent: Option<Rc<dyn Fn(&Path, &str, &Value) -> Res<Option<Value>>>>,
     pickup_scheduler: Option<&'static str>,
+    launch_wait_seconds: Option<f64>,
     exe: Option<String>,
 }
 
@@ -2620,14 +2640,6 @@ fn outcomes_pickup_record(home: &Path) -> Res<()> {
     Ok(())
 }
 
-fn retro_transcripts() -> PathBuf {
-    let base = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::home_dir().unwrap_or_default().join(".claude"));
-    base.join("projects")
-}
-
 fn retro_pushed_today(home: &Path) -> bool {
     let (utc, offset) = local_now();
     ran_today(&home.join(RETRO_PUSH_FILE), &local_date(utc, offset))
@@ -2762,14 +2774,1393 @@ fn backlog_triage_pass(home: &Path) -> Res<()> {
 
 // ---- group B: routes, holds, claims and launches
 
-fn tracer_building(j: &Value) -> bool {
-    j.get("tracer").and_then(|t| t.get("building")) == Some(&Value::Bool(true))
+const LAUNCH_WAIT_SECONDS: f64 = 30.0;
+const LAUNCH_BACKOFF_SECONDS: i64 = 300;
+const LAUNCH_BACKOFF_CAP_SECONDS: i64 = 14400;
+const LAUNCH_STOP_FAILURES: i64 = 5;
+const AGENT_ROWS_MAX: usize = 32;
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+const SPEC_APPROVED_NOTES: [&str; 2] =
+    ["spec approved in Tracer", "spec approved on the dashboard"];
+const RETRO_PROMPT_FILE: &str = "retro-schedule-prompt.md";
+const RETRO_CATCHUP_FILE: &str = "retro-catchup.json";
+const RETRO_WAIT_FILE: &str = "retro-catchup-wait.json";
+const RETRO_CATCHUP_AFTER: (i64, i64) = (9, 30);
+const USAGE_PROMPT_LINES: usize = 50;
+/// USAGE_TOKENS: the kinds in order, and the usage field each reads.
+const USAGE_TOKENS: [(&str, &str); 4] = [
+    ("input", "input_tokens"),
+    ("output", "output_tokens"),
+    ("cache_write", "cache_creation_input_tokens"),
+    ("cache_read", "cache_read_input_tokens"),
+];
+static NOT_BEFORE: Pattern = Pattern::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", Re::NONE);
+static LIMIT_TEXT: Pattern = Pattern::new(
+    "(?:usage|rate|session|weekly) limit|limit (?:reached|exceeded)",
+    Re::I,
+);
+static RESET_IN: Pattern = Pattern::new(
+    r"(?:resets|try again) in (\d{1,4}) ?(minutes?|mins?|m|hours?|hrs?|h)\b",
+    Re::I,
+);
+static RESET_AT: Pattern = Pattern::new(
+    r"resets (?:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2}), )?(\d{1,2})(?::(\d{2}))?(am|pm) \(([A-Za-z_]+(?:/[A-Za-z0-9_+-]+)*)\)",
+    Re::NONE,
+);
+static PLACEHOLDER: Pattern = Pattern::new(
+    r"\{(id|project|repo_path|session|provider|model|effort|prompt)\}",
+    Re::NONE,
+);
+static RETRO_RUN_NAME: Pattern = Pattern::new(r"(\d{8}T\d{6}Z)-[0-9a-f]{6}", Re::NONE);
+static RETRO_JOB: Pattern = Pattern::new(r"factory-(\d{2,5})-", Re::NONE);
+
+fn new_claim(device: &str, session: &str) -> Value {
+    let stamp = now();
+    json!({"device": device, "session": session, "since": stamp, "seen": stamp})
 }
 
-fn retro_pickup_catchup(io: &mut Io, home: &Path, dry: bool) {
-    let _ = (io, home, dry);
+fn mine(c: &Value, device: &str, session: &str) -> bool {
+    get_str(c, "device") == Some(device) && get_str(c, "session") == Some(session)
 }
 
+/// Python truthiness of a JSON value.
+fn truthy(v: Option<&Value>) -> bool {
+    match v {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(Value::Array(a)) => !a.is_empty(),
+        Some(Value::Object(o)) => !o.is_empty(),
+        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
+    }
+}
+
+/// The job's claim when another session holds it and checked in within the last minutes. A
+/// claim whose seen stamp does not parse counts as held, where Python stops with a traceback.
+fn blocking(job: &Value, device: &str, session: &str, minutes: u32) -> Option<Value> {
+    let c = job.get("claim").filter(|c| truthy(Some(c)))?;
+    if mine(c, device, session) {
+        return None;
+    }
+    match get_str(c, "seen").and_then(parse_stamp) {
+        Some(seen) if unix_now() - seen >= i64::from(minutes) * 60 => None,
+        _ => Some(c.clone()),
+    }
+}
+
+fn claimed_by(c: &Value) -> String {
+    format!(
+        "claimed by {} session {}",
+        text_of(c.get("device")),
+        text_of(c.get("session"))
+    )
+}
+
+/// Python `str(v)` for a JSON value that is usually a string: None for a missing one.
+fn text_of(v: Option<&Value>) -> String {
+    match v {
+        None | Some(Value::Null) => "None".into(),
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Bool(true)) => "True".into(),
+        Some(Value::Bool(false)) => "False".into(),
+        Some(other) => other.to_string(),
+    }
+}
+
+fn earlier_moves(m: &Value) -> Vec<&Value> {
+    m.get("earlier")
+        .and_then(Value::as_array)
+        .map(|e| e.iter().filter(|x| x.is_object()).collect())
+        .unwrap_or_default()
+}
+
+/// True when pickup recorded this holder's stop. Only a string counts.
+fn move_stopped(x: &Value) -> bool {
+    x.get("stopped").is_some_and(Value::is_string)
+}
+
+/// The move's holders whose host has not stopped them yet, earlier ones first.
+fn queued_stops(m: Option<&Value>) -> Vec<&Value> {
+    let Some(m) = m.filter(|m| m.is_object()) else {
+        return Vec::new();
+    };
+    let mut all = earlier_moves(m);
+    all.push(m);
+    all.into_iter()
+        .filter(|x| truthy(x.get("from")) && !move_stopped(x))
+        .collect()
+}
+
+fn jobs_of(data: &Value) -> &[Value] {
+    data["jobs"].as_array().map_or(&[], Vec::as_slice)
+}
+
+fn open_job_ids(jobs: &[Value]) -> Vec<&Value> {
+    jobs.iter()
+        .filter(|j| !get_str(j, "stage").is_some_and(|s| TERMINAL.contains(&s)))
+        .filter_map(|j| j.get("id"))
+        .collect()
+}
+
+/// Fresh in-flight jobs on the board: of one project, or of all when project is None, and only
+/// this device's claims when device is set.
+fn inflight_count(
+    data: &Value,
+    project: Option<&str>,
+    minutes: u32,
+    device: Option<&str>,
+) -> usize {
+    let cutoff = unix_now() - i64::from(minutes) * 60;
+    jobs_of(data)
+        .iter()
+        .filter(|j| {
+            if project.is_some_and(|p| !p.is_empty()) && get_str(j, "project") != project {
+                return false;
+            }
+            let claim_device = j.get("claim").and_then(|c| c.get("device"));
+            if device.is_some_and(|d| !d.is_empty())
+                && claim_device.and_then(Value::as_str) != device
+            {
+                return false;
+            }
+            if gated(j) || lead_of(j).is_some() || babysitting(j) || waiting_until(j).is_some() {
+                return false;
+            }
+            let stage = get_str(j, "stage");
+            let stamp = if stage == Some(IDEA) || approved_start(j) {
+                j.get("claim").and_then(|c| c.get("seen"))
+            } else if stage.is_some_and(|s| IN_FLIGHT.contains(&s))
+                || stage == Some("pr-open") && !escalated(j)
+            {
+                j.get("updated")
+            } else {
+                return false;
+            };
+            stamp
+                .and_then(Value::as_str)
+                .and_then(parse_stamp)
+                .is_some_and(|seen| seen > cutoff)
+        })
+        .count()
+}
+
+/// One launch entry: the job, its checkout and the session tag it runs as.
+#[derive(Clone, Debug)]
+struct Entry {
+    id: String,
+    project: String,
+    repo_path: String,
+    session: String,
+}
+
+/// routes.md's optional experiment line.
+#[derive(Clone, Debug)]
+struct Experiment {
+    name: String,
+    provider: String,
+    model: String,
+    effort: Option<String>,
+    percent: u32,
+}
+
+/// claim_ideas's keyword arguments.
+struct Pick<'a> {
+    max_inflight: Option<usize>,
+    project: Option<&'a str>,
+    by_host: bool,
+    builds: bool,
+    experiment: Option<&'a Experiment>,
+    route: Option<&'a Route>,
+    skip_ids: Vec<String>,
+}
+
+/// Claim up to limit of the oldest runnable ideas in one board write, and return them. An
+/// empty session mints a tag per idea.
+#[allow(clippy::too_many_arguments)]
+fn claim_ideas(
+    home: &Path,
+    device: &str,
+    session: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    limit: usize,
+    pick: &Pick,
+) -> Res<Vec<Entry>> {
+    let mut exp_limited = false;
+    if let Some(experiment) = pick.experiment {
+        let limits = read_limits(home)?;
+        exp_limited = lookup(&limits, &experiment.name).is_some_and(|u| u > now().as_str());
+    }
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let mut picked: Vec<Entry> = Vec::new();
+        let count = match pick.max_inflight {
+            None => 0,
+            Some(_) if pick.by_host => inflight_count(&data, None, minutes, Some(device)),
+            Some(_) => inflight_count(&data, pick.project, minutes, None),
+        };
+        let budget = match pick.max_inflight {
+            None => limit,
+            Some(cap) => limit.min(cap.saturating_sub(count)),
+        };
+        let mut order: Vec<usize> = (0..jobs_of(&data).len()).collect();
+        order.sort_by_key(|&i| !prioritized(&jobs_of(&data)[i]));
+        for i in order {
+            if picked.len() == budget {
+                break;
+            }
+            let j = &data["jobs"][i];
+            if !truthy(j.get("project"))
+                || gated(j)
+                || paused(j)
+                || waiting_until(j).is_some()
+                || closing(j)
+                || waiting_on(j, jobs_of(&data)).is_some()
+                || tracer_building(j)
+            {
+                continue;
+            }
+            let project = get_str(j, "project").unwrap_or_default().to_string();
+            let repo = lookup(paths, &project).map(String::from);
+            let startable = get_str(j, "stage") == Some(IDEA)
+                || pick.builds && (approved_start(j) || moved_here(j, device));
+            let Some(id) = safe_id(j).map(String::from) else {
+                continue;
+            };
+            let Some(repo) = repo.filter(|r| startable && is_dir(r)) else {
+                continue;
+            };
+            if pick.project.is_some_and(|p| p != project)
+                || pick.skip_ids.contains(&id)
+                || blocking(j, device, session, minutes).is_some()
+            {
+                continue;
+            }
+            if let Some(experiment) = pick.experiment {
+                let record = j.get("experiment");
+                let arm = match record.and_then(|r| get_str(r, "arm")) {
+                    Some(arm @ ("a" | "b")) if record.is_some_and(Value::is_object) => {
+                        arm.to_string()
+                    }
+                    _ => experiment_arm(&id, experiment.percent).to_string(),
+                };
+                if arm == "b" && exp_limited {
+                    continue;
+                }
+                if !truthy(record) {
+                    let route = pick.route.unwrap();
+                    let (provider, model, effort) = if arm == "b" {
+                        (&experiment.provider, &experiment.model, &experiment.effort)
+                    } else {
+                        (&route.provider, &route.model, &route.effort)
+                    };
+                    data["jobs"][i]["experiment"] = json!({"name": experiment.name, "arm": arm,
+                        "provider": provider, "model": model, "effort": effort});
+                }
+            }
+            let tag = if session.is_empty() {
+                token_hex3()
+            } else {
+                session.to_string()
+            };
+            let claim = new_claim(device, &tag);
+            // Replace the claim whole, as hold does. The paseo key stays as it was.
+            data["jobs"][i]
+                .as_object_mut()
+                .unwrap()
+                .shift_remove("claim");
+            patch_job(&mut data, &id, &json!({"claim": claim}));
+            if pick.builds && moved_here(&data["jobs"][i], device) {
+                patch_job(
+                    &mut data,
+                    &id,
+                    &json!({"move": {"claimed": claim["since"]}}),
+                );
+            }
+            picked.push(Entry {
+                id,
+                project,
+                repo_path: repo,
+                session: tag,
+            });
+        }
+        let text = (!picked.is_empty()).then(|| dump_board(&data));
+        Ok((text, picked))
+    })
+}
+
+/// A job waiting on a person, as the dashboard's waitsOnYou reads it.
+fn waits_on_you(j: &Value) -> bool {
+    let stage = get_str(j, "stage");
+    if stage.is_some_and(|s| TERMINAL.contains(&s)) {
+        return false;
+    }
+    stage == Some("needs-human")
+        || get_str(j, "needs").is_some_and(|n| !strip(n).is_empty())
+        || stage == Some("pr-open") && escalated(j)
+}
+
+fn read_experiment(home: &Path, route_names: &[String]) -> Res<Option<Experiment>> {
+    let path = home.join("routes.md");
+    let meta = meta(&path)?;
+    let Some(line) = lookup(&meta, "experiment") else {
+        return Ok(None);
+    };
+    let bad = || {
+        fail(
+            format!(
+                "bad experiment in {}: use experiment: <name> <provider> <model> [<effort>] <percent>",
+                path.display()
+            ),
+            2,
+        )
+    };
+    let parts = words(line);
+    if !(4..=5).contains(&parts.len()) {
+        return Err(bad());
+    }
+    let (name, provider, model) = (parts[0], parts[1], parts[2]);
+    let effort = (parts.len() == 5).then(|| parts[3]);
+    let percent = parts[parts.len() - 1];
+    let digits = (1..=3).contains(&percent.len()) && percent.bytes().all(|b| b.is_ascii_digit());
+    if !SLUG.is_full(name)
+        || !SLUG.is_full(provider)
+        || !ROUTE_MODEL.is_full(model)
+        || route_names.iter().any(|r| r == name)
+        || effort.is_some_and(|e| !ROUTE_EFFORTS.contains(&e))
+        || !digits
+        || percent.parse::<u32>().unwrap_or(999) > 100
+    {
+        return Err(bad());
+    }
+    Ok(Some(Experiment {
+        name: name.into(),
+        provider: provider.into(),
+        model: model.into(),
+        effort: effort.map(String::from),
+        percent: percent.parse().unwrap(),
+    }))
+}
+
+/// Arm "b" when the job id's stable hash bucket falls under percent, else "a".
+fn experiment_arm(job_id: &str, percent: u32) -> &'static str {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(job_id.as_bytes());
+    let bucket = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) % 100;
+    if bucket < percent {
+        "b"
+    } else {
+        "a"
+    }
+}
+
+/// This host's first route not marked limited, or None.
+fn pick_route(home: &Path) -> Res<Option<Route>> {
+    #[cfg(test)]
+    if let Some(f) = fake!(pick_route) {
+        return f(home);
+    }
+    let routes = read_routes(home)?;
+    let stamp = now();
+    let limits = read_limits(home)?;
+    let active = |name: &str| lookup(&limits, name).is_some_and(|u| u > stamp.as_str());
+    Ok(routes.into_iter().find(|r| !active(&r.name)))
+}
+
+/// True when name is the experiment, False when it is a route, else exit 2.
+fn check_limit_name(home: &Path, name: &str) -> Res<bool> {
+    let routes: Vec<String> = read_routes(home)?.into_iter().map(|r| r.name).collect();
+    let experiment = read_experiment(home, &routes)?;
+    if experiment.as_ref().is_some_and(|e| e.name == name) {
+        return Ok(true);
+    }
+    if routes.iter().any(|r| r == name) {
+        return Ok(false);
+    }
+    let path = home.join("routes.md");
+    let what = if experiment.is_some() {
+        "unknown route or experiment"
+    } else {
+        "unknown route"
+    };
+    Err(fail(
+        format!("{what} {}: not in {}", repr(name), path.display()),
+        2,
+    ))
+}
+
+/// Mark one route or the experiment limited for minutes from now.
+fn limit_route(home: &Path, name: &str, minutes: i64) -> Res<(String, bool)> {
+    let experiment = check_limit_name(home, name)?;
+    let stamp = now();
+    let mut limits: Map<String, Value> = Map::new();
+    for (n, until) in read_limits(home)? {
+        if until > stamp {
+            limits.insert(n, Value::from(until));
+        }
+    }
+    let until = format_stamp(unix_now() + minutes * 60);
+    limits.insert(name.to_string(), Value::from(until.clone()));
+    write_file(
+        &home.join("route-limits.json"),
+        &(dumps(&Value::Object(limits), INDENT2) + "\n"),
+    )?;
+    Ok((until, experiment))
+}
+
+/// Drop this session's claim on an idea in one board write, so the idea waits again.
+fn release_claim(home: &Path, job_id: &str, device: &str, session: &str) -> Res<()> {
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(job) = jobs_of(&data)
+            .iter()
+            .find(|j| get_str(j, "id") == Some(job_id))
+        else {
+            return Err(fail(format!("no job {job_id} on the board"), 4));
+        };
+        let stage = job.get("stage");
+        if get_str(job, "stage") != Some(IDEA) {
+            return Err(fail(
+                format!(
+                    "{job_id} is at {}, not idea: nothing to release",
+                    text_of(stage)
+                ),
+                6,
+            ));
+        }
+        let claim = job.get("claim").filter(|c| truthy(Some(c)));
+        if !claim.is_some_and(|c| mine(c, device, session)) {
+            return Err(fail(format!("{job_id} has no claim from this session"), 6));
+        }
+        patch_job(&mut data, job_id, &json!({"claim": null}));
+        Ok((Some(dump_board(&data)), ()))
+    })
+}
+
+/// True when pickup holds this idea for a batch: a follow-up or a triage-queued idea nobody added,
+/// approved or prioritized from the dashboard.
+fn batch_hold(j: &Value) -> bool {
+    if get_str(j, "stage") != Some(IDEA) || j.get("capture_id").is_some() || prioritized(j) {
+        return false;
+    }
+    let follow_up = j.get("refs").and_then(Value::as_array).is_some_and(|refs| {
+        refs.iter()
+            .any(|r| get_str(r, "kind") == Some("follow-up-of"))
+    });
+    follow_up || j.get("backlog").and_then(|b| get_str(b, "by")) == Some("triage")
+}
+
+/// A field of the effective pipeline view, or None when it is absent or unreadable.
+fn view_field(home: &Path, slug: &str, field: &str) -> Res<Option<Value>> {
+    let path = format!("/api/pipeline/effective/{slug}");
+    let r = api(home, "GET", &path, None, &[200, 404, 409], &[])?;
+    if r.status != 200 {
+        return Ok(None);
+    }
+    let view = loads(&r.text()?).ok();
+    Ok(view.and_then(|v| v.get(field).cloned()))
+}
+
+fn hold_config(home: &Path, slug: &str) -> Res<(i64, i64)> {
+    let hold = view_field(home, slug, "hold")?.filter(Value::is_object);
+    let least = hold.as_ref().and_then(|h| int_of(h.get("min_ideas")));
+    let hours = hold.as_ref().and_then(|h| int_of(h.get("max_wait_hours")));
+    match (least, hours) {
+        (Some(l), Some(h)) if (1..=MAX_RIDERS as i64).contains(&l) && (1..=168).contains(&h) => {
+            Ok((l, h))
+        }
+        _ => Ok((HOLD_MIN_IDEAS as i64, HOLD_MAX_HOURS as i64)),
+    }
+}
+
+fn backpressure_config(home: &Path, slug: &str) -> Res<i64> {
+    let bp = view_field(home, slug, "backpressure")?.filter(Value::is_object);
+    match bp.as_ref().and_then(|b| int_of(b.get("needs_you"))) {
+        Some(n) if (1..=50).contains(&n) => Ok(n),
+        _ => Ok(BACKPRESSURE_NEEDS_YOU as i64),
+    }
+}
+
+/// {id: skip line} for plain ideas pickup does not launch while the project's own waiting jobs
+/// reach its backpressure.needs_you.
+fn backpressure_holds(
+    home: &Path,
+    jobs: &[&Value],
+    waiting: &HashMap<Option<String>, i64>,
+    runnable: &dyn Fn(&Value) -> bool,
+) -> Res<HashMap<String, String>> {
+    let (mut limits, mut lines) = (HashMap::new(), HashMap::new());
+    for j in jobs {
+        if get_str(j, "stage") != Some(IDEA) || prioritized(j) || !runnable(j) {
+            continue;
+        }
+        let slug = get_str(j, "project").unwrap_or_default().to_string();
+        let count = waiting.get(&Some(slug.clone())).copied().unwrap_or(0);
+        if count < 1 {
+            continue;
+        }
+        if !limits.contains_key(&slug) {
+            limits.insert(slug.clone(), backpressure_config(home, &slug)?);
+        }
+        let limit = limits[&slug];
+        if count >= limit {
+            let id = get_str(j, "id").unwrap_or_default();
+            lines.insert(
+                id.to_string(),
+                format!(
+                    "skip {id} {slug}: backpressure ({count} waiting on you, pauses at {limit})"
+                ),
+            );
+        }
+    }
+    Ok(lines)
+}
+
+/// {id: skip line} for the held ideas pickup does not launch this run.
+fn batch_holds(
+    home: &Path,
+    jobs: &[&Value],
+    runnable: &dyn Fn(&Value) -> bool,
+) -> Res<HashMap<String, String>> {
+    let mut groups: Vec<(String, Vec<&Value>)> = Vec::new();
+    let mut starters: HashMap<String, String> = HashMap::new();
+    for j in jobs {
+        let slug = get_str(j, "project").unwrap_or_default().to_string();
+        let id = get_str(j, "id").unwrap_or_default();
+        let batch = j.get("priority").and_then(|p| p.get("batch")) == Some(&Value::Bool(true));
+        if get_str(j, "stage") == Some(IDEA)
+            && prioritized(j)
+            && batch
+            && !(gated(j)
+                || paused(j)
+                || closing(j)
+                || waiting_until(j).is_some()
+                || tracer_building(j))
+        {
+            starters
+                .entry(slug.clone())
+                .or_insert_with(|| id.to_string());
+        }
+        if batch_hold(j) && runnable(j) {
+            match groups.iter_mut().find(|(s, _)| *s == slug) {
+                Some((_, held)) => held.push(j),
+                None => groups.push((slug, vec![j])),
+            }
+        }
+    }
+    let (stamp, mut lines) = (unix_now(), HashMap::new());
+    let id = |j: &Value| get_str(j, "id").unwrap_or_default().to_string();
+    for (slug, held) in groups {
+        if let Some(starter) = starters.get(&slug) {
+            for j in &held {
+                lines.insert(
+                    id(j),
+                    format!("skip {} {slug}: batches behind {starter}", id(j)),
+                );
+            }
+            continue;
+        }
+        let (least, hours) = hold_config(home, &slug)?;
+        let age = |j: &Value| {
+            get_str(j, "updated")
+                .and_then(parse_stamp)
+                .map_or(hours * 3600, |u| stamp - u)
+        };
+        let oldest = held.iter().map(|j| age(j)).max().unwrap();
+        if held.len() as i64 >= least || oldest >= hours * 3600 {
+            let first = id(held[0]);
+            for j in &held[1..] {
+                lines.insert(
+                    id(j),
+                    format!("skip {} {slug}: batches behind {first}", id(j)),
+                );
+            }
+            continue;
+        }
+        let waited = oldest.max(0) / 3600;
+        for j in &held {
+            lines.insert(
+                id(j),
+                format!(
+                    "skip {} {slug}: waits for a batch ({} of {least} held, oldest {waited}h of {hours}h)",
+                    id(j),
+                    held.len()
+                ),
+            );
+        }
+    }
+    Ok(lines)
+}
+
+/// This host's max_inflight from the host registry (0 pauses pickup), or None.
+fn host_max_inflight(home: &Path, device: &str) -> Res<Option<usize>> {
+    let r = api(home, "GET", "/api/hosts", None, &[200, 404], &[])?;
+    if r.status == 404 {
+        return Ok(None);
+    }
+    let hosts = loads(&r.text()?).ok();
+    let record = hosts
+        .as_ref()
+        .and_then(Value::as_array)
+        .and_then(|h| h.iter().find(|h| get_str(h, "id") == Some(device)));
+    let cap = record.and_then(|r| int_of(r.get("max_inflight")));
+    Ok(cap.filter(|c| (0..=5).contains(c)).map(|c| c as usize))
+}
+
+/// The values a launcher's placeholders take.
+#[derive(Clone, Debug)]
+struct Given {
+    id: String,
+    project: String,
+    repo_path: String,
+    session: String,
+    provider: String,
+    model: String,
+    effort: String,
+    prompt: String,
+}
+
+impl Given {
+    fn new(entry: &Entry, route: (&str, &str, &str), prompt: String) -> Given {
+        Given {
+            id: entry.id.clone(),
+            project: entry.project.clone(),
+            repo_path: entry.repo_path.clone(),
+            session: entry.session.clone(),
+            provider: route.0.into(),
+            model: route.1.into(),
+            effort: route.2.into(),
+            prompt,
+        }
+    }
+}
+
+fn route_values(route: &Route) -> (&str, &str, &str) {
+    (
+        &route.provider,
+        &route.model,
+        route.effort.as_deref().unwrap_or(""),
+    )
+}
+
+/// The template with each known {placeholder} replaced; unknown braces stay literal.
+fn launcher_argv(template: &[String], given: &Given) -> Vec<String> {
+    template
+        .iter()
+        .map(|arg| {
+            PLACEHOLDER.replace_all(arg, |c| {
+                match c.get(1).unwrap().as_str() {
+                    "id" => &given.id,
+                    "project" => &given.project,
+                    "repo_path" => &given.repo_path,
+                    "session" => &given.session,
+                    "provider" => &given.provider,
+                    "model" => &given.model,
+                    "effort" => &given.effort,
+                    _ => &given.prompt,
+                }
+                .clone()
+            })
+        })
+        .collect()
+}
+
+fn launch_prompt(command: &str) -> String {
+    format!("{command}\n\n{UNATTENDED}")
+}
+
+fn launch_wait_seconds() -> f64 {
+    #[cfg(test)]
+    if let Some(s) = FAKES.with(|f| f.borrow().launch_wait_seconds) {
+        return s;
+    }
+    LAUNCH_WAIT_SECONDS
+}
+
+fn exit_code(status: std::process::ExitStatus) -> i32 {
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
+        return -signal;
+    }
+    status.code().unwrap_or(1)
+}
+
+/// Start one launcher detached, with its output in a private log, and wait up to
+/// LAUNCH_WAIT_SECONDS. (ok, detail, log path): still running or exit 0 is ok.
+fn launch_idea(
+    home: &Path,
+    entry: &Entry,
+    route: &str,
+    argv: &[String],
+    env: &[(String, String)],
+) -> Res<(bool, Option<String>, PathBuf)> {
+    #[cfg(test)]
+    if let Some(f) = fake!(launch_idea) {
+        return f(home, entry, route, argv, env);
+    }
+    let _ = route;
+    let folder = home.join("logs").join("pickup");
+    mkdirs(&folder)?;
+    let log_path = folder.join(format!("{}-{}.log", entry.id, entry.session));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let log = options
+        .open(&log_path)
+        .map_err(|e| fail(os_error(&e, Some(&log_path)), 1))?;
+    let err_log = log
+        .try_clone()
+        .map_err(|e| fail(os_error(&e, Some(&log_path)), 1))?;
+    let mut cmd = Command::new(&argv[0]);
+    cmd.args(&argv[1..])
+        .current_dir(&entry.repo_path)
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .stdin(Stdio::null())
+        .stdout(log)
+        .stderr(err_log);
+    detach(&mut cmd);
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            let name = basename(&argv[0]);
+            return Ok((
+                false,
+                Some(format!("cannot start {name}: {}", strerror(&e))),
+                log_path,
+            ));
+        }
+    };
+    let deadline = Instant::now() + Duration::from_secs_f64(launch_wait_seconds());
+    loop {
+        if let Some(status) = child.try_wait().map_err(|e| fail(os_error(&e, None), 1))? {
+            let code = exit_code(status);
+            return Ok((code == 0, Some(format!("exit {code}")), log_path));
+        }
+        if Instant::now() >= deadline {
+            // The child is left running, detached; dropping the handle does not stop it.
+            return Ok((true, None, log_path));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Seconds pickup parks a job after its nth launch failure in a row: 300, doubling, capped at 4 hours.
+fn launch_backoff_seconds(n: i64) -> i64 {
+    (LAUNCH_BACKOFF_SECONDS * 2i64.pow((n - 1).clamp(0, 6) as u32)).min(LAUNCH_BACKOFF_CAP_SECONDS)
+}
+
+/// A launch failure detail as one board-safe line of at most 200 characters.
+fn launch_reason(detail: &str) -> String {
+    let line = words(detail).join(" ");
+    NOTE_INVISIBLE
+        .replace_all(&line, |_| String::new())
+        .chars()
+        .take(200)
+        .collect()
+}
+
+/// (count, until) or (count, None) for a stop at needs-human, or None.
+type Parked = Option<(i64, Option<String>)>;
+
+/// Drop this session's claim and park the job after a failed launch, in one board write. From the
+/// fifth failure in a row, move it to needs-human with a needs ask instead.
+fn back_off_launch(
+    home: &Path,
+    job_id: &str,
+    device: &str,
+    session: &str,
+    reason: &str,
+) -> Res<Parked> {
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(job) = jobs_of(&data)
+            .iter()
+            .find(|j| get_str(j, "id") == Some(job_id))
+        else {
+            return Ok((None, None));
+        };
+        if !job
+            .get("claim")
+            .is_some_and(|c| truthy(Some(c)) && mine(c, device, session))
+        {
+            return Ok((None, None));
+        }
+        let prior = job
+            .get("launch_failure")
+            .filter(|r| r.is_object())
+            .and_then(|r| int_of(r.get("count")))
+            .filter(|n| *n >= 1)
+            .unwrap_or(0);
+        let count = prior + 1;
+        let at = unix_now();
+        let failure = json!({"count": count, "reason": reason, "at": format_stamp(at)});
+        if count >= LAUNCH_STOP_FAILURES {
+            let needs = format!("Pickup launch failed {count} times in a row on host {device}. Last reason: {reason}. Fix the launcher, then clear this ask and move the job back to {}.", text_of(job.get("stage")));
+            patch_job(
+                &mut data,
+                job_id,
+                &json!({"claim": null, "not_before": null,
+                "stage": "needs-human", "needs": needs, "launch_failure": failure}),
+            );
+            return Ok((Some(dump_board(&data)), Some((count, None))));
+        }
+        let until = format_stamp(at + launch_backoff_seconds(count));
+        patch_job(
+            &mut data,
+            job_id,
+            &json!({"claim": null, "not_before": until, "launch_failure": failure}),
+        );
+        Ok((Some(dump_board(&data)), Some((count, Some(until)))))
+    })
+}
+
+/// Drop a job's launch_failure after a launch succeeds; a failed write warns instead of ending the pass.
+fn clear_launch_failure(io: &mut Io, home: &Path, job_id: &str) {
+    let cleared = cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        if !jobs_of(&data)
+            .iter()
+            .any(|j| get_str(j, "id") == Some(job_id) && j.get("launch_failure").is_some())
+        {
+            return Ok((None, ()));
+        }
+        patch_job(&mut data, job_id, &json!({"launch_failure": null}));
+        Ok((Some(dump_board(&data)), ()))
+    });
+    if let Err(e) = cleared {
+        let _ = io.err.write_all(e.stderr.as_bytes());
+        errln!(io, "factory.py: {job_id} launched, but its launch failure was not cleared; the pass goes on");
+    }
+}
+
+/// The TZif data for zone: (transition times, their type index, (utoff, isdst) types, footer).
+struct Zone {
+    times: Vec<i64>,
+    index: Vec<usize>,
+    types: Vec<(i64, bool)>,
+    rule: Option<TzRule>,
+}
+
+/// A POSIX TZ footer: standard and DST offsets east of UTC, and the DST start and end rules.
+struct TzRule {
+    std: i64,
+    dst: Option<(i64, (u32, u32, u32, u32, i64), (u32, u32, u32, u32, i64))>,
+}
+
+fn read_zone(name: &str) -> Option<Zone> {
+    if Path::new(name).is_absolute() || name.contains("..") || WINDOWS {
+        return None;
+    }
+    let mut dirs: Vec<PathBuf> = std::env::var_os("TZDIR")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .into_iter()
+        .collect();
+    dirs.extend(
+        [
+            "/usr/share/zoneinfo",
+            "/usr/lib/zoneinfo",
+            "/usr/share/lib/zoneinfo",
+            "/etc/zoneinfo",
+        ]
+        .map(PathBuf::from),
+    );
+    let data = dirs.iter().find_map(|d| fs::read(d.join(name)).ok())?;
+    parse_tzif(&data)
+}
+
+fn parse_tzif(data: &[u8]) -> Option<Zone> {
+    let header = |at: usize| -> Option<[usize; 6]> {
+        if data.get(at..at + 4)? != b"TZif" {
+            return None;
+        }
+        let mut counts = [0usize; 6];
+        for (i, c) in counts.iter_mut().enumerate() {
+            let b = data.get(at + 20 + i * 4..at + 24 + i * 4)?;
+            *c = u32::from_be_bytes(b.try_into().ok()?) as usize;
+        }
+        Some(counts)
+    };
+    let [isut, isstd, leap, time, typ, chars] = header(0)?;
+    let v1 = 44 + time * 5 + typ * 6 + chars + leap * 8 + isstd + isut;
+    let (start, size, counts) = if data[4] >= b'2' {
+        (v1 + 44, 8, header(v1)?)
+    } else {
+        (44, 4, [isut, isstd, leap, time, typ, chars])
+    };
+    let [isut, isstd, leap, time, typ, chars] = counts;
+    let mut at = start;
+    let mut times = Vec::new();
+    for _ in 0..time {
+        let b = data.get(at..at + size)?;
+        times.push(if size == 8 {
+            i64::from_be_bytes(b.try_into().ok()?)
+        } else {
+            i64::from(i32::from_be_bytes(b.try_into().ok()?))
+        });
+        at += size;
+    }
+    let index: Vec<usize> = data
+        .get(at..at + time)?
+        .iter()
+        .map(|b| *b as usize)
+        .collect();
+    at += time;
+    let mut types = Vec::new();
+    for _ in 0..typ {
+        let b = data.get(at..at + 6)?;
+        types.push((
+            i64::from(i32::from_be_bytes(b[..4].try_into().ok()?)),
+            b[4] != 0,
+        ));
+        at += 6;
+    }
+    if index.iter().any(|i| *i >= types.len()) || types.is_empty() {
+        return None;
+    }
+    at += chars + leap * (size + 4) + isstd + isut;
+    let rule = if size == 8 {
+        let footer = std::str::from_utf8(data.get(at..)?).ok()?;
+        let footer = footer.strip_prefix('\n')?.split('\n').next()?;
+        parse_tz_rule(footer)
+    } else {
+        None
+    };
+    Some(Zone {
+        times,
+        index,
+        types,
+        rule,
+    })
+}
+
+/// A POSIX TZ string such as `EST5EDT,M3.2.0,M11.1.0`, or None when it is empty or unsupported.
+fn parse_tz_rule(s: &str) -> Option<TzRule> {
+    fn name(s: &str) -> Option<&str> {
+        if let Some(rest) = s.strip_prefix('<') {
+            return Some(&rest[rest.find('>')? + 1..]);
+        }
+        let n = s
+            .find(|c: char| !c.is_ascii_alphabetic())
+            .unwrap_or(s.len());
+        (n >= 3).then(|| &s[n..])
+    }
+    fn offset(s: &str) -> Option<(i64, &str)> {
+        let (sign, body) = match s.as_bytes().first()? {
+            b'-' => (-1, &s[1..]),
+            b'+' => (1, &s[1..]),
+            _ => (1, s),
+        };
+        let end = body
+            .find(|c: char| !(c.is_ascii_digit() || c == ':'))
+            .unwrap_or(body.len());
+        let mut secs = 0;
+        for (i, part) in body[..end].split(':').enumerate() {
+            secs += part.parse::<i64>().ok()? * [3600, 60, 1].get(i)?;
+        }
+        Some((sign * secs, &body[end..]))
+    }
+    fn date(s: &str) -> Option<((u32, u32, u32, u32, i64), &str)> {
+        let end = s.find(',').unwrap_or(s.len());
+        let (spec, time) = s[..end]
+            .split_once('/')
+            .map_or((&s[..end], None), |(a, b)| (a, Some(b)));
+        let time = match time {
+            Some(t) => offset(t).filter(|(_, rest)| rest.is_empty())?.0,
+            None => 7200,
+        };
+        let rest = &s[end..];
+        let parsed = if let Some(m) = spec.strip_prefix('M') {
+            let mut parts = m.split('.').map(|p| p.parse::<u32>().ok());
+            (0, parts.next()??, parts.next()??, parts.next()??, time)
+        } else if let Some(j) = spec.strip_prefix('J') {
+            (1, j.parse().ok()?, 0, 0, time)
+        } else {
+            (2, spec.parse().ok()?, 0, 0, time)
+        };
+        Some((parsed, rest))
+    }
+    let rest = name(s)?;
+    let (std, rest) = offset(rest)?;
+    if rest.is_empty() {
+        return Some(TzRule {
+            std: -std,
+            dst: None,
+        });
+    }
+    let rest = name(rest)?;
+    let (dst, rest) = match rest.as_bytes().first() {
+        Some(b',') | None => (std - 3600, rest),
+        _ => offset(rest)?,
+    };
+    let rest = rest.strip_prefix(',')?;
+    let (start, rest) = date(rest)?;
+    let (end, rest) = date(rest.strip_prefix(',')?)?;
+    rest.is_empty().then_some(TzRule {
+        std: -std,
+        dst: Some((-dst, start, end)),
+    })
+}
+
+/// Seconds since 1970 of a rule's transition in year y, as local wall time.
+fn rule_wall(y: i64, (kind, a, b, c, time): (u32, u32, u32, u32, i64)) -> i64 {
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let day = match kind {
+        0 => {
+            let first = days_from_civil(y, i64::from(a), 1);
+            let weekday = (first + 4).rem_euclid(7);
+            let mut day = first + (i64::from(c) - weekday).rem_euclid(7) + 7 * (i64::from(b) - 1);
+            while civil(day).1 != i64::from(a) {
+                day -= 7;
+            }
+            day
+        }
+        1 => {
+            let n = i64::from(a);
+            days_from_civil(y, 1, 1) + n - 1 + i64::from(leap && n >= 60)
+        }
+        _ => days_from_civil(y, 1, 1) + i64::from(a),
+    };
+    day * 86_400 + time
+}
+
+/// Seconds east of UTC in zone at utc, from its TZif data and then its footer rule.
+fn zone_offset(zone: &str, utc: i64) -> Option<i64> {
+    let z = read_zone(zone)?;
+    Some(zone_at(&z, utc))
+}
+
+fn zone_at(z: &Zone, utc: i64) -> i64 {
+    let after_last = z.times.last().is_none_or(|last| utc >= *last);
+    if let (true, Some(rule)) = (after_last, &z.rule) {
+        let Some((dst, start, end)) = rule.dst else {
+            return rule.std;
+        };
+        let y = civil((utc + rule.std).div_euclid(86_400)).0;
+        let begin = rule_wall(y, start) - rule.std;
+        let finish = rule_wall(y, end) - dst;
+        let in_dst = if begin < finish {
+            (begin..finish).contains(&utc)
+        } else {
+            !(finish..begin).contains(&utc)
+        };
+        return if in_dst { dst } else { rule.std };
+    }
+    match z.times.iter().rposition(|t| *t <= utc) {
+        Some(i) => z.types[z.index[i]].0,
+        None => z.types.iter().find(|t| !t.1).unwrap_or(&z.types[0]).0,
+    }
+}
+
+/// The UTC instant of a wall time in zone, with fold 0: the offset before a transition wins in
+/// both an overlap and a gap.
+fn zone_wall_to_utc(zone: &str, wall: i64) -> Option<i64> {
+    let z = read_zone(zone)?;
+    let early = zone_at(&z, wall - 14 * 3600);
+    let late = zone_at(&z, wall + 14 * 3600);
+    if zone_at(&z, wall - early) == early {
+        return Some(wall - early);
+    }
+    if zone_at(&z, wall - late) == late {
+        return Some(wall - late);
+    }
+    Some(wall - early)
+}
+
+/// Minutes until a usage limit in launcher output resets, from 1 to 1440, else 60.
+fn limit_minutes(text: &str, now: i64) -> i64 {
+    let mut minutes = 60;
+    if let Some(after) = RESET_IN.search(text) {
+        let n: i64 = after.get(1).unwrap().as_str().parse().unwrap();
+        let hours = after
+            .get(2)
+            .unwrap()
+            .as_str()
+            .to_lowercase()
+            .starts_with('h');
+        minutes = n * if hours { 60 } else { 1 };
+    } else if let Some(at) = RESET_AT.search(text) {
+        let group = |i| at.get(i).map(|m| m.as_str());
+        let reset = || -> Option<i64> {
+            let zone = group(6)?;
+            let local = now + zone_offset(zone, now)?;
+            let (y, m, d) = civil(local.div_euclid(86_400));
+            let hour =
+                group(3)?.parse::<i64>().ok()? % 12 + if group(5) == Some("pm") { 12 } else { 0 };
+            let minute = group(4).map_or(Some(0), |m| m.parse::<i64>().ok())?;
+            if minute > 59 {
+                return None;
+            }
+            let wall = |y: i64, m: i64, d: i64| -> Option<i64> {
+                let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+                let len = [
+                    31,
+                    if leap { 29 } else { 28 },
+                    31,
+                    30,
+                    31,
+                    30,
+                    31,
+                    31,
+                    30,
+                    31,
+                    30,
+                    31,
+                ];
+                if d < 1 || d > len[(m - 1) as usize] {
+                    return None;
+                }
+                zone_wall_to_utc(
+                    zone,
+                    days_from_civil(y, m, d) * 86_400 + hour * 3600 + minute * 60,
+                )
+            };
+            match group(1) {
+                None => {
+                    let reset = wall(y, m, d)?;
+                    if reset > now {
+                        return Some(reset);
+                    }
+                    let (y, m, d) = civil(days_from_civil(y, m, d) + 1);
+                    wall(y, m, d)
+                }
+                Some(month) => {
+                    let month = MONTHS.iter().position(|n| *n == month)? as i64 + 1;
+                    let day: i64 = group(2)?.parse().ok()?;
+                    let reset = wall(y, month, day)?;
+                    if reset < now - 86_400 {
+                        return wall(y + 1, month, day);
+                    }
+                    Some(reset)
+                }
+            }
+        };
+        if let Some(reset) = reset() {
+            minutes = (reset - now + 59).div_euclid(60);
+        }
+    }
+    minutes.clamp(1, 1440)
+}
+
+/// The launcher's FACTORY_ environment, added to this process's own.
+fn launch_env(given: &Given, provider: &str, model: &str) -> Vec<(String, String)> {
+    [
+        ("FACTORY_JOB_ID", given.id.as_str()),
+        ("FACTORY_PROJECT", &given.project),
+        ("FACTORY_REPO_PATH", &given.repo_path),
+        ("FACTORY_SESSION", &given.session),
+        ("FACTORY_PROVIDER", provider),
+        ("FACTORY_MODEL", model),
+        ("FACTORY_EFFORT", &given.effort),
+        ("FACTORY_PROMPT", &given.prompt),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect()
+}
+
+/// The last 4096 bytes of a launch log, decoded with replacement.
+fn log_tail(log_path: &Path) -> Res<String> {
+    let data = fs::read(log_path).map_err(|e| fail(os_error(&e, Some(log_path)), 1))?;
+    let tail = &data[data.len().saturating_sub(4096)..];
+    Ok(String::from_utf8_lossy(tail).into_owned())
+}
+
+/// After a failed launch: mark the route limited when its log says so, else exit 1, or with
+/// fatal false log the failure and return. release drops the claim first, except that a non-limit
+/// failure with backoff parks the job instead.
+#[allow(clippy::too_many_arguments)]
+fn launch_failed(
+    io: &mut Io,
+    home: &Path,
+    name: &str,
+    job_id: &str,
+    detail: &str,
+    log_path: &Path,
+    release: &mut dyn FnMut() -> Res<Parked>,
+    fatal: bool,
+    experiment: bool,
+    backoff: Option<&mut dyn FnMut() -> Res<Parked>>,
+) -> Res<()> {
+    let tail = log_tail(log_path)?;
+    if LIMIT_TEXT.search(&tail).is_some() {
+        let until = limit_route(home, name, limit_minutes(&tail, unix_now()))?.0;
+        release()?;
+        if experiment {
+            outln!(io, "limited experiment {name} until {until}");
+        } else {
+            outln!(io, "limited {name} until {until}");
+        }
+        outln!(io, "released {job_id}");
+        return Ok(());
+    }
+    let parked = match backoff {
+        Some(backoff) => backoff()?,
+        None => release()?,
+    };
+    outln!(io, "released {job_id}");
+    match parked {
+        Some((count, None)) => outln!(
+            io,
+            "needs-human {job_id} after {count} launch failures in a row"
+        ),
+        Some((count, Some(until))) => outln!(
+            io,
+            "backed off {job_id} until {until} (launch failure {count})"
+        ),
+        None => {}
+    }
+    let message = format!(
+        "launch of {job_id} on {name} failed: {detail}; see {}",
+        log_path.display()
+    );
+    if fatal {
+        return Err(fail(message, 1));
+    }
+    errln!(io, "factory.py: {message}");
+    Ok(())
+}
+
+fn dated(j: &Value, key: &str) -> bool {
+    j.get(key)
+        .is_some_and(|v| v.get("at").is_some_and(Value::is_string))
+}
+
+/// True when the dashboard asked pickup to take this job first.
+fn prioritized(j: &Value) -> bool {
+    dated(j, "priority")
+}
+
+/// True when the dashboard handed this job's PR to a babysit session.
+fn babysitting(j: &Value) -> bool {
+    dated(j, "babysit")
+}
+
+/// True when the dashboard paused pickup for this job.
+fn paused(j: &Value) -> bool {
+    dated(j, "paused")
+}
+
+/// The job's not_before stamp while it is still in the future, else None.
+fn waiting_until(j: &Value) -> Option<String> {
+    get_str(j, "not_before")
+        .filter(|t| NOT_BEFORE.is_full(t) && *t > now().as_str())
+        .map(String::from)
+}
+
+/// The first depends-on id of an idea whose job is still open on the board, else None.
+fn waiting_on(j: &Value, jobs: &[Value]) -> Option<String> {
+    if get_str(j, "stage") != Some(IDEA) {
+        return None;
+    }
+    let open = open_job_ids(jobs);
+    j.get("refs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|r| get_str(r, "kind") == Some("depends-on"))
+        .filter_map(|r| r.get("id"))
+        .find(|id| open.contains(id))
+        .map(|id| text_of(Some(id)))
+}
+
+/// True when the dashboard queued a close that pickup has not done yet.
+fn closing(j: &Value) -> bool {
+    dated(j, "close") && j["close"].get("closed").is_none()
+}
+
+/// True when the dashboard moved this in-flight job to this host, no pickup claimed it yet, and
+/// no stop of it is still queued on this host.
+fn moved_here(j: &Value, device: &str) -> bool {
+    let Some(m) = j.get("move").filter(|m| m.is_object()) else {
+        return false;
+    };
+    get_str(m, "to") == Some(device)
+        && m.get("claimed").is_none()
+        && get_str(j, "stage").is_some_and(|s| IN_FLIGHT.contains(&s))
+        && !queued_stops(Some(m))
+            .iter()
+            .any(|x| get_str(x, "from") == Some(device))
+}
+
+/// Python's `f"{n:,}"`.
+fn commas(n: i64) -> String {
+    let digits = n.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    if n < 0 {
+        format!("-{out}")
+    } else {
+        out
+    }
+}
+
+/// {job id: skip line} for every free job once this host's job tokens since local midnight reach
+/// daily_token_cap.
+fn daily_cap_holds(
+    io: &mut Io,
+    home: &Path,
+    device: &str,
+    jobs: &[&Value],
+    free: &dyn Fn(&Value) -> bool,
+    dry: bool,
+) -> Res<HashMap<String, String>> {
+    let cap = token_cap(io, home, "daily_token_cap")?;
+    let held: Vec<&&Value> = match cap {
+        Some(_) => jobs.iter().filter(|j| free(j)).collect(),
+        None => Vec::new(),
+    };
+    let (Some(cap), false) = (cap, held.is_empty()) else {
+        return Ok(HashMap::new());
+    };
+    let used = match daily_tokens(local_midnight()) {
+        Ok(used) => used,
+        Err(kind) => {
+            errln!(
+                io,
+                "factory.py: pickup skips the daily token cap: scan failed ({kind})"
+            );
+            return Ok(HashMap::new());
+        }
+    };
+    if used < cap {
+        return Ok(HashMap::new());
+    }
+    let reached = format!(
+        "daily token cap reached ({}/{} since local midnight)",
+        commas(used),
+        commas(cap)
+    );
+    if !dry {
+        errln!(
+            io,
+            "factory.py: pickup launches no new job on {device}: {reached}"
+        );
+    }
+    Ok(held
+        .into_iter()
+        .map(|j| {
+            let id = get_str(j, "id").unwrap_or_default();
+            (
+                id.to_string(),
+                format!(
+                    "skip {id} {}: host {device} {reached}",
+                    text_of(j.get("project"))
+                ),
+            )
+        })
+        .collect())
+}
+
+/// One pickup run after flags and the holder are resolved. Reads the board unless given it.
 #[allow(clippy::too_many_arguments)]
 fn pickup_pass(
     io: &mut Io,
@@ -2785,8 +4176,1165 @@ fn pickup_pass(
     if let Some(f) = fake!(pickup_pass) {
         return f(io, home);
     }
-    let _ = (io, home, device, minutes, dry, limit, cap, data);
-    Err(not_ported("pickup"))
+    let paths = paths_of(home);
+    let mut data = match data {
+        Some(data) => data,
+        None => read_board(home)?,
+    };
+    let stalls = read_stalls(home)?;
+    let mut settings: HashMap<String, Settings> = HashMap::new();
+    let adapter = stalls.as_ref().map(|s| s.0.clone());
+    move_stop_pass(
+        io,
+        home,
+        &mut data,
+        device,
+        &paths,
+        &mut settings,
+        dry,
+        adapter.as_deref(),
+    )?;
+    session_stop_pass(io, home, &mut data, device, dry)?;
+    pr_sync_pass(
+        io,
+        home,
+        &mut data,
+        device,
+        minutes,
+        &paths,
+        &mut settings,
+        dry,
+    )?;
+    autonomy_hold_pass(io, home, &mut data, dry)?;
+    close_pass(io, home, &mut data, device, minutes, dry)?;
+    close_cleanup_pass(io, home, &mut data, device, &paths, &mut settings, dry)?;
+    priority_nudge_pass(io, home, &mut data, device, dry)?;
+    idle_watch_pass(io, home, &mut data, device, dry)?;
+    token_cap_pass(io, home, &mut data, device, dry)?;
+    auto_babysit_pass(
+        io,
+        home,
+        &mut data,
+        device,
+        minutes,
+        &paths,
+        &mut settings,
+        dry,
+    )?;
+    babysit_pass(
+        io,
+        home,
+        &mut data,
+        device,
+        minutes,
+        &paths,
+        &mut settings,
+        dry,
+    )?;
+    let taken = match &stalls {
+        Some(_) => takeover(
+            io,
+            home,
+            &mut data,
+            device,
+            minutes,
+            &paths,
+            &mut settings,
+            dry,
+        )?,
+        None => 0,
+    };
+    deny_notes_pass(
+        io,
+        home,
+        &mut data,
+        device,
+        minutes,
+        &paths,
+        &mut settings,
+        dry,
+    )?;
+    resolve_pass(
+        io,
+        home,
+        &mut data,
+        device,
+        minutes,
+        &paths,
+        &mut settings,
+        dry,
+    )?;
+    if !dry && taken >= limit {
+        return Ok(());
+    }
+    let mut jobs: Vec<&Value> = jobs_of(&data)
+        .iter()
+        .filter(|j| {
+            (get_str(j, "stage") == Some(IDEA) || approved_start(j) || moved_here(j, device))
+                && safe_id(j).is_some()
+        })
+        .collect();
+    jobs.sort_by_key(|j| !prioritized(j));
+    let id_of = |j: &Value| safe_id(j).unwrap().to_string();
+    let starts: Vec<String> = jobs
+        .iter()
+        .filter(|j| approved_start(j) || moved_here(j, device))
+        .map(|j| id_of(j))
+        .collect();
+    let (mut experiment, mut exp_limited) = (None, None);
+    // Only an experiment line needs routes.md this early; without one, a host with no routes stays silent.
+    let routes_md = home.join("routes.md");
+    if !jobs.is_empty() && lookup(&meta(&routes_md)?, "experiment").is_some() {
+        let names: Vec<String> = read_routes(home)?.into_iter().map(|r| r.name).collect();
+        let e = read_experiment(home, &names)?.unwrap();
+        let limits = read_limits(home)?;
+        exp_limited = lookup(&limits, &e.name)
+            .filter(|u| *u > now().as_str())
+            .map(String::from);
+        experiment = Some(e);
+    }
+    let job_arm = |j: Option<&Value>| -> Option<String> {
+        let j = j?;
+        let record = j.get("experiment").filter(|r| r.is_object());
+        match record.and_then(|r| get_str(r, "arm")) {
+            Some(arm @ ("a" | "b")) => Some(arm.to_string()),
+            _ => experiment
+                .as_ref()
+                .map(|e| experiment_arm(&id_of(j), e.percent).to_string()),
+        }
+    };
+    let all = jobs_of(&data);
+    let base_skip = |j: &Value| -> Option<String> {
+        let id = id_of(j);
+        let Some(project) = get_str(j, "project").filter(|p| !p.is_empty()) else {
+            return Some(format!("skip {id}: no project"));
+        };
+        if !lookup(&paths, project).is_some_and(is_dir) {
+            return Some(format!("skip {id} {project}: no checkout on this host"));
+        }
+        if gated(j) {
+            return Some(format!("skip {id} {project}: waiting on a human"));
+        }
+        if paused(j) {
+            return Some(format!("skip {id} {project}: paused"));
+        }
+        if closing(j) {
+            return Some(format!("skip {id} {project}: closing"));
+        }
+        if let Some(until) = waiting_until(j) {
+            return Some(format!("skip {id} {project}: not before {until}"));
+        }
+        if let Some(other) = waiting_on(j, all) {
+            return Some(format!("skip {id} {project}: waits on {other}"));
+        }
+        if tracer_building(j) {
+            return Some(format!("skip {id} {project}: building in Tracer"));
+        }
+        if let Some(c) = blocking(j, device, "", minutes) {
+            return Some(format!("skip {id} {project}: {}", claimed_by(&c)));
+        }
+        if let (Some(e), Some(until)) = (&experiment, &exp_limited) {
+            if job_arm(Some(j)).as_deref() == Some("b") {
+                return Some(format!(
+                    "skip {id} {project}: experiment {} limited until {until}",
+                    e.name
+                ));
+            }
+        }
+        None
+    };
+    let base: HashMap<String, Option<String>> =
+        jobs.iter().map(|j| (id_of(j), base_skip(j))).collect();
+    let runnable = |j: &Value| base[&id_of(j)].is_none();
+    let mut waiting: HashMap<Option<String>, i64> = HashMap::new();
+    for j in all {
+        if waits_on_you(j) {
+            *waiting
+                .entry(get_str(j, "project").map(String::from))
+                .or_default() += 1;
+        }
+    }
+    let mut holds = batch_holds(home, &jobs, &runnable)?;
+    holds.extend(backpressure_holds(home, &jobs, &waiting, &runnable)?);
+    holds.extend(daily_cap_holds(io, home, device, &jobs, &runnable, dry)?);
+    let skip = |j: &Value| base[&id_of(j)].is_some() || holds.contains_key(&id_of(j));
+
+    let mut eligible: Vec<String> = Vec::new();
+    for j in &jobs {
+        let slug = get_str(j, "project").unwrap_or_default().to_string();
+        if skip(j) || eligible.contains(&slug) {
+            continue;
+        }
+        if !settings.contains_key(&slug) {
+            let found = pickup_settings(home, &slug, lookup(&paths, &slug).unwrap(), device)?;
+            if let (Some(reason), false) = (&found.reason, dry) {
+                errln!(io, "factory.py: pickup skips {slug}: {reason}");
+            }
+            settings.insert(slug.clone(), found);
+        }
+        if settings[&slug].lists(device) {
+            eligible.push(slug);
+        }
+    }
+
+    let host_cap = if eligible.is_empty() {
+        None
+    } else {
+        host_max_inflight(home, device)?
+    };
+    let by_host = host_cap.is_some();
+    let cap = match host_cap {
+        Some(h) => cap.map_or(h, |c| c.min(h)),
+        None => cap.unwrap_or(1),
+    };
+    let route = if eligible.is_empty() {
+        None
+    } else {
+        pick_route(home)?
+    };
+    let template = match &route {
+        Some(route) => route_launcher(home, route)?,
+        None => Vec::new(),
+    };
+    let values = |entry: &Entry| {
+        let verb = if starts.contains(&entry.id) {
+            "recover"
+        } else {
+            "idea"
+        };
+        let route = route.as_ref().unwrap();
+        Given::new(
+            entry,
+            route_values(route),
+            launch_prompt(&format!(
+                "/factory {verb} {} --session {}",
+                entry.id, entry.session
+            )),
+        )
+    };
+    let job_given = |j: Option<&Value>, entry: &Entry| -> (Option<String>, Given) {
+        let mut given = values(entry);
+        let arm = job_arm(j);
+        if arm.as_deref() == Some("b") {
+            let record = j
+                .and_then(|j| j.get("experiment"))
+                .filter(|r| r.is_object() && truthy(r.get("provider")) && truthy(r.get("model")));
+            if let Some(r) = record {
+                given.provider = text_of(r.get("provider"));
+                given.model = text_of(r.get("model"));
+                given.effort = get_str(r, "effort").unwrap_or_default().to_string();
+            } else if let Some(e) = &experiment {
+                given.provider = e.provider.clone();
+                given.model = e.model.clone();
+                given.effort = e.effort.clone().unwrap_or_default();
+            }
+        }
+        (arm, given)
+    };
+
+    if dry {
+        let (mut would, mut no_route) = (Vec::<(String, usize)>::new(), false);
+        for j in &jobs {
+            let slug = get_str(j, "project").unwrap_or_default().to_string();
+            let mut line = base[&id_of(j)].clone();
+            if line.is_none() {
+                let id = id_of(j);
+                if !settings.contains_key(&slug) {
+                    let found =
+                        pickup_settings(home, &slug, lookup(&paths, &slug).unwrap(), device)?;
+                    settings.insert(slug.clone(), found);
+                }
+                let s = &settings[&slug];
+                let count = if by_host {
+                    inflight_count(&data, None, minutes, Some(device))
+                        + would.iter().map(|(_, n)| n).sum::<usize>()
+                } else {
+                    inflight_count(&data, Some(&slug), minutes, None) + lookup_count(&would, &slug)
+                };
+                line = Some(if let Some(reason) = &s.reason {
+                    format!("skip {id} {slug}: {reason}")
+                } else if s.enabled != Some(true) {
+                    format!("skip {id} {slug}: pickup off")
+                } else if !s.hosts.iter().any(|h| h == device) {
+                    format!("skip {id} {slug}: pickup does not list host {device}")
+                } else if let Some(hold) = holds.get(&id) {
+                    hold.clone()
+                } else if by_host && cap == 0 {
+                    format!("skip {id} {slug}: host {device} paused (max in flight 0)")
+                } else if count >= cap && by_host {
+                    format!("skip {id} {slug}: host {device} in-flight cap full ({count}/{cap})")
+                } else if count >= cap {
+                    format!("skip {id} {slug}: in-flight cap full ({count}/{cap})")
+                } else if route.is_none() {
+                    if no_route {
+                        continue;
+                    }
+                    no_route = true;
+                    no_route_line(home)?
+                } else {
+                    match would.iter_mut().find(|(s, _)| *s == slug) {
+                        Some(slot) => slot.1 += 1,
+                        None => would.push((slug.clone(), 1)),
+                    }
+                    let entry = Entry {
+                        id: id.clone(),
+                        project: slug.clone(),
+                        repo_path: lookup(&paths, &slug).unwrap().to_string(),
+                        session: "<session>".into(),
+                    };
+                    let (arm, given) = job_given(Some(j), &entry);
+                    let shown =
+                        arm.map_or(String::new(), |a| format!(" arm {a} model {}", given.model));
+                    format!(
+                        "would launch {id} {slug} on {}{shown}: {}",
+                        route.as_ref().unwrap().name,
+                        shlex_join(&launcher_argv(&template, &given))
+                    )
+                });
+            }
+            outln!(io, "{}", line.unwrap());
+        }
+        if stalls.is_some() {
+            outln!(io, "host {device}: would take over {taken}");
+        }
+        let total: usize = would.iter().map(|(_, n)| n).sum();
+        outln!(io, "host {device}: would launch {total}");
+        return Ok(());
+    }
+    let Some(route) = route.clone() else {
+        return Ok(());
+    };
+    let skip_ids: Vec<String> = holds.keys().cloned().collect();
+    let mut launches = taken;
+    while launches < limit {
+        let mut picked = Vec::new();
+        for slug in &eligible {
+            let pick = Pick {
+                max_inflight: Some(cap),
+                project: Some(slug),
+                by_host,
+                builds: true,
+                experiment: experiment.as_ref(),
+                route: Some(&route),
+                skip_ids: skip_ids.clone(),
+            };
+            picked = claim_ideas(home, device, "", minutes, &paths, 1, &pick)?;
+            if !picked.is_empty() {
+                break;
+            }
+        }
+        let Some(entry) = picked.into_iter().next() else {
+            return Ok(());
+        };
+        let j = jobs_of(&data)
+            .iter()
+            .find(|x| get_str(x, "id") == Some(entry.id.as_str()));
+        let (arm, given) = job_given(j, &entry);
+        let argv = launcher_argv(&template, &given);
+        let env = launch_env(&given, &given.provider, &given.model);
+        let (ok, detail, log_path) = launch_idea(home, &entry, &route.name, &argv, &env)?;
+        if ok {
+            outln!(
+                io,
+                "launched {} {} on {} session {}",
+                entry.id,
+                entry.project,
+                route.name,
+                entry.session
+            );
+            record_launch(
+                io,
+                home,
+                &entry.id,
+                launch_row(&given, &argv, &entry.session),
+            );
+            if j.is_some_and(|j| j.get("launch_failure").is_some()) {
+                clear_launch_failure(io, home, &entry.id);
+            }
+            launches += 1;
+            continue;
+        }
+        let b = arm.as_deref() == Some("b") && experiment.is_some();
+        let limit_name = if b {
+            experiment.as_ref().unwrap().name.clone()
+        } else {
+            route.name.clone()
+        };
+        let detail = detail.unwrap_or_default();
+        let reason = launch_reason(&detail);
+        let mut release = || release_claim(home, &entry.id, device, &entry.session).map(|_| None);
+        let mut backoff = || back_off_launch(home, &entry.id, device, &entry.session, &reason);
+        return launch_failed(
+            io,
+            home,
+            &limit_name,
+            &entry.id,
+            &detail,
+            &log_path,
+            &mut release,
+            true,
+            b,
+            Some(&mut backoff),
+        );
+    }
+    Ok(())
+}
+
+fn lookup_count(pairs: &[(String, usize)], key: &str) -> usize {
+    pairs.iter().find(|(k, _)| k == key).map_or(0, |(_, n)| *n)
+}
+
+/// The dry-run line when every route is limited.
+fn no_route_line(home: &Path) -> Res<String> {
+    let stamp = now();
+    let limits = read_limits(home)?;
+    let routes = read_routes(home)?;
+    let shown: Vec<String> = routes
+        .iter()
+        .map(|r| {
+            let until = lookup(&limits, &r.name).filter(|u| *u > stamp.as_str());
+            format!("{} until {}", r.name, until.unwrap_or_default())
+        })
+        .collect();
+    Ok(format!(
+        "no route: no available route: {}",
+        shown.join(", ")
+    ))
+}
+
+/// True when Tracer scope approval or the dashboard's Approve spec moved this job to build and no
+/// session has started it.
+fn approved_start(j: &Value) -> bool {
+    get_str(j, "stage") == Some("build")
+        && get_str(j, "note").is_some_and(|n| SPEC_APPROVED_NOTES.contains(&n))
+}
+
+/// True while a job waits on a human: it has an ask, or it is an unapproved explorer card.
+fn gated(j: &Value) -> bool {
+    if get_str(j, "needs").is_some_and(|n| !strip(n).is_empty()) {
+        return true;
+    }
+    j.get("origin").is_some_and(|o| {
+        o.is_object() && get_str(o, "gate") == Some("human") && !truthy(o.get("approved"))
+    })
+}
+
+/// True when pickup marked this job as held by a Tracer build agent.
+fn tracer_building(j: &Value) -> bool {
+    j.get("tracer").and_then(|t| t.get("building")) == Some(&Value::Bool(true))
+}
+
+/// A message or tool_result content as text: a string, or its joined text blocks.
+fn retro_text(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(|b| get_str(b, "text"))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => String::new(),
+    }
+}
+
+/// Local time as (utc, offset) with its weekday (Monday 0), hour, minute and date.
+struct Local {
+    utc: i64,
+    offset: i64,
+}
+
+impl Local {
+    fn wall(&self) -> i64 {
+        self.utc + self.offset
+    }
+    fn weekday(&self) -> i64 {
+        (self.wall().div_euclid(86_400) + 3).rem_euclid(7)
+    }
+    fn hour_minute(&self) -> (i64, i64) {
+        let t = self.wall().rem_euclid(86_400);
+        (t / 3600, t / 60 % 60)
+    }
+    fn date(&self) -> String {
+        local_date(self.utc, self.offset)
+    }
+}
+
+/// Whether this retro host missed today's weekday retro.
+fn retro_catchup_due(home: &Path, local: &Local) -> bool {
+    #[cfg(test)]
+    if let Some(f) = fake!(retro_catchup_due) {
+        return f(home, local);
+    }
+    let prompt = home.join(RETRO_PROMPT_FILE);
+    if is_link(&prompt).unwrap_or(false) || !prompt.is_file() {
+        return false;
+    }
+    if local.weekday() > 4 || local.hour_minute() < RETRO_CATCHUP_AFTER {
+        return false;
+    }
+    let today = local.date();
+    let record = read_json(&home.join(RETRO_CATCHUP_FILE));
+    if record.as_ref().and_then(Value::as_object).is_some_and(|r| {
+        r.len() == 2
+            && eq_int(r.get("version"), 1)
+            && r.get("date").and_then(Value::as_str) == Some(today.as_str())
+    }) {
+        return false;
+    }
+    let Ok(entries) = fs::read_dir(home.join("retro")) else {
+        return true;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(m) = RETRO_RUN_NAME.fullmatch(&name) else {
+            continue;
+        };
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let s = m.get(1).unwrap().as_str();
+        let stamp = format!(
+            "{}-{}-{}T{}:{}:{}Z",
+            &s[..4],
+            &s[4..6],
+            &s[6..8],
+            &s[9..11],
+            &s[11..13],
+            &s[13..15]
+        );
+        let Some(at) = parse_stamp(&stamp) else {
+            continue;
+        };
+        if local_date(at, local.offset) == today {
+            return false;
+        }
+    }
+    true
+}
+
+/// Print why the retro catch-up waits, once per local date and reason. A dry run prints every
+/// time and records nothing.
+fn retro_catchup_wait(io: &mut Io, home: &Path, local: &Local, reason: &str, dry: bool) -> Res<()> {
+    let record = json!({"version": 1, "date": local.date(), "reason": reason});
+    let path = home.join(RETRO_WAIT_FILE);
+    if !dry && read_json(&path).as_ref() == Some(&record) {
+        return Ok(());
+    }
+    errln!(io, "factory.py: retro catch-up waits: {reason}");
+    if !dry {
+        write_file(&path, &(dumps(&record, DEFAULT) + "\n"))?;
+    }
+    Ok(())
+}
+
+/// Launch the stored retro schedule prompt once on a weekday whose 09:00 slot left no run.
+fn retro_pickup_catchup(io: &mut Io, home: &Path, dry: bool) {
+    let mut catchup = || -> Res<()> {
+        let (utc, offset) = local_now();
+        let local = Local { utc, offset };
+        if !retro_catchup_due(home, &local) {
+            return Ok(());
+        }
+        let job_id = format!("retro-{}", local.date().replace('-', ""));
+        let Some(route) = pick_route(home)? else {
+            return retro_catchup_wait(io, home, &local, "no available route", dry);
+        };
+        let Some((slug, path)) = paths_of(home).into_iter().find(|(_, p)| is_dir(p)) else {
+            return retro_catchup_wait(io, home, &local, "no checkout in paths.md", dry);
+        };
+        let template = route_launcher(home, &route)?;
+        if dry {
+            outln!(io, "would launch retro catch-up {job_id} on {}", route.name);
+            return Ok(());
+        }
+        let prompt_path = home.join(RETRO_PROMPT_FILE);
+        let prompt =
+            read_text(&prompt_path).map_err(|e| fail(os_error(&e, Some(&prompt_path)), 1))?;
+        let entry = Entry {
+            id: job_id.clone(),
+            project: slug,
+            repo_path: path,
+            session: token_hex3(),
+        };
+        let given = Given::new(&entry, route_values(&route), prompt);
+        write_file(
+            &home.join(RETRO_CATCHUP_FILE),
+            &(dumps(&json!({"version": 1, "date": local.date()}), DEFAULT) + "\n"),
+        )?;
+        let argv = launcher_argv(&template, &given);
+        let env = launch_env(&given, &route.provider, &route.model);
+        let (ok, detail, log_path) = launch_idea(home, &entry, &route.name, &argv, &env)?;
+        if ok {
+            outln!(
+                io,
+                "launched retro catch-up {job_id} on {} session {}",
+                route.name,
+                entry.session
+            );
+        } else {
+            errln!(
+                io,
+                "factory.py: retro catch-up {job_id} failed to launch ({}); see {}; no retry today",
+                detail.unwrap_or_default(),
+                log_path.display()
+            );
+        }
+        Ok(())
+    };
+    if let Err(e) = catchup() {
+        let _ = io.err.write_all(e.stderr.as_bytes());
+        errln!(
+            io,
+            "factory.py: retro catch-up stopped (exit {}); the next pickup run retries it",
+            e.code
+        );
+    }
+}
+
+fn retro_transcripts() -> PathBuf {
+    let base = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::home_dir().unwrap_or_default().join(".claude"));
+    base.join("projects")
+}
+
+/// Entries of dir, sorted, or none when it cannot be read.
+fn sorted_entries(dir: &Path) -> Vec<PathBuf> {
+    let mut items: Vec<PathBuf> = fs::read_dir(dir)
+        .map(|e| e.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    items.sort();
+    items
+}
+
+fn jsonl(dir: &Path) -> Vec<PathBuf> {
+    sorted_entries(dir)
+        .into_iter()
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().ends_with(".jsonl"))
+        })
+        .collect()
+}
+
+/// A transcript and its subagent transcripts, each with whether it is a main session.
+fn with_subagents(project: &Path, path: &Path) -> Vec<(PathBuf, bool)> {
+    let stem = path.file_stem().unwrap_or_default();
+    let mut found = vec![(path.to_path_buf(), true)];
+    found.extend(
+        jsonl(&project.join(stem).join("subagents"))
+            .into_iter()
+            .map(|s| (s, false)),
+    );
+    found
+}
+
+/// The sorted transcript folders this host keeps from the job's worktrees.
+fn audit_folders(job_id: &str) -> Vec<PathBuf> {
+    let needle = format!("factory-{job_id}");
+    sorted_entries(&retro_transcripts())
+        .into_iter()
+        .filter(|p| {
+            let name = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            p.is_dir()
+                && name.match_indices(&needle).any(|(at, _)| {
+                    let before = name[..at].chars().last();
+                    let after = name[at + needle.len()..].chars().next();
+                    before.is_none_or(|c| c == '-') && after.is_none_or(|c| c == '-')
+                })
+        })
+        .collect()
+}
+
+/// The lines of a transcript, read as text with replacement, without their endings.
+fn transcript_lines(path: &Path) -> io::Result<Vec<String>> {
+    let text = String::from_utf8_lossy(&fs::read(path)?).into_owned();
+    let text = crate::shared::py::universal_newlines(text);
+    Ok(text.split_inclusive('\n').map(String::from).collect())
+}
+
+/// The text of a transcript's first non-meta user line within USAGE_PROMPT_LINES, else "".
+fn usage_prompt(path: &Path) -> String {
+    let Ok(lines) = transcript_lines(path) else {
+        return String::new();
+    };
+    for line in lines.iter().take(USAGE_PROMPT_LINES) {
+        let Ok(e) = loads(line) else { continue };
+        if get_str(&e, "type") == Some("user") && !truthy(e.get("isMeta")) {
+            let msg = e.get("message").filter(|m| m.is_object());
+            return msg.map_or(String::new(), |m| retro_text(m.get("content")));
+        }
+    }
+    String::new()
+}
+
+/// ({model: {kind: tokens}}, unreadable line count) for one transcript, each message.id counted once.
+fn usage_scan(
+    path: &Path,
+    main: bool,
+    since: Option<&str>,
+) -> io::Result<(Map<String, Value>, usize)> {
+    let mut turns: Vec<(String, String, [i64; 4])> = Vec::new();
+    let mut bad = 0;
+    for line in transcript_lines(path)? {
+        if strip(&line).is_empty() {
+            continue;
+        }
+        let Ok(e) = loads(&line) else {
+            bad += 1;
+            continue;
+        };
+        if !e.is_object()
+            || get_str(&e, "type") != Some("assistant")
+            || main && truthy(e.get("isSidechain"))
+        {
+            continue;
+        }
+        if let Some(since) = since {
+            if !get_str(&e, "timestamp").is_some_and(|t| t >= since) {
+                continue;
+            }
+        }
+        let Some(msg) = e.get("message").filter(|m| m.is_object()) else {
+            continue;
+        };
+        let (Some(id), Some(usage)) = (
+            get_str(msg, "id"),
+            msg.get("usage").filter(|u| u.is_object()),
+        ) else {
+            continue;
+        };
+        let model = get_str(msg, "model")
+            .filter(|m| ROUTE_MODEL.is_full(m))
+            .unwrap_or("other");
+        let at = match turns.iter().position(|t| t.0 == id) {
+            Some(at) => at,
+            None => {
+                turns.push((id.to_string(), model.to_string(), [0; 4]));
+                turns.len() - 1
+            }
+        };
+        for (k, (_, field)) in USAGE_TOKENS.iter().enumerate() {
+            if let Some(v) = int_of(usage.get(*field)) {
+                turns[at].2[k] = turns[at].2[k].max(v);
+            }
+        }
+    }
+    let mut models: Vec<(String, [i64; 4])> = Vec::new();
+    for (_, model, counts) in turns {
+        let at = match models.iter().position(|m| m.0 == model) {
+            Some(at) => at,
+            None => {
+                models.push((model, [0; 4]));
+                models.len() - 1
+            }
+        };
+        for k in 0..4 {
+            models[at].1[k] += counts[k];
+        }
+    }
+    let map = models
+        .into_iter()
+        .filter(|(_, c)| c.iter().any(|v| *v != 0))
+        .map(|(m, c)| (m, counts_value(&c)))
+        .collect();
+    Ok((map, bad))
+}
+
+fn counts_value(c: &[i64; 4]) -> Value {
+    Value::Object(
+        USAGE_TOKENS
+            .iter()
+            .zip(c)
+            .map(|((k, _), v)| (k.to_string(), Value::from(*v)))
+            .collect(),
+    )
+}
+
+/// This host's transcripts that ran in the job's worktree, plus each main session or subagent
+/// elsewhere whose own first prompt names the job folder or the job's prompt folder.
+fn usage_transcripts(home: &Path, slug: &str, job_id: &str) -> Vec<(PathBuf, bool)> {
+    let root = retro_transcripts();
+    if !root.is_dir() {
+        return Vec::new();
+    }
+    let mut needles: Vec<String> = Vec::new();
+    for base in ["jobs", "prompts"] {
+        let p = home.join(base).join(slug).join(job_id);
+        for s in [
+            p.to_string_lossy().into_owned(),
+            p.to_string_lossy().replace('\\', "/"),
+        ] {
+            if !needles.contains(&s) {
+                needles.push(s);
+            }
+        }
+    }
+    let named = |text: &str| {
+        needles.iter().any(|n| {
+            text.match_indices(n.as_str()).any(|(at, _)| {
+                !text[at + n.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            })
+        })
+    };
+    let worktrees = audit_folders(job_id);
+    let mut found = Vec::new();
+    for project in sorted_entries(&root).into_iter().filter(|p| p.is_dir()) {
+        for path in jsonl(&project) {
+            let all = with_subagents(&project, &path);
+            if worktrees.contains(&project) {
+                found.extend(all);
+                continue;
+            }
+            found.extend(all.into_iter().filter(|(p, _)| named(&usage_prompt(p))));
+        }
+    }
+    found
+}
+
+/// Tokens this host's job sessions spent since midnight, or the kind of error the scan hit.
+fn daily_tokens(midnight: i64) -> Result<i64, String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(daily_tokens) {
+        return f(midnight);
+    }
+    let root = retro_transcripts();
+    if !root.is_dir() {
+        return Ok(0);
+    }
+    let since = &format_stamp(midnight)[..19];
+    let mut used = 0;
+    for project in sorted_entries(&root) {
+        let name = project
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        if !project.is_dir() || RETRO_JOB.search(&name).is_none() {
+            continue;
+        }
+        for path in jsonl(&project) {
+            for (file, main) in with_subagents(&project, &path) {
+                let fresh = fs::metadata(&file)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .is_some_and(|d| d.as_secs_f64() >= midnight as f64);
+                if fresh {
+                    if let Ok((models, _)) = usage_scan(&file, main, Some(since)) {
+                        used += token_count(&Value::Object(models));
+                    }
+                }
+            }
+        }
+    }
+    Ok(used)
+}
+
+/// Input, output and cache_write tokens summed over a {model: {kind: tokens}} map.
+fn token_count(models: &Value) -> i64 {
+    models
+        .as_object()
+        .into_iter()
+        .flat_map(|m| m.values())
+        .filter_map(Value::as_object)
+        .flat_map(|counts| counts.iter())
+        .filter(|(k, _)| ["input", "output", "cache_write"].contains(&k.as_str()))
+        .filter_map(|(_, v)| int_of(Some(v)))
+        .filter(|v| *v >= 0)
+        .sum()
+}
+
+/// The start of today in the host's local time zone, as UTC seconds.
+fn local_midnight() -> i64 {
+    let (utc, offset) = local_now();
+    (utc + offset).div_euclid(86_400) * 86_400 - offset
+}
+
+/// config.md's key as a whole number of at least 1, else None. A bad value prints one line.
+fn token_cap(io: &mut Io, home: &Path, key: &str) -> Res<Option<i64>> {
+    let config = home.join("config.md");
+    let meta = if config.is_file() {
+        meta(&config)?
+    } else {
+        Vec::new()
+    };
+    let Some(value) = lookup(&meta, key) else {
+        return Ok(None);
+    };
+    match value.parse::<i64>() {
+        Ok(n) if n >= 1 && value.bytes().all(|b| b.is_ascii_digit()) => Ok(Some(n)),
+        _ => {
+            errln!(
+                io,
+                "factory.py: pickup ignores {key} in {}: must be a whole number of at least 1",
+                config.display()
+            );
+            Ok(None)
+        }
+    }
+}
+
+/// The orchestrator row for one pickup launch, on the values it actually used.
+fn launch_row(given: &Given, argv: &[String], tag: &str) -> Value {
+    let stem = Path::new(&argv[0])
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
+    let mut row = json!({"role": "orchestrator", "harness": given.provider,
+        "via": if stem == "paseo" { "paseo" } else { "launcher" }, "model": given.model});
+    if !given.effort.is_empty() {
+        row["effort"] = Value::from(given.effort.clone());
+    }
+    row["session"] = Value::from(tag);
+    row
+}
+
+/// One CAS: append row, stamped with the board's stage, round and time, to job_id's agents,
+/// keeping the newest AGENT_ROWS_MAX. The saved row, or None for a missing job.
+fn record_agent(home: &Path, job_id: &str, row: &Value) -> Res<Option<Value>> {
+    #[cfg(test)]
+    if let Some(f) = fake!(record_agent) {
+        return f(home, job_id, row);
+    }
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(job) = jobs_of(&data)
+            .iter()
+            .find(|j| get_str(j, "id") == Some(job_id))
+        else {
+            return Ok((None, None));
+        };
+        let mut full = json!({"at": now(), "stage": job.get("stage")});
+        if get_str(job, "stage") == Some("review") && job.get("round").is_some_and(|r| !r.is_null())
+        {
+            full["round"] = job["round"].clone();
+        }
+        for (k, v) in row.as_object().unwrap() {
+            full[k] = v.clone();
+        }
+        let mut rows = job
+            .get("agents")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        rows.push(full.clone());
+        let keep = rows.len().saturating_sub(AGENT_ROWS_MAX);
+        patch_job(&mut data, job_id, &json!({"agents": rows[keep..]}));
+        Ok((Some(dump_board(&data)), Some(full)))
+    })
+}
+
+/// record_agent for a launch that already happened: a failed write warns instead of ending the pass.
+fn record_launch(io: &mut Io, home: &Path, job_id: &str, row: Value) {
+    if let Err(e) = record_agent(home, job_id, &row) {
+        let _ = io.err.write_all(e.stderr.as_bytes());
+        errln!(
+            io,
+            "factory.py: {job_id} launched, but its agent row was not recorded; the pass goes on"
+        );
+    }
+}
+
+// ---- group C: the board passes
+
+type Cache = HashMap<String, Settings>;
+
+fn read_stalls(home: &Path) -> Res<Option<(Vec<String>, i64)>> {
+    // group C placeholder
+    let _ = home;
+    Ok(None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn move_stop_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+    adapter: Option<&[String]>,
+) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, paths, settings, dry, adapter);
+    Ok(())
+}
+
+fn session_stop_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    dry: bool,
+) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, dry);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pr_sync_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, minutes, paths, settings, dry);
+    Ok(())
+}
+
+fn autonomy_hold_pass(io: &mut Io, home: &Path, data: &mut Value, dry: bool) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, dry);
+    Ok(())
+}
+
+fn close_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    minutes: u32,
+    dry: bool,
+) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, minutes, dry);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn close_cleanup_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, paths, settings, dry);
+    Ok(())
+}
+
+fn priority_nudge_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    dry: bool,
+) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, dry);
+    Ok(())
+}
+
+fn idle_watch_pass(io: &mut Io, home: &Path, data: &mut Value, device: &str, dry: bool) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, dry);
+    Ok(())
+}
+
+fn token_cap_pass(io: &mut Io, home: &Path, data: &mut Value, device: &str, dry: bool) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, dry);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn auto_babysit_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, minutes, paths, settings, dry);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn babysit_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, minutes, paths, settings, dry);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn takeover(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+) -> Res<usize> {
+    // group C placeholder
+    let _ = (io, home, data, device, minutes, paths, settings, dry);
+    Ok(0)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn deny_notes_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, minutes, paths, settings, dry);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+) -> Res<()> {
+    // group C placeholder
+    let _ = (io, home, data, device, minutes, paths, settings, dry);
+    Ok(())
 }
 
 #[cfg(test)]
