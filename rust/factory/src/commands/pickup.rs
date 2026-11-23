@@ -11668,4 +11668,425 @@ exit "$archive_code"
             assert_eq!(lines[2..], [format!("host {DEVICE}: would launch 2")]);
         }
     }
+
+    /// decision.md files the faked Worker keeps, with the CAS condition of each write.
+    pub(super) struct Files {
+        pub files: Rc<RefCell<HashMap<String, String>>>,
+        pub conditions: Rc<RefCell<Vec<Vec<(String, String)>>>>,
+    }
+
+    impl Files {
+        pub fn install(fx: &Fx) -> Files {
+            let f = Files { files: Rc::new(RefCell::new(HashMap::new())), conditions: Rc::new(RefCell::new(Vec::new())) };
+            let (files, conditions, state) = (f.files.clone(), f.conditions.clone(), fx.state.clone());
+            let calls = Rc::downgrade(&state);
+            let fake_api: Api = Rc::new(move |_, method, path, body, ok_codes, headers| {
+                if !path.ends_with("/decision.md") {
+                    return request(&state, method, path, body, ok_codes, headers);
+                }
+                if let Some(s) = calls.upgrade() {
+                    s.borrow_mut().calls.push((method.into(), path.into()));
+                }
+                if method == "GET" {
+                    return match files.borrow().get(path) {
+                        Some(text) => Ok(Response { status: 200, headers: vec![("ETag".into(), "\"decision\"".into())], body: text.clone().into_bytes() }),
+                        None => ok(404, ""),
+                    };
+                }
+                conditions.borrow_mut().push(headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
+                files.borrow_mut().insert(path.into(), String::from_utf8(body.unwrap().to_vec()).unwrap());
+                ok(200, "")
+            });
+            fx.set_fakes(|fakes| fakes.api = Some(fake_api));
+            f
+        }
+
+        pub fn get(&self, path: &str) -> Option<String> {
+            self.files.borrow().get(path).cloned()
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.files.borrow().is_empty()
+        }
+    }
+
+    mod close_test {
+        use super::*;
+
+        const DECISION: &str = "/api/jobs/alpha/042-sample-export/decision.md";
+        const REASON: &str = "Duplicate of 041-sample-report";
+        const PR: &str = "https://github.com/sample/alpha/pull/7";
+        const RIDER_PR: &str = "https://github.com/sample/alpha/pull/8";
+        const TEXT: &str = "CLOSED: Duplicate of 041-sample-report\n\n**Summary.** Closed from the dashboard at 2026-01-02T12:00:00Z while at stage `build`. The owner's reason: Duplicate of 041-sample-report. Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- Close requested from the dashboard at 2026-01-02T12:00:00Z.\n- Stage when closed: `build`, round 1.\n- Branch: `factory/042-sample-export`.\n- Pull request: none.\n- Written by factory.py pickup on host-a.\n\n## Left out\n\n- No agent reviewed this close. The reason is the owner's own words.\n- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup alpha/042-sample-export` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup alpha/042-sample-export` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n";
+
+        fn setup() -> (Fx, Files) {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            let files = Files::install(&fx);
+            fx.set_fakes(|f| f.paseo_run = Some(Rc::new(|_| (0, String::new()))));
+            fs::create_dir(fx.home.join("projects")).unwrap();
+            fs::write(fx.home.join("projects/alpha.md"), "---\nrepo: sample/alpha\n---\n").unwrap();
+            (fx, files)
+        }
+
+        fn closing(extra: Value) -> Value {
+            with(json!({"id": "042-sample-export", "stage": "build", "project": "alpha", "round": 1,
+                "branch": "factory/042-sample-export", "updated": "2026-01-01T00:00:00Z", "needs": "Which option?",
+                "claim": {"device": "other-host", "session": "a1b2c3", "since": stamp(-300), "seen": stamp(-240)},
+                "close": {"reason": REASON, "at": "2026-01-02T12:00:00Z"}}), extra)
+        }
+
+        fn stacked_rider() -> Value {
+            json!({"id": "043-sample-schema", "project": "alpha", "stage": "build", "stacked": true, "pr": RIDER_PR,
+                "refs": [{"id": "042-sample-export", "kind": "batched-into"}], "updated": "2026-01-01T00:00:00Z"})
+        }
+
+        fn deferred_close(fx: &Fx, files: &Files) {
+            assert_eq!(fx.pickup(&[]), out_err(2, "", "factory.py: pickup PR close is not ported to the Rust binary yet\n"));
+            assert!(fx.puts().is_empty() && files.is_empty());
+        }
+
+        #[test]
+        fn test_close_writes_decision_then_the_stage() {
+            let (fx, files) = setup();
+            fx.jobs(json!([closing(json!({}))]));
+            assert_eq!(fx.pickup(&[]), out_err(0, "closed 042-sample-export alpha\n", ""));
+            assert_eq!(files.get(DECISION).as_deref(), Some(TEXT));
+            assert_eq!(*files.conditions.borrow(), vec![vec![("If-None-Match".to_string(), "*".to_string())]]);
+            assert_eq!(fx.puts(), [("PUT".to_string(), DECISION.to_string()), ("PUT".into(), "/api/board".into())]);
+            let job = fx.job("042-sample-export");
+            assert_eq!((&job["stage"], &job["note"]), (&json!("closed"), &json!(REASON)));
+            assert!(job.get("claim").is_none() && job.get("needs").is_none());
+            assert_eq!(job["done"], job["updated"]);
+            assert_eq!(job["close"].as_object().unwrap().keys().collect::<Vec<_>>(), ["reason", "at", "closed"]);
+            fx.clear_calls();
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert!(fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_close_keeps_an_earlier_decision() {
+            let (fx, files) = setup();
+            files.files.borrow_mut().insert(DECISION.into(), "APPROVE\n\nShip it.\n".into());
+            fx.jobs(json!([closing(json!({}))]));
+            assert_eq!(fx.pickup(&[]), out_err(0, "closed 042-sample-export alpha\n", ""));
+            assert_eq!(files.get(DECISION).unwrap(), format!("{TEXT}\n## Earlier decision\n\nAPPROVE\n\nShip it.\n"));
+            assert_eq!(*files.conditions.borrow(), vec![vec![("If-Match".to_string(), "\"decision\"".to_string())]]);
+            assert_eq!(fx.job("042-sample-export")["stage"], "closed");
+        }
+
+        #[test]
+        fn test_close_leaves_an_existing_closed_decision() {
+            let (fx, files) = setup();
+            files.files.borrow_mut().insert(DECISION.into(), "CLOSED: written by another host\n".into());
+            fx.jobs(json!([closing(json!({}))]));
+            assert_eq!(fx.pickup(&[]), out_err(0, "closed 042-sample-export alpha\n", ""));
+            assert_eq!(files.get(DECISION).unwrap(), "CLOSED: written by another host\n");
+            assert_eq!(fx.puts(), [("PUT".to_string(), "/api/board".to_string())]);
+            assert_eq!(fx.job("042-sample-export")["stage"], "closed");
+        }
+
+        #[test]
+        fn test_close_waits_for_a_live_claim() {
+            let (fx, files) = setup();
+            fx.jobs(json!([closing(json!({"claim": held("other-host")}))]));
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(lines(&out)[0], "skip close 042-sample-export alpha: claimed by other-host session s1");
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert!(fx.puts().is_empty() && files.is_empty());
+        }
+
+        #[test]
+        fn test_close_skips_an_invalid_reason() {
+            let (fx, files) = setup();
+            for reason in [json!(""), json!("   "), json!("two\nlines"), json!("Dup\u{85}x"), json!("Dup\u{2028}x"), json!("Dup\u{2029}x"), json!("Dup\u{9f}x"), json!("x".repeat(201)), json!(42)] {
+                fx.clear_calls();
+                fx.jobs(json!([closing(json!({"close": {"reason": reason, "at": "2026-01-02T12:00:00Z"}}))]));
+                assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: pickup skips the close of 042-sample-export: its reason must be 1 to 200 characters, with no line breaks or control characters\n"), "{reason}");
+                assert!(fx.puts().is_empty() && files.is_empty());
+            }
+        }
+
+        #[test]
+        fn test_close_dry_run_writes_nothing() {
+            let (fx, files) = setup();
+            fx.jobs(json!([closing(json!({}))]));
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(lines(&out)[0], "would close 042-sample-export alpha");
+            assert!(fx.puts().is_empty() && files.is_empty());
+        }
+
+        /// An open pull request needs the PR close, which waits on the checks slice; the parts of the
+        /// decision pickup writes without it are checked here.
+        #[test]
+        fn test_close_decision_names_an_open_pull_request() {
+            let (fx, files) = setup();
+            fx.jobs(json!([closing(json!({"pr": "https://github.example.test/sample/pull/7"}))]));
+            deferred_close(&fx, &files);
+            let on = Settings { enabled: Some(true), hosts: vec!["other-host".into(), DEVICE.into()], reason: None };
+            let bare = close_decision(&json!({"id": "042-sample-export", "project": "alpha", "stage": "spec", "close": {"at": "2026-01-02T12:00:00Z"}}), REASON, DEVICE, None, false, &on);
+            assert!(bare.contains("- Stage when closed: `spec`, round 0.\n- Branch: `none`.\n- Pull request: none.\n"));
+        }
+
+        #[test]
+        fn test_close_decision_names_hosts_pickup_skips() {
+            let (fx, files) = setup();
+            fx.jobs(json!([closing(json!({"move": {"from": "host-b", "session": "s9", "to": "other-host", "at": "2026-01-02T11:00:00Z", "earlier": [{"from": "host-c"}, {"from": "bad host"}]}}))]));
+            assert_eq!(fx.pickup(&[]), out_err(0, "closed 042-sample-export alpha\n", ""));
+            assert!(files.get(DECISION).unwrap().contains("Hosts that need `factory.py cleanup alpha/042-sample-export` run by hand: `host-b`, `host-c`. The board records them as holding this job, and the project's pickup does not list them.\n"));
+        }
+
+        #[test]
+        fn test_close_decision_names_hosts_when_pickup_is_off() {
+            let (fx, files) = setup();
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": {"enabled": false, "hosts": ["other-host", DEVICE]}})), None));
+            fx.jobs(json!([closing(json!({}))]));
+            assert_eq!(fx.pickup(&[]), out_err(0, "closed 042-sample-export alpha\n", ""));
+            assert!(files.get(DECISION).unwrap().contains("- Host that needs `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup is off.\n"));
+        }
+
+        #[test]
+        fn test_close_decision_names_one_host_pickup_skips() {
+            let only = Settings { enabled: Some(true), hosts: vec![DEVICE.into()], reason: None };
+            let text = close_decision(&closing(json!({})), REASON, DEVICE, None, false, &only);
+            assert!(text.contains("- Host that needs `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup does not list it.\n"));
+        }
+
+        #[test]
+        fn test_close_decision_lists_hosts_when_pickup_is_unread() {
+            let (fx, files) = setup();
+            fx.view("alpha", 404, json!(""));
+            fx.jobs(json!([closing(json!({}))]));
+            assert_eq!(fx.pickup(&[]), out_err(0, "closed 042-sample-export alpha\n", ""));
+            assert!(files.get(DECISION).unwrap().contains("- The board records `other-host` as holding this job, but host-a could not read the project's pickup hosts: no pipeline view; register the project or deploy the current Worker. Run `factory.py cleanup alpha/042-sample-export` by hand on each of those hosts that pickup does not cover.\n"));
+        }
+
+        #[test]
+        fn test_close_reads_pickup_config_once_per_project() {
+            let (fx, _files) = setup();
+            fx.jobs(json!([closing(json!({})), closing(json!({"id": "043-sample-report"}))]));
+            assert_eq!(fx.pickup(&[]), out_err(0, "closed 042-sample-export alpha\nclosed 043-sample-report alpha\n", ""));
+            assert_eq!(fx.calls().iter().filter(|c| c.0 == "GET" && c.1 == "/api/pipeline/effective/alpha").count(), 1);
+        }
+
+        #[test]
+        fn test_close_closes_an_open_pull_request() {
+            let (fx, files) = setup();
+            fx.jobs(json!([closing(json!({"pr": PR}))]));
+            deferred_close(&fx, &files);
+            assert_eq!(fx.job("042-sample-export")["stage"], "build");
+        }
+
+        #[test]
+        fn test_close_skips_a_finished_pull_request() {
+            let (fx, files) = setup();
+            fx.jobs(json!([closing(json!({"pr": PR}))]));
+            deferred_close(&fx, &files);
+        }
+
+        #[test]
+        fn test_close_leaves_the_pull_request_open() {
+            let (fx, files) = setup();
+            for pr in [PR, "https://github.com/other/repo/pull/7"] {
+                fx.jobs(json!([closing(json!({"pr": pr}))]));
+                deferred_close(&fx, &files);
+            }
+        }
+
+        #[test]
+        fn test_close_dry_run_names_the_pull_request() {
+            let (fx, files) = setup();
+            fx.jobs(json!([closing(json!({"pr": PR}))]));
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(lines(&out)[0], format!("would close 042-sample-export alpha and pull request {PR}"));
+            assert!(fx.puts().is_empty() && files.is_empty());
+        }
+
+        #[test]
+        fn test_close_closes_stacked_rider_pr() {
+            let (fx, files) = setup();
+            fx.jobs(json!([closing(json!({})), stacked_rider()]));
+            deferred_close(&fx, &files);
+            assert_eq!(fx.job("043-sample-schema")["pr"], RIDER_PR);
+        }
+
+        #[test]
+        fn test_close_skips_stacked_rider_without_project() {
+            let (fx, _files) = setup();
+            fx.jobs(json!([closing(json!({})), with(stacked_rider(), json!({"project": null}))]));
+            fx.state.borrow_mut().board["jobs"][1]["project"] = Value::Null;
+            assert_eq!(fx.pickup(&[]), out_err(0, "closed 042-sample-export alpha\n", ""));
+            assert_eq!(fx.job("042-sample-export")["stage"], "closed");
+        }
+
+        #[test]
+        fn test_close_dry_run_names_stacked_pr() {
+            let (fx, files) = setup();
+            fx.jobs(json!([closing(json!({})), stacked_rider()]));
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(lines(&out)[0], format!("would close 042-sample-export alpha and stacked pull request {RIDER_PR}"));
+            assert!(fx.puts().is_empty() && files.is_empty());
+        }
+    }
+
+    mod session_stop_test {
+        use super::*;
+
+        const PAUSED_LINE: &str = "stopped session synthetic-agent of 042-sample-export alpha: the job is paused\n";
+
+        struct Ss {
+            fx: Fx,
+            files: Files,
+            paseo: Paseo,
+            runs: Rc<RefCell<Vec<Vec<String>>>>,
+            code: Rc<RefCell<i32>>,
+        }
+
+        fn setup() -> Ss {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            let files = Files::install(&fx);
+            let paseo = Paseo::install(&fx, agents(&[("synthetic-agent", "running")]));
+            let (runs, code) = (Rc::new(RefCell::new(Vec::new())), Rc::new(RefCell::new(0)));
+            let (r, c) = (runs.clone(), code.clone());
+            fx.set_fakes(|f| f.paseo_run = Some(Rc::new(move |args| {
+                r.borrow_mut().push(args.iter().map(|a| a.to_string()).collect());
+                (*c.borrow(), String::new())
+            })));
+            Ss { fx, files, paseo, runs, code }
+        }
+
+        fn export(fx: &Fx, extra: Value) {
+            fx.jobs(json!([with(json!({"id": "042-sample-export", "stage": "build", "project": "alpha", "updated": "2026-01-01T10:00:00Z", "claim": held(DEVICE), "paseo": {"server": "synthetic-server", "agent": "synthetic-agent"}, "paused": {"at": "2026-01-02T12:00:00Z"}}), extra)]));
+        }
+
+        fn stop_call() -> Vec<Vec<String>> {
+            vec![vec!["stop".into(), "synthetic-agent".into()]]
+        }
+
+        #[test]
+        fn test_pause_stops_once() {
+            let ss = setup();
+            export(&ss.fx, json!({}));
+            assert_eq!(ss.fx.pickup(&[]), out_err(0, PAUSED_LINE, ""));
+            assert_eq!(*ss.runs.borrow(), stop_call());
+            assert_eq!(ss.fx.puts(), [("PUT".to_string(), "/api/board".to_string())]);
+            let job = ss.fx.job("042-sample-export");
+            assert_eq!(job["claim"]["device"], DEVICE);
+            assert_eq!(job["paused"]["session_stop"].as_object().unwrap().keys().collect::<Vec<_>>(), [DEVICE]);
+            assert_eq!(job["paused"]["session_stop"][DEVICE]["agent"], "synthetic-agent");
+            ss.fx.clear_calls();
+            assert_eq!(ss.fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!((ss.runs.borrow().len(), ss.fx.puts().len()), (1, 0));
+        }
+
+        #[test]
+        fn test_pause_changed_during_stop_skips_write() {
+            let ss = setup();
+            export(&ss.fx, json!({}));
+            let (state, runs) = (ss.fx.state.clone(), ss.runs.clone());
+            ss.fx.set_fakes(|f| f.paseo_run = Some(Rc::new(move |args| {
+                runs.borrow_mut().push(args.iter().map(|a| a.to_string()).collect());
+                state.borrow_mut().board["jobs"][0]["paused"] = json!({"at": "2026-01-02T13:00:00Z"});
+                (0, String::new())
+            })));
+            assert_eq!(ss.fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*ss.runs.borrow(), stop_call());
+            assert!(ss.fx.puts().is_empty());
+            assert!(ss.fx.job("042-sample-export")["paused"].get("session_stop").is_none());
+        }
+
+        #[test]
+        fn test_close_stops_then_closes() {
+            let ss = setup();
+            export(&ss.fx, json!({"paused": null, "close": {"reason": "Duplicate of 041-sample-report", "at": "2026-01-02T12:00:00Z"}}));
+            assert_eq!(ss.fx.pickup(&[]), out_err(0, "stopped session synthetic-agent of 042-sample-export alpha: the job is closing\nclosed 042-sample-export alpha\n", ""));
+            assert_eq!(*ss.runs.borrow(), stop_call());
+            let job = ss.fx.job("042-sample-export");
+            assert_eq!(job["stage"], "closed");
+            assert!(job.get("claim").is_none());
+            assert_eq!(job["close"]["session_stop"][DEVICE]["agent"], "synthetic-agent");
+            assert!(ss.files.get("/api/jobs/alpha/042-sample-export/decision.md").is_some());
+        }
+
+        #[test]
+        fn test_closed_window() {
+            let ss = setup();
+            for (hours, out) in [(-1, "stopped session synthetic-agent of 042-sample-export alpha: the job is closed\n"), (-25, "")] {
+                ss.runs.borrow_mut().clear();
+                ss.fx.clear_calls();
+                export(&ss.fx, json!({"stage": "closed", "claim": null, "paused": null, "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z", "closed": stamp(hours * 60)}}));
+                assert_eq!(ss.fx.pickup(&[]), out_err(0, out, ""), "{hours}");
+                let n = usize::from(!out.is_empty());
+                assert_eq!((ss.runs.borrow().len(), ss.fx.puts().len()), (n, n));
+            }
+        }
+
+        #[test]
+        fn test_skips() {
+            let ss = setup();
+            for (name, extra, statuses) in [
+                ("other server", json!({"paseo": {"server": "other-server", "agent": "synthetic-agent"}}), agents(&[("synthetic-agent", "running")])),
+                ("other device", json!({"claim": held("other-host")}), agents(&[("synthetic-agent", "running")])),
+                ("closed agent", json!({}), agents(&[("synthetic-agent", "closed")])),
+                ("missing agent", json!({}), agents(&[])),
+                ("this session", json!({}), agents(&[("synthetic-agent", "running")])),
+                ("rider", json!({"refs": [{"kind": "batched-into", "id": "041-sample-report"}]}), agents(&[("synthetic-agent", "running")])),
+            ] {
+                ss.runs.borrow_mut().clear();
+                ss.fx.clear_calls();
+                *ss.paseo.statuses.borrow_mut() = statuses;
+                export(&ss.fx, extra);
+                if name == "this session" {
+                    std::env::set_var("PASEO_AGENT_ID", "synthetic-agent");
+                }
+                let result = ss.fx.pickup(&[]);
+                std::env::remove_var("PASEO_AGENT_ID");
+                assert_eq!(result, out_err(0, "", ""), "{name}");
+                assert!(ss.runs.borrow().is_empty() && ss.fx.puts().is_empty(), "{name}");
+            }
+        }
+
+        #[test]
+        fn test_failed_stop_and_dry_run() {
+            let ss = setup();
+            export(&ss.fx, json!({}));
+            *ss.code.borrow_mut() = 1;
+            assert_eq!(ss.fx.pickup(&[]), out_err(0, "", "factory.py: pickup could not stop agent synthetic-agent of 042-sample-export: paseo stop failed\n"));
+            assert!(ss.fx.puts().is_empty());
+            assert!(ss.fx.job("042-sample-export")["paused"].get("session_stop").is_none());
+            ss.runs.borrow_mut().clear();
+            *ss.code.borrow_mut() = 0;
+            assert_eq!(ss.fx.pickup(&["--dry-run"]), out_err(0, &format!("would stop session synthetic-agent of 042-sample-export alpha: the job is paused\nhost {DEVICE}: would launch 0\n"), ""));
+            assert!(ss.runs.borrow().is_empty() && ss.fx.puts().is_empty());
+        }
+    }
+
+    /// gh_pr waits on the checks slice; gh_cli, which this file ports, reads gh the same way.
+    mod gh_pr_test {
+        use super::*;
+
+        #[cfg(unix)]
+        #[test]
+        fn test_gh_pr_replaces_bad_utf8() {
+            let fx = Fx::new();
+            let bin = fx.root.join("bin");
+            fs::create_dir(&bin).unwrap();
+            fs::write(bin.join("gh"), "#!/bin/sh\nprintf 'OPEN \\377\\n'\n").unwrap();
+            Command::new("chmod").arg("755").arg(bin.join("gh")).status().unwrap();
+            fx.set_env("PATH", format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()));
+            assert_eq!(gh_cli(&["view", "x"]), Some((Some(0), "OPEN \u{fffd}\n".to_string())));
+        }
+
+        #[test]
+        fn test_gh_pr_reports_a_timeout() {
+            let fx = Fx::new();
+            fx.set_env("PATH", fx.root.join("empty"));
+            assert_eq!(gh_cli(&["view", "x"]), None);
+        }
+    }
 }
