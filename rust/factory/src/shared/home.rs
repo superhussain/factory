@@ -81,7 +81,7 @@ fn location(pointer: &Path) -> Option<PathBuf> {
     regular_metadata(pointer).ok()?;
     let value = pyjson::loads(&super::fs::read_text(pointer).ok()?).ok()?;
     let map = value.as_object()?;
-    if map.len() != 2 || map.get("version")?.as_i64() != Some(1) || !map.get("version")?.is_number() {
+    if map.len() != 2 || map.get("version")?.as_i64() != Some(1) {
         return None;
     }
     let text = map.get("home")?.as_str()?;
