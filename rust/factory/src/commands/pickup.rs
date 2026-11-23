@@ -2502,6 +2502,12 @@ fn service_state(installed: bool, running: Option<bool>) -> &'static str {
     }
 }
 
+/// The daemon's state for the doctor line.
+pub(crate) fn daemon_state(home: &Path) -> &'static str {
+    let installed = timer_installed(daemon_scheduler(), &DAEMON).0;
+    service_state(installed, daemon::running(home))
+}
+
 /// Ends the daemon that holds the lock, for schedulers that do not stop it themselves.
 fn stop_daemon(home: &Path) -> Option<String> {
     if daemon::running(home) != Some(true) {
@@ -19016,6 +19022,17 @@ exit "$archive_code"
             let out = ds.run(Show).1;
             let cmd = ds.fx.root.join(".config/factory-daemon.cmd");
             assert!(out.contains(&format!("    Then run: schtasks /Create /TN factory-daemon /SC ONLOGON /TR \"\\\"{}\\\"\" /F\n", cmd.display())), "{out}");
+        }
+
+        #[test]
+        fn state_word_for_doctor() {
+            let ds = Ds::new("cron");
+            assert_eq!(daemon_state(&ds.fx.home), "not installed");
+            ds.run(Install);
+            assert_eq!(daemon_state(&ds.fx.home), "stopped");
+            let _lock = daemon::take_lock(&ds.fx.home).unwrap().unwrap();
+            assert_eq!(daemon_state(&ds.fx.home), "running");
+            assert_eq!(service_state(true, None), "installed");
         }
 
         #[test]
