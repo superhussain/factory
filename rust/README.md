@@ -82,5 +82,6 @@ A handler keeps the Python function's name, except `where`, which is `where_cmd`
 - Unicode `\w` is `[\p{L}\p{N}_]`. That is close to `str.isalnum`, not identical, and the Unicode versions differ between the `regex` crate and the Python in use.
 - `parse_stamp` reads ASCII digits only, where `strptime` also takes other Unicode decimal digits.
 - `nfkc` folds one character at a time, so it skips composition across characters. A check that rejects folded text can only over-reject compared with full NFKC.
+- A Worker body that is not UTF-8 fails 1 with `the Worker sent a body that is not UTF-8`. Python fails 5 with `can't reach {url}: 'utf-8' codec ...`.
 - TLS error text and Windows OS error text differ from Python's.
 - HTTP header names go out in lowercase (`http` crate). Python sends `User-agent` style. Python also sends `Accept-Encoding: identity` and `Connection: close`.
