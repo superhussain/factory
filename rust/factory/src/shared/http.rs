@@ -205,8 +205,8 @@ fn host_not_found() -> &'static str {
     }
 }
 
-/// What Python's urllib prints for a failed request.
-fn network_detail(e: &ureq::Error) -> String {
+/// What Python's urllib prints for a failed request, on one line of at most 200 characters.
+pub fn urlopen_error(e: &ureq::Error) -> String {
     let detail = match e {
         ureq::Error::Io(io) if io.raw_os_error().is_some() => format!("<urlopen error {}>", os_error(io, None)),
         ureq::Error::Timeout(ureq::Timeout::Connect) => "<urlopen error timed out>".to_string(),
@@ -279,7 +279,7 @@ pub fn api(home: &Path, method: &str, path: &str, body: Option<&[u8]>, ok: &[u16
     let mut result = send(platform_agent(), method, &url, &sent, body);
     if let Err(e) = &result {
         if !cert_error(e) {
-            return Err(fail(format!("can't reach {url}: {}", network_detail(e)), 5));
+            return Err(fail(format!("can't reach {url}: {}", urlopen_error(e)), 5));
         }
         let ssl_env = std::env::var_os("SSL_CERT_FILE").is_some_and(|v| !v.is_empty())
             || std::env::var_os("SSL_CERT_DIR").is_some_and(|v| !v.is_empty());
@@ -289,7 +289,7 @@ pub fn api(home: &Path, method: &str, path: &str, body: Option<&[u8]>, ok: &[u16
         }
         if let Err(e) = &result {
             return Err(fail(
-                format!("can't reach {url}: {}. Set SSL_CERT_FILE to your system CA bundle and retry.", network_detail(e)),
+                format!("can't reach {url}: {}. Set SSL_CERT_FILE to your system CA bundle and retry.", urlopen_error(e)),
                 5,
             ));
         }

@@ -17,19 +17,29 @@ pub fn unquote(v: &str) -> &str {
 
 pub type Conf = std::collections::BTreeMap<String, String>;
 
-/// `read_conf`: `KEY=value` lines, skipping blanks, comments and lines with no `=`.
-pub fn read_conf(p: &Path) -> io::Result<Conf> {
-    let mut conf = Conf::new();
+/// `KEY=value` lines in file order, skipping blanks, comments and lines with no `=`. A repeated key
+/// keeps its first place and its last value, as a dict does.
+pub fn read_env_ordered(p: &Path) -> io::Result<Vec<(String, String)>> {
+    let mut pairs: Vec<(String, String)> = Vec::new();
     for line in read_text(p)?.split('\n') {
         let line = strip(line);
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
         if let Some((key, value)) = line.split_once('=') {
-            conf.insert(strip(key).to_string(), unquote(strip(value)).to_string());
+            let (key, value) = (strip(key).to_string(), unquote(strip(value)).to_string());
+            match pairs.iter_mut().find(|(k, _)| *k == key) {
+                Some(slot) => slot.1 = value,
+                None => pairs.push((key, value)),
+            }
         }
     }
-    Ok(conf)
+    Ok(pairs)
+}
+
+/// `read_conf`.
+pub fn read_conf(p: &Path) -> io::Result<Conf> {
+    Ok(read_env_ordered(p)?.into_iter().collect())
 }
 
 /// `frontmatter`: the flat `key: value` block between `---` lines, in file order, and the body.
@@ -118,6 +128,8 @@ mod tests {
         assert_eq!(conf.get("A").map(String::as_str), Some("1"));
         assert_eq!(conf.get("B").map(String::as_str), Some("x=y"));
         assert_eq!(conf.len(), 2);
+        fs::write(&p, "Z=1\nA=2\nZ=3\n").unwrap();
+        assert_eq!(read_env_ordered(&p).unwrap(), vec![("Z".to_string(), "3".to_string()), ("A".to_string(), "2".to_string())]);
         assert_eq!(unquote("'"), "'");
         fs::remove_dir_all(dir).unwrap();
     }

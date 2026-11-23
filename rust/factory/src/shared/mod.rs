@@ -11,4 +11,6 @@ pub mod py;
 pub mod pyjson;
 pub mod pyre;
 pub mod time;
+pub mod unicode;
+mod nfkc_table;
 mod unicode_printable;
