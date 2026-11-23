@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Number, Value};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, riders_of};
+use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job};
 use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::{
     tag_lookalike, ADAPTER_ID, BACKLOG_NOTES_TAG, BACKPRESSURE_NEEDS_YOU, HOLD_MAX_HOURS,
@@ -147,6 +147,8 @@ struct Fakes {
     usage_record: Option<Rc<dyn Fn(&Path, &str, &str, &str, &Value) -> Res<()>>>,
     outcomes: Option<Rc<dyn Fn(&str, &mut String) -> Res<()>>>,
     stop_pids: Option<Rc<dyn Fn(&Path) -> Option<Vec<u32>>>>,
+    close_pull_request: Option<Rc<dyn Fn(&Path, &Value, &str) -> Res<(&'static str, String)>>>,
+    close_stacked_prs: Option<Rc<dyn Fn(&Path, &str, &[Value], &str) -> Res<()>>>,
     pickup_scheduler: Option<&'static str>,
     launch_wait_seconds: Option<f64>,
     exe: Option<String>,
@@ -7047,37 +7049,50 @@ fn recorded_holders(j: &Value) -> Vec<String> {
     hosts
 }
 
-/// The stacked riders of lead_id that still have a PR.
-fn open_stacked(data: &Value, lead_id: &str) -> Vec<String> {
-    riders_of(data, lead_id)
-        .into_iter()
-        .filter_map(|id| {
-            jobs_of(data)
-                .iter()
-                .find(|j| get_str(j, "id") == Some(id.as_str()))
-        })
-        .filter(|r| {
-            r.get("stacked") == Some(&Value::Bool(true))
-                && get_str(r, "pr").is_some_and(|p| !p.is_empty())
-                && get_str(r, "project").is_some_and(|p| SLUG.is_full(p))
-                && !get_str(r, "stage").is_some_and(|s| TERMINAL.contains(&s))
-        })
-        .map(|r| get_str(r, "pr").unwrap().to_string())
-        .collect()
+fn close_pull_request(home: &Path, j: &Value, device: &str) -> Res<(&'static str, String)> {
+    #[cfg(test)]
+    if let Some(f) = fake!(close_pull_request) {
+        return f(home, j, device);
+    }
+    crate::commands::checks::close_pull_request(home, j, device, None)
 }
 
-/// decision.md for a job closed from the dashboard or by a GitHub close.
+fn close_stacked_prs(home: &Path, lead_id: &str, riders: &[Value], device: &str) -> Res<()> {
+    #[cfg(test)]
+    if let Some(f) = fake!(close_stacked_prs) {
+        return f(home, lead_id, riders, device);
+    }
+    crate::commands::checks::close_stacked_prs(home, lead_id, riders, device)
+}
+
+/// What decision.md's Evidence says of the pull request, per close_pull_request state.
+const PR_EVIDENCE: [(&str, &str); 4] = [
+    (
+        "closed",
+        "closed by pickup with a comment that links this page",
+    ),
+    ("merged", "already merged"),
+    ("already closed", "already closed"),
+    ("open", "still open"),
+];
+
+/// decision.md for a job closed from the dashboard or by a GitHub close. outcome is
+/// close_pull_request's (state, why), or None without a pr.
 fn close_decision(
     j: &Value,
     reason: &str,
     device: &str,
     earlier: Option<&str>,
-    outcome: bool,
+    outcome: Option<(&str, String)>,
     pickup: &Settings,
 ) -> String {
     let at = text_of(j["close"].get("at"));
     let stage = text_of(j.get("stage"));
     let pr = text_of(j.get("pr"));
+    let open_pr = match &outcome {
+        Some(("open", why)) => format!("- Pull request {pr} stays open because {why}. Close it on GitHub if it should not merge.\n"),
+        _ => String::new(),
+    };
     let holders = recorded_holders(j);
     let uncovered: Vec<&String> = holders.iter().filter(|h| !pickup.lists(h)).collect();
     let (project, id) = (text_of(j.get("project")), text_of(j.get("id")));
@@ -7122,12 +7137,14 @@ fn close_decision(
     let branch = get_str(j, "branch")
         .filter(|b| !b.is_empty())
         .unwrap_or("none");
-    let shown_pr = if outcome {
-        format!("{pr}, already closed")
-    } else {
-        "none".into()
+    let shown_pr = match outcome {
+        Some((state, _)) => {
+            let evidence = PR_EVIDENCE.iter().find(|(k, _)| *k == state).unwrap().1;
+            format!("{pr}, {evidence}")
+        }
+        None => "none".into(),
     };
-    let text = format!("CLOSED: {reason}\n\n**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- {requested}\n- Stage when closed: `{stage}`, round {round}.\n- Branch: `{branch}`.\n- Pull request: {shown_pr}.\n- Written by factory.py pickup on {device}.\n\n## Left out\n\n- {unreviewed}\n- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup {project}/{id}` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup {project}/{id}` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n{manual}");
+    let text = format!("CLOSED: {reason}\n\n**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- {requested}\n- Stage when closed: `{stage}`, round {round}.\n- Branch: `{branch}`.\n- Pull request: {shown_pr}.\n- Written by factory.py pickup on {device}.\n\n## Left out\n\n- {unreviewed}\n{open_pr}- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup {project}/{id}` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup {project}/{id}` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n{manual}");
     match earlier {
         Some(e) if !e.is_empty() => format!("{text}\n## Earlier decision\n\n{e}"),
         _ => text,
@@ -7144,7 +7161,7 @@ fn close_pass(
     dry: bool,
 ) -> Res<()> {
     let mut configs: Cache = HashMap::new();
-    for i in 0..jobs_of(data).len() {
+    for i in 0..ops::board_jobs(data)?.len() {
         let j = data["jobs"][i].clone();
         let terminal = get_str(&j, "stage").is_some_and(|s| TERMINAL.contains(&s));
         let (Some(job_id), Some(project)) = (
@@ -7167,21 +7184,32 @@ fn close_pass(
             continue;
         }
         let pr = get_str(&j, "pr").filter(|p| !p.is_empty());
-        let stacked = open_stacked(data, job_id);
         if dry {
             let mut line = format!("would close {job_id} {project}");
             if let Some(pr) = pr {
                 line += &format!(" and pull request {pr}");
             }
-            for r in &stacked {
-                line += &format!(" and stacked pull request {r}");
+            for r in claims::open_stacked(data, job_id) {
+                line += &format!(" and stacked pull request {}", text_of(r.get("pr")));
             }
             outln!(io, "{line}");
             continue;
         }
-        let github = get_str(&j["close"], "via") == Some("github");
-        if pr.is_some() && !github || !stacked.is_empty() {
-            return Err(deferred("PR close"));
+        let outcome = if get_str(&j["close"], "via") == Some("github") {
+            Some(("already closed", String::new()))
+        } else if pr.is_some() {
+            Some(close_pull_request(home, &j, device)?)
+        } else {
+            None
+        };
+        match &outcome {
+            Some(("closed", _)) => outln!(io, "closed pull request {} for {job_id}", pr.unwrap()),
+            Some(("open", why)) => errln!(
+                io,
+                "factory.py: pickup leaves pull request {} open: {why}",
+                pr.unwrap()
+            ),
+            _ => {}
         }
         if !configs.contains_key(project) {
             configs.insert(project.to_string(), pickup_config(home, project)?);
@@ -7195,16 +7223,24 @@ fn close_pass(
                     return Ok((None, ()));
                 }
                 Ok((
-                    Some(close_decision(&j, &reason, device, text, github, &config)),
+                    Some(close_decision(
+                        &j,
+                        &reason,
+                        device,
+                        text,
+                        outcome.clone(),
+                        &config,
+                    )),
                     (),
                 ))
             },
         )?;
         let at = j["close"].get("at").cloned();
-        let done = cas(home, "/api/board", |text| {
+        let (done, stacked) = cas(home, "/api/board", |text| {
             let mut board = load_board(text)?;
+            ops::board_jobs(&board)?;
             let Some(b) = job_index(&board, job_id) else {
-                return Ok((None, false));
+                return Ok((None, (false, Vec::new())));
             };
             let found = &board["jobs"][b];
             if !closing(found)
@@ -7212,21 +7248,23 @@ fn close_pass(
                 || get_str(found, "stage").is_some_and(|s| TERMINAL.contains(&s))
                 || claims::blocking(Some(found), device, "", minutes)?.is_some()
             {
-                return Ok((None, false));
+                return Ok((None, (false, Vec::new())));
             }
             board["jobs"][b]
                 .as_object_mut()
                 .unwrap()
                 .shift_remove("claim");
+            let stacked = claims::open_stacked(&board, job_id);
             patch_job(
                 &mut board,
                 job_id,
                 &json!({"stage": "closed", "note": reason, "needs": null, "close": {"closed": now()}}),
             );
-            Ok((Some(dump_board(&board)), true))
+            Ok((Some(dump_board(&board)), (true, stacked)))
         })?;
         if done {
             outln!(io, "closed {job_id} {project}");
+            close_stacked_prs(home, job_id, &stacked, device)?;
         }
     }
     Ok(())
@@ -13601,16 +13639,50 @@ exit "$archive_code"
                 "refs": [{"id": "042-sample-export", "kind": "batched-into"}], "updated": "2026-01-01T00:00:00Z"})
         }
 
-        fn deferred_close(fx: &Fx, files: &Files) {
-            assert_eq!(
-                fx.pickup(&[]),
-                out_err(
-                    2,
-                    "",
-                    "factory.py: pickup PR close is not ported to the Rust binary yet\n"
-                )
-            );
-            assert!(fx.puts().is_empty() && files.is_empty());
+        /// Fake close_pull_request: it answers (state, why) and logs a `gh close <pr>` call on the
+        /// Worker call list, so tests can order it against the decision write.
+        fn pr_answer(fx: &Fx, state: &'static str, why: &str) {
+            let (calls, why) = (fx.state.clone(), why.to_string());
+            fx.set_fakes(|f| {
+                f.close_pull_request = Some(Rc::new(move |_, j, _| {
+                    calls
+                        .borrow_mut()
+                        .calls
+                        .push(("gh close".into(), text_of(j.get("pr"))));
+                    Ok((state, why.clone()))
+                }))
+            });
+        }
+
+        /// Fake close_stacked_prs: logs (lead, riders) and a `gh stacked` call.
+        fn stacked_log(fx: &Fx) -> Rc<RefCell<Vec<(String, Vec<Value>)>>> {
+            let log = Rc::new(RefCell::new(Vec::new()));
+            let (seen, calls) = (log.clone(), fx.state.clone());
+            fx.set_fakes(|f| {
+                f.close_stacked_prs = Some(Rc::new(move |_, lead, riders, _| {
+                    calls
+                        .borrow_mut()
+                        .calls
+                        .push(("gh stacked".into(), lead.to_string()));
+                    seen.borrow_mut().push((lead.to_string(), riders.to_vec()));
+                    Ok(())
+                }))
+            });
+            log
+        }
+
+        fn gh_calls(fx: &Fx) -> Vec<(String, String)> {
+            fx.calls()
+                .into_iter()
+                .filter(|c| c.0.starts_with("gh "))
+                .collect()
+        }
+
+        fn position(fx: &Fx, call: (&str, &str)) -> usize {
+            fx.calls()
+                .iter()
+                .position(|c| (c.0.as_str(), c.1.as_str()) == call)
+                .unwrap()
         }
 
         #[test]
@@ -13739,26 +13811,32 @@ exit "$archive_code"
             assert!(fx.puts().is_empty() && files.is_empty());
         }
 
-        /// An open pull request needs the PR close, which waits on the checks slice; the parts of the
-        /// decision pickup writes without it are checked here.
         #[test]
         fn test_close_decision_names_an_open_pull_request() {
-            let (fx, files) = setup();
-            fx.jobs(json!([closing(
-                json!({"pr": "https://github.example.test/sample/pull/7"})
-            )]));
-            deferred_close(&fx, &files);
+            let job = closing(json!({"pr": "https://github.example.test/sample/pull/7"}));
             let on = Settings {
                 enabled: Some(true),
                 hosts: vec!["other-host".into(), DEVICE.into()],
                 reason: None,
             };
+            let text = close_decision(
+                &job,
+                REASON,
+                DEVICE,
+                None,
+                Some(("open", "gh is not installed on host-a".into())),
+                &on,
+            );
+            assert!(text.contains(
+                "- Pull request: https://github.example.test/sample/pull/7, still open.\n"
+            ));
+            assert!(text.contains("- No agent reviewed this close. The reason is the owner's own words.\n- Pull request https://github.example.test/sample/pull/7 stays open because gh is not installed on host-a. Close it on GitHub if it should not merge.\n- The next pickup run on each host"));
             let bare = close_decision(
                 &json!({"id": "042-sample-export", "project": "alpha", "stage": "spec", "close": {"at": "2026-01-02T12:00:00Z"}}),
                 REASON,
                 DEVICE,
                 None,
-                false,
+                None,
                 &on,
             );
             assert!(bare.contains(
@@ -13804,7 +13882,7 @@ exit "$archive_code"
                 hosts: vec![DEVICE.into()],
                 reason: None,
             };
-            let text = close_decision(&closing(json!({})), REASON, DEVICE, None, false, &only);
+            let text = close_decision(&closing(json!({})), REASON, DEVICE, None, None, &only);
             assert!(text.contains("- Host that needs `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup does not list it.\n"));
         }
 
@@ -13847,24 +13925,76 @@ exit "$archive_code"
         #[test]
         fn test_close_closes_an_open_pull_request() {
             let (fx, files) = setup();
+            pr_answer(&fx, "closed", "");
             fx.jobs(json!([closing(json!({"pr": PR}))]));
-            deferred_close(&fx, &files);
-            assert_eq!(fx.job("042-sample-export")["stage"], "build");
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    &format!(
+                        "closed pull request {PR} for 042-sample-export\nclosed 042-sample-export alpha\n"
+                    ),
+                    ""
+                )
+            );
+            assert_eq!(gh_calls(&fx), [("gh close".to_string(), PR.to_string())]);
+            assert!(position(&fx, ("gh close", PR)) < position(&fx, ("PUT", DECISION)));
+            let text = files.get(DECISION).unwrap();
+            assert!(text.contains(&format!(
+                "- Pull request: {PR}, closed by pickup with a comment that links this page.\n"
+            )));
+            assert!(!text.contains("stays open"));
+            assert_eq!(fx.job("042-sample-export")["stage"], "closed");
         }
 
         #[test]
         fn test_close_skips_a_finished_pull_request() {
             let (fx, files) = setup();
-            fx.jobs(json!([closing(json!({"pr": PR}))]));
-            deferred_close(&fx, &files);
+            for (state, line) in [
+                ("merged", "already merged"),
+                ("already closed", "already closed"),
+            ] {
+                fx.clear_calls();
+                files.files.borrow_mut().clear();
+                pr_answer(&fx, state, "");
+                fx.jobs(json!([closing(json!({"pr": PR}))]));
+                assert_eq!(
+                    fx.pickup(&[]),
+                    out_err(0, "closed 042-sample-export alpha\n", "")
+                );
+                let text = files.get(DECISION).unwrap();
+                assert!(text.contains(&format!("- Pull request: {PR}, {line}.\n")));
+                assert!(!text.contains("stays open"));
+            }
         }
 
         #[test]
         fn test_close_leaves_the_pull_request_open() {
             let (fx, files) = setup();
-            for pr in [PR, "https://github.com/other/repo/pull/7"] {
+            let other = "https://github.com/other/repo/pull/7";
+            for (pr, why) in [
+                (PR, "gh is not installed on host-a"),
+                (PR, "gh pr close exited 1 (check gh auth status on host-a)"),
+                (other, "its URL is not a pull request in sample/alpha"),
+            ] {
+                fx.clear_calls();
+                files.files.borrow_mut().clear();
+                pr_answer(&fx, "open", why);
                 fx.jobs(json!([closing(json!({"pr": pr}))]));
-                deferred_close(&fx, &files);
+                assert_eq!(
+                    fx.pickup(&[]),
+                    out_err(
+                        0,
+                        "closed 042-sample-export alpha\n",
+                        &format!("factory.py: pickup leaves pull request {pr} open: {why}\n")
+                    )
+                );
+                let text = files.get(DECISION).unwrap();
+                assert!(text.contains(&format!("- Pull request: {pr}, still open.\n")));
+                assert!(text.contains(&format!(
+                    "- Pull request {pr} stays open because {why}. Close it on GitHub if it should not merge.\n"
+                )));
+                assert_eq!(fx.job("042-sample-export")["stage"], "closed");
             }
         }
 
@@ -13883,15 +14013,33 @@ exit "$archive_code"
 
         #[test]
         fn test_close_closes_stacked_rider_pr() {
-            let (fx, files) = setup();
+            let (fx, _files) = setup();
+            let log = stacked_log(&fx);
             fx.jobs(json!([closing(json!({})), stacked_rider()]));
-            deferred_close(&fx, &files);
-            assert_eq!(fx.job("043-sample-schema")["pr"], RIDER_PR);
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(0, "closed 042-sample-export alpha\n", "")
+            );
+            assert_eq!(
+                *log.borrow(),
+                [(
+                    "042-sample-export".to_string(),
+                    vec![json!({"id": "043-sample-schema", "project": "alpha", "pr": RIDER_PR})]
+                )]
+            );
+            let board_put = fx
+                .calls()
+                .iter()
+                .rposition(|c| c.0 == "PUT" && c.1 == "/api/board")
+                .unwrap();
+            assert!(board_put < position(&fx, ("gh stacked", "042-sample-export")));
+            assert_eq!(fx.job("042-sample-export")["stage"], "closed");
         }
 
         #[test]
         fn test_close_skips_stacked_rider_without_project() {
             let (fx, _files) = setup();
+            let log = stacked_log(&fx);
             fx.jobs(json!([
                 closing(json!({})),
                 with(stacked_rider(), json!({"project": null}))
@@ -13900,6 +14048,10 @@ exit "$archive_code"
             assert_eq!(
                 fx.pickup(&[]),
                 out_err(0, "closed 042-sample-export alpha\n", "")
+            );
+            assert_eq!(
+                *log.borrow(),
+                [("042-sample-export".to_string(), Vec::new())]
             );
             assert_eq!(fx.job("042-sample-export")["stage"], "closed");
         }
@@ -14114,7 +14266,8 @@ exit "$archive_code"
         }
     }
 
-    /// gh_pr waits on the checks slice; gh_cli, which this file ports, reads gh the same way.
+    /// gh_pr is the checks slice's, and pickup reaches it only through close_pull_request; gh_cli,
+    /// pickup's own gh read, runs gh the same way.
     mod gh_pr_test {
         use super::*;
 
@@ -17322,14 +17475,6 @@ exit "$archive_code"
             )
             .unwrap_err();
             assert_eq!((e.code, e.stderr.as_str()), (2, "factory.py: pickup auto-babysit PR signals is not ported to the Rust binary yet\n"));
-        }
-
-        #[test]
-        fn pr_close() {
-            let fx = Fx::new();
-            alpha_on(&fx);
-            fx.jobs(json!([{"id": "042-sample-export", "stage": "build", "project": "alpha", "pr": "https://github.com/sample/alpha/pull/7", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}}]));
-            assert_deferred(fx.pickup(&[]), "PR close");
         }
 
         #[test]
