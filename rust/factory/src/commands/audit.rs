@@ -2789,6 +2789,19 @@ mod tests {
     }
 
     #[test]
+    fn pr_merge_is_linear() {
+        for text in [
+            format!(";{}", "a=".repeat(50_000)),
+            format!("gh api {}", "x".repeat(100_000)),
+        ] {
+            let start = std::time::Instant::now();
+            let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text));
+            assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
+            assert!(start.elapsed().as_secs_f64() < 1.0);
+        }
+    }
+
+    #[test]
     fn push_trims_oldest() {
         let lines: Vec<String> = (0..6).map(|n| format!("{{\"row\": {n}}}\n")).collect();
         let full: usize = lines.iter().map(String::len).sum();
