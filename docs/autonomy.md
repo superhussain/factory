@@ -779,6 +779,7 @@ A person restores the class:
 
 - Restore needs a terminal, like `autonomy resume`, because it loosens autonomy.
 - A malformed `restored` entry is ignored, so the hold stays.
+- Restore keeps other `restored` entries as stored. When `autonomy.restored` is not a map it refuses with exit 3: `autonomy.restored is not a map; nothing was changed`.
 - PRs already held keep their `needs` until a person merges them.
 
 ## Earned autonomy promotion
@@ -815,5 +816,6 @@ Refusals change nothing:
 
 - The gates run before the prompt and again on the fresh board inside the write.
 - Promote also stamps `restored`, so the next revert starts a fresh window.
+- Promote keeps other `restored` entries and refuses the same way when `autonomy.restored` is not a map (`autonomy.restored is not a map; nothing was changed`).
 - A malformed `promoted` entry for the class refuses promotion rather than dropping the cooldown.
 - The 7-day and 14-day values are starting guesses.
