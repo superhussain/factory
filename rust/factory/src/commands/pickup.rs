@@ -18396,6 +18396,103 @@ exit "$archive_code"
         }
     }
 
+    mod board_jobs_test {
+        use super::*;
+
+        /// Each pass that reads the board's jobs through ops::board_jobs, on one board.
+        fn run_passes(fx: &Fx, board: &Value) -> Vec<(&'static str, i32, String)> {
+            let paths = paths_of(&fx.home).unwrap();
+            let mut results = Vec::new();
+            for name in [
+                "audit push",
+                "worktree stop",
+                "PR close",
+                "close cleanup",
+                "PR state sync",
+                "auto-babysit",
+            ] {
+                let (mut out, mut err) = (Vec::new(), Vec::new());
+                let mut io = Io {
+                    out: &mut out,
+                    err: &mut err,
+                };
+                let mut data = board.clone();
+                let settings = &mut HashMap::new();
+                let (home, io) = (&fx.home, &mut io);
+                let result = match name {
+                    "audit push" => audit_pickup_push(io, home, Some(&data)),
+                    "worktree stop" => {
+                        move_stop_pass(io, home, &mut data, DEVICE, &paths, settings, false, None)
+                    }
+                    "PR close" => close_pass(io, home, &mut data, DEVICE, 120, false),
+                    "close cleanup" => {
+                        close_cleanup_pass(io, home, &mut data, DEVICE, &paths, settings, false)
+                    }
+                    "PR state sync" => {
+                        pr_sync_pass(io, home, &mut data, DEVICE, 120, &paths, settings, false)
+                    }
+                    _ => {
+                        auto_babysit_pass(io, home, &mut data, DEVICE, 120, &paths, settings, false)
+                    }
+                };
+                let e = result.unwrap_err();
+                results.push((name, e.code, e.stderr));
+            }
+            results
+        }
+
+        #[test]
+        fn test_board_jobs_fails_closed() {
+            let fx = Fx::new();
+            fs::create_dir_all(fx.root.join("claude/projects")).unwrap();
+            let stderr = "factory.py: the board's jobs is not a list of objects\n";
+            for board in [json!({"jobs": [1]}), json!({"jobs": {}})] {
+                for (name, code, err) in run_passes(&fx, &board) {
+                    assert_eq!((code, err.as_str()), (1, stderr), "{name} on {board}");
+                }
+            }
+            assert!(fx.puts().is_empty());
+        }
+
+        /// A dry already-babysat line needs the PR head as text, where Python slices it.
+        #[test]
+        fn test_auto_babysit_head_not_a_string_fails() {
+            let fx = Fx::new();
+            fs::create_dir(fx.home.join("projects")).unwrap();
+            fs::write(
+                fx.home.join("projects/alpha.md"),
+                "---\nrepo: sample/alpha\nauto_babysit: 3\n---\n",
+            )
+            .unwrap();
+            fx.view(
+                "alpha",
+                200,
+                with(
+                    effective("alpha", Some(json!({"pickup": on()})), None),
+                    json!({"stage_notes": {"babysit": ["Fix it."]}}),
+                ),
+            );
+            fx.set_fakes(|f| {
+                f.pr_signals = Some(Rc::new(|_, _, _, _| {
+                    Ok(BTreeMap::from([(7, (json!(7), Some("fix-ci")))]))
+                }))
+            });
+            fx.jobs(
+                json!([{"id": "042-sample-export", "stage": "pr-open", "project": "alpha",
+                "pr": "https://github.com/sample/alpha/pull/7", "updated": "2026-01-01T00:00:00Z",
+                "auto_babysit": {"count": 1, "head": 7, "reason": "fix-ci"}}]),
+            );
+            assert_eq!(
+                fx.pickup(&["--dry-run"]),
+                out_err(
+                    1,
+                    "",
+                    "factory.py: auto-babysit 042-sample-export: PR head is not a string\n"
+                )
+            );
+        }
+    }
+
     mod deferred_passes {
         use super::*;
 
