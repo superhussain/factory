@@ -39,7 +39,6 @@ const TRACER_STAGES: [&str; 7] = [
 const TRACER_GATHER_STAGES: [&str; 2] = ["idea", "spec"];
 pub(crate) const TRACER_GATE_NOTE: &str = "gate: tracer-scope";
 pub(crate) const TRACER_APPROVED_NOTE: &str = "spec approved in Tracer";
-#[allow(dead_code)] // The claims slice reads it.
 pub(crate) const SPEC_APPROVED_NOTES: [&str; 2] =
     [TRACER_APPROVED_NOTE, "spec approved on the dashboard"];
 const TRACER_STARTING: &str = "The companion is starting this build";
@@ -1343,7 +1342,6 @@ fn after_board_steps(
 /// Mirror each followed job that has no Tracer link yet, pulling its spec.md first when this
 /// device lacks it. A job that gathers in Tracer, or asks to, is gathered or polled without a
 /// pull. Silent on a device without tracer.json.
-#[allow(dead_code)] // The pickup slice calls it.
 pub(crate) fn tracer_follow_pass(home: &Path) -> Res<()> {
     follow_pass_to(home, &mut std::io::stderr().lock())
 }
@@ -1399,7 +1397,6 @@ type BuildMark = (String, bool, Option<Value>);
 /// the job stays checked; a 404 drops it. A Tracer failure costs one stderr warning and leaves
 /// unchecked jobs as they were. A device without tracer.json only clears marks, and only while
 /// Tracer is off. True when it wrote the board.
-#[allow(dead_code)] // The pickup slice calls it.
 pub(crate) fn tracer_build_pass(home: &Path, jobs: Option<&[Value]>) -> Res<bool> {
     build_pass_to(home, jobs, &mut std::io::stderr().lock())
 }

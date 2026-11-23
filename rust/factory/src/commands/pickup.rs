@@ -2,6 +2,7 @@
 //! board passes.
 
 use crate::commands::claims::{self, mine};
+use crate::commands::tracer::SPEC_APPROVED_NOTES;
 use crate::shared::pyval::truthy;
 #[cfg(test)]
 use std::cell::RefCell;
@@ -2688,27 +2689,12 @@ fn audit_pickup_push(home: &Path) -> Res<()> {
     Err(deferred("audit push"))
 }
 
-/// True only when the all-projects pipeline document sets tracer.enabled to true.
-fn tracer_enabled(home: &Path) -> Res<bool> {
-    let r = api(home, "GET", "/api/pipeline/global", None, &[200, 404], &[])?;
-    if r.status == 404 {
-        return Ok(false);
-    }
-    let malformed = |code| fail("malformed all-projects pipeline document", code);
-    let doc = loads(&r.text()?).map_err(|_| malformed(5))?;
-    let doc = doc.as_object().ok_or_else(|| malformed(1))?;
-    Ok(doc.get("tracer").and_then(|t| t.get("enabled")) == Some(&Value::Bool(true)))
-}
-
 fn tracer_follow_pass(home: &Path) -> Res<()> {
     #[cfg(test)]
     if let Some(f) = fake!(tracer_follow_pass) {
         return f(home);
     }
-    if !lexists(&home.join("tracer.json")) || !tracer_enabled(home)? {
-        return Ok(());
-    }
-    Err(deferred("tracer follow pass"))
+    crate::commands::tracer::tracer_follow_pass(home)
 }
 
 /// True when the pass wrote the board. A host without tracer.json and with no Building in
@@ -2743,7 +2729,10 @@ fn tracer_build_pass(io: &mut Io, home: &Path, jobs: Option<&Value>) -> Res<bool
             return Ok(false);
         }
     }
-    Err(deferred("tracer build pass"))
+    crate::commands::tracer::tracer_build_pass(
+        home,
+        jobs.and_then(Value::as_array).map(Vec::as_slice),
+    )
 }
 
 /// The backlog lines this host already has a final triage verdict for.
@@ -2809,8 +2798,6 @@ const AGENT_ROWS_MAX: usize = 32;
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
-const SPEC_APPROVED_NOTES: [&str; 2] =
-    ["spec approved in Tracer", "spec approved on the dashboard"];
 const RETRO_PROMPT_FILE: &str = "retro-schedule-prompt.md";
 const RETRO_CATCHUP_FILE: &str = "retro-catchup.json";
 const RETRO_WAIT_FILE: &str = "retro-catchup-wait.json";
@@ -8455,27 +8442,6 @@ exit "$code"
                     format!("factory.py: pickup {what} is not ported to the Rust binary yet\n")
                 )
             );
-        }
-
-        #[test]
-        fn tracer_follow_pass() {
-            let fx = Fx::new();
-            fs::write(fx.home.join("tracer.json"), "{}").unwrap();
-            assert_deferred(fx.pickup(&[]), "tracer follow pass");
-        }
-
-        #[test]
-        fn tracer_build_pass() {
-            let fx = Fx::new();
-            fx.jobs(json!([idea(
-                "001-tracer",
-                "alpha",
-                json!({"tracer": {"building": true}})
-            )]));
-            assert_deferred(fx.pickup(&[]), "tracer build pass");
-            fs::write(fx.home.join("tracer.json"), "{}").unwrap();
-            fx.set_fakes(|f| f.tracer_follow_pass = Some(Rc::new(|_| Ok(()))));
-            assert_deferred(fx.pickup(&[]), "tracer build pass");
         }
 
         #[test]

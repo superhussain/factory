@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value};
 use crate::cli::Call;
 use crate::commands::checks::close_stacked_prs;
 use crate::commands::sync::{conflict_exit, pull_job, push_target, sync_problems, sync_state};
-use crate::commands::tracer::tracer_after_board;
+use crate::commands::tracer::{tracer_after_board, SPEC_APPROVED_NOTES};
 use crate::shared::board::{batch_refs, dump_board, lead_of, load_board, patch_job, read_board};
 use crate::shared::consts::{
     BUILD_STATES, IDEA, IN_FLIGHT, JOB_ID, NEW_JOB_ID, PASEO_ID, REF_KINDS, RELEASE, SLUG, TERMINAL,
@@ -209,7 +209,6 @@ const CLAIM_REFRESH_MINUTES: f64 = 10.0;
 const REVIEWERS: [&str; 4] = ["security", "ux", "ui", "code"];
 const TRACER_GATE_NOTE: &str = "gate: tracer-scope";
 const TRACER_APPROVED_NOTE: &str = "spec approved in Tracer";
-const SPEC_APPROVED_NOTES: [&str; 2] = [TRACER_APPROVED_NOTE, "spec approved on the dashboard"];
 const RECEIPT_REFUSAL: &str = "without a Tracer-signed scope receipt";
 static NOT_BEFORE: Pattern = Pattern::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", Flags::NONE);
 static TRACER_JIRA: Pattern = Pattern::new(
@@ -1693,8 +1692,6 @@ mod tests {
         }
         out
     }
-
-    const NO_PASEO: &[(&str, &str)] = &[("PASEO_AGENT_ID", ""), ("FACTORY_SESSION", "s")];
 
     /// A PASEO_HOME folder with a server id, so paseo_session links once PASEO_AGENT_ID is set.
     fn paseo_home(name: &str) -> PathBuf {
