@@ -1159,6 +1159,7 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
             if job["tracer"].get("receipt"):
                 job.update(stage="build", note=TRACER_APPROVED_NOTE)
                 job.pop("needs", None)
+                job["spec_approval"] = spec_approval_record("tracer", job["updated"])
                 sent.append(job_id)
             else:
                 feature = job["tracer"].get("feature") or tracer_ids(job)[1]
@@ -12282,6 +12283,7 @@ def tracer_record(home, job, base, feature_id, scope=None, receipt=None):
                 found["stage"] = "build"
                 found["note"] = TRACER_APPROVED_NOTE
                 found.pop("needs", None)
+                found["spec_approval"] = spec_approval_record("tracer", stamp)
                 sent.append(job["id"])
             else:
                 found["note"] = "gate: spec-approval"
