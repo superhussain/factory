@@ -7,8 +7,9 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use crate::cli::{not_ported, Call};
+use crate::cli::Call;
 use crate::commands::claims::{self, held_by, mine};
+use crate::commands::sync::{push_target, sync_problems, sync_state};
 use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, read_env_ordered};
 use crate::shared::consts::{
@@ -2108,16 +2109,6 @@ fn first_item(
     Ok(None)
 }
 
-/// Claim an id for the picked line. Waits on the claims slice.
-fn claim_id(
-    _home: &Path,
-    _feature_slug: &str,
-    _project_slug: &str,
-    _refs: Option<&Value>,
-) -> Res<String> {
-    Err(not_ported("next"))
-}
-
 /// Drop a claim stub from the board, but never a job that has started.
 fn drop_stub(home: &Path, job_id: &str) -> Res<()> {
     cas(home, "/api/board", |text| {
@@ -2178,11 +2169,11 @@ fn next_item_in(home: &Path) -> Res<()> {
             };
             return Err(fail(why, 3));
         };
-        let job_id = claim_id(
+        let job_id = claims::claim_id(
             home,
             &feature_slug(&feature),
             &slug,
-            Some(&Value::Array(refs)),
+            Some(Value::Array(refs)),
         )?;
         let done = format!("- [x] {slug}: {feature} ({job_id})");
         let marked = cas(home, "/api/backlog", |text| {
@@ -2407,15 +2398,28 @@ fn ideas_in(home: &Path, args: &[String]) -> Res<()> {
     Ok(())
 }
 
-/// Push the imported files, then refuse when R2 does not hold them. Waits on the sync slice.
+/// Push the imported files, then refuse when R2 does not hold them. push returns 0 even when it skips a
+/// manifest-tracked file that changed or vanished in R2, so the imported files are judged by the sync state.
 fn push_imported(
-    _home: &Path,
-    _target: &str,
-    _slug: &str,
-    _job_id: &str,
-    _mine: &BTreeSet<String>,
+    home: &Path,
+    target: &str,
+    slug: &str,
+    job_id: &str,
+    mine: &BTreeSet<String>,
 ) -> Res<()> {
-    Err(not_ported("idea-images"))
+    push_target(target)?;
+    let (folder, manifest, remote) = sync_state(home, slug, job_id)?;
+    let problems = sync_problems(&folder, &manifest, &remote)?;
+    if let Some(problem) = problems
+        .iter()
+        .find(|p| mine.contains(p.split(' ').next().unwrap_or("")))
+    {
+        return Err(fail(
+            format!("{target}'s imported artifacts do not match the factory's: {problem}. Pull and reconcile before promotion; the local copies were not overwritten"),
+            6,
+        ));
+    }
+    Ok(())
 }
 
 pub fn idea_images(call: &Call) -> Res<()> {
@@ -5681,24 +5685,6 @@ fn random_tag() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn deferred_stubs() {
-        let home = Path::new("/nonexistent");
-        let e = claim_id(home, "x", "s", None).unwrap_err();
-        assert_eq!(
-            (e.code, e.stderr.as_str()),
-            (2, "factory.py: next is not ported to the Rust binary yet\n")
-        );
-        let e = push_imported(home, "s/1-a", "s", "1-a", &BTreeSet::new()).unwrap_err();
-        assert_eq!(
-            (e.code, e.stderr.as_str()),
-            (
-                2,
-                "factory.py: idea-images is not ported to the Rust binary yet\n"
-            )
-        );
-    }
 
     const PARSE: &str = "sample: Parse recipe URLs (sub-job-of 041-recipe-import)";
     const STORE: &str = "sample: Store imported recipes (sub-job-of 041-recipe-import)";
