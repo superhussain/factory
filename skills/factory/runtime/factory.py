@@ -4349,37 +4349,6 @@ WINDOW_SECONDS = 7 * 86400
 MIN_ARM_FINISHED = 5
 # decision.md's verdict formats, from SKILL.md. Anything else before the PR ships is a skipped step.
 DECISION_VERDICTS = ("APPROVE", "ESCALATE", "CLOSED:")
-# decision.md line 2 when a person decided: /factory approve, or close_decision's two summaries.
-PERSON_APPROVE = "A person approved this job with /factory approve."
-PERSON_CLOSES = ("**Summary.** Closed from the dashboard at ", "**Summary.** GitHub reported pull request ")
-
-
-def decision_verdict(text):
-    """{verdict, decider} from decision.md's first two non-empty lines, or None without a verdict line."""
-    lines = [line.strip() for line in text.splitlines() if line.strip()] + ["", ""]
-    first, second = lines[0], lines[1]
-    if first.startswith("CLOSED:"):
-        return {"verdict": "CLOSED", "decider": "person" if second.startswith(PERSON_CLOSES) else "model"}
-    m = re.match(r"(APPROVE|ESCALATE|CHANGES)\b", first)
-    if not m:
-        return None
-    person = m[1] == "APPROVE" and second == PERSON_APPROVE
-    return {"verdict": m[1], "decider": "person" if person else "model"}
-
-
-def inferred_decision(home, j):
-    """An older row's decision, read from this host's decision.md and marked inferred, or None."""
-    if "decision" in j or not (isinstance(j.get("project"), str) and SLUG.fullmatch(j["project"])
-                               and isinstance(j.get("id"), str) and JOB_ID.fullmatch(j["id"]) and ".." not in j["id"]):
-        return None
-    path = Path(home) / "jobs" / j["project"] / j["id"] / "decision.md"
-    if not path.is_file() or is_link(path):
-        return None
-    try:
-        verdict = decision_verdict(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError):
-        return None
-    return {**verdict, "inferred": True} if verdict else None
 
 
 def stamp_of(value):
@@ -10861,9 +10830,6 @@ def job(job_id):
         if status == 404:
             fail(f"no job {job_id} on the board or in the archive. Nothing was written.", 4)
         found = json.loads(text)["jobs"][0]
-    decision = inferred_decision(home, found)
-    if decision:
-        found["decision"] = decision
     print(json.dumps(found, indent=2))
 
 
