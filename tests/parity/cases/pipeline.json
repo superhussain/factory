@@ -9353,6 +9353,790 @@
       },
       "exit": 0,
       "from": "tests/cli/test_repeats.py::RepeatsTest.test_recording_never_changes_the_verdict"
+    },
+    {
+      "id": "pipeline/verdict-sets-one-verdict",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "2",
+        "code",
+        "PASS",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-verdict-sets-one-verdict",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_sets_one_verdict"
+    },
+    {
+      "id": "pipeline/verdict-skipped-for-ux",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "1",
+        "ux",
+        "SKIPPED",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-verdict-skipped-for-ux",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_skipped_for_ux"
+    },
+    {
+      "id": "pipeline/verdict-refuses",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "0",
+        "code",
+        "PASS",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-verdict-refuses",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_refuses"
+    },
+    {
+      "id": "pipeline/verdict-refuses-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "2",
+        "qa",
+        "PASS",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-verdict-refuses",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_refuses"
+    },
+    {
+      "id": "pipeline/verdict-refuses-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "2",
+        "code",
+        "pass",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-verdict-refuses",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_refuses"
+    },
+    {
+      "id": "pipeline/verdict-refuses-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "2",
+        "security",
+        "SKIPPED",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-verdict-refuses",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_refuses"
+    },
+    {
+      "id": "pipeline/verdict-refuses-5",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "beta/042-sample-export",
+        "2",
+        "code",
+        "PASS",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-verdict-refuses",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_refuses"
+    },
+    {
+      "id": "pipeline/verdict-refuses-6",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "3",
+        "code",
+        "PASS",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-verdict-refuses",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_refuses"
+    },
+    {
+      "id": "pipeline/verdict-refuses-7",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/043-missing",
+        "1",
+        "code",
+        "PASS",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-verdict-refuses",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_refuses"
+    },
+    {
+      "id": "pipeline/verdict-refuses-8",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "2",
+        "code",
+        "PASS",
+        "--session",
+        "other1"
+      ],
+      "home": "pipeline-verdict-refuses",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_refuses"
+    },
+    {
+      "id": "pipeline/verdict-refuses-without-review-file",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "2",
+        "code",
+        "PASS",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_refuses_without_review_file"
+    },
+    {
+      "id": "pipeline/verdict-refuses-mismatched-review-file",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "2",
+        "code",
+        "PASS",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-verdict-refuses-mismatched-review-file",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_refuses_mismatched_review_file"
+    },
+    {
+      "id": "pipeline/verdict-pending-needs-no-file",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "1",
+        "code",
+        "pending",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "review",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "pending",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "pending"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_verdict.py::VerdictTest.test_pending_needs_no_file"
+    },
+    {
+      "id": "pipeline/verdict-verdict-still-writes-changes-at-approve",
+      "argv": [
+        "--home",
+        "{home}",
+        "verdict",
+        "factory/042-sample-export",
+        "2",
+        "code",
+        "CHANGES",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-verdict-verdict-still-writes-changes-at-approve",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "stage": "approve",
+                "round": 2,
+                "project": "factory",
+                "updated": "2026-01-01T00:00:00Z",
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "SKIPPED",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "PASS",
+                    "ux": "SKIPPED",
+                    "ui": "SKIPPED",
+                    "code": "PASS"
+                  }
+                ],
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_verdict_still_writes_changes_at_approve"
     }
   ]
 }

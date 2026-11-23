@@ -10,20 +10,20 @@ use sha2::{Digest, Sha256};
 
 use crate::cli::{not_ported, Call};
 use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, read_board};
-use crate::shared::conf::{fm_get, frontmatter};
+use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::{
-    tag_lookalike, BABYSIT_SENTENCE, JOB_ID, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS,
-    NOTE_TAG, PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE, REVIEW_ROUTE_KEYS,
-    ROUTE_EFFORTS, ROUTE_MODEL, SLUG,
+    tag_lookalike, BABYSIT_SENTENCE, BATCH_REF, JOB_ID, JOB_REL, NOTE_INVISIBLE, NOTE_LINK,
+    NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE,
+    REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL, SLUG,
 };
 use crate::shared::exit::{fail, Res};
-use crate::shared::fs::{is_link, read_text, write_atomic};
+use crate::shared::fs::{is_link, mkdir_private, read_text, resolve, write_atomic};
 use crate::shared::home::factory_home;
 use crate::shared::http::{access_message, api, cas};
 use crate::shared::proc::capture;
 use crate::shared::project::{project_files, r2_target, safe_job_folder};
 use crate::shared::py::{
-    is_space, os_error, printable_line, repr, round_half_even, splitlines, strip,
+    is_space, os_error, printable_line, repr, round_half_even, round_int, splitlines, strip,
     universal_newlines,
 };
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2, NO_ASCII};
@@ -2823,22 +2823,1029 @@ pub fn review_floor_cmd(call: &Call) -> Res<()> {
     flushed(|o| review_floor(&home, &slug, &job_id, o))
 }
 
-// ---- not ported yet ----
+// ---- pre-review ----
 
-pub fn verdict_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("verdict"))
+const CHECKS_FILE: &str = ".factory/checks.json";
+const DIFF_BUDGET_LINES_PER_FILE: usize = 150;
+const DIFF_BUDGET_FILE_FACTOR: usize = 2;
+const DIFF_BUDGET_LINE_FACTOR: usize = 3;
+const DIFF_BUDGET_UNLISTED_MAX: usize = 20;
+const PRE_REVIEW_USAGE: &str = "usage: pre-review <project-slug>/<job-id>";
+const CHECK_NAME_SRC: &str = "[A-Za-z0-9][A-Za-z0-9_.-]{0,39}";
+static CHECK_NAME: Pattern = Pattern::new(CHECK_NAME_SRC, Flags::NONE);
+static SPEC_TASKS: Pattern = Pattern::new(
+    r"^## (?:\d+\.\s*)?Tasks\b[^\n]*\n(.*?)(?=^## |\Z)",
+    Flags {
+        multiline: true,
+        dotall: true,
+        ..Flags::NONE
+    },
+);
+static REPO_PATH: Pattern = Pattern::new(r"[A-Za-z0-9_./-]{1,200}", Flags::ASCII);
+static TRANSIENT_LOG: Pattern = Pattern::new(
+    r"ECONNRESET|ETIMEDOUT|EAI_AGAIN|Connection reset by peer|Temporary failure in name resolution|Could not resolve host|429 Too Many Requests|502 Bad Gateway|503 Service Unavailable|504 Gateway Timeout",
+    Flags::NONE,
+);
+static BACKTICK_SPAN: Pattern = Pattern::new("`([^`]*)`", Flags::NONE);
+static BACKTICK_RUN: Pattern = Pattern::new("`+", Flags::NONE);
+
+/// The distinct safe path tokens from the Tasks section's - Files: lines, in first-seen order.
+fn spec_budget_paths(text: &str) -> Vec<String> {
+    let text = format!("{text}\n");
+    let Some(section) = SPEC_TASKS.search(&text) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<String> = Vec::new();
+    for line in splitlines(section.get(1).unwrap().as_str(), false) {
+        if !strip(line).starts_with("- Files:") {
+            continue;
+        }
+        for m in BACKTICK_SPAN.find_iter(line) {
+            let t = &m.as_str()[1..m.as_str().len() - 1];
+            if REPO_PATH.is_full(&t.replace('*', ""))
+                && !t.starts_with('/')
+                && !t.contains("..")
+                && !paths.iter().any(|p| p == t)
+            {
+                paths.push(t.to_string());
+            }
+        }
+    }
+    paths
 }
 
-pub fn lesson_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("lesson"))
+/// {path: added plus deleted lines} the branch changes since the merge base with ref, or None on a git failure.
+fn diff_numstat(wt: &Path, reference: &str) -> Option<Vec<(String, u64)>> {
+    let mb = base_read(wt, &["merge-base", reference, "HEAD"]).filter(|o| o.code == 0)?;
+    let diff = base_read(
+        wt,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--numstat",
+            "--no-renames",
+            "-z",
+            strip(&mb.stdout),
+            "HEAD",
+        ],
+    )
+    .filter(|o| o.code == 0)?;
+    let mut counts: Vec<(String, u64)> = Vec::new();
+    for record in diff.stdout.split('\0').filter(|r| !r.is_empty()) {
+        let mut parts = record.splitn(3, '\t');
+        let (added, deleted, path) = (parts.next()?, parts.next()?, parts.next()?);
+        let n: u64 = [added, deleted]
+            .iter()
+            .filter(|n| **n != "-")
+            .map(|n| n.parse::<u64>().unwrap_or(0))
+            .sum();
+        match counts.iter_mut().find(|(p, _)| p == path) {
+            Some(slot) => slot.1 = n,
+            None => counts.push((path.to_string(), n)),
+        }
+    }
+    Some(counts)
 }
 
-pub fn pre_review_cmd(_call: &Call) -> Res<()> {
+/// Whether a spec Files token covers a changed path: a * glob, a directory ending in /, or the exact path.
+fn budget_covers(token: &str, path: &str) -> bool {
+    if token.contains('*') {
+        return fnmatch(path, token);
+    }
+    if token.ends_with('/') {
+        path.starts_with(token)
+    } else {
+        path == token
+    }
+}
+
+/// The pre-review budget object comparing the spec's Files paths with the branch's numstat.
+fn diff_budget(paths: &[String], numstat: &[(String, u64)]) -> Value {
+    let expected_lines = paths.len() * DIFF_BUDGET_LINES_PER_FILE;
+    let files = numstat.len();
+    let lines: u64 = numstat.iter().map(|(_, n)| n).sum();
+    let file_limit = paths.len() * DIFF_BUDGET_FILE_FACTOR;
+    let line_limit = expected_lines * DIFF_BUDGET_LINE_FACTOR;
+    let mut unlisted: Vec<&String> = numstat
+        .iter()
+        .map(|(p, _)| p)
+        .filter(|p| !paths.iter().any(|t| budget_covers(t, p)))
+        .collect();
+    unlisted.sort();
+    let over = files > file_limit || lines > line_limit as u64;
+    json!({"result": if over { "over" } else { "within" }, "files": files, "lines": lines,
+           "expected_files": paths.len(), "expected_lines": expected_lines, "file_limit": file_limit,
+           "line_limit": line_limit, "unlisted": unlisted, "reason": null})
+}
+
+/// The Budget: line for pre-review.md.
+fn budget_line(budget: &Value) -> String {
+    if budget["result"] == "none" {
+        return format!("Budget: none ({})", budget["reason"].as_str().unwrap_or(""));
+    }
+    format!(
+        "Budget: {} (files {}, limit {}; lines {}, limit {})",
+        budget["result"].as_str().unwrap(),
+        budget["files"],
+        budget["file_limit"],
+        budget["lines"],
+        budget["line_limit"]
+    )
+}
+
+/// (checks, reason): the checks file's list of {name, run}, or [] and why the file is unusable.
+fn load_checks(text: &str) -> (Vec<(String, Vec<String>)>, Option<String>) {
+    let data = match loads(text) {
+        Ok(data) => data,
+        Err(e) => {
+            return (
+                Vec::new(),
+                Some(format!("{CHECKS_FILE} is not valid JSON: {e}")),
+            )
+        }
+    };
+    let checks = data
+        .get("checks")
+        .and_then(Value::as_array)
+        .filter(|c| (1..=20).contains(&c.len()));
+    let Some(checks) = checks.filter(|_| data.is_object()) else {
+        return (
+            Vec::new(),
+            Some(format!(
+                "{CHECKS_FILE} needs a checks list of 1 to 20 entries"
+            )),
+        );
+    };
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    for (i, check) in checks.iter().enumerate() {
+        let name = check
+            .as_object()
+            .and_then(|c| c.get("name"))
+            .and_then(Value::as_str);
+        let Some(name) = name.filter(|n| CHECK_NAME.is_full(n) && !out.iter().any(|(k, _)| k == n))
+        else {
+            return (
+                Vec::new(),
+                Some(format!(
+                    "check {} needs a unique name matching {CHECK_NAME_SRC}",
+                    i + 1
+                )),
+            );
+        };
+        let run = check.get("run").and_then(Value::as_array).filter(|r| {
+            (1..=64).contains(&r.len())
+                && r.iter().all(|a| {
+                    a.as_str()
+                        .is_some_and(|a| !a.is_empty() && !a.contains('\0'))
+                })
+        });
+        let Some(run) = run else {
+            return (
+                Vec::new(),
+                Some(format!(
+                    "check {name} needs a run list of 1 to 64 nonempty strings"
+                )),
+            );
+        };
+        out.push((
+            name.to_string(),
+            run.iter()
+                .map(|a| a.as_str().unwrap().to_string())
+                .collect(),
+        ));
+    }
+    (out, None)
+}
+
+/// A check's exit: a code, a negative signal, or "timeout" or "missing" when it never finished.
+#[derive(Clone, Debug, PartialEq)]
+enum CheckExit {
+    Code(i32),
+    Timeout,
+    Missing,
+}
+
+impl CheckExit {
+    fn value(&self) -> Value {
+        match self {
+            CheckExit::Code(c) => json!(c),
+            CheckExit::Timeout => json!("timeout"),
+            CheckExit::Missing => json!("missing"),
+        }
+    }
+
+    fn text(&self) -> String {
+        match self {
+            CheckExit::Code(c) => c.to_string(),
+            CheckExit::Timeout => "timeout".into(),
+            CheckExit::Missing => "missing".into(),
+        }
+    }
+}
+
+/// (exit, seconds): run argv in cwd with output to log.
+fn run_check(argv: &[String], cwd: &Path, log: &Path, timeout: u64) -> Res<(CheckExit, i64)> {
+    use std::process::{Command, Stdio};
+    let start = std::time::Instant::now();
+    let seconds = |s: std::time::Instant| round_int(s.elapsed().as_secs_f64());
+    let mut out = std::fs::File::create(log).map_err(|e| fail(os_error(&e, Some(log)), 1))?;
+    let err = out
+        .try_clone()
+        .map_err(|e| fail(os_error(&e, Some(log)), 1))?;
+    let mut command = Command::new(&argv[0]);
+    command
+        .args(&argv[1..])
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(
+            out.try_clone()
+                .map_err(|e| fail(os_error(&e, Some(log)), 1))?,
+        ))
+        .stderr(Stdio::from(err));
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(_) => {
+            use std::io::Write;
+            let _ = write!(out, "missing program: {}\n", argv[0]);
+            return Ok((CheckExit::Missing, seconds(start)));
+        }
+    };
+    let deadline = start + std::time::Duration::from_secs(timeout);
+    loop {
+        if let Some(status) = child.try_wait().map_err(|e| fail(os_error(&e, None), 1))? {
+            #[cfg(unix)]
+            if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
+                return Ok((CheckExit::Code(-signal), seconds(start)));
+            }
+            return Ok((CheckExit::Code(status.code().unwrap_or(1)), seconds(start)));
+        }
+        if std::time::Instant::now() >= deadline {
+            #[cfg(unix)]
+            {
+                extern "C" {
+                    fn kill(pid: i32, sig: i32) -> i32;
+                }
+                // SAFETY: kill takes two plain integers and touches no Rust memory; -pid names the check's
+                // own process group, which process_group(0) created for it.
+                unsafe {
+                    kill(-(child.id() as i32), 9);
+                }
+            }
+            #[cfg(not(unix))]
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok((CheckExit::Timeout, seconds(start)));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// A check result's class: None on a pass, else budget, structural, canceled, transient or deterministic.
+fn failure_class(code: &CheckExit, log: &Path) -> Option<&'static str> {
+    let code = match code {
+        CheckExit::Code(0) => return None,
+        CheckExit::Timeout => return Some("budget"),
+        CheckExit::Missing | CheckExit::Code(126 | 127) => return Some("structural"),
+        CheckExit::Code(c) if *c < 0 || *c == 130 || *c == 143 => return Some("canceled"),
+        CheckExit::Code(c) => *c,
+    };
+    let _ = code;
+    let bytes = std::fs::read(log).unwrap_or_default();
+    let tail = &bytes[bytes.len().saturating_sub(65536)..];
+    if TRANSIENT_LOG
+        .search(&String::from_utf8_lossy(tail))
+        .is_some()
+    {
+        Some("transient")
+    } else {
+        Some("deterministic")
+    }
+}
+
+/// The last lines of a failing check's log for pre-review.md, with secrets redacted.
+fn pre_review_tail(_log_text: &str, _env: &crate::shared::conf::Conf) -> Res<Vec<String>> {
+    // Deferred to integration: 2202-port-retro
     Err(not_ported("pre-review"))
 }
 
-pub fn grounding_cmd(_call: &Call) -> Res<()> {
+/// The user id that owns this process.
+#[cfg(unix)]
+fn own_uid() -> u32 {
+    extern "C" {
+        fn getuid() -> u32;
+    }
+    // SAFETY: getuid takes no arguments, cannot fail and touches no Rust memory.
+    unsafe { getuid() }
+}
+
+/// Create the job's temp folder private to this account, refusing a name someone else holds.
+fn make_job_temp(slug: &str, job_id: &str) -> Res<PathBuf> {
+    let path = temp_root().join(format!("factory-{slug}-{job_id}"));
+    let refused = || {
+        fail(
+            format!(
+                "{} is a link or a file; remove it, then run prompt again",
+                path.display()
+            ),
+            6,
+        )
+    };
+    let link = is_link(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
+    if link || std::fs::symlink_metadata(&path).is_ok() && !path.is_dir() {
+        return Err(refused());
+    }
+    mkdir_private(&path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => refused(),
+        _ => fail(os_error(&e, Some(&path)), 1),
+    })?;
+    let meta = std::fs::symlink_metadata(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
+    if is_link(&path).unwrap_or(true) || !meta.is_dir() {
+        return Err(refused());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        if meta.uid() != own_uid() {
+            return Err(fail(
+                format!(
+                    "{} belongs to another account; remove it, then run prompt again",
+                    path.display()
+                ),
+                6,
+            ));
+        }
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            .map_err(|_| refused())?;
+    }
+    Ok(path)
+}
+
+/// The raw id of the job's batched-into ref, as Python's `lead_of` returns it.
+fn lead_value(j: &Value) -> Option<Value> {
+    j.get("refs")?
+        .as_array()?
+        .iter()
+        .find(|r| r.get("kind").and_then(Value::as_str) == Some(BATCH_REF))
+        .map(|r| r.get("id").cloned().unwrap_or(Value::Null))
+}
+
+fn pre_review(home: &Path, slug: &str, job_id: &str, o: &mut Out) -> Res<()> {
+    let data = read_board(home)?;
+    let Some(job) = data["jobs"]
+        .as_array()
+        .and_then(|jobs| jobs.iter().find(|j| str_of(j, "id") == Some(job_id)))
+    else {
+        return Err(fail(
+            format!("no job {job_id} on the board. Nothing was written. {PRE_REVIEW_USAGE}"),
+            4,
+        ));
+    };
+    let round_n = py_int(job.get("round")).filter(|r| *r >= 0).unwrap_or(0) + 1;
+    let project_file = project_files(home, slug)?.0;
+    let meta = frontmatter(&project_file)
+        .map_err(|e| fail(os_error(&e, Some(&project_file)), 1))?
+        .0;
+    let base = fm_get(&meta, "base")
+        .filter(|b| !b.is_empty())
+        .unwrap_or("main")
+        .to_string();
+    let repo = fm_get(&meta, "repo").unwrap_or("").to_string();
+    let lead = if job.get("stacked") == Some(&Value::Bool(true)) {
+        lead_value(job).filter(|v| !v.is_null())
+    } else {
+        None
+    };
+    let budget_ref = match &lead {
+        None => Some(format!("refs/remotes/origin/{base}")),
+        Some(Value::String(l)) if JOB_ID.is_full(l) && !l.contains("..") => {
+            Some(format!("refs/heads/factory/{l}"))
+        }
+        Some(_) => None,
+    };
+    let stacked = data["jobs"].as_array().into_iter().flatten().find(|j| {
+        lead_of(j).as_deref() == Some(job_id) && j.get("stacked") == Some(&Value::Bool(true))
+    });
+    let wt = home
+        .join("worktrees")
+        .join(slug)
+        .join(stacked.and_then(|j| str_of(j, "id")).unwrap_or(job_id));
+    let folder = home.join("jobs").join(slug).join(job_id);
+    let out_file = folder.join("pre-review.md");
+    refuse_links(&[&folder, &out_file])?;
+    if !wt.is_dir() {
+        return Err(fail(
+            format!("no worktree at {}; nothing was written", wt.display()),
+            4,
+        ));
+    }
+    let git = |args: &[&str]| {
+        base_read(&wt, args)
+            .filter(|o| o.code == 0)
+            .map(|o| o.stdout)
+    };
+    let head = git(&["rev-parse", "HEAD"])
+        .map(|h| strip(&h).to_string())
+        .filter(|h| !h.is_empty());
+    let mut reason = fetch_base(&wt, &base, &repo);
+    let mut checks = Vec::new();
+    let spec = folder.join("spec.md");
+    let mut paths = Vec::new();
+    let mut numstat = None;
+    let why;
+    if is_link(&spec).unwrap_or(false) {
+        why = "spec.md is a symlink or junction";
+    } else if !spec.is_file() {
+        why = "the job folder has no spec.md";
+    } else if {
+        paths = spec_budget_paths(&read_lossy(&spec).unwrap_or_default());
+        paths.is_empty()
+    } {
+        why = "spec.md has no task Files paths";
+    } else if reason.is_some() {
+        why = "the base could not be fetched";
+    } else if {
+        numstat = budget_ref.as_deref().and_then(|r| diff_numstat(&wt, r));
+        numstat.is_none()
+    } {
+        why = "the branch diff could not be read";
+    } else {
+        why = "";
+    }
+    let budget = match &numstat {
+        Some(numstat) => diff_budget(&paths, numstat),
+        None => {
+            json!({"result": "none", "files": 0, "lines": 0, "expected_files": 0, "expected_lines": 0,
+                       "file_limit": 0, "line_limit": 0, "unlisted": [], "reason": why})
+        }
+    };
+    if reason.is_none() {
+        match git(&["show", &format!("refs/remotes/origin/{base}:{CHECKS_FILE}")]) {
+            Some(text) => (checks, reason) = load_checks(&text),
+            None => reason = Some(format!("origin/{base} has no {CHECKS_FILE}")),
+        }
+    }
+    let head_text = head.clone().unwrap_or_else(|| "None".into());
+    if let Some(reason) = reason {
+        write_file(
+            &out_file,
+            &format!(
+                "PRE-REVIEW: NONE\n\nHead: {head_text}\n{}\nReason: {}\n",
+                budget_line(&budget),
+                printable_line(&reason, 300)
+            ),
+        )?;
+        let out = json!({"result": "none", "head": head, "checks": [], "reason": reason, "round": round_n,
+                         "repeats": [], "budget": budget});
+        writeln!(o.out, "{}", dumps(&out, DEFAULT)).unwrap();
+        return Ok(());
+    }
+    let logs = make_job_temp(slug, job_id)?.join("pre-review");
+    if is_link(&logs).unwrap_or(false) {
+        return Err(fail(
+            format!(
+                "{} is a symlink or junction; nothing was written",
+                logs.display()
+            ),
+            6,
+        ));
+    }
+    mkdir_private(&logs).map_err(|e| fail(os_error(&e, Some(&logs)), 1))?;
+    let checks_sha = git(&["rev-parse", &format!("refs/remotes/origin/{base}")])
+        .map(|s| strip(&s).to_string())
+        .unwrap_or_default();
+    let mut results: Vec<(String, CheckExit, i64, Option<&str>, bool)> = Vec::new();
+    for (name, run) in &checks {
+        let log = logs.join(format!("{name}.log"));
+        let (mut code, mut seconds) = run_check(run, &wt, &log, check_timeout())?;
+        let (mut kind, mut retried) = (failure_class(&code, &log), false);
+        if kind == Some("transient") {
+            let attempt = logs.join(format!("{name}.attempt-1.log"));
+            std::fs::rename(&log, &attempt).map_err(|e| fail(os_error(&e, Some(&log)), 1))?;
+            (code, seconds) = run_check(run, &wt, &log, check_timeout())?;
+            (kind, retried) = (failure_class(&code, &log), true);
+        }
+        results.push((name.clone(), code, seconds, kind, retried));
+    }
+    let failed: Vec<&(String, CheckExit, i64, Option<&str>, bool)> = results
+        .iter()
+        .filter(|r| r.1 != CheckExit::Code(0))
+        .collect();
+    let result = if failed.is_empty() { "pass" } else { "fail" };
+    let mut lines = vec![
+        format!("PRE-REVIEW: {}", result.to_uppercase()),
+        String::new(),
+        format!("Head: {head_text}"),
+        budget_line(&budget),
+        format!("Checks: origin/{base}:{CHECKS_FILE} at {checks_sha}"),
+        format!("Logs: {}", logs.display()),
+        String::new(),
+        "| Check | Exit | Seconds | Class |".into(),
+        "| --- | --- | --- | --- |".into(),
+    ];
+    for (name, code, seconds, kind, retried) in &results {
+        let tail = if *retried { ", retried" } else { "" };
+        lines.push(format!(
+            "| {name} | {} | {seconds} | {}{tail} |",
+            code.text(),
+            kind.unwrap_or("-")
+        ));
+    }
+    lines.push(String::new());
+    lines.push("Classes are explained under \"Failure classes\" in docs/autonomy.md of the factory repository.".into());
+    if budget["result"] == "over" {
+        lines.extend([
+            String::new(),
+            "## Diff budget".into(),
+            String::new(),
+            "| Measure | Spec estimate | Limit | Branch |".into(),
+            "| --- | --- | --- | --- |".into(),
+            format!(
+                "| Files | {} | {} | {} |",
+                budget["expected_files"], budget["file_limit"], budget["files"]
+            ),
+            format!(
+                "| Lines | {} | {} | {} |",
+                budget["expected_lines"], budget["line_limit"], budget["lines"]
+            ),
+        ]);
+        let unlisted: Vec<&str> = budget["unlisted"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        if !unlisted.is_empty() {
+            lines.extend([
+                String::new(),
+                "Files outside the spec's task list:".into(),
+                String::new(),
+            ]);
+            for p in unlisted.iter().take(DIFF_BUDGET_UNLISTED_MAX) {
+                let p = printable_line(p, 200);
+                let longest = BACKTICK_RUN
+                    .find_iter(&p)
+                    .map(|m| m.as_str().len())
+                    .max()
+                    .unwrap_or(0);
+                let fence = "`".repeat(longest + 1);
+                lines.push(if p.contains('`') {
+                    format!("- {fence} {p} {fence}")
+                } else {
+                    format!("- `{p}`")
+                });
+            }
+            if unlisted.len() > DIFF_BUDGET_UNLISTED_MAX {
+                lines.push(format!(
+                    "- and {} more",
+                    unlisted.len() - DIFF_BUDGET_UNLISTED_MAX
+                ));
+            }
+        }
+    }
+    let env_file = home.join(".env");
+    let env = if env_file.exists() {
+        read_conf(&env_file).map_err(|e| fail(os_error(&e, Some(&env_file)), 1))?
+    } else {
+        Default::default()
+    };
+    for r in &failed {
+        let log_text = read_lossy(&logs.join(format!("{}.log", r.0))).unwrap_or_default();
+        let tail = pre_review_tail(&log_text, &env)?;
+        lines.extend([
+            String::new(),
+            format!("## {}", r.0),
+            String::new(),
+            "~~~text".into(),
+        ]);
+        lines.extend(tail);
+        lines.push("~~~".into());
+    }
+    write_file(&out_file, &(lines.join("\n") + "\n"))?;
+    let mut repeats: Vec<String> = Vec::new();
+    let names: BTreeSet<String> = failed
+        .iter()
+        .filter(|r| r.3 == Some("deterministic"))
+        .map(|r| r.0.clone())
+        .collect();
+    if !names.is_empty() {
+        let record_file = make_job_temp(slug, job_id)?.join("pre-review-failures.json");
+        let record = read_text(&record_file).ok().and_then(|t| loads(&t).ok());
+        let valid = record.as_ref().and_then(Value::as_object).filter(|m| {
+            m.values()
+                .all(|v| v.as_array().is_some_and(|l| l.iter().all(Value::is_string)))
+        });
+        let mut record = valid.cloned().unwrap_or_default();
+        let key = round_n.to_string();
+        let mut merged: BTreeSet<String> = names.clone();
+        if let Some(old) = record.get(&key).and_then(Value::as_array) {
+            merged.extend(old.iter().filter_map(Value::as_str).map(String::from));
+        }
+        record.insert(key, json!(merged));
+        write_file(
+            &record_file,
+            &(dumps(&Value::Object(record.clone()), DEFAULT) + "\n"),
+        )?;
+        let earlier: BTreeSet<String> = record
+            .iter()
+            .filter(|(k, _)| {
+                !k.is_empty()
+                    && k.chars().all(|c| c.is_ascii_digit())
+                    && k.parse::<i64>().is_ok_and(|k| k < round_n)
+            })
+            .flat_map(|(_, v)| {
+                v.as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+            })
+            .collect();
+        repeats = names.intersection(&earlier).cloned().collect();
+    }
+    let checks_out: Vec<Value> = results
+        .iter()
+        .map(|(name, code, seconds, kind, retried)| {
+            json!({"name": name, "exit": code.value(), "seconds": seconds, "class": kind, "retried": retried})
+        })
+        .collect();
+    let out = json!({"result": result, "head": head, "checks": checks_out, "reason": null, "round": round_n,
+                     "repeats": repeats, "budget": budget});
+    writeln!(o.out, "{}", dumps(&out, DEFAULT)).unwrap();
+    if !failed.is_empty() {
+        return Err(crate::shared::exit::exit(1));
+    }
+    Ok(())
+}
+
+/// Run the base branch's checks file in the job worktree, write pre-review.md and print one JSON line.
+pub fn pre_review_cmd(call: &Call) -> Res<()> {
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    flushed(|o| pre_review(&home, &slug, &job_id, o))
+}
+
+// ---- grounding and verdict ----
+
+const GROUNDING_USAGE: &str = "usage: grounding <project-slug>/<job-id> <round>";
+const GROUNDING_NEAR: i64 = 10;
+#[cfg_attr(not(test), allow(dead_code))]
+const GROUNDING_ROWS_MAX: usize = 100;
+static CITATION: Pattern = Pattern::new(
+    r"(?<![\w./:-])((?:[\w.-]+/)*[\w-][\w.-]*\.[A-Za-z][A-Za-z0-9]{0,9}):([0-9]+)(?:-([0-9]+))?((?:,[0-9]+)*)(?![\w])",
+    Flags::NONE,
+);
+/// CITATION without its lookarounds, to split one match into groups.
+static CITATION_PARTS: Pattern = Pattern::new(
+    r"((?:[\w.-]+/)*[\w-][\w.-]*\.[A-Za-z][A-Za-z0-9]{0,9}):([0-9]+)(?:-([0-9]+))?((?:,[0-9]+)*)",
+    Flags::NONE,
+);
+static HUNK: Pattern = Pattern::new(r"@@ -\S+ \+([0-9]+)(?:,([0-9]+))? @@", Flags::NONE);
+
+/// A cited path and its lines, as `find_citations` lists them.
+#[derive(Debug, PartialEq)]
+struct Citation {
+    citation: String,
+    path: String,
+    lines: Vec<i64>,
+    span: Option<(i64, i64)>,
+}
+
+/// Each distinct path:line a review cites, in order of first appearance.
+#[cfg_attr(not(test), allow(dead_code))]
+fn find_citations(text: &str) -> Vec<Citation> {
+    let mut found = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    for whole in CITATION.find_iter(text) {
+        let all = whole.as_str().to_string();
+        let m = CITATION_PARTS.fullmatch(whole.as_str()).unwrap();
+        let mut path = m.get(1).unwrap().as_str();
+        while let Some(rest) = path.strip_prefix("./") {
+            path = rest;
+        }
+        if seen.contains(&all) || path.split('/').any(|p| p == "..") {
+            continue;
+        }
+        seen.insert(all.clone());
+        let num = |s: &str| s.parse::<i64>().unwrap_or(i64::MAX);
+        let mut lines = vec![num(m.get(2).unwrap().as_str())];
+        let end = m.get(3).map(|e| num(e.as_str()));
+        lines.extend(end);
+        lines.extend(
+            m.get(4)
+                .unwrap()
+                .as_str()
+                .split(',')
+                .filter(|x| !x.is_empty())
+                .map(num),
+        );
+        let span = end.map(|_| (lines[0], lines[1]));
+        found.push(Citation {
+            citation: all,
+            path: path.to_string(),
+            lines,
+            span,
+        });
+    }
+    found
+}
+
+/// The lines the branch changes since origin/<base>, by path, or why they cannot be read.
+type Ranges = std::collections::BTreeMap<String, Vec<(i64, i64)>>;
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn diff_ranges(wt: &Path, base: &str, repo: &str) -> Result<Ranges, String> {
+    if let Some(reason) = fetch_base(wt, base, repo) {
+        return Err(reason);
+    }
+    let unreadable = format!("the diff against origin/{base} could not be read");
+    let Some(mb) = base_read(
+        wt,
+        &["merge-base", &format!("refs/remotes/origin/{base}"), "HEAD"],
+    )
+    .filter(|o| o.code == 0) else {
+        return Err(unreadable);
+    };
+    let Some(diff) = base_read(
+        wt,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "-U0",
+            "--no-renames",
+            strip(&mb.stdout),
+            "HEAD",
+        ],
+    )
+    .filter(|o| o.code == 0) else {
+        return Err(unreadable);
+    };
+    let mut ranges = Ranges::new();
+    let (mut path, mut header): (Option<String>, bool) = (None, false);
+    for line in splitlines(&diff.stdout, false) {
+        if line.starts_with("diff --git ") {
+            (path, header) = (None, true);
+        } else if header && line.starts_with("+++ ") {
+            path = line.strip_prefix("+++ b/").map(String::from);
+        } else if line.starts_with("@@ ") {
+            header = false;
+            if let (Some(p), Some(m)) = (&path, HUNK.match_start(line)) {
+                let start: i64 = m.get(1).unwrap().as_str().parse().unwrap_or(0);
+                let count: i64 = m.get(2).map_or(1, |c| c.as_str().parse().unwrap_or(0));
+                ranges
+                    .entry(p.clone())
+                    .or_default()
+                    .push((start, start + count.max(1) - 1));
+            }
+        }
+    }
+    Ok(ranges)
+}
+
+/// (status, resolved, reason) for one cited path and its lines: ok, no-file, bad-line or off-diff.
+#[cfg_attr(not(test), allow(dead_code))]
+#[allow(clippy::too_many_arguments)]
+fn ground_citation(
+    path: &str,
+    lines: &[i64],
+    wt: &Path,
+    folder: &Path,
+    tracked: &[String],
+    ranges: Option<&Ranges>,
+    near: bool,
+    span: Option<(i64, i64)>,
+) -> (String, String, String) {
+    let regular = |root: &Path, rel: &str| {
+        let file = root.join(rel);
+        let (Ok(root), Ok(real)) = (resolve(root), resolve(&file)) else {
+            return false;
+        };
+        file.is_file()
+            && !is_link(&file).unwrap_or(true)
+            && real.ancestors().skip(1).any(|a| a == root)
+    };
+    let files: Option<Vec<String>> = if regular(wt, path) {
+        Some(vec![path.to_string()])
+    } else if !path.contains('/')
+        && tracked
+            .iter()
+            .any(|t| t.rsplit('/').next() == Some(path) && regular(wt, t))
+    {
+        Some(
+            tracked
+                .iter()
+                .filter(|t| t.rsplit('/').next() == Some(path) && regular(wt, t))
+                .cloned()
+                .collect(),
+        )
+    } else if JOB_REL.is_full(path) && regular(folder, path) {
+        None
+    } else {
+        return (
+            "no-file".into(),
+            "no-file".into(),
+            format!("no file at {path} in the worktree or job folder"),
+        );
+    };
+    let count = |p: PathBuf| {
+        let bytes = std::fs::read(p).unwrap_or_default();
+        bytes_lines(&bytes)
+    };
+    let (resolved, counts) = match &files {
+        None => (format!("job:{path}"), vec![count(folder.join(path))]),
+        Some(files) => (
+            files.join(", "),
+            files
+                .iter()
+                .map(|f| count(wt.join(f)))
+                .collect::<Vec<i64>>(),
+        ),
+    };
+    if let Some(missing) = lines
+        .iter()
+        .find(|line| !counts.iter().any(|n| 1 <= **line && **line <= *n))
+    {
+        let reason = if counts.len() == 1 {
+            format!("{resolved} has {} lines", counts[0])
+        } else {
+            format!(
+                "{} files named {path}, none has line {missing}",
+                counts.len()
+            )
+        };
+        return ("bad-line".into(), resolved, reason);
+    }
+    if let (true, Some(ranges), Some(files)) = (near, ranges, &files) {
+        let changed: Vec<(i64, i64)> = files
+            .iter()
+            .flat_map(|f| ranges.get(f).cloned().unwrap_or_default())
+            .collect();
+        if changed.is_empty() {
+            return (
+                "off-diff".into(),
+                resolved.clone(),
+                format!("{resolved} is not changed on this branch"),
+            );
+        }
+        let spans: Vec<(i64, i64)> = lines.iter().map(|l| (*l, *l)).chain(span).collect();
+        if !spans.iter().any(|(lo, hi)| {
+            changed
+                .iter()
+                .any(|(start, end)| start - GROUNDING_NEAR <= *hi && *lo <= end + GROUNDING_NEAR)
+        }) {
+            return (
+                "off-diff".into(),
+                resolved.clone(),
+                format!("more than {GROUNDING_NEAR} lines from every change to {resolved}"),
+            );
+        }
+    }
+    ("ok".into(), resolved, String::new())
+}
+
+/// `len(bytes.splitlines())`.
+fn bytes_lines(bytes: &[u8]) -> i64 {
+    let mut n = 0;
+    let mut i = 0;
+    let mut start = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\r' => {
+                if bytes.get(i + 1) == Some(&b'\n') {
+                    i += 1;
+                }
+                n += 1;
+                start = i + 1;
+            }
+            b'\n' => {
+                n += 1;
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    n + i64::from(start < bytes.len())
+}
+
+/// One unverified citation row for grounding.md.
+#[cfg_attr(not(test), allow(dead_code))]
+struct GroundRow {
+    review: String,
+    citation: String,
+    status: String,
+    reason: String,
+}
+
+/// grounding.md's text for a round's unverified rows.
+#[cfg_attr(not(test), allow(dead_code))]
+fn grounding_report(
+    rows: &[GroundRow],
+    head: Option<&str>,
+    base: &str,
+    diff_reason: Option<&str>,
+    checked: usize,
+    files: usize,
+) -> String {
+    let cell = |t: &str| printable_line(t, 200).replace('|', "/");
+    let mut out = vec![
+        if rows.is_empty() {
+            "GROUNDING: CLEAN".to_string()
+        } else {
+            format!("GROUNDING: UNVERIFIED {}", rows.len())
+        },
+        String::new(),
+        format!("Head: {}", head.unwrap_or("None")),
+        match diff_reason {
+            None => format!("Diff: origin/{base}"),
+            Some(reason) => format!("Diff: unreadable: {}", cell(reason)),
+        },
+        format!("Checked: {checked} citations in {files} review files"),
+    ];
+    if !rows.is_empty() {
+        out.extend([
+            String::new(),
+            "| Review | Citation | Status | Reason |".into(),
+            "| --- | --- | --- | --- |".into(),
+        ]);
+        for r in rows.iter().take(GROUNDING_ROWS_MAX) {
+            out.push(format!(
+                "| {} | `{}` | {} | {} |",
+                cell(&r.review),
+                cell(&r.citation),
+                r.status,
+                cell(&r.reason)
+            ));
+        }
+        if rows.len() > GROUNDING_ROWS_MAX {
+            out.extend([
+                String::new(),
+                format!("And {} more.", rows.len() - GROUNDING_ROWS_MAX),
+            ]);
+        }
+    }
+    out.extend([
+        String::new(),
+        "Unverified means the cited path or line did not check out. The finding may still be right. No verdict changed.".into(),
+    ]);
+    out.join("\n") + "\n"
+}
+
+fn grounding(_home: &Path, _slug: &str, _job_id: &str, round_text: &str, _o: &mut Out) -> Res<()> {
+    if !ROUND.is_full(round_text) {
+        return Err(fail(
+            format!("bad round {}. {GROUNDING_USAGE}", repr(round_text)),
+            2,
+        ));
+    }
+    // Deferred to integration: 2194-port-claims and its hold sub-job
     Err(not_ported("grounding"))
+}
+
+/// Check each path:line a round's reviews cite against the job worktree, write grounding.md and the board.
+pub fn grounding_cmd(call: &Call) -> Res<()> {
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    flushed(|o| grounding(&home, &slug, &job_id, &call.args[1], o))
+}
+
+const VERDICT_USAGE: &str =
+    "usage: verdict <project-slug>/<job-id> <round> <reviewer> <PASS|CHANGES|SKIPPED|pending>";
+
+fn verdict(
+    _home: &Path,
+    _slug: &str,
+    _job_id: &str,
+    _n: u64,
+    _reviewer: &str,
+    _value: &str,
+    _o: &mut Out,
+) -> Res<()> {
+    // Deferred to integration: 2194-port-claims
+    Err(not_ported("verdict"))
+}
+
+/// Set one reviewer's verdict in the board's rounds entry N in one CAS write, keeping the rest.
+pub fn verdict_cmd(call: &Call) -> Res<()> {
+    let (round_text, reviewer, value) =
+        (&call.args[1], call.args[2].as_str(), call.args[3].as_str());
+    if !ROUND.is_full(round_text)
+        || !TRACER_REVIEWERS.contains(&reviewer)
+        || !["PASS", "CHANGES", "pending", "SKIPPED"].contains(&value)
+        || value == "SKIPPED" && !["ux", "ui"].contains(&reviewer)
+    {
+        return Err(fail(VERDICT_USAGE, 2));
+    }
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    let n: u64 = round_text.parse().unwrap_or(u64::MAX);
+    flushed(|o| verdict(&home, &slug, &job_id, n, reviewer, value, o))
+}
+
+// ---- not ported yet ----
+
+pub fn lesson_cmd(_call: &Call) -> Res<()> {
+    Err(not_ported("lesson"))
 }
 
 pub fn batch_cmd(_call: &Call) -> Res<()> {
@@ -4337,6 +5344,1573 @@ mod tests {
                 .nothing_written("1", r, &o, 2)
                 .contains("bad review route review-low"));
             assert!(!f.folder.join("round-1").exists());
+        }
+    }
+
+    mod pre_review {
+        use super::super::*;
+        use super::git_in;
+        use crate::shared::fs::temp_dir;
+        use crate::shared::http::tests::serve;
+        use std::fs;
+
+        const JOB: &str = "001-sample-job";
+        const DEFER: &str = "deferred to integration: 2202-port-retro";
+        const SPEC: &str = "# Sample\n\n## Design\n\n- Files: `outside/design.py`\n\n## Tasks\n\n1. Tool\n   - Files: `tools/a.py`\n2. Test\n   - Files: `tests/b.py`\n\n## Risks\n\n- None.\n";
+
+        fn check(name: &str, code: &str) -> Value {
+            json!({"name": name, "run": ["python3", "-c", code]})
+        }
+
+        struct Fix {
+            home: PathBuf,
+            folder: PathBuf,
+            out: PathBuf,
+            tmp: PathBuf,
+            logs: PathBuf,
+            wt: PathBuf,
+            origin: PathBuf,
+        }
+
+        impl Fix {
+            fn new(name: &str) -> Fix {
+                let home = temp_dir(name);
+                fs::create_dir(home.join("projects")).unwrap();
+                fs::write(
+                    home.join("projects/sample.md"),
+                    "---\nrepo: example/sample\nbase: main\n---\n# Sample\n",
+                )
+                .unwrap();
+                let folder = home.join("jobs/sample").join(JOB);
+                fs::create_dir_all(&folder).unwrap();
+                let tmp = home.join("tmp");
+                fs::create_dir(&tmp).unwrap();
+                TEMP_ROOT.with(|r| *r.borrow_mut() = Some(tmp.clone()));
+                let logs = tmp.join(format!("factory-sample-{JOB}/pre-review"));
+                let wt = home.join("worktrees/sample").join(JOB);
+                fs::create_dir_all(&wt).unwrap();
+                git_in(&wt, &["init", "-q"]);
+                let origin = home.join("origin.git");
+                git_in(
+                    &home,
+                    &["init", "-q", "--bare", &origin.display().to_string()],
+                );
+                git_in(
+                    &wt,
+                    &["remote", "add", "origin", &origin.display().to_string()],
+                );
+                FETCH_URL.with(|u| *u.borrow_mut() = Some(origin.display().to_string()));
+                fs::write(wt.join("README.md"), "base\n").unwrap();
+                let f = Fix {
+                    out: folder.join("pre-review.md"),
+                    home,
+                    folder,
+                    tmp,
+                    logs,
+                    wt,
+                    origin,
+                };
+                f.commit(None, None);
+                f
+            }
+
+            fn git(&self, args: &[&str]) -> String {
+                git_in(&self.wt, args)
+            }
+
+            fn commit(&self, checks: Option<Value>, text: Option<&str>) {
+                if checks.is_some() || text.is_some() {
+                    fs::create_dir_all(self.wt.join(".factory")).unwrap();
+                    let body = match text {
+                        Some(t) => t.to_string(),
+                        None => json!({"checks": checks.unwrap()}).to_string(),
+                    };
+                    fs::write(self.wt.join(".factory/checks.json"), body).unwrap();
+                }
+                self.git(&["add", "-A"]);
+                self.git(&["commit", "-q", "-m", "change"]);
+            }
+
+            fn base(&self, checks: Option<Value>, text: Option<&str>) {
+                self.commit(checks, text);
+                self.git(&["push", "-q", "-f", "origin", "HEAD:refs/heads/main"]);
+            }
+
+            fn run_gate(&self, round: Option<i64>, extra: Value) -> (i32, Value, String) {
+                let mut job = json!({"id": JOB, "project": "sample", "title": "Sample job", "stage": "review"});
+                for (k, v) in extra.as_object().unwrap() {
+                    job[k] = v.clone();
+                }
+                if let Some(round) = round {
+                    job["round"] = json!(round);
+                }
+                let board: &'static str = Box::leak(
+                    json!({"updated": "", "jobs": [job]})
+                        .to_string()
+                        .into_boxed_str(),
+                );
+                let (origin, _) = serve(vec![(200, board, vec![])]);
+                fs::write(
+                    self.home.join("config.md"),
+                    format!("---\napi_url: {origin}\n---\n"),
+                )
+                .unwrap();
+                let mut o = Out::default();
+                let r = pre_review(&self.home, "sample", JOB, &mut o);
+                let (code, err) = match r {
+                    Ok(()) => (0, o.err.clone()),
+                    Err(e) => (e.code, o.err.clone() + &e.stderr),
+                };
+                let out = if o.out.is_empty() {
+                    Value::Null
+                } else {
+                    loads(&o.out).unwrap()
+                };
+                (code, out, err)
+            }
+
+            fn gate(&self) -> (i32, Value, String) {
+                self.run_gate(None, json!({}))
+            }
+
+            fn text(&self) -> String {
+                fs::read_to_string(&self.out).unwrap()
+            }
+
+            fn names(out: &Value) -> Vec<String> {
+                out["checks"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|c| c["name"].as_str().unwrap().to_string())
+                    .collect()
+            }
+
+            fn assert_none(&self, reason: &str) {
+                let (code, out, err) = self.gate();
+                assert_eq!((code, err.as_str()), (0, ""));
+                assert_eq!(
+                    (&out["result"], &out["checks"], &out["reason"]),
+                    (&json!("none"), &json!([]), &json!(reason))
+                );
+                assert!(self.text().contains(&format!("Reason: {reason}\n")));
+                assert!(!self.logs.exists());
+            }
+
+            fn forged(&self) -> PathBuf {
+                let forged = self.home.join("forged.git");
+                git_in(
+                    &self.home,
+                    &["init", "-q", "--bare", &forged.display().to_string()],
+                );
+                self.commit(Some(json!([check("forged", "raise SystemExit(3)")])), None);
+                self.git(&[
+                    "push",
+                    "-q",
+                    &forged.display().to_string(),
+                    "HEAD:refs/heads/main",
+                ]);
+                forged
+            }
+
+            fn linked(&self) {
+                let checkout = self.home.join("checkout");
+                fs::rename(&self.wt, &checkout).unwrap();
+                git_in(
+                    &checkout,
+                    &[
+                        "worktree",
+                        "add",
+                        "-q",
+                        "-b",
+                        "job",
+                        &self.wt.display().to_string(),
+                    ],
+                );
+            }
+
+            fn spec(&self) {
+                fs::write(self.folder.join("spec.md"), SPEC).unwrap();
+            }
+
+            fn write(&self, sizes: &[(&str, usize)]) {
+                for (path, n) in sizes {
+                    let file = self.wt.join(path);
+                    fs::create_dir_all(file.parent().unwrap()).unwrap();
+                    fs::write(file, "x\n".repeat(*n)).unwrap();
+                }
+                self.commit(None, None);
+            }
+
+            fn stacked_rider(&self) -> Value {
+                self.spec();
+                self.base(Some(json!([check("lint", "pass")])), None);
+                let sizes: Vec<(String, usize)> =
+                    (0..6).map(|i| (format!("src/lead{i}.py"), 120)).collect();
+                let sizes: Vec<(&str, usize)> =
+                    sizes.iter().map(|(p, n)| (p.as_str(), *n)).collect();
+                self.write(&sizes);
+                self.git(&["branch", "factory/000-sample-lead"]);
+                self.write(&[("tools/a.py", 10)]);
+                json!({"stacked": true, "refs": [{"kind": "batched-into", "id": "000-sample-lead"}]})
+            }
+
+            fn budget_none(&self, reason: &str, extra: Value) {
+                let (_, out, err) = self.run_gate(None, extra);
+                assert_eq!(err, "");
+                assert_eq!(
+                    out["budget"],
+                    json!({"result": "none", "files": 0, "lines": 0, "expected_files": 0, "expected_lines": 0,
+                           "file_limit": 0, "line_limit": 0, "unlisted": [], "reason": reason})
+                );
+                assert!(self
+                    .text()
+                    .contains(&format!("\nBudget: none ({reason})\n")));
+            }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn no_checks_file_is_none() {
+            let f = Fix::new("pre-no-checks");
+            f.git(&["push", "-q", "origin", "HEAD:refs/heads/main"]);
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(
+                (
+                    &out["result"],
+                    &out["checks"],
+                    &out["round"],
+                    &out["repeats"]
+                ),
+                (&json!("none"), &json!([]), &json!(1), &json!([]))
+            );
+            let text = f.text();
+            assert!(text.starts_with("PRE-REVIEW: NONE\n\n"));
+            assert!(text.contains("Reason: origin/main has no .factory/checks.json"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn branch_copy_is_never_read() {
+            let f = Fix::new("pre-branch-copy");
+            f.base(Some(json!([check("base", "print('base ran')")])), None);
+            f.commit(Some(json!([check("branch", "raise SystemExit(3)")])), None);
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(Fix::names(&out), ["base"]);
+            assert!(fs::read_to_string(f.logs.join("base.log"))
+                .unwrap()
+                .contains("base ran"));
+            assert!(!f.logs.join("branch.log").exists());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn all_pass() {
+            use std::os::unix::fs::PermissionsExt;
+            let f = Fix::new("pre-all-pass");
+            f.base(
+                Some(json!([check("lint", "pass"), check("cli", "print('ok')")])),
+                None,
+            );
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            let head = f.git(&["rev-parse", "HEAD"]);
+            assert_eq!(
+                (&out["result"], &out["head"], &out["reason"]),
+                (&json!("pass"), &json!(head), &Value::Null)
+            );
+            assert_eq!((&out["round"], &out["repeats"]), (&json!(1), &json!([])));
+            let checks = out["checks"].as_array().unwrap();
+            assert_eq!(
+                checks
+                    .iter()
+                    .map(|c| (c["name"].clone(), c["exit"].clone()))
+                    .collect::<Vec<_>>(),
+                [(json!("lint"), json!(0)), (json!("cli"), json!(0))]
+            );
+            assert!(checks.iter().all(|c| c["seconds"].is_i64()));
+            assert_eq!(
+                fs::metadata(&f.logs).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            let text = f.text();
+            assert!(text.starts_with("PRE-REVIEW: PASS\n\n"));
+            assert!(text.contains(&format!("Head: {head}\n")));
+            assert!(text.contains(&format!(
+                "Checks: origin/main:.factory/checks.json at {head}\n"
+            )));
+            assert!(text.contains("| lint | 0 |") && text.contains("| cli | 0 |"));
+            assert!(!text.contains("## "));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2202-port-retro"]
+        fn failure_writes_tail_and_log() {
+            let _ = DEFER;
+            let f = Fix::new("pre-tail");
+            let noisy = "import sys\nfor i in range(60): print(f'line {i} ~x~')\nsys.exit(1)";
+            f.base(
+                Some(json!([check("format", "pass"), check("lint", noisy)])),
+                None,
+            );
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (1, ""));
+            assert_eq!(out["result"], "fail");
+            let text = f.text();
+            assert!(text.starts_with("PRE-REVIEW: FAIL\n\n"));
+            assert!(text.contains("| lint | 1 |") && !text.contains("## format"));
+            let block: Vec<&str> = text
+                .split("## lint\n\n~~~text\n")
+                .nth(1)
+                .unwrap()
+                .split("~~~\n")
+                .next()
+                .unwrap()
+                .lines()
+                .collect();
+            assert_eq!(block.len(), 40);
+            assert_eq!((block[0], block[39]), ("line 20 -x-", "line 59 -x-"));
+            assert_eq!(
+                fs::read_to_string(f.logs.join("lint.log"))
+                    .unwrap()
+                    .lines()
+                    .count(),
+                60
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2202-port-retro"]
+        fn a_check_failing_in_two_consecutive_rounds_is_a_repeat() {
+            let f = Fix::new("pre-repeat");
+            f.base(
+                Some(json!([
+                    check("lint", "pass"),
+                    check("unit", "raise SystemExit(1)")
+                ])),
+                None,
+            );
+            let (code, out, _) = f.gate();
+            assert_eq!(
+                (code, &out["round"], &out["repeats"]),
+                (1, &json!(1), &json!([]))
+            );
+            let (code, out, _) = f.run_gate(Some(1), json!({}));
+            assert_eq!(
+                (code, &out["round"], &out["repeats"]),
+                (1, &json!(2), &json!(["unit"]))
+            );
+            let record =
+                fs::read_to_string(f.logs.parent().unwrap().join("pre-review-failures.json"))
+                    .unwrap();
+            assert_eq!(
+                loads(&record).unwrap(),
+                json!({"1": ["unit"], "2": ["unit"]})
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2202-port-retro"]
+        fn failure_classes() {
+            let f = Fix::new("pre-classes");
+            let record = f.logs.parent().unwrap().join("pre-review-failures.json");
+            let rows = [
+                (
+                    "budget",
+                    check("unit", "import time; time.sleep(30)"),
+                    json!("timeout"),
+                    "budget",
+                ),
+                (
+                    "missing",
+                    json!({"name": "unit", "run": ["factory-test-no-such-program"]}),
+                    json!("missing"),
+                    "structural",
+                ),
+                (
+                    "127",
+                    check("unit", "raise SystemExit(127)"),
+                    json!(127),
+                    "structural",
+                ),
+                (
+                    "signal",
+                    check(
+                        "unit",
+                        "import os, signal; os.kill(os.getpid(), signal.SIGTERM)",
+                    ),
+                    json!(-15),
+                    "canceled",
+                ),
+                (
+                    "transient",
+                    check("unit", "print('ECONNRESET'); raise SystemExit(1)"),
+                    json!(1),
+                    "transient, retried",
+                ),
+                (
+                    "deterministic",
+                    check("unit", "raise SystemExit(1)"),
+                    json!(1),
+                    "deterministic",
+                ),
+            ];
+            CHECK_TIMEOUT.with(|t| t.set(Some(1)));
+            for (row, unit, exit, cell) in rows {
+                let _ = fs::remove_file(&record);
+                f.base(Some(json!([check("lint", "pass"), unit])), None);
+                let (code, out, err) = f.gate();
+                assert_eq!((code, err.as_str()), (1, ""), "{row}");
+                let (lint, result) = (&out["checks"][0], &out["checks"][1]);
+                assert_eq!(
+                    (&lint["class"], &lint["retried"]),
+                    (&Value::Null, &json!(false))
+                );
+                assert_eq!(
+                    (&result["exit"], &result["class"], &result["retried"]),
+                    (
+                        &exit,
+                        &json!(cell.split(',').next().unwrap()),
+                        &json!(cell.ends_with("retried"))
+                    )
+                );
+                let text = f.text();
+                assert!(text
+                    .contains("| Check | Exit | Seconds | Class |\n| --- | --- | --- | --- |\n"));
+                assert!(text.contains(&format!(" | {cell} |\n\nClasses are explained under ")));
+                assert_eq!(record.exists(), row == "deterministic");
+            }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2202-port-retro"]
+        fn a_transient_failure_is_retried_once() {
+            let f = Fix::new("pre-transient");
+            let marker = f.tmp.join("deps-ran");
+            let flaky = format!(
+                "import pathlib, sys\nmarker = pathlib.Path({:?})\nif not marker.exists():\n    marker.touch()\n    print('ECONNRESET')\n    sys.exit(1)\nprint('installed')",
+                marker.display().to_string()
+            );
+            f.base(
+                Some(json!([
+                    check("deps", &flaky),
+                    check("unit", "raise SystemExit(1)")
+                ])),
+                None,
+            );
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (1, ""));
+            let (deps, unit) = (&out["checks"][0], &out["checks"][1]);
+            assert_eq!(
+                (&deps["exit"], &deps["class"], &deps["retried"]),
+                (&json!(0), &Value::Null, &json!(true))
+            );
+            assert_eq!(
+                (&unit["class"], &unit["retried"]),
+                (&json!("deterministic"), &json!(false))
+            );
+            assert_eq!(
+                fs::read_to_string(f.logs.join("deps.attempt-1.log")).unwrap(),
+                "ECONNRESET\n"
+            );
+            assert_eq!(
+                fs::read_to_string(f.logs.join("deps.log")).unwrap(),
+                "installed\n"
+            );
+            assert!(!f.logs.join("unit.attempt-1.log").exists());
+            assert!(f.text().contains(" | -, retried |\n"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2202-port-retro"]
+        fn a_pass_between_does_not_reset_the_repeat() {
+            let f = Fix::new("pre-pass-between");
+            let record = f.logs.parent().unwrap().join("pre-review-failures.json");
+            f.base(Some(json!([check("unit", "raise SystemExit(1)")])), None);
+            let (code, out, _) = f.gate();
+            assert_eq!((code, &out["repeats"]), (1, &json!([])));
+            f.base(
+                Some(json!([
+                    check("unit", "pass"),
+                    check("deps", "print('ECONNRESET'); raise SystemExit(1)")
+                ])),
+                None,
+            );
+            let (code, out, _) = f.run_gate(Some(1), json!({}));
+            assert_eq!(
+                (code, &out["round"], &out["repeats"]),
+                (1, &json!(2), &json!([]))
+            );
+            assert_eq!(
+                loads(&fs::read_to_string(&record).unwrap()).unwrap(),
+                json!({"1": ["unit"]})
+            );
+            f.base(Some(json!([check("unit", "raise SystemExit(1)")])), None);
+            let (code, out, _) = f.run_gate(Some(2), json!({}));
+            assert_eq!(
+                (code, &out["round"], &out["repeats"]),
+                (1, &json!(3), &json!(["unit"]))
+            );
+            assert_eq!(
+                loads(&fs::read_to_string(&record).unwrap()).unwrap(),
+                json!({"1": ["unit"], "3": ["unit"]})
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2202-port-retro"]
+        fn two_failures_in_one_round_are_not_a_repeat() {
+            let f = Fix::new("pre-two-failures");
+            let record = f.logs.parent().unwrap().join("pre-review-failures.json");
+            f.base(Some(json!([check("unit", "raise SystemExit(1)")])), None);
+            f.run_gate(Some(2), json!({}));
+            f.base(
+                Some(json!([
+                    check("lint", "raise SystemExit(1)"),
+                    check("unit", "pass")
+                ])),
+                None,
+            );
+            let (code, out, _) = f.run_gate(Some(2), json!({}));
+            assert_eq!(
+                (code, &out["round"], &out["repeats"]),
+                (1, &json!(3), &json!([]))
+            );
+            assert_eq!(
+                loads(&fs::read_to_string(&record).unwrap()).unwrap(),
+                json!({"3": ["lint", "unit"]})
+            );
+            fs::write(&record, "[not an object]").unwrap();
+            f.base(Some(json!([check("lint", "raise SystemExit(1)")])), None);
+            let (_, out, _) = f.run_gate(Some(3), json!({}));
+            assert_eq!(out["repeats"], json!([]));
+            assert_eq!(
+                loads(&fs::read_to_string(&record).unwrap()).unwrap(),
+                json!({"4": ["lint"]})
+            );
+            for bad in [json!({"4": 5}), json!({"4": "lint"}), json!({"4": [5]})] {
+                fs::write(&record, bad.to_string()).unwrap();
+                let (code, out, _) = f.run_gate(Some(4), json!({}));
+                assert_eq!((code, &out["repeats"]), (1, &json!([])));
+                assert_eq!(
+                    loads(&fs::read_to_string(&record).unwrap()).unwrap(),
+                    json!({"5": ["lint"]})
+                );
+            }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2202-port-retro"]
+        fn failure_tail_is_redacted() {
+            let f = Fix::new("pre-redacted");
+            fs::write(
+                f.home.join(".env"),
+                "FACTORY_TEST_SECRET=synthetic-secret-0123456789\n", // gitleaks:allow synthetic secret
+            )
+            .unwrap();
+            let leak = "import sys\nprint('token=synthetic-secret-0123456789')\nprint('Authorization: Bearer abcdefghijklmnop123456')\nsys.exit(1)"; // gitleaks:allow synthetic secret
+            f.base(Some(json!([check("leak", leak)])), None);
+            let (code, _, _) = f.gate();
+            assert_eq!(code, 1);
+            let text = f.text();
+            assert!(
+                !text.contains("synthetic-secret-0123456789")
+                    && !text.contains("abcdefghijklmnop123456")
+            );
+            assert!(
+                text.contains("token=[redacted]") && text.contains("Authorization: [redacted]")
+            );
+            assert!(fs::read_to_string(f.logs.join("leak.log"))
+                .unwrap()
+                .contains("synthetic-secret-0123456789"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2202-port-retro"]
+        fn nested_env_values_are_redacted_longest_first() {
+            let f = Fix::new("pre-nested");
+            fs::write(
+                f.home.join(".env"),
+                "FACTORY_TEST_SHORT=abcdefghijkl\nFACTORY_TEST_LONG=abcdefghijklMNOP\n",
+            )
+            .unwrap();
+            f.base(
+                Some(json!([check(
+                    "nested",
+                    "import sys\nprint('value abcdefghijklMNOP')\nsys.exit(1)"
+                )])),
+                None,
+            );
+            assert_eq!(f.gate().0, 1);
+            let text = f.text();
+            assert!(!text.contains("MNOP") && text.contains("value [redacted]"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2202-port-retro"]
+        fn end_overlapping_env_values_are_fully_redacted() {
+            let f = Fix::new("pre-overlap");
+            fs::write(
+                f.home.join(".env"),
+                "FACTORY_TEST_LEFT=alpha-secret-overlap1234\nFACTORY_TEST_RIGHT=overlap1234-beta-secret\n",
+            )
+            .unwrap();
+            let printed =
+                "import sys\nprint('value alpha-secret-overlap1234-beta-secret')\nsys.exit(1)";
+            f.base(Some(json!([check("overlap", printed)])), None);
+            assert_eq!(f.gate().0, 1);
+            let text = f.text();
+            assert!(!text.contains("secret") && text.contains("value [redacted]\n"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2202-port-retro"]
+        fn timeout_and_missing() {
+            let f = Fix::new("pre-timeout");
+            f.base(
+                Some(json!([check("slow", "import time; time.sleep(30)"),
+                            {"name": "gone", "run": ["factory-test-no-such-program"]},
+                            {"name": "noexec", "run": ["./README.md"]}])),
+                None,
+            );
+            CHECK_TIMEOUT.with(|t| t.set(Some(1)));
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (1, ""));
+            let got: Vec<Value> = out["checks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| json!([c["name"], c["exit"], c["class"], c["retried"]]))
+                .collect();
+            assert_eq!(
+                got,
+                [
+                    json!(["slow", "timeout", "budget", false]),
+                    json!(["gone", "missing", "structural", false]),
+                    json!(["noexec", "missing", "structural", false])
+                ]
+            );
+            assert!(!f
+                .logs
+                .parent()
+                .unwrap()
+                .join("pre-review-failures.json")
+                .exists());
+            assert_eq!(
+                fs::read_to_string(f.logs.join("gone.log")).unwrap(),
+                "missing program: factory-test-no-such-program\n"
+            );
+            assert_eq!(
+                fs::read_to_string(f.logs.join("noexec.log")).unwrap(),
+                "missing program: ./README.md\n"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn invalid_checks_file_is_none() {
+            let f = Fix::new("pre-invalid");
+            for (text, reason) in [
+                ("{not json".to_string(), "is not valid JSON"),
+                (
+                    json!({"checks": [{"name": "-bad", "run": ["x"]}]}).to_string(),
+                    "unique name",
+                ),
+                (
+                    json!({"checks": [{"name": "a", "run": []}]}).to_string(),
+                    "run list",
+                ),
+            ] {
+                f.base(None, Some(&text));
+                let (code, out, err) = f.gate();
+                assert_eq!((code, err.as_str()), (0, ""));
+                assert_eq!(out["result"], "none");
+                assert!(out["reason"].as_str().unwrap().contains(reason));
+                assert!(f.text().contains("Reason: "));
+            }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn link_refused() {
+            let f = Fix::new("pre-link");
+            f.base(Some(json!([check("lint", "pass")])), None);
+            let elsewhere = f.home.join("elsewhere.md");
+            std::os::unix::fs::symlink(&elsewhere, &f.out).unwrap();
+            let (code, out, err) = f.gate();
+            assert_eq!((code, out), (6, Value::Null));
+            assert!(err.contains("symlink or junction"));
+            assert!(!elsewhere.exists() && !f.logs.exists());
+            fs::remove_file(&f.out).unwrap();
+            let real = f.home.join("jobs/sample/real");
+            fs::rename(&f.folder, &real).unwrap();
+            std::os::unix::fs::symlink(&real, &f.folder).unwrap();
+            let (code, out, _) = f.gate();
+            assert_eq!((code, out), (6, Value::Null));
+            assert_eq!(fs::read_dir(&real).unwrap().count(), 0);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn forged_local_base_is_refetched() {
+            let f = Fix::new("pre-forged-base");
+            f.base(Some(json!([check("base", "print('base ran')")])), None);
+            f.commit(Some(json!([check("forged", "raise SystemExit(3)")])), None);
+            f.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(Fix::names(&out), ["base"]);
+            assert!(!f.logs.join("forged.log").exists());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn factory_base_is_none() {
+            let f = Fix::new("pre-factory-base");
+            f.base(Some(json!([check("lint", "pass")])), None);
+            fs::write(
+                f.home.join("projects/sample.md"),
+                "---\nrepo: example/sample\nbase: factory/x\n---\n",
+            )
+            .unwrap();
+            f.assert_none("base factory/x is a factory branch");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn fetch_failure_is_none() {
+            let f = Fix::new("pre-fetch-failure");
+            f.commit(Some(json!([check("lint", "pass")])), None);
+            f.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+            f.assert_none("could not fetch origin main");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn repointed_origin_is_ignored() {
+            let f = Fix::new("pre-repointed");
+            f.base(Some(json!([check("base", "print('base ran')")])), None);
+            let forged = f.forged();
+            f.git(&["remote", "set-url", "origin", &forged.display().to_string()]);
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(Fix::names(&out), ["base"]);
+            assert!(!f.logs.join("forged.log").exists());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn url_rewrite_is_none() {
+            let f = Fix::new("pre-url-rewrite");
+            f.base(Some(json!([check("base", "pass")])), None);
+            let forged = f.forged();
+            f.git(&[
+                "config",
+                &format!("url.{}.insteadOf", forged.display()),
+                &f.origin.display().to_string(),
+            ]);
+            f.assert_none("the worktree's git config sets url or http keys");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn unreadable_git_config_is_none() {
+            let f = Fix::new("pre-bad-config");
+            f.base(Some(json!([check("base", "pass")])), None);
+            fs::write(f.wt.join(".git/config"), "[core\n").unwrap();
+            f.assert_none("could not read the worktree's git config");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn bad_repo_is_none() {
+            let f = Fix::new("pre-bad-repo");
+            f.base(Some(json!([check("base", "pass")])), None);
+            fs::write(
+                f.home.join("projects/sample.md"),
+                "---\nrepo: ../x\nbase: main\n---\n",
+            )
+            .unwrap();
+            f.assert_none("project file repo '../x' is not owner/name");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn linked_worktree_fetches() {
+            let f = Fix::new("pre-linked");
+            f.base(Some(json!([check("base", "print('base ran')")])), None);
+            f.linked();
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(Fix::names(&out), ["base"]);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn worktree_config_rewrite_is_none() {
+            let f = Fix::new("pre-worktree-config");
+            f.base(Some(json!([check("base", "pass")])), None);
+            f.linked();
+            let forged = f.forged();
+            f.git(&["config", "extensions.worktreeConfig", "true"]);
+            f.git(&[
+                "config",
+                "--worktree",
+                &format!("url.{}.insteadOf", forged.display()),
+                &f.origin.display().to_string(),
+            ]);
+            f.assert_none("the worktree's git config sets url or http keys");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn replaced_checks_blob_is_ignored() {
+            let f = Fix::new("pre-replaced-blob");
+            f.base(Some(json!([check("base", "print('base ran')")])), None);
+            let real = f.git(&["rev-parse", "HEAD:.factory/checks.json"]);
+            let forged_file = f.home.join("forged.json");
+            fs::write(
+                &forged_file,
+                json!({"checks": [check("forged", "raise SystemExit(3)")]}).to_string(),
+            )
+            .unwrap();
+            let forged = f.git(&["hash-object", "-w", &forged_file.display().to_string()]);
+            f.git(&["replace", &real, &forged]);
+            f.git(&["config", "core.useReplaceRefs", "true"]);
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(Fix::names(&out), ["base"]);
+            assert!(!f.logs.join("forged.log").exists());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn forged_tag_is_ignored() {
+            let f = Fix::new("pre-forged-tag");
+            f.base(Some(json!([check("base", "print('base ran')")])), None);
+            let pushed = f.git(&["rev-parse", "HEAD"]);
+            f.commit(Some(json!([check("forged", "raise SystemExit(3)")])), None);
+            f.git(&["tag", "origin/main", "HEAD"]);
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(Fix::names(&out), ["base"]);
+            assert!(f.text().contains(&format!(
+                "Checks: origin/main:.factory/checks.json at {pushed}\n"
+            )));
+            assert!(changed_files(&f.wt, "main")
+                .unwrap()
+                .contains(&".factory/checks.json".to_string()));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn base_diff_ignores_replace_and_grafts() {
+            let f = Fix::new("pre-replace-grafts");
+            f.git(&["push", "-q", "origin", "HEAD:refs/heads/main"]);
+            fs::write(f.wt.join("README.md"), "branch\n").unwrap();
+            f.commit(None, None);
+            let new = f.git(&["rev-parse", "HEAD:README.md"]);
+            let old = f.git(&["rev-parse", "HEAD~1:README.md"]);
+            f.git(&["replace", &new, &old]);
+            assert_eq!(fetch_base(&f.wt, "main", "example/sample"), None);
+            let readme = "README.md".to_string();
+            assert!(changed_files(&f.wt, "main").unwrap().contains(&readme));
+            assert!(diff_numstat(&f.wt, "refs/remotes/origin/main")
+                .unwrap()
+                .iter()
+                .any(|(p, _)| *p == readme));
+            assert!(diff_ranges(&f.wt, "main", "example/sample")
+                .unwrap()
+                .contains_key(&readme));
+            let head = f.git(&["rev-parse", "HEAD"]);
+            fs::write(f.wt.join(".git/info/grafts"), head + "\n").unwrap();
+            assert!(changed_files(&f.wt, "main").unwrap().contains(&readme));
+        }
+
+        #[cfg(unix)]
+        fn forging_driver(f: &Fix) -> PathBuf {
+            use std::os::unix::fs::PermissionsExt;
+            let marker = f.home.join("driver-ran");
+            let driver = f.home.join("driver.sh");
+            fs::write(
+                &driver,
+                format!(
+                    "#!/bin/sh\necho ran >> '{}'\necho FORGED\n",
+                    marker.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&driver, fs::Permissions::from_mode(0o755)).unwrap();
+            f.git(&["config", "diff.external", &driver.display().to_string()]);
+            f.git(&[
+                "config",
+                "diff.forge.textconv",
+                &driver.display().to_string(),
+            ]);
+            fs::create_dir_all(f.wt.join(".git/info")).unwrap();
+            fs::write(f.wt.join(".git/info/attributes"), "* diff=forge\n").unwrap();
+            marker
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn base_diff_ignores_external_diff_and_textconv() {
+            let f = Fix::new("pre-ext-diff");
+            f.git(&["push", "-q", "origin", "HEAD:refs/heads/main"]);
+            fs::write(f.wt.join("README.md"), "branch\n").unwrap();
+            f.commit(None, None);
+            let marker = forging_driver(&f);
+            assert_eq!(fetch_base(&f.wt, "main", "example/sample"), None);
+            assert!(changed_files(&f.wt, "main")
+                .unwrap()
+                .contains(&"README.md".to_string()));
+            let numstat = diff_numstat(&f.wt, "refs/remotes/origin/main").unwrap();
+            assert_eq!(numstat.iter().find(|(p, _)| p == "README.md").unwrap().1, 2);
+            assert_eq!(
+                diff_ranges(&f.wt, "main", "example/sample").unwrap()["README.md"],
+                [(1, 1)]
+            );
+            assert!(!marker.exists());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn round_diff_ignores_external_diff_and_textconv() {
+            let f = Fix::new("pre-round-ext-diff");
+            let head = f.git(&["rev-parse", "HEAD"]);
+            fs::write(f.wt.join("README.md"), "round\n").unwrap();
+            f.commit(None, None);
+            let marker = forging_driver(&f);
+            assert_eq!(round_changed_files(&f.wt, &head).unwrap(), ["README.md"]);
+            assert!(!marker.exists());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn budget_over_warns() {
+            let f = Fix::new("pre-budget-over");
+            f.spec();
+            f.base(Some(json!([check("lint", "pass")])), None);
+            f.write(&[
+                ("tools/a.py", 300),
+                ("tests/b.py", 300),
+                ("docs/c.md", 120),
+                ("docs/d.md", 120),
+                ("src/e.py", 120),
+                ("src/f.py", 120),
+                ("src/g.py", 120),
+            ]);
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out["result"], "pass");
+            let unlisted = ["docs/c.md", "docs/d.md", "src/e.py", "src/f.py", "src/g.py"];
+            assert_eq!(
+                out["budget"],
+                json!({"result": "over", "files": 7, "lines": 1200, "expected_files": 2, "expected_lines": 300,
+                       "file_limit": 4, "line_limit": 900, "unlisted": unlisted, "reason": null})
+            );
+            let text = f.text();
+            let head = f.git(&["rev-parse", "HEAD"]);
+            assert!(text.contains(&format!(
+                "Head: {head}\nBudget: over (files 7, limit 4; lines 1200, limit 900)\nChecks: "
+            )));
+            let section = text.split("## Diff budget\n").nth(1).unwrap();
+            assert!(section.contains("| Measure | Spec estimate | Limit | Branch |\n"));
+            assert!(
+                section.contains("| Files | 2 | 4 | 7 |\n")
+                    && section.contains("| Lines | 300 | 900 | 1200 |\n")
+            );
+            assert!(section.contains("Files outside the spec's task list:\n"));
+            let bullets: Vec<&str> = section.lines().filter(|l| l.starts_with("- ")).collect();
+            let expected: Vec<String> = unlisted.iter().map(|p| format!("- `{p}`")).collect();
+            assert_eq!(bullets, expected);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn budget_cuts_unlisted_and_fences_backticks() {
+            let f = Fix::new("pre-budget-cut");
+            f.spec();
+            f.base(Some(json!([check("lint", "pass")])), None);
+            let mut names: Vec<String> = (0..21).map(|i| format!("src/m{i:02}.py")).collect();
+            names.push("src/a`odd.py".into());
+            let sizes: Vec<(&str, usize)> = names.iter().map(|n| (n.as_str(), 1)).collect();
+            f.write(&sizes);
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out["budget"]["unlisted"].as_array().unwrap().len(), 22);
+            let text = f.text();
+            let bullets: Vec<&str> = text.lines().filter(|l| l.starts_with("- ")).collect();
+            assert_eq!(bullets.len(), 21);
+            assert_eq!(bullets[..2], ["- `` src/a`odd.py ``", "- `src/m00.py`"]);
+            assert_eq!(bullets[19..], ["- `src/m18.py`", "- and 2 more"]);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn budget_fences_backtick_runs() {
+            let f = Fix::new("pre-budget-fence");
+            f.spec();
+            f.base(Some(json!([check("lint", "pass")])), None);
+            f.write(&[
+                ("src/m0.py", 1),
+                ("src/m1.py", 1),
+                ("src/m2.py", 1),
+                ("src/m3.py", 1),
+                ("src/b``two.py", 1),
+            ]);
+            let (code, _, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            let text = f.text();
+            assert_eq!(
+                text.lines().find(|l| l.starts_with("- ")).unwrap(),
+                "- ``` src/b``two.py ```"
+            );
+        }
+
+        #[cfg(target_os = "linux")]
+        #[test]
+        fn budget_survives_non_utf8() {
+            use std::os::unix::ffi::OsStrExt;
+            let f = Fix::new("pre-budget-bytes");
+            let mut spec = SPEC.as_bytes().to_vec();
+            spec.extend_from_slice(b"\xff\xfe bad\n");
+            fs::write(f.folder.join("spec.md"), spec).unwrap();
+            f.base(Some(json!([check("lint", "pass")])), None);
+            fs::write(f.wt.join(std::ffi::OsStr::from_bytes(b"bad\xff.py")), "x\n").unwrap();
+            f.write(&[("tools/a.py", 10)]);
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            let budget = &out["budget"];
+            assert_eq!(
+                (
+                    &budget["result"],
+                    &budget["files"],
+                    &budget["expected_files"]
+                ),
+                (&json!("within"), &json!(2), &json!(2))
+            );
+            assert!(f
+                .text()
+                .contains("Budget: within (files 2, limit 4; lines 11, limit 900)\n"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn budget_within() {
+            let f = Fix::new("pre-budget-within");
+            f.spec();
+            f.base(Some(json!([check("lint", "pass")])), None);
+            f.write(&[("tools/a.py", 10)]);
+            let (code, out, err) = f.gate();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out["budget"]["result"], "within");
+            let text = f.text();
+            assert!(text.contains("Budget: within (files 1, limit 4; lines 10, limit 900)\n"));
+            assert!(!text.contains("## "));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn budget_stacked_rider_counts_own_commits() {
+            let f = Fix::new("pre-rider-own");
+            let extra = f.stacked_rider();
+            let (code, out, err) = f.run_gate(None, extra);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out["budget"]["result"], "within");
+            assert!(f
+                .text()
+                .contains("Budget: within (files 1, limit 4; lines 10, limit 900)\n"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn budget_stacked_rider_without_lead_branch() {
+            let f = Fix::new("pre-rider-no-lead");
+            let extra = f.stacked_rider();
+            f.git(&["branch", "-D", "factory/000-sample-lead"]);
+            f.budget_none("the branch diff could not be read", extra);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn budget_stacked_rider_with_non_string_lead() {
+            let f = Fix::new("pre-rider-int-lead");
+            f.stacked_rider();
+            f.budget_none(
+                "the branch diff could not be read",
+                json!({"stacked": true, "refs": [{"kind": "batched-into", "id": 7}]}),
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn budget_none_reasons() {
+            let f = Fix::new("pre-budget-none");
+            f.base(Some(json!([check("lint", "pass")])), None);
+            f.write(&[("tools/a.py", 10)]);
+            f.budget_none("the job folder has no spec.md", json!({}));
+            fs::write(f.home.join("elsewhere.md"), SPEC).unwrap();
+            std::os::unix::fs::symlink(f.home.join("elsewhere.md"), f.folder.join("spec.md"))
+                .unwrap();
+            f.budget_none("spec.md is a symlink or junction", json!({}));
+            fs::remove_file(f.folder.join("spec.md")).unwrap();
+            fs::write(
+                f.folder.join("spec.md"),
+                "## Tasks\n\n1. Step\n   - Files: `/etc/x` and `../y`\n",
+            )
+            .unwrap();
+            f.budget_none("spec.md has no task Files paths", json!({}));
+            f.spec();
+            let branch = f.git(&["rev-parse", "--abbrev-ref", "HEAD"]);
+            f.git(&["checkout", "-q", "--orphan", "unrelated"]);
+            f.commit(None, None);
+            f.git(&["push", "-q", "-f", "origin", "HEAD:refs/heads/main"]);
+            f.git(&["checkout", "-q", "-f", &branch]);
+            f.budget_none("the branch diff could not be read", json!({}));
+            fs::write(
+                f.home.join("projects/sample.md"),
+                "---\nrepo: example/sample\nbase: factory/x\n---\n",
+            )
+            .unwrap();
+            f.budget_none("the base could not be fetched", json!({}));
+        }
+
+        #[test]
+        fn paths() {
+            let text = "## Design\n\n- Files: `outside.py`\n\n## Tasks\n\n1. One\n   - Files: `tools/*.py`, `docs/`\n   - Change: `not/a/files/line.py`\n2. Two\n   - Files: `tools/*.py`, `/etc/passwd`, `../up.py`, `a/../b.py`, `tests/t.py`\n\n## Risks\n\n- Files: `after.py`\n";
+            assert_eq!(
+                spec_budget_paths(text),
+                ["tools/*.py", "docs/", "tests/t.py"]
+            );
+            assert!(spec_budget_paths("## Design\n\n- Files: `a.py`\n").is_empty());
+        }
+
+        #[test]
+        fn covers() {
+            assert!(budget_covers("tools/*.py", "tools/a.py"));
+            assert!(!budget_covers("tools/*.py", "tools/a.md"));
+            assert!(budget_covers("docs/", "docs/deep/c.md"));
+            assert!(!budget_covers("docs/", "docsx/c.md"));
+            assert!(budget_covers("tests/t.py", "tests/t.py"));
+            assert!(!budget_covers("tests/t.py", "tests/t.pyc"));
+        }
+    }
+
+    mod grounding {
+        use super::super::*;
+        use super::git_in;
+        use crate::shared::fs::temp_dir;
+        use crate::shared::http::tests::serve;
+        use std::fs;
+
+        const JOB: &str = "042-sample-export";
+        const CODE_REVIEW: &str = "VERDICT: CHANGES\n\n1. The export loop at `src/export.py:52` skips the last row.\n2. `export.py:412` never closes the file.\n3. Move the view into src/export_view.py:12.\n4. The query in src/db.py:300 is unbounded.\n5. Same loop again at src/export.py:52.\n";
+        const SECURITY_REVIEW: &str =
+            "VERDICT: PASS\n\nThe escaping at src/export.py:60-64 is fine.\n";
+        const SKIPPED_REVIEW: &str =
+            "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: src/nope.py:1.\n";
+        const UNVERIFIED: [&str; 3] = [
+            "review-code.md export.py:412 bad-line",
+            "review-code.md src/export_view.py:12 no-file",
+            "review-code.md src/db.py:300 off-diff",
+        ];
+
+        fn round_1() -> Value {
+            json!({"security": "PASS", "ux": "SKIPPED", "ui": "SKIPPED", "code": "CHANGES"})
+        }
+
+        fn numbered(count: usize, tag: &str) -> String {
+            (1..=count).map(|i| format!("line {i}{tag}\n")).collect()
+        }
+
+        struct Fix {
+            home: PathBuf,
+            folder: PathBuf,
+            round: PathBuf,
+            out: PathBuf,
+            wt: PathBuf,
+        }
+
+        impl Fix {
+            fn new(name: &str) -> Fix {
+                let home = temp_dir(name);
+                fs::create_dir(home.join("projects")).unwrap();
+                fs::write(
+                    home.join("projects/sample.md"),
+                    "---\nrepo: example/sample\nbase: main\n---\n# Sample\n",
+                )
+                .unwrap();
+                let folder = home.join("jobs/sample").join(JOB);
+                let round = folder.join("round-1");
+                fs::create_dir_all(&round).unwrap();
+                fs::write(folder.join("spec.md"), "# Spec\n\nSample.\n\nMore.\n").unwrap();
+                let wt = home.join("worktrees/sample").join(JOB);
+                fs::create_dir_all(wt.join("src")).unwrap();
+                git_in(&wt, &["init", "-q"]);
+                let origin = home.join("origin.git");
+                git_in(
+                    &home,
+                    &["init", "-q", "--bare", &origin.display().to_string()],
+                );
+                git_in(
+                    &wt,
+                    &["remote", "add", "origin", &origin.display().to_string()],
+                );
+                FETCH_URL.with(|u| *u.borrow_mut() = Some(origin.display().to_string()));
+                fs::write(wt.join("src/export.py"), numbered(180, "")).unwrap();
+                fs::write(wt.join("src/db.py"), numbered(400, "")).unwrap();
+                let f = Fix {
+                    out: round.join("grounding.md"),
+                    home,
+                    folder,
+                    round,
+                    wt,
+                };
+                f.commit();
+                f.git(&["push", "-q", "origin", "HEAD:refs/heads/main"]);
+                let mut lines: Vec<String> = numbered(180, "")
+                    .lines()
+                    .map(|l| format!("{l}\n"))
+                    .collect();
+                let changed: Vec<String> = numbered(75, " changed")
+                    .lines()
+                    .map(|l| format!("{l}\n"))
+                    .collect();
+                lines.splice(39..75, changed[39..75].iter().cloned());
+                fs::write(f.wt.join("src/export.py"), lines.concat()).unwrap();
+                f.commit();
+                f.review("code", CODE_REVIEW);
+                f.review("security", SECURITY_REVIEW);
+                f.review("ux", SKIPPED_REVIEW);
+                f.review("ui", SKIPPED_REVIEW);
+                f
+            }
+
+            fn git(&self, args: &[&str]) -> String {
+                git_in(&self.wt, args)
+            }
+
+            fn commit(&self) {
+                self.git(&["add", "-A"]);
+                self.git(&["commit", "-q", "-m", "change"]);
+            }
+
+            fn review(&self, reviewer: &str, text: &str) {
+                fs::write(self.round.join(format!("review-{reviewer}.md")), text).unwrap();
+            }
+
+            /// Run grounding against a fixed board; returns the exit code, stdout and the PUT bodies.
+            fn grounding(
+                &self,
+                round: &str,
+                rounds: Value,
+                jobs: Option<Value>,
+            ) -> (i32, String, Vec<Value>) {
+                let job = json!({"id": JOB, "project": "sample", "title": "Sample export", "stage": "review",
+                                 "round": 1, "rounds": rounds});
+                let board = json!({"updated": "", "jobs": jobs.unwrap_or(json!([job]))});
+                let board: &'static str = Box::leak(board.to_string().into_boxed_str());
+                let (origin, seen) = serve(vec![
+                    (200, board, vec![("ETag", "\"e1\"")]),
+                    (200, board, vec![("ETag", "\"e1\"")]),
+                    (200, "", vec![]),
+                ]);
+                fs::write(
+                    self.home.join("config.md"),
+                    format!("---\napi_url: {origin}\ndevice: sample-device\n---\n"),
+                )
+                .unwrap();
+                let mut o = Out::default();
+                let code = match grounding(&self.home, "sample", JOB, round, &mut o) {
+                    Ok(()) => 0,
+                    Err(e) => e.code,
+                };
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let puts = seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|r| r.method == "PUT")
+                    .map(|r| loads(std::str::from_utf8(&r.body).unwrap()).unwrap())
+                    .collect();
+                (code, o.out, puts)
+            }
+
+            fn result(&self, rounds: Value) -> (Value, Vec<Value>) {
+                let (code, out, puts) = self.grounding("1", rounds, None);
+                assert_eq!(code, 0);
+                assert_eq!(out.matches('\n').count(), 1);
+                (loads(&out).unwrap(), puts)
+            }
+        }
+
+        const DEFER: &str = "deferred to integration: 2194-port-claims";
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2194-port-claims"]
+        fn running_example() {
+            let _ = DEFER;
+            let f = Fix::new("ground-example");
+            let (result, _) = f.result(json!([round_1()]));
+            assert_eq!(
+                result,
+                json!({"round": 1, "result": "unverified", "checked": 5, "diff": null, "unverified": [
+                    {"review": "review-code.md", "citation": "export.py:412", "status": "bad-line",
+                     "reason": "src/export.py has 180 lines"},
+                    {"review": "review-code.md", "citation": "src/export_view.py:12", "status": "no-file",
+                     "reason": "no file at src/export_view.py in the worktree or job folder"},
+                    {"review": "review-code.md", "citation": "src/db.py:300", "status": "off-diff",
+                     "reason": "src/db.py is not changed on this branch"}]})
+            );
+            let head = f.git(&["rev-parse", "HEAD"]);
+            assert_eq!(
+                fs::read_to_string(&f.out).unwrap(),
+                format!("GROUNDING: UNVERIFIED 3\n\nHead: {head}\nDiff: origin/main\nChecked: 5 citations in 2 review files\n\n| Review | Citation | Status | Reason |\n| --- | --- | --- | --- |\n| review-code.md | `export.py:412` | bad-line | src/export.py has 180 lines |\n| review-code.md | `src/export_view.py:12` | no-file | no file at src/export_view.py in the worktree or job folder |\n| review-code.md | `src/db.py:300` | off-diff | src/db.py is not changed on this branch |\n\nUnverified means the cited path or line did not check out. The finding may still be right. No verdict changed.\n")
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2194-port-claims"]
+        fn board_entry() {
+            let f = Fix::new("ground-board");
+            let (_, puts) = f.result(json!([round_1()]));
+            let mut entry = round_1();
+            entry["unverified"] = json!(UNVERIFIED);
+            assert_eq!(
+                puts.iter()
+                    .map(|b| b["jobs"][0]["rounds"].clone())
+                    .collect::<Vec<_>>(),
+                [json!([entry])]
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2194-port-claims"]
+        fn clean_rerun() {
+            let f = Fix::new("ground-clean");
+            f.review(
+                "code",
+                "VERDICT: PASS\n\nThe loop at src/export.py:52 is fine now.\n",
+            );
+            let mut entry = round_1();
+            entry["unverified"] = json!(UNVERIFIED);
+            let (result, puts) = f.result(json!([entry]));
+            assert_eq!(
+                (&result["result"], &result["checked"], &result["unverified"]),
+                (&json!("clean"), &json!(2), &json!([]))
+            );
+            assert_eq!(
+                puts.iter()
+                    .map(|b| b["jobs"][0]["rounds"].clone())
+                    .collect::<Vec<_>>(),
+                [json!([round_1()])]
+            );
+            let text = fs::read_to_string(&f.out).unwrap();
+            assert!(text.starts_with("GROUNDING: CLEAN\n\nHead: "));
+            assert!(
+                text.contains("Checked: 2 citations in 2 review files\n\nUnverified means")
+                    && !text.contains('|')
+            );
+            let (_, puts) = f.result(json!([round_1()]));
+            assert!(puts.is_empty());
+        }
+
+        #[test]
+        fn citation_forms() {
+            let text = "See ./src/a.py:3, src/b.py:4-9 and src/c.md:1,5,7 and ./src/a.py:3 again. Not https://example.com:443/a.py:3, localhost:8220, /abs/path.py:3, ../up.py:2 or a.py:x.";
+            let cite = |c: &str, p: &str, lines: Vec<i64>, span| Citation {
+                citation: c.into(),
+                path: p.into(),
+                lines,
+                span,
+            };
+            assert_eq!(
+                find_citations(text),
+                [
+                    cite("./src/a.py:3", "src/a.py", vec![3], None),
+                    cite("src/b.py:4-9", "src/b.py", vec![4, 9], Some((4, 9))),
+                    cite("src/c.md:1,5,7", "src/c.md", vec![1, 5, 7], None),
+                ]
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2194-port-claims"]
+        fn skipped_ignored() {
+            let f = Fix::new("ground-skipped");
+            f.review("code", "VERDICT: SKIPPED\n\nsrc/nope.py:1\n");
+            f.review("security", SKIPPED_REVIEW);
+            let (result, _) = f.result(json!([round_1()]));
+            assert_eq!(
+                (&result["result"], &result["checked"]),
+                (&json!("clean"), &json!(0))
+            );
+            assert!(fs::read_to_string(&f.out)
+                .unwrap()
+                .contains("Checked: 0 citations in 0 review files\n"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2194-port-claims"]
+        fn resolution() {
+            let f = Fix::new("ground-resolution");
+            fs::create_dir(f.wt.join("lib")).unwrap();
+            fs::write(f.wt.join("lib/export.py"), numbered(500, "")).unwrap();
+            f.git(&["add", "-A"]);
+            let tracked: Vec<String> = f.git(&["ls-files"]).lines().map(String::from).collect();
+            let near: Ranges = [("src/export.py".to_string(), vec![(40, 75)])]
+                .into_iter()
+                .collect();
+            let empty = Ranges::new();
+            let ground = |path: &str, lines: &[i64], ranges: Option<&Ranges>, near: bool, span| {
+                ground_citation(path, lines, &f.wt, &f.folder, &tracked, ranges, near, span)
+            };
+            let t = |a: &str, b: &str, c: &str| (a.to_string(), b.to_string(), c.to_string());
+            assert_eq!(ground("export.py", &[412], None, false, None).0, "ok");
+            assert_eq!(
+                ground("export.py", &[600], None, false, None),
+                t(
+                    "bad-line",
+                    "lib/export.py, src/export.py",
+                    "2 files named export.py, none has line 600"
+                )
+            );
+            assert_eq!(
+                ground("spec.md", &[3], Some(&empty), true, None),
+                t("ok", "job:spec.md", "")
+            );
+            assert_eq!(
+                ground("src/export.py", &[80], Some(&near), true, None),
+                t("ok", "src/export.py", "")
+            );
+            assert_eq!(
+                ground("src/export.py", &[90], Some(&near), true, None).2,
+                "more than 10 lines from every change to src/export.py"
+            );
+            assert_eq!(
+                ground(
+                    "src/export.py",
+                    &[20, 100],
+                    Some(&near),
+                    true,
+                    Some((20, 100))
+                ),
+                t("ok", "src/export.py", "")
+            );
+            assert_eq!(
+                ground("src/export.py", &[20, 100], Some(&near), true, None).0,
+                "off-diff"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2194-port-claims"]
+        fn unreadable_diff() {
+            let f = Fix::new("ground-unreadable");
+            FETCH_URL
+                .with(|u| *u.borrow_mut() = Some(f.home.join("gone.git").display().to_string()));
+            let (result, _) = f.result(json!([round_1()]));
+            assert_eq!(result["diff"], "could not fetch origin main");
+            let statuses: Vec<&Value> = result["unverified"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| &r["status"])
+                .collect();
+            assert_eq!(statuses, [&json!("bad-line"), &json!("no-file")]);
+            let text = fs::read_to_string(&f.out).unwrap();
+            assert!(
+                text.contains("\nDiff: unreadable: could not fetch origin main\n")
+                    && !text.contains("off-diff")
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        #[ignore = "deferred to integration: 2194-port-claims"]
+        fn refusals() {
+            let f = Fix::new("ground-refusals");
+            for round in ["0", "x", "01"] {
+                let (code, out, puts) = f.grounding(round, json!([round_1()]), None);
+                assert_eq!((code, out.as_str(), puts.len()), (2, "", 0));
+            }
+            for (round, rounds, jobs) in [
+                ("1", json!([round_1()]), Some(json!([]))),
+                ("1", json!([]), None),
+                ("2", json!([round_1()]), None),
+            ] {
+                let (code, out, puts) = f.grounding(round, rounds, jobs);
+                assert_eq!((code, out.as_str(), puts.len()), (4, "", 0));
+            }
+            fs::rename(&f.wt, f.home.join("moved")).unwrap();
+            assert_eq!(f.grounding("1", json!([round_1()]), None).0, 4);
+            fs::rename(f.home.join("moved"), &f.wt).unwrap();
+            fs::write(f.home.join("elsewhere.md"), "x\n").unwrap();
+            std::os::unix::fs::symlink(f.home.join("elsewhere.md"), &f.out).unwrap();
+            assert_eq!(f.grounding("1", json!([round_1()]), None).0, 6);
+            assert_eq!(
+                fs::read_to_string(f.home.join("elsewhere.md")).unwrap(),
+                "x\n"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn arm_metrics_accepts_unverified() {
+            let f = Fix::new("ground-arm-metrics");
+            let mut entry = round_1();
+            entry["unverified"] = json!(UNVERIFIED);
+            let mut jobs = Map::new();
+            jobs.insert(
+                JOB.into(),
+                json!({"project": "sample", "stage": "review", "rounds": [entry]}),
+            );
+            for name in TRACER_REVIEWERS {
+                fs::write(f.round.join(format!("review-{name}.md")), "").unwrap();
+            }
+            assert_eq!(
+                arm_metrics(&jobs, json!([]), &f.home.join("jobs"))["coverage_unknown"],
+                0
+            );
+        }
+
+        #[test]
+        fn report_lists_rows() {
+            let rows = [GroundRow {
+                review: "review-code.md".into(),
+                citation: "a|b.py:1".into(),
+                status: "no-file".into(),
+                reason: "no file".into(),
+            }];
+            let text = grounding_report(
+                &rows,
+                None,
+                "main",
+                Some("could not fetch origin main"),
+                1,
+                1,
+            );
+            assert!(text.starts_with("GROUNDING: UNVERIFIED 1\n\nHead: None\nDiff: unreadable: could not fetch origin main\n"));
+            assert!(text.contains("| review-code.md | `a/b.py:1` | no-file | no file |\n"));
         }
     }
 }
