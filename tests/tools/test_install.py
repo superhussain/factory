@@ -367,16 +367,21 @@ class InstallTest(IsolatedTestCase):
     @unittest.skipIf(os.name == "nt", "the fake cargo is a shell script")
     def test_rust_build_installs_the_binary_and_its_entry(self):
         del os.environ["FACTORY_RUNTIME"]
-        source = self.checkout('mkdir -p "$CARGO_TARGET_DIR/release" && printf stub > "$CARGO_TARGET_DIR/release/factory"\n'
+        os.environ.pop("CARGO_TARGET_DIR", None)
+        source = self.checkout('mkdir -p "$CARGO_TARGET_DIR/release" && printf "$STUB" > "$CARGO_TARGET_DIR/release/factory"\n'
                                'printf "%s\\n" "$PWD" "$@" > "$CARGO_TARGET_DIR/args"\n')
+        os.environ["STUB"] = "stub"
         target, err, bundle = self.install_rust(source)
         self.assertEqual(err, "")
         binary = target / "runtime/factory"
         self.assertEqual(binary.read_bytes(), b"stub")
         self.assertEqual(stat.S_IMODE(binary.stat().st_mode), 0o755)
         rust = source.parents[1] / "rust"
-        self.assertEqual((rust / "target/args").read_text().splitlines(),
+        cache = self.root / ".cache/huss-skills/factory/cargo-target"
+        self.assertEqual(stat.S_IMODE(cache.stat().st_mode), 0o700)
+        self.assertEqual((cache / "args").read_text().splitlines(),
                          [str(rust), "build", "--release", "--locked", "--manifest-path", str(rust / "Cargo.toml")])
+        self.assertFalse((rust / "target").exists())
         self.assertEqual(bundle["entry"], ["runtime/factory"])
         self.assertEqual(bundle["binary_sha256"], hashlib.sha256(b"stub").hexdigest())
         files = self.installer.tree(target)[0]
@@ -388,6 +393,11 @@ class InstallTest(IsolatedTestCase):
         spec.loader.exec_module(runtime)
         self.assertEqual(runtime.bundle_stamp(), {"commit": bundle["commit"], "tree": bundle["tree"]})
         self.assertEqual(runtime.catch_up_entry(target), [str(binary)])
+        os.environ.update(CARGO_TARGET_DIR=str(self.root / "own-target"), STUB="stub2")
+        with contextlib.redirect_stderr(io.StringIO()):
+            target, _ = self.install(replace=True, source=source)
+        self.assertEqual((target / "runtime/factory").read_bytes(), b"stub2")
+        self.assertTrue((self.root / "own-target/args").is_file())
 
     @unittest.skipIf(os.name == "nt", "the fake cargo is a shell script")
     def test_failed_build_keeps_the_python_runtime(self):
@@ -400,16 +410,16 @@ class InstallTest(IsolatedTestCase):
 
     @unittest.skipIf(os.name == "nt", "the fake cargo is a shell script")
     def test_python_runtime_or_no_cargo_skips_the_build(self):
-        source = self.checkout('touch "$CARGO_TARGET_DIR/../ran"\n')
+        source = self.checkout('touch "$HOME/ran"\n')
         target, err, bundle = self.install_rust(source)
         self.assertEqual((err, set(bundle)), ("", {"commit", "tree"}))
-        self.assertFalse((source.parents[1] / "rust/ran").exists())
+        self.assertFalse((self.root / "ran").exists())
         del os.environ["FACTORY_RUNTIME"]
         with patch.object(self.installer.shutil, "which", return_value=None):
             target, err, bundle = self.install_rust(source)
         self.assertEqual(err, "install: cargo not found, keeping the Python runtime\n")
         self.assertFalse((target / "runtime/factory").exists())
-        self.assertFalse((source.parents[1] / "rust/ran").exists())
+        self.assertFalse((self.root / "ran").exists())
 
     @unittest.skipIf(os.name == "nt", "the planted binary is a shell script")
     def test_launcher_hands_off_to_the_binary_beside_it(self):

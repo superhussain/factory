@@ -45,8 +45,12 @@ def rust_binary(checkout):
     if cargo is None:
         print("install: cargo not found, keeping the Python runtime", file=sys.stderr)
         return None
-    target = manifest.parent / "target"
+    # A per-user target folder keeps dependencies compiled across catch-up's fresh source worktrees.
+    target = Path(os.environ.get("CARGO_TARGET_DIR") or (
+        Path(os.environ["LOCALAPPDATA"], "huss-skills", "factory", "cargo-target") if os.name == "nt"
+        else Path.home() / ".cache" / "huss-skills" / "factory" / "cargo-target"))
     try:
+        os.makedirs(target, mode=0o700, exist_ok=True)
         # cwd is the workspace so rustup reads its rust-toolchain.toml.
         r = subprocess.run([cargo, "build", "--release", "--locked", "--manifest-path", str(manifest)],
                            cwd=str(manifest.parent), env=dict(os.environ, CARGO_TARGET_DIR=str(target)),
