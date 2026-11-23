@@ -1,0 +1,223 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "catch-up/no-paths",
+      "argv": ["--home", "{home}", "catch-up"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 1,
+      "from": "tests/cli/test_catch_up.py::CatchUpTest.test_installs_origin_head_with_backup"
+    },
+    {
+      "id": "catch-up/no-checkout",
+      "argv": ["--home", "{home}", "catch-up"],
+      "home": "catch-up-other",
+      "stubs": {},
+      "exit": 1,
+      "from": "tests/cli/test_catch_up.py::CatchUpTest.test_installs_origin_head_with_backup"
+    },
+    {
+      "id": "catch-up/from-checkout",
+      "argv": ["--home", "{home}", "catch-up"],
+      "home": "catch-up-root",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_catch_up.py::CatchUpTest.test_installs_origin_head_with_backup"
+    },
+    {
+      "id": "catch-up/unsafe-base",
+      "argv": ["--home", "{home}", "catch-up"],
+      "home": "catch-up-unsafe-base",
+      "stubs": {},
+      "exit": 1,
+      "from": "tests/cli/test_catch_up.py::CatchUpTest.test_installs_origin_head_with_backup"
+    },
+    {
+      "id": "catch-up/fetch-failed",
+      "argv": ["--home", "{home}", "catch-up"],
+      "home": "catch-up-checkout",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_catch_up.py::CatchUpTest.test_second_run_nothing_new"
+    },
+    {
+      "id": "catch-up/nothing-new",
+      "argv": ["--home", "{home}", "catch-up"],
+      "home": "catch-up-checkout",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "{home}/checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/checkout", "rev-parse", "refs/remotes/origin/main"],
+            "stdout": "0123456789abcdef0123456789abcdef01234567\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/checkout", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/checkout", "rev-parse", "HEAD"],
+            "stdout": "0123456789abcdef0123456789abcdef01234567\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/checkout", "config", "--get", "remote.origin.url"],
+            "stdout": "https://github.com/example/factory.git\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/checkout",
+              "cat-file",
+              "-e",
+              "0123456789abcdef0123456789abcdef01234567:.github/workflows/deploy-main.yml"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "gh": [
+          {
+            "argv": [
+              "run",
+              "list",
+              "--workflow",
+              "deploy-main.yml",
+              "--commit",
+              "0123456789abcdef0123456789abcdef01234567",
+              "--json",
+              "databaseId,status,conclusion,attempt,url",
+              "--limit",
+              "1",
+              "-R",
+              "example/factory"
+            ],
+            "stdout": "[{\"databaseId\":7,\"status\":\"completed\",\"conclusion\":\"success\",\"attempt\":1,\"url\":\"https://github.com/example/factory/actions/runs/7\"}]",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "skill": "{tmp}/skill/factory",
+      "bundle": "{\"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"tree\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "exit": 0,
+      "from": "tests/cli/test_catch_up.py::CatchUpTest.test_second_run_nothing_new"
+    },
+    {
+      "id": "catch-up/worker-in-progress",
+      "argv": ["--home", "{home}", "catch-up"],
+      "home": "catch-up-checkout",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "{home}/checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/checkout", "rev-parse", "refs/remotes/origin/main"],
+            "stdout": "0123456789abcdef0123456789abcdef01234567\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/checkout", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/checkout", "rev-parse", "HEAD"],
+            "stdout": "0123456789abcdef0123456789abcdef01234567\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/checkout", "config", "--get", "remote.origin.url"],
+            "stdout": "https://github.com/example/factory.git\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/checkout",
+              "cat-file",
+              "-e",
+              "0123456789abcdef0123456789abcdef01234567:.github/workflows/deploy-main.yml"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "gh": [
+          {
+            "argv": [
+              "run",
+              "list",
+              "--workflow",
+              "deploy-main.yml",
+              "--commit",
+              "0123456789abcdef0123456789abcdef01234567",
+              "--json",
+              "databaseId,status,conclusion,attempt,url",
+              "--limit",
+              "1",
+              "-R",
+              "example/factory"
+            ],
+            "stdout": "[{\"databaseId\":7,\"status\":\"in_progress\",\"conclusion\":\"\",\"attempt\":1,\"url\":\"https://github.com/example/factory/actions/runs/7\"}]",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "skill": "{tmp}/skill/factory",
+      "bundle": "{\"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"tree\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "exit": 0,
+      "from": "tests/cli/test_catch_up.py::CatchUpTest.test_worker_states"
+    }
+  ]
+}
