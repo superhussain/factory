@@ -1,17 +1,24 @@
 //! The Tracer mirror: `tracer sync`, the board hook and the pickup passes.
 
+use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use serde_json::{json, Value};
+use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
+use ureq::Agent;
 
 use crate::cli::{not_ported, Call};
-use crate::shared::consts::NOTE_INVISIBLE;
+use crate::shared::consts::{NOTE_INVISIBLE, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
-use crate::shared::fs::read_text;
-use crate::shared::py::{is_space, splitlines, strip};
-use crate::shared::pyjson::{dumps, DEFAULT};
+use crate::shared::fs::{read_text, regular_metadata};
+use crate::shared::http::{api, urlopen_error};
+use crate::shared::py::{is_space, repr, splitlines, strip};
+use crate::shared::pyjson::{dumps, loads, DEFAULT};
 use crate::shared::pyre::{Flags, Pattern};
 
+const TRACER_TIMEOUT: Duration = Duration::from_secs(5);
 /// Stages the Tracer mirror covers. idea and closed jobs are never mirrored.
 const TRACER_STAGES: [&str; 7] = [
     "spec",
@@ -425,6 +432,235 @@ fn tracer_task_summary(feature: &Value) -> Vec<Value> {
     summary
 }
 
+/// True only when the all-projects pipeline document sets tracer.enabled to true.
+fn tracer_enabled(home: &Path) -> Res<bool> {
+    let r = api(home, "GET", "/api/pipeline/global", None, &[200, 404], &[])?;
+    if r.status == 404 {
+        return Ok(false);
+    }
+    let doc = loads(&r.text()?).map_err(|_| fail("malformed all-projects pipeline document", 5))?;
+    if !doc.is_object() {
+        return Err(py_error("AttributeError"));
+    }
+    match doc.get("tracer").filter(|t| truthy(t)) {
+        None => Ok(false),
+        Some(Value::Object(t)) => Ok(is_true(t.get("enabled"))),
+        Some(_) => Err(py_error("AttributeError")),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TracerCfg {
+    url: String,
+    token_file: String,
+    service: String,
+    language: String,
+}
+
+/// Each project's entry in <home>/tracer.json, none when the file is absent. With only, other
+/// projects' entries are not validated.
+fn read_tracer(home: &Path, only: Option<&str>) -> Res<BTreeMap<String, TracerCfg>> {
+    let path = home.join("tracer.json");
+    if std::fs::symlink_metadata(&path).is_err() {
+        return Ok(BTreeMap::new());
+    }
+    let bad = |what: &str| fail(format!("{}: {what}", path.display()), 2);
+    let data = regular_metadata(&path)
+        .ok()
+        .and_then(|_| read_text(&path).ok())
+        .and_then(|text| loads(&text).ok())
+        .ok_or_else(|| bad("not a readable regular JSON file"))?;
+    let projects = match &data {
+        Value::Object(map)
+            if map.len() == 2 && map.get("version").and_then(Value::as_i64) == Some(1) =>
+        {
+            map.get("projects").and_then(Value::as_object)
+        }
+        _ => None,
+    }
+    .ok_or_else(|| bad(r#"must be {"version": 1, "projects": {...}}"#))?;
+    let mut out = BTreeMap::new();
+    for (slug, entry) in projects {
+        if only.is_some_and(|only| slug != only) {
+            continue;
+        }
+        let Some(entry) = entry.as_object().filter(|_| SLUG.is_full(slug)) else {
+            return Err(bad(&format!(
+                "project {} must be a slug naming an object",
+                repr(slug)
+            )));
+        };
+        let known = ["url", "token_file", "service", "language"];
+        if let Some(extra) = entry.keys().filter(|k| !known.contains(&k.as_str())).min() {
+            return Err(bad(&format!("{slug}: unknown key {extra}")));
+        }
+        let text = |key: &str| entry.get(key).and_then(Value::as_str);
+        for key in ["url", "token_file", "service"] {
+            if text(key).is_none() {
+                return Err(bad(&format!(
+                    "{slug}.{key} is required and must be a string"
+                )));
+            }
+        }
+        let (url, token_file, service) = (
+            text("url").unwrap(),
+            text("token_file").unwrap(),
+            text("service").unwrap(),
+        );
+        let url = tracer_base(url).map_err(|_| {
+            bad(&format!("{slug}.url must be https, or http only for localhost or 127.0.0.1, with no credentials, query or fragment"))
+        })?;
+        if !Path::new(token_file).is_absolute() {
+            return Err(bad(&format!("{slug}.token_file must be an absolute path")));
+        }
+        tracer_token(slug, Path::new(token_file))?;
+        if !TRACER_SERVICE.is_full(service) {
+            return Err(bad(&format!(
+                "{slug}.service must match [a-z0-9][a-z0-9._-]{{0,39}}"
+            )));
+        }
+        let language = match entry.get("language") {
+            None => "",
+            Some(Value::String(s)) if s.chars().count() <= 40 => s,
+            Some(_) => {
+                return Err(bad(&format!(
+                    "{slug}.language must be a string of at most 40 characters"
+                )))
+            }
+        };
+        out.insert(
+            slug.clone(),
+            TracerCfg {
+                url,
+                token_file: token_file.to_string(),
+                service: service.to_string(),
+                language: language.to_string(),
+            },
+        );
+    }
+    Ok(out)
+}
+
+/// The one token in a project's token file.
+fn tracer_token(slug: &str, path: &Path) -> Res<String> {
+    if regular_metadata(path).is_ok() {
+        if let Ok(text) = read_text(path) {
+            let token = strip(&text);
+            if TRACER_TOKEN.is_full(token) {
+                return Ok(token.to_string());
+            }
+        }
+    }
+    Err(fail(
+        format!("tracer token_file for {slug} must be a readable regular file holding one token"),
+        2,
+    ))
+}
+
+/// The Tracer client: no proxy, no redirects, a 5 second limit on each step.
+fn tracer_agent() -> &'static Agent {
+    static AGENT: OnceLock<Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        let tls = TlsConfig::builder()
+            .provider(TlsProvider::NativeTls)
+            .root_certs(RootCerts::PlatformVerifier)
+            .build();
+        let limit = Some(TRACER_TIMEOUT);
+        Agent::config_builder()
+            .proxy(None)
+            .max_redirects(0)
+            .max_redirects_will_error(false)
+            .http_status_as_error(false)
+            .user_agent("factory")
+            .accept("")
+            .timeout_connect(limit)
+            .timeout_send_request(limit)
+            .timeout_send_body(limit)
+            .timeout_recv_response(limit)
+            .timeout_recv_body(limit)
+            .tls_config(tls)
+            .build()
+            .new_agent()
+    })
+}
+
+fn tracer_send(
+    method: &str,
+    url: &str,
+    token: &str,
+    data: Option<Vec<u8>>,
+) -> Result<(u16, Vec<u8>), ureq::Error> {
+    let request = ureq::http::Request::builder()
+        .method(method)
+        .uri(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Content-Type", "application/json");
+    let response = match data {
+        Some(data) => tracer_agent().run(request.body(data).map_err(ureq::Error::Http)?)?,
+        None => tracer_agent().run(request.body(()).map_err(ureq::Error::Http)?)?,
+    };
+    let status = response.status().as_u16();
+    let body = response
+        .into_body()
+        .with_config()
+        .limit(u64::MAX)
+        .read_to_vec()?;
+    Ok((status, body))
+}
+
+/// (status, parsed JSON or null) from Tracer. Fails 5 on a network failure or a status outside
+/// ok. The token goes only in the Authorization header and never in a message.
+fn tracer_call(
+    base: &str,
+    token: &str,
+    method: &str,
+    path: &str,
+    body: Option<&Value>,
+    ok: &[u16],
+) -> Res<(u16, Value)> {
+    let data = body.map(|b| dumps(b, DEFAULT).into_bytes());
+    let (status, raw) =
+        tracer_send(method, &format!("{base}/{path}"), token, data).map_err(|e| {
+            fail(
+                format!("can't reach Tracer at {base}: {}", urlopen_error(&e))
+                    .replace(token, "[token]"),
+                5,
+            )
+        })?;
+    let text = String::from_utf8_lossy(&raw);
+    if !ok.contains(&status) {
+        let detail = match loads(&text) {
+            Ok(Value::Object(map)) => map.get("detail").cloned(),
+            _ => None,
+        };
+        let detail = match detail {
+            None => text.to_string(),
+            Some(Value::String(s)) => s,
+            Some(other) => dumps(&other, DEFAULT),
+        };
+        let detail = chars(&squash(&detail.replace(token, "[token]")), 160);
+        let hint = if status == 401 {
+            " (check token_file)"
+        } else {
+            ""
+        };
+        return Err(fail(
+            format!("Tracer {method} {path} returned {status}: {detail}{hint}"),
+            5,
+        ));
+    }
+    if strip(&text).is_empty() {
+        return Ok((status, Value::Null));
+    }
+    let parsed = loads(&text).map_err(|_| {
+        fail(
+            format!("Tracer {method} {path} returned {status} with a body that is not JSON"),
+            5,
+        )
+    })?;
+    Ok((status, parsed))
+}
+
 pub fn tracer_cmd(_call: &Call) -> Res<()> {
     Err(not_ported("tracer"))
 }
@@ -432,7 +668,492 @@ pub fn tracer_cmd(_call: &Call) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::fs::temp_dir;
+    use crate::shared::fs::{resolve, temp_dir};
+    use serde_json::Map;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex, MutexGuard};
+
+    const TOKEN: &str = "synthetic-token-0123456789";
+    const RECEIPT_REFUSAL: &str = "a board write from a device cannot set the note \"spec approved in Tracer\" on \"001-sample\" without a Tracer-signed scope receipt for FACTORY-1. Nothing was written.";
+
+    fn sample_job() -> Value {
+        json!({"id": "001-sample", "project": "sample", "stage": "spec", "jira": "PLAN-1234",
+               "title": "Sample feature"})
+    }
+
+    struct FakeState {
+        board: Value,
+        board_writes: u32,
+        pipeline: Option<Value>,
+        refuse_receipt: bool,
+        features: Map<String, Value>,
+        requests: Vec<(String, String, Value)>,
+        token: String,
+        scope_locked: bool,
+        delay: Duration,
+        stop_answer: (u16, Value),
+        answer: Option<(u16, Value)>,
+    }
+
+    /// The factory Worker and, under /tracer, a Tracer stand-in on one loopback port. The
+    /// listener lives for the whole test process, so its port and pipeline cache stay its own.
+    struct Fake {
+        origin: String,
+        state: Arc<Mutex<FakeState>>,
+    }
+
+    impl Fake {
+        fn new(pipeline: Option<Value>) -> Fake {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+            let state = Arc::new(Mutex::new(FakeState {
+                board: json!({"jobs": [sample_job()]}),
+                board_writes: 0,
+                pipeline,
+                refuse_receipt: false,
+                features: Map::new(),
+                requests: Vec::new(),
+                token: TOKEN.to_string(),
+                scope_locked: false,
+                delay: Duration::ZERO,
+                stop_answer: (409, json!({"detail": "No build is running."})),
+                answer: None,
+            }));
+            let shared = state.clone();
+            std::thread::spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    let state = shared.clone();
+                    std::thread::spawn(move || serve(stream, &state));
+                }
+            });
+            Fake { origin, state }
+        }
+
+        fn on() -> Fake {
+            Fake::new(Some(json!({"schema": 1, "tracer": {"enabled": true}})))
+        }
+
+        fn state(&self) -> MutexGuard<'_, FakeState> {
+            self.state.lock().unwrap()
+        }
+
+        fn url(&self) -> String {
+            format!("{}/tracer", self.origin)
+        }
+
+        fn job(&self) -> Value {
+            self.state().board["jobs"][0].clone()
+        }
+
+        fn feature(&self, id: &str) -> Value {
+            self.state().features[id].clone()
+        }
+
+        fn requests(&self) -> Vec<(String, String, Value)> {
+            self.state().requests.clone()
+        }
+    }
+
+    fn serve(mut stream: TcpStream, state: &Mutex<FakeState>) {
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        if reader.read_line(&mut line).is_err() || line.is_empty() {
+            return;
+        }
+        let mut parts = line.split_whitespace();
+        let (method, path) = (
+            parts.next().unwrap().to_string(),
+            parts.next().unwrap().to_string(),
+        );
+        let mut headers = Vec::new();
+        loop {
+            let mut h = String::new();
+            reader.read_line(&mut h).unwrap();
+            let h = h.trim_end();
+            if h.is_empty() {
+                break;
+            }
+            let (k, v) = h.split_once(':').unwrap();
+            headers.push((k.to_ascii_lowercase(), v.trim().to_string()));
+        }
+        let header = |name: &str| {
+            headers
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone())
+        };
+        let length = header("content-length").map_or(0, |v| v.parse().unwrap());
+        let mut raw = vec![0; length];
+        reader.read_exact(&mut raw).unwrap();
+        let (status, text, etag) = match path.strip_prefix("/tracer") {
+            Some(path) => {
+                let body = if raw.is_empty() {
+                    Value::Null
+                } else {
+                    serde_json::from_slice(&raw).unwrap()
+                };
+                let delay = {
+                    let mut s = state.lock().unwrap();
+                    s.requests
+                        .push((method.clone(), path.to_string(), body.clone()));
+                    s.delay
+                };
+                std::thread::sleep(delay);
+                let auth = header("authorization");
+                let (status, out) = answer(
+                    &mut state.lock().unwrap(),
+                    &method,
+                    path,
+                    auth.as_deref(),
+                    &body,
+                );
+                (status, out.to_string(), false)
+            }
+            None => worker(&mut state.lock().unwrap(), &method, &path, &raw),
+        };
+        let etag = if etag { "ETag: \"x\"\r\n" } else { "" };
+        let head = format!(
+            "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n{etag}\r\n",
+            text.len()
+        );
+        let _ = stream.write_all(format!("{head}{text}").as_bytes());
+    }
+
+    fn worker(s: &mut FakeState, method: &str, path: &str, raw: &[u8]) -> (u16, String, bool) {
+        match (method, path) {
+            ("GET", "/api/pipeline/global") => match &s.pipeline {
+                None => (404, "not found".to_string(), false),
+                Some(p) => (200, p.to_string(), false),
+            },
+            ("GET", "/api/board") => (200, s.board.to_string(), true),
+            ("PUT", "/api/board") => {
+                let board: Value = serde_json::from_slice(raw).unwrap();
+                let receipt = board["jobs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|j| j.get("tracer").and_then(|t| t.get("receipt")).is_some());
+                if s.refuse_receipt && receipt {
+                    return (400, RECEIPT_REFUSAL.to_string(), false);
+                }
+                s.board = board;
+                s.board_writes += 1;
+                (200, String::new(), true)
+            }
+            _ => (404, String::new(), false),
+        }
+    }
+
+    /// FakeTracer.answer from test_tracer.py.
+    fn answer(
+        s: &mut FakeState,
+        method: &str,
+        path: &str,
+        auth: Option<&str>,
+        body: &Value,
+    ) -> (u16, Value) {
+        if let Some(fixed) = &s.answer {
+            return fixed.clone();
+        }
+        if auth != Some(format!("Bearer {}", s.token).as_str()) {
+            return (401, json!({"detail": "bad token"}));
+        }
+        let Some(rest) = path.strip_prefix("/api/") else {
+            return (404, json!({"detail": "no route"}));
+        };
+        let parts: Vec<&str> = rest.split('/').collect();
+        if parts == ["features"] {
+            if method == "GET" {
+                return (200, Value::Array(s.features.values().cloned().collect()));
+            }
+            let id = body["id"].as_str().unwrap().to_string();
+            let held = s.features.get(&id).cloned();
+            if held.as_ref().is_some_and(|h| truthy(&h["ticket"]))
+                || s.features.values().any(|f| f["ticket"] == body["ticket"])
+            {
+                return (409, json!({"detail": "exists"}));
+            }
+            let mut feature = held.unwrap_or(json!({"tasks": [], "agents": []}));
+            for (k, v) in body.as_object().unwrap() {
+                feature[k] = v.clone();
+            }
+            s.features.insert(id, feature.clone());
+            return (201, feature);
+        }
+        let (scope_locked, stop_answer) = (s.scope_locked, s.stop_answer.clone());
+        let Some(feature) = s.features.get_mut(parts[1]) else {
+            return (404, json!({"detail": "no feature"}));
+        };
+        if parts.len() == 2 {
+            return (200, feature.clone());
+        }
+        if parts[2] == "agents" {
+            let agents = feature["agents"].as_array_mut().unwrap();
+            agents.retain(|a| a["id"] != parts[3]);
+            let mut agent = body.clone();
+            agent["id"] = json!(parts[3]);
+            agents.push(agent);
+            return (200, body.clone());
+        }
+        if parts[2..] == ["build-runs", "stop"] {
+            return stop_answer;
+        }
+        let tasks = feature["tasks"].as_array_mut().unwrap();
+        let pos = tasks.iter().position(|t| t["id"] == parts[3]);
+        if parts[2] == "tasks" && parts.len() == 4 {
+            if method == "PUT" {
+                let task = pos
+                    .map(|i| tasks.remove(i))
+                    .unwrap_or(json!({"id": parts[3], "test_runs": [], "agent": null}));
+                let mut put = task.clone();
+                for (k, v) in body.as_object().unwrap() {
+                    put[k] = v.clone();
+                }
+                tasks.push(put);
+                return (200, task);
+            }
+            if scope_locked {
+                return (409, json!({"detail": "scope is not approved"}));
+            }
+            let task = &mut tasks[pos.unwrap()];
+            for (k, v) in body.as_object().unwrap() {
+                task[k] = v.clone();
+            }
+            return (200, task.clone());
+        }
+        if parts.get(4) == Some(&"test-results") {
+            let runs = tasks[pos.unwrap()]["test_runs"].as_array_mut().unwrap();
+            let mut run = body.clone();
+            run["id"] = json!(format!("r{}", runs.len() + 1));
+            runs.push(run);
+            return (201, body.clone());
+        }
+        (404, json!({"detail": "no route"}))
+    }
+
+    struct TempHome {
+        path: PathBuf,
+    }
+
+    impl Drop for TempHome {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    impl TempHome {
+        fn folder(&self) -> PathBuf {
+            self.path.join("jobs/sample/001-sample")
+        }
+
+        fn token_file(&self) -> PathBuf {
+            self.path.join("token")
+        }
+
+        fn configure(&self, url: &str) {
+            let entry = json!({"url": url, "token_file": self.token_file().to_str().unwrap(),
+                               "service": "sample", "language": "Python"});
+            let doc = json!({"version": 1, "projects": {"sample": entry}});
+            std::fs::write(self.path.join("tracer.json"), doc.to_string()).unwrap();
+        }
+
+        fn review(&self, n: u32, verdicts: &[(&str, &str)]) {
+            let d = self.folder().join(format!("round-{n}"));
+            std::fs::create_dir_all(&d).unwrap();
+            for (kind, verdict) in verdicts {
+                std::fs::write(
+                    d.join(format!("review-{kind}.md")),
+                    format!("VERDICT: {verdict}\n\nBody.\n"),
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    fn home(fake: &Fake) -> TempHome {
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let n = N.fetch_add(1, Ordering::SeqCst);
+        let path = std::env::temp_dir().join(format!("factory-tracer-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(path.join("jobs/sample/001-sample")).unwrap();
+        let t = TempHome {
+            path: resolve(&path).unwrap(),
+        };
+        std::fs::write(
+            t.path.join("config.md"),
+            format!("---\ndevice: test\napi_url: {}\n---\n", fake.origin),
+        )
+        .unwrap();
+        std::fs::write(t.token_file(), format!("{TOKEN}\n")).unwrap();
+        std::fs::write(t.folder().join("spec.md"), SPEC).unwrap();
+        t.configure(&fake.url());
+        t
+    }
+
+    /// An origin nothing listens on.
+    fn dead_origin() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port())
+    }
+
+    #[test]
+    fn config_validation() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        let path = t.path.join("tracer.json");
+        std::fs::remove_file(&path).unwrap();
+        assert!(read_tracer(&t.path, None).unwrap().is_empty());
+        let token = t.token_file().to_str().unwrap().to_string();
+        let write = |change: Value| {
+            let mut entry = json!({"url": "https://tracer.example.invalid/base/", "token_file": token, "service": "sample"});
+            for (k, v) in change.as_object().unwrap() {
+                entry[k] = v.clone();
+            }
+            std::fs::write(
+                &path,
+                json!({"version": 1, "projects": {"sample": entry}}).to_string(),
+            )
+            .unwrap();
+        };
+        write(json!({"language": "Python"}));
+        assert_eq!(
+            read_tracer(&t.path, None).unwrap()["sample"],
+            TracerCfg {
+                url: "https://tracer.example.invalid/base".into(),
+                token_file: token.clone(),
+                service: "sample".into(),
+                language: "Python".into(),
+            }
+        );
+        let refused = |change: Value, needle: &str| {
+            write(change);
+            let e = read_tracer(&t.path, None).unwrap_err();
+            assert_eq!(e.code, 2, "{}", e.stderr);
+            assert!(e.stderr.contains(needle), "{}", e.stderr);
+            if !needle.starts_with("tracer token_file") {
+                assert!(e.stderr.contains(path.to_str().unwrap()));
+            }
+            assert!(!e.stderr.contains(TOKEN));
+        };
+        refused(json!({"service": "Bad Name"}), "sample.service");
+        refused(json!({"language": "x".repeat(41)}), "sample.language");
+        refused(
+            json!({"token_file": t.path.join("missing").to_str().unwrap()}),
+            "tracer token_file for sample",
+        );
+        std::fs::write(t.path.join("empty"), " \n").unwrap();
+        refused(
+            json!({"token_file": t.path.join("empty").to_str().unwrap()}),
+            "tracer token_file for sample",
+        );
+        std::fs::write(t.path.join("spaced"), "two words\n").unwrap();
+        refused(
+            json!({"token_file": t.path.join("spaced").to_str().unwrap()}),
+            "tracer token_file for sample",
+        );
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(t.token_file(), t.path.join("link")).unwrap();
+            refused(
+                json!({"token_file": t.path.join("link").to_str().unwrap()}),
+                "tracer token_file for sample",
+            );
+        }
+        std::fs::write(
+            &path,
+            json!({"version": 1, "projects": {"other": {"url": "ftp://x"}}}).to_string(),
+        )
+        .unwrap();
+        assert!(read_tracer(&t.path, Some("sample")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn unset_setting_is_off() {
+        for pipeline in [None, Some(json!({"schema": 1}))] {
+            let fake = Fake::new(pipeline);
+            assert!(!tracer_enabled(&home(&fake).path).unwrap());
+        }
+        let fake = Fake::on();
+        assert!(tracer_enabled(&home(&fake).path).unwrap());
+        let fake = Fake::new(Some(json!({"tracer": "on"})));
+        let e = tracer_enabled(&home(&fake).path).unwrap_err();
+        assert_eq!(py_kind(&e), Some("AttributeError"));
+    }
+
+    #[test]
+    fn redirects_are_not_followed() {
+        let fake = Fake::on();
+        fake.state().answer = Some((302, json!({"detail": "elsewhere"})));
+        let e = tracer_call(
+            &fake.url(),
+            TOKEN,
+            "GET",
+            "api/features/plan-1234",
+            None,
+            &[200, 404],
+        )
+        .unwrap_err();
+        assert_eq!(e.code, 5);
+        assert!(e.stderr.contains("returned 302: elsewhere"), "{}", e.stderr);
+        assert_eq!(fake.requests().len(), 1);
+    }
+
+    #[test]
+    fn environment_proxies_are_ignored() {
+        let fake = Fake::on();
+        assert!(tracer_agent().config().proxy().is_none());
+        fake.state().answer = Some((200, json!([])));
+        assert_eq!(
+            tracer_call(&fake.url(), TOKEN, "GET", "api/features", None, &[200]).unwrap(),
+            (200, json!([]))
+        );
+        assert_eq!(fake.requests().len(), 1);
+    }
+
+    #[test]
+    fn http_client_errors_exit_5() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut line = String::new();
+                let _ = BufReader::new(&stream).read_line(&mut line);
+                drop(stream);
+            }
+        });
+        let e = tracer_call(&base, TOKEN, "GET", "api/features", None, &[200]).unwrap_err();
+        assert_eq!(e.code, 5);
+        assert!(e.stderr.contains("can't reach Tracer"), "{}", e.stderr);
+    }
+
+    #[test]
+    fn client_error_shapes() {
+        let base = dead_origin();
+        let e = tracer_call(&base, TOKEN, "GET", "api/features", None, &[200]).unwrap_err();
+        assert_eq!(e.code, 5);
+        assert!(
+            e.stderr.contains(&format!("can't reach Tracer at {base}")),
+            "{}",
+            e.stderr
+        );
+        assert!(!e.stderr.contains(TOKEN));
+        let fake = Fake::on();
+        fake.state().answer = Some((500, json!({"detail": [1, 2]})));
+        let e = tracer_call(&fake.url(), TOKEN, "GET", "api/x", None, &[200]).unwrap_err();
+        assert_eq!(
+            e.stderr,
+            "factory.py: Tracer GET api/x returned 500: [1, 2]\n"
+        );
+        fake.state().answer = Some((401, json!(["no"])));
+        let e = tracer_call(&fake.url(), TOKEN, "GET", "api/x", None, &[200]).unwrap_err();
+        assert_eq!(
+            e.stderr,
+            "factory.py: Tracer GET api/x returned 401: [\"no\"] (check token_file)\n"
+        );
+    }
 
     const SPEC: &str = "# Spec: Sample feature
 
