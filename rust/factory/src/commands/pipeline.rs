@@ -2392,7 +2392,7 @@ fn git_run(
 }
 
 /// None once origin/<base> in wt matches <base> at the project file's repo, or why it cannot be trusted.
-fn fetch_base(wt: &Path, base: &str, repo: &str) -> Option<String> {
+pub(crate) fn fetch_base(wt: &Path, base: &str, repo: &str) -> Option<String> {
     if base.starts_with("factory/") {
         return Some(format!("base {base} is a factory branch"));
     }

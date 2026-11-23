@@ -1,6 +1,6 @@
 //! The transcript commands: audit, usage, outcomes and bench.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -9,15 +9,17 @@ use std::time::UNIX_EPOCH;
 use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
+use crate::commands::checks::pr_merge_commits;
+use crate::commands::pipeline::fetch_base;
 use crate::shared::board::{dump_board, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{JOB_ID, NEW_JOB_ID, PASEO_ID, ROUTE_MODEL, SLUG};
 use crate::shared::exit::{fail, Res};
-use crate::shared::fs::read_text;
+use crate::shared::fs::{read_text, resolve};
 use crate::shared::home::{device_name, factory_home};
 use crate::shared::http::{access_message, api, cas};
 use crate::shared::paseo::paseo_server;
-use crate::shared::proc::{hostname, which};
+use crate::shared::proc::{git, hostname, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
 use crate::shared::py::{
     is_space, os_error, round_half_even, round_int, rstrip, splitlines, strip, universal_newlines,
@@ -1118,6 +1120,8 @@ pub fn usage_cmd(call: &Call) -> Res<()> {
 
 const OUTCOME_DAYS: i64 = 90;
 const OUTCOME_RESULTS: [&str; 4] = ["held", "reworked", "reverted", "unknown"];
+const OUTCOME_FIX_DAYS: i64 = 7;
+static OUTCOME_SUBJECT: Pattern = Pattern::new("(?:fix|revert)", Flags::I);
 static GH_PR_PARTS: Pattern = Pattern::new(
     r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})",
     Flags::ASCII,
@@ -1169,6 +1173,109 @@ fn outcomes_change(
     }
     data["updated"] = Value::from(stamp);
     Ok((Some(dump_board(&data)), changed))
+}
+
+/// (result, evidence) for one merge commit, read from the commits on origin/<base> after it. An unknown
+/// result's evidence is its one reason.
+fn outcome_of(
+    checkout: &Path,
+    base: &str,
+    oid: &str,
+    rework_ids: &[String],
+) -> (String, Vec<String>) {
+    let origin = format!("origin/{base}");
+    if git(
+        checkout,
+        &["branch", "-r", "--contains", oid, "--list", &origin],
+    )
+    .is_empty()
+    {
+        return (
+            "unknown".into(),
+            vec![format!(
+                "merge commit {} is not on {origin}",
+                &oid[..12.min(oid.len())]
+            )],
+        );
+    }
+    let merged: i64 = git(checkout, &["show", "-s", "--format=%ct", oid])
+        .parse()
+        .unwrap_or(0);
+    let parent = format!("{oid}^1");
+    let diff = git(checkout, &["diff", "--name-only", &parent, oid]);
+    let touched: BTreeSet<&str> = splitlines(&diff, false).into_iter().collect();
+    let range = format!("{oid}..refs/remotes/origin/{base}");
+    let log = git(
+        checkout,
+        &[
+            "log",
+            "--no-merges",
+            "--name-only",
+            "--format=%x1e%H%x1f%ct%x1f%B%x1f",
+            &range,
+        ],
+    );
+    let commits: Vec<Vec<String>> = log
+        .split('\x1e')
+        .filter(|c| !c.is_empty())
+        .map(|c| {
+            let mut parts: Vec<String> = format!("{c}\x1f")
+                .split('\x1f')
+                .take(4)
+                .map(String::from)
+                .collect();
+            parts.resize(4, String::new());
+            parts
+        })
+        .collect();
+    let short = |sha: &str| sha.chars().take(12).collect::<String>();
+    for c in &commits {
+        if c[2].contains(&format!("This reverts commit {oid}")) {
+            return ("reverted".into(), vec![format!("commit {}", short(&c[0]))]);
+        }
+    }
+    let mut evidence: Vec<String> = rework_ids
+        .iter()
+        .map(|i| format!("rework-of {i}"))
+        .collect();
+    for c in &commits {
+        let at: i64 = c[1].parse().unwrap_or(i64::MIN);
+        let subject = c[2].split('\n').next().unwrap_or("");
+        let files: BTreeSet<&str> = splitlines(&c[3], false).into_iter().collect();
+        if merged <= at
+            && at <= merged + OUTCOME_FIX_DAYS * 86_400
+            && OUTCOME_SUBJECT.search(subject).is_some()
+            && !touched.is_disjoint(&files)
+        {
+            evidence.push(format!("commit {}", short(&c[0])));
+        }
+    }
+    evidence.sort();
+    if evidence.is_empty() {
+        ("held".into(), evidence)
+    } else {
+        ("reworked".into(), evidence)
+    }
+}
+
+/// Why outcomes cannot read origin/<base> in checkout on device, or None once the fetch worked.
+fn outcome_checkout_problem(
+    checkout: &str,
+    base: &str,
+    repo: &str,
+    device: &str,
+) -> Option<String> {
+    let path = Path::new(checkout);
+    if !path.is_dir() {
+        return Some(format!("no folder at {checkout} on {device}"));
+    }
+    let top = git(path, &["rev-parse", "--show-toplevel"]);
+    let same = !top.is_empty()
+        && matches!((resolve(Path::new(&top)), resolve(path)), (Ok(a), Ok(b)) if a == b);
+    if !same {
+        return Some(format!("{checkout} is not a git checkout on {device}"));
+    }
+    fetch_base(path, base, repo).map(|why| format!("{why} in {checkout} on {device}"))
 }
 
 /// `outcomes_cmd` after its argument check: each line it prints, plus `\n`, goes to out.
@@ -1223,6 +1330,19 @@ pub(crate) fn outcomes(record: bool, slug: Option<&str>, out: &mut String) -> Re
         }
         return Ok(());
     }
+    let mut rework: HashMap<String, Vec<String>> = HashMap::new();
+    for j in &all {
+        for r in j
+            .get("refs")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if r.get("kind").and_then(Value::as_str) == Some("rework-of") {
+                rework.entry(py_str(r.get("id"))).or_default().push(id(j));
+            }
+        }
+    }
     let (paths, device) = (read_paths(&home), retro_host()?);
     let mut results = Results::new();
     let mut slugs: Vec<String> = jobs.iter().filter_map(|j| project(j)).collect();
@@ -1238,6 +1358,9 @@ pub(crate) fn outcomes(record: bool, slug: Option<&str>, out: &mut String) -> Re
             Vec::new()
         };
         let repo = fm_get(&meta, "repo").unwrap_or("");
+        let base = fm_get(&meta, "base")
+            .filter(|b| !b.is_empty())
+            .unwrap_or("main");
         let checkout = fm_get(&paths, slug).unwrap_or("");
         let mut prs: Vec<(i64, Vec<String>)> = Vec::new();
         for j in jobs.iter().filter(|j| project(j).as_deref() == Some(slug)) {
@@ -1269,13 +1392,36 @@ pub(crate) fn outcomes(record: bool, slug: Option<&str>, out: &mut String) -> Re
         if prs.is_empty() {
             continue;
         }
-        if Path::new(checkout).is_dir() {
-            return Err(not_ported("outcomes"));
+        if let Some(problem) = outcome_checkout_problem(checkout, base, repo, &device) {
+            for ids in prs.into_iter().map(|(_, ids)| ids) {
+                for i in ids {
+                    results.insert(i, ("unknown".into(), vec![problem.clone()]));
+                }
+            }
+            continue;
         }
-        let problem = format!("no folder at {checkout} on {device}");
-        for ids in prs.into_iter().map(|(_, ids)| ids) {
+        let mut numbers: Vec<u64> = prs.iter().map(|(n, _)| *n as u64).collect();
+        numbers.sort();
+        let oids = pr_merge_commits(repo, &numbers, &device);
+        for (n, ids) in prs {
+            let got = match &oids {
+                Err(why) => ("unknown".to_string(), vec![why.clone()]),
+                Ok(oids) => match oids.get(&(n as u64)).cloned().flatten() {
+                    None => (
+                        "unknown".to_string(),
+                        vec!["no merge commit from GitHub".to_string()],
+                    ),
+                    Some(oid) => {
+                        let reworks: Vec<String> = ids
+                            .iter()
+                            .flat_map(|i| rework.get(i).cloned().unwrap_or_default())
+                            .collect();
+                        outcome_of(Path::new(checkout), base, &oid, &reworks)
+                    }
+                },
+            };
             for i in ids {
-                results.insert(i, ("unknown".into(), vec![problem.clone()]));
+                results.insert(i, got.clone());
             }
         }
     }
@@ -1821,6 +1967,67 @@ pub fn bench_cmd(call: &Call) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn outcome_of_reads_reverts_fixes_and_holds() {
+        let dir = crate::shared::fs::temp_dir("outcome-of");
+        let run = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        let commit = |file: &str, text: &str, message: &str| {
+            std::fs::write(dir.join(file), text).unwrap();
+            run(&["add", "-A"]);
+            run(&["commit", "-q", "-m", message]);
+            run(&["rev-parse", "HEAD"])
+        };
+        run(&["init", "-q"]);
+        commit("a.py", "1\n", "start");
+        let merge = commit("a.py", "2\n", "the change");
+        run(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &[]),
+            ("held".into(), vec![])
+        );
+        let fix = commit("a.py", "3\n", "Fix the change");
+        commit("b.py", "x\n", "fix an unrelated file");
+        run(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &["1001-redo".into()]),
+            (
+                "reworked".into(),
+                vec![
+                    format!("commit {}", &fix[..12]),
+                    "rework-of 1001-redo".into()
+                ]
+            )
+        );
+        let revert = commit(
+            "a.py",
+            "1\n",
+            &format!("Revert\n\nThis reverts commit {merge}."),
+        );
+        run(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &[]),
+            ("reverted".into(), vec![format!("commit {}", &revert[..12])])
+        );
+        assert_eq!(
+            outcome_of(&dir, "trunk", &merge, &[]).1,
+            [format!(
+                "merge commit {} is not on origin/trunk",
+                &merge[..12]
+            )]
+        );
+    }
     use crate::shared::pyval::py_repr;
     use serde_json::json;
 
