@@ -3628,6 +3628,8 @@ export async function serveFactory(request, env, principal, ctx) {
       !env.BoardEvents
     )
       return notFound();
+    // Only a paired or active host's token may take one of the room's shared slots.
+    if (!(await boundHost(env, principal))) return reply("forbidden", 403);
     return connectEvents(request, env);
   }
   if (path.startsWith("/api/")) return api(request, env, path, principal, ctx);
