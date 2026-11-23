@@ -8064,13 +8064,6 @@ exit "$code"
                "stage_notes": {}, "versions": {"global": 1, "project": 1}, "floors": []})
     }
 
-    pub(super) fn view_on(slug: &str) -> (u16, String) {
-        (
-            200,
-            effective(slug, Some(json!({"pickup": on()})), None).to_string(),
-        )
-    }
-
     pub(super) fn host(id: &str, max_inflight: Value) -> Value {
         json!({"id": id, "label": "Host A", "state": "active", "max_inflight": max_inflight})
     }
@@ -8176,11 +8169,10 @@ exit "$code"
     pub(super) struct Fx {
         _env: MutexGuard<'static, ()>,
         saved: Vec<(&'static str, Option<OsString>)>,
-        pub tmp: TempHome,
+        _tmp: TempHome,
         pub root: PathBuf,
         pub home: PathBuf,
         pub repo_a: PathBuf,
-        pub repo_b: PathBuf,
         pub routes: PathBuf,
         pub fake: PathBuf,
         pub state: Rc<RefCell<State>>,
@@ -8234,11 +8226,10 @@ exit "$code"
             let fx = Fx {
                 _env: guard,
                 saved,
-                tmp,
+                _tmp: tmp,
                 root,
                 home,
                 repo_a,
-                repo_b,
                 routes,
                 fake,
                 state: Rc::new(RefCell::new(State {
@@ -15974,6 +15965,904 @@ exit "$archive_code"
                     json!({"stage": "build", "role": "orchestrator", "harness": "provider-b", "via": "launcher", "model": "model-b", "session": tag})
                 ]
             );
+        }
+    }
+
+    /// Python's PickupSetupTest fixture: one checkout, a faked doctor and a faked scheduler.
+    struct St {
+        fx: Fx,
+        crontab: Rc<RefCell<String>>,
+        crontab_error: Rc<RefCell<Option<String>>>,
+        loaded: Rc<RefCell<bool>>,
+        runs: Rc<RefCell<Vec<Vec<String>>>>,
+        doctor: Rc<RefCell<Value>>,
+    }
+
+    impl St {
+        fn new() -> St {
+            let fx = Fx::new();
+            fs::write(
+                fx.home.join("paths.md"),
+                format!("---\nalpha: {}\n---\n", fx.repo_a.display()),
+            )
+            .unwrap();
+            fx.view(
+                "alpha",
+                200,
+                effective("alpha", None, Some(json!({"pickup": on()}))),
+            );
+            let st = St {
+                fx,
+                crontab: Rc::new(RefCell::new(String::new())),
+                crontab_error: Rc::new(RefCell::new(None)),
+                loaded: Rc::new(RefCell::new(false)),
+                runs: Rc::new(RefCell::new(Vec::new())),
+                doctor: Rc::new(RefCell::new(
+                    json!({"checks": [{"name": "config", "status": "pass", "message": ""}]}),
+                )),
+            };
+            let (crontab, error, loaded, runs, doctor) = (
+                st.crontab.clone(),
+                st.crontab_error.clone(),
+                st.loaded.clone(),
+                st.runs.clone(),
+                st.doctor.clone(),
+            );
+            st.fx.set_fakes(|f| {
+                f.doctor = Some(Rc::new(move |_| Ok(doctor.borrow().clone())));
+                f.pickup_scheduler = Some("cron");
+                f.setup_run = Some(Rc::new(move |argv, stdin| {
+                    let argv: Vec<String> = argv.iter().map(|a| a.to_string()).collect();
+                    runs.borrow_mut().push(argv.clone());
+                    if argv == ["crontab", "-l"] {
+                        if let Some(e) = error.borrow().clone() {
+                            return (1, e);
+                        }
+                        let text = crontab.borrow().clone();
+                        return if text.is_empty() {
+                            (1, "no crontab for user".into())
+                        } else {
+                            (0, text)
+                        };
+                    }
+                    if argv == ["crontab", "-"] {
+                        *crontab.borrow_mut() = stdin.unwrap().to_string();
+                    }
+                    if argv[..2] == ["launchctl", "print"] {
+                        return (if *loaded.borrow() { 0 } else { 113 }, String::new());
+                    }
+                    (0, String::new())
+                }));
+            });
+            st
+        }
+
+        fn setup(&self, args: &[&str]) -> (i32, String, String) {
+            let mut all = vec!["setup"];
+            all.extend(args);
+            self.fx.run_args(&all, false)
+        }
+
+        fn cron_line(&self) -> String {
+            timer_text("cron", &timer_values(&self.fx.home))
+        }
+
+        fn writes(&self) -> usize {
+            self.runs
+                .borrow()
+                .iter()
+                .filter(|a| *a == &["crontab", "-"])
+                .count()
+        }
+
+        fn launchd(&self) -> PathBuf {
+            self.fx.set_fakes(|f| f.pickup_scheduler = Some("launchd"));
+            let plist = self
+                .fx
+                .root
+                .join("Library/LaunchAgents/factory.pickup.plist");
+            fs::create_dir_all(plist.parent().unwrap()).unwrap();
+            plist
+        }
+    }
+
+    mod pickup_setup_test {
+        use super::*;
+
+        #[cfg(unix)]
+        #[test]
+        fn test_timer_path_has_system_folders() {
+            let st = St::new();
+            let folders: Vec<String> = timer_values(&st.fx.home)
+                .path
+                .split(':')
+                .map(String::from)
+                .collect();
+            assert!(folders.contains(&"/usr/sbin".into()) && folders.contains(&"/sbin".into()));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_timer_path_includes_the_gh_folder() {
+            let st = St::new();
+            let bin = st.fx.root.join("synthetic/brew/bin");
+            fs::create_dir_all(&bin).unwrap();
+            fs::write(bin.join("gh"), "#!/bin/sh\n").unwrap();
+            Command::new("chmod")
+                .arg("755")
+                .arg(bin.join("gh"))
+                .status()
+                .unwrap();
+            st.fx.set_env(
+                "PATH",
+                format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+            );
+            assert!(timer_values(&st.fx.home)
+                .path
+                .split(':')
+                .any(|f| f == bin.display().to_string()));
+        }
+
+        #[test]
+        fn test_all_ok_exits_0() {
+            let st = St::new();
+            *st.crontab.borrow_mut() = st.cron_line() + "\n";
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 0, "{out}");
+            assert!(out.contains("7 of 7 ok.\n"));
+            assert_eq!(*lines(&out).last().unwrap(), "A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.");
+            let numbers: Vec<&str> = lines(&out)[2..9]
+                .iter()
+                .map(|l| l.split(' ').next().unwrap())
+                .collect();
+            assert_eq!(numbers, ["1.", "2.", "3.", "4.", "5.", "6.", "7."]);
+            assert!(!out.contains("note:"));
+        }
+
+        /// The timer runs this binary, so the three Python timer checks see the binary named.
+        fn timer_runs_this_binary(st: &St) {
+            assert_eq!(timer_values(&st.fx.home).argv[0], exe());
+            let (_, out, _) = st.setup(&[]);
+            assert!(
+                lines(&out)[1].contains(&format!(
+                    "timer runs {}  home {}",
+                    exe(),
+                    st.fx.home.display()
+                )),
+                "{out}"
+            );
+        }
+
+        #[test]
+        fn test_timer_prefers_system_python() {
+            timer_runs_this_binary(&St::new());
+        }
+
+        #[test]
+        fn test_timer_python_missing_falls_back() {
+            timer_runs_this_binary(&St::new());
+        }
+
+        #[test]
+        fn test_timer_python_broken_falls_back() {
+            timer_runs_this_binary(&St::new());
+        }
+
+        #[test]
+        fn test_timer_drift_note() {
+            let st = St::new();
+            *st.crontab.borrow_mut() = "*/5 * * * * PATH=/usr/bin /opt/py3.12/bin/python3 /old/skill/runtime/factory.py pickup >> /tmp/p.log 2>&1\n".into();
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 0);
+            assert!(out.contains("7 of 7 ok.\n"));
+            assert!(out.contains("\n7. ok       timer: crontab runs pickup every 5 minutes\n    note: the timer runs /opt/py3.12/bin/python3 /old/skill/runtime/factory.py pickup, but --install would write "), "{out}");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_launchd_drift_note() {
+            let st = St::new();
+            let plist = st.launchd();
+            fs::write(&plist, plist_dumps(&json!({"Label": "factory.pickup", "ProgramArguments": ["/old/python3", "/old/factory.py", "pickup"]}))).unwrap();
+            *st.loaded.borrow_mut() = true;
+            let (_, out, _) = st.setup(&[]);
+            assert!(out.contains("7. ok       timer:"));
+            assert!(out.contains("note: the timer runs /old/python3 /old/factory.py pickup"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_launchd_path_drift_note() {
+            let st = St::new();
+            let plist = st.launchd();
+            fs::write(&plist, plist_dumps(&json!({"Label": "factory.pickup", "ProgramArguments": timer_values(&st.fx.home).argv, "EnvironmentVariables": {"PATH": "/usr/bin:/bin"}}))).unwrap();
+            *st.loaded.borrow_mut() = true;
+            assert!(st
+                .setup(&[])
+                .1
+                .contains("note: the timer PATH is /usr/bin:/bin, but --install would write "));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_launchd_unset_path_note() {
+            let st = St::new();
+            let plist = st.launchd();
+            fs::write(&plist, plist_dumps(&json!({"Label": "factory.pickup", "ProgramArguments": timer_values(&st.fx.home).argv}))).unwrap();
+            *st.loaded.borrow_mut() = true;
+            assert!(st
+                .setup(&[])
+                .1
+                .contains("note: the timer PATH is unset, but --install would write "));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_launchd_current_plist_has_no_note() {
+            let st = St::new();
+            let plist = st.launchd();
+            fs::write(&plist, timer_text("launchd", &timer_values(&st.fx.home))).unwrap();
+            *st.loaded.borrow_mut() = true;
+            assert!(!st.setup(&[]).1.contains("note:"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_launchd_without_program_arguments_notes() {
+            let st = St::new();
+            let plist = st.launchd();
+            fs::write(
+                &plist,
+                plist_dumps(&json!({"Label": "factory.pickup", "Program": "/old/python3"})),
+            )
+            .unwrap();
+            *st.loaded.borrow_mut() = true;
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 0);
+            assert!(out.contains(&format!(
+                "    note: could not read ProgramArguments in {}",
+                plist.display()
+            )));
+            fs::write(&plist, plist_dumps(&json!(["not", "a", "dict"]))).unwrap();
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 0);
+            assert!(out.contains(&format!("    note: could not read {}.", plist.display())));
+            let full = plist_dumps(
+                &json!({"Label": "factory.pickup", "ProgramArguments": ["/old/python3"]}),
+            );
+            fs::write(&plist, &full.as_bytes()[..40]).unwrap();
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 0);
+            assert!(out.contains(&format!("    note: could not read {}.", plist.display())));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_env_launcher_adds_program_folder() {
+            let st = St::new();
+            let bin = st.fx.root.join("bin");
+            fs::create_dir(&bin).unwrap();
+            fs::write(bin.join("fake-agent"), "#!/bin/sh\n").unwrap();
+            Command::new("chmod")
+                .arg("755")
+                .arg(bin.join("fake-agent"))
+                .status()
+                .unwrap();
+            st.fx.set_env(
+                "PATH",
+                format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+            );
+            let template = json!(["env", "X=0", "fake-agent", "{prompt}"]);
+            st.fx
+                .write_launchers(json!({"primary": template, "fallback": template}));
+            assert!(timer_values(&st.fx.home)
+                .path
+                .split(':')
+                .any(|f| f == bin.display().to_string()));
+        }
+
+        #[test]
+        fn test_missing_device_names_the_fix() {
+            let st = St::new();
+            fs::write(st.fx.home.join("config.md"), "---\n---\n").unwrap();
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 3);
+            assert!(out.contains("2. missing  device:") && out.contains("\n    device: "));
+        }
+
+        #[test]
+        fn test_pickup_off_names_the_host() {
+            let st = St::new();
+            st.fx.view("alpha", 200, effective("alpha", None, None));
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 3);
+            assert!(out.contains("alpha: pickup off"));
+            assert!(out.contains(&format!("add host {DEVICE} exactly as written")));
+        }
+
+        #[test]
+        fn test_missing_launcher() {
+            let st = St::new();
+            st.fx
+                .write_launchers(json!({"primary": ["/bin/sh", st.fx.fake]}));
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 3);
+            assert!(out.contains("5. missing  launchers:"));
+        }
+
+        #[test]
+        fn test_doctor_fail_skips_pipeline() {
+            let st = St::new();
+            *st.doctor.borrow_mut() =
+                json!({"checks": [{"name": "credentials", "status": "fail", "message": ""}]});
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 3);
+            assert!(out.contains("6. missing  pipeline: not checked: fix check 1 first\n"));
+            assert!(!out.contains("Fix check 2 first"));
+            assert!(!st
+                .fx
+                .calls()
+                .iter()
+                .any(|(_, p)| p.starts_with("/api/pipeline")));
+        }
+
+        #[test]
+        fn test_doctor_fail_and_no_checkout_skip_pipeline() {
+            let st = St::new();
+            *st.doctor.borrow_mut() =
+                json!({"checks": [{"name": "credentials", "status": "fail", "message": ""}]});
+            fs::write(
+                st.fx.home.join("paths.md"),
+                "---\nalpha: /nonexistent-1530\n---\n",
+            )
+            .unwrap();
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 3);
+            assert!(out.contains("6. missing  pipeline: not checked: fix checks 1 and 3 first\n"));
+            assert!(!out.contains("Fix check 2 first"));
+        }
+
+        #[test]
+        fn test_no_checkout_skips_pipeline() {
+            let st = St::new();
+            fs::write(
+                st.fx.home.join("paths.md"),
+                "---\nalpha: /nonexistent-1530\n---\n",
+            )
+            .unwrap();
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 3);
+            assert!(out.contains("6. missing  pipeline: not checked: fix check 3 first\n"));
+            assert!(!out.contains("Fix check 2 first"));
+        }
+
+        #[test]
+        fn test_install_cron_is_idempotent() {
+            let st = St::new();
+            *st.crontab.borrow_mut() =
+                "0 1 * * * true\n*/5 * * * * python3 /old/factory.py pickup\n".into();
+            let (code, out, _) = st.setup(&["--install"]);
+            assert_eq!(code, 0, "{out}");
+            assert!(out.starts_with("installed cron timer: crontab\n"));
+            assert_eq!(
+                *st.crontab.borrow(),
+                format!("0 1 * * * true\n{}\n", st.cron_line())
+            );
+            assert_eq!(st.writes(), 1);
+            let (code, out, _) = st.setup(&["--install"]);
+            assert_eq!(code, 0);
+            assert!(out.starts_with("timer already installed: crontab\n"));
+            assert_eq!(st.writes(), 1);
+        }
+
+        #[test]
+        fn test_install_cron_keeps_an_unreadable_crontab() {
+            let st = St::new();
+            *st.crontab_error.borrow_mut() = Some("crontab: permission denied".into());
+            let (code, _, err) = st.setup(&["--install"]);
+            assert_eq!(code, 1);
+            assert!(err.contains(
+                "could not read the crontab, so it was left as is: crontab: permission denied"
+            ));
+            assert_eq!(st.writes(), 0);
+        }
+
+        #[test]
+        fn test_invalid_device_is_named() {
+            let st = St::new();
+            fs::write(st.fx.home.join("config.md"), "---\ndevice: bad host\n---\n").unwrap();
+            let (code, out, _) = st.setup(&[]);
+            assert_eq!(code, 3);
+            assert!(out.contains(
+                "2. missing  device: config.md device: 'bad host' is not a valid host name\n"
+            ));
+            assert!(out.contains(&format!(
+                "    Replace the device: line in the frontmatter of {} with:\n",
+                st.fx.home.join("config.md").display()
+            )));
+            assert!(!out.contains("Add this line inside the frontmatter"));
+        }
+
+        #[test]
+        fn test_fix_lines_quote_paths_with_spaces() {
+            let st = St::new();
+            st.fx
+                .set_fakes(|f| f.exe = Some("/opt/my python/python3".into()));
+            assert!(st
+                .setup(&[])
+                .1
+                .contains("    Or run: '/opt/my python/python3' "));
+        }
+
+        #[test]
+        fn test_fix_lines_carry_the_home_override() {
+            let st = St::new();
+            let (code, out, _) = st.fx.run_args(&["setup"], true);
+            assert_eq!(code, 3);
+            assert!(out.contains(&format!(
+                "{} --home {} pickup setup --install\n",
+                exe(),
+                st.fx.home.display()
+            )));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_install_launchd_writes_plist() {
+            let st = St::new();
+            let plist = st.launchd();
+            st.setup(&["--install"]);
+            let doc = plist_loads(&fs::read(&plist).unwrap()).unwrap();
+            assert_eq!(doc["StartInterval"], 300);
+            let args = doc["ProgramArguments"].as_array().unwrap();
+            assert_eq!(
+                args[args.len() - 3..],
+                [
+                    json!("--home"),
+                    json!(st.fx.home.display().to_string()),
+                    json!("pickup")
+                ]
+            );
+            let bootstrap = vec![
+                "launchctl".to_string(),
+                "bootstrap".into(),
+                format!("gui/{}", getuid()),
+                plist.display().to_string(),
+            ];
+            assert!(st.runs.borrow().contains(&bootstrap));
+            *st.loaded.borrow_mut() = true;
+            let before = fs::metadata(&plist).unwrap().modified().unwrap();
+            st.runs.borrow_mut().clear();
+            let (_, out, _) = st.setup(&["--install"]);
+            assert!(out.starts_with(&format!("timer already installed: {}\n", plist.display())));
+            assert_eq!(fs::metadata(&plist).unwrap().modified().unwrap(), before);
+            assert!(!st
+                .runs
+                .borrow()
+                .iter()
+                .any(|a| a[..2] == ["launchctl", "bootstrap"]));
+        }
+
+        #[test]
+        fn test_install_schtasks() {
+            let st = St::new();
+            st.fx.set_fakes(|f| f.pickup_scheduler = Some("schtasks"));
+            st.setup(&["--install"]);
+            let cmd = st.fx.root.join(".config/factory-pickup.cmd");
+            assert!(cmd.exists());
+            let create = st
+                .runs
+                .borrow()
+                .iter()
+                .find(|a| a[..2] == ["schtasks", "/Create"])
+                .cloned()
+                .unwrap();
+            assert_eq!(
+                create[create.len() - 3..],
+                ["/TR".to_string(), cmd.display().to_string(), "/F".into()]
+            );
+        }
+
+        #[test]
+        fn test_setup_never_claims() {
+            let st = St::new();
+            *st.crontab.borrow_mut() = st.cron_line() + "\n";
+            assert_eq!(st.setup(&[]).0, 0);
+            assert!(st.fx.puts().is_empty());
+            assert!(st.fx.launched().is_empty());
+        }
+
+        #[test]
+        fn timer_plist_matches_python_bytes() {
+            let values = TimerValues {
+                argv: vec![
+                    "/a b/f".into(),
+                    "--home".into(),
+                    "/h&<>".into(),
+                    "pickup".into(),
+                ],
+                path: "/x:/y".into(),
+                log: "/l".into(),
+                exe: String::new(),
+            };
+            assert_eq!(timer_text("launchd", &values), "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>PATH</key>\n\t\t<string>/x:/y</string>\n\t</dict>\n\t<key>Label</key>\n\t<string>factory.pickup</string>\n\t<key>ProgramArguments</key>\n\t<array>\n\t\t<string>/a b/f</string>\n\t\t<string>--home</string>\n\t\t<string>/h&amp;&lt;&gt;</string>\n\t\t<string>pickup</string>\n\t</array>\n\t<key>StandardErrorPath</key>\n\t<string>/l</string>\n\t<key>StandardOutPath</key>\n\t<string>/l</string>\n\t<key>StartInterval</key>\n\t<integer>300</integer>\n</dict>\n</plist>\n");
+            assert_eq!(
+                plist_loads(timer_text("launchd", &values).as_bytes()).unwrap()["ProgramArguments"]
+                    [2],
+                "/h&<>"
+            );
+            assert_eq!(
+                list2cmdline(&[
+                    "C:\\a b\\f.exe".into(),
+                    "--home".into(),
+                    "x\"y".into(),
+                    "a\\".into(),
+                    String::new()
+                ]),
+                "\"C:\\a b\\f.exe\" --home x\\\"y a\\ \"\""
+            );
+            assert_eq!(
+                shlex_split("a 'b c' \"d\\\"e\" f\\ g"),
+                Some(vec!["a".into(), "b c".into(), "d\"e".into(), "f g".into()])
+            );
+            assert_eq!(shlex_split("a 'open"), None);
+            assert_eq!(
+                cron_argv("*/5 * * * * PATH=/x /bin/f --home /h pickup >> /l 2>&1"),
+                Some(vec![
+                    "/bin/f".into(),
+                    "--home".into(),
+                    "/h".into(),
+                    "pickup".into()
+                ])
+            );
+        }
+    }
+
+    /// Python's PickupHeartbeatTest: a real loopback Worker, and the status PUT after every request.
+    mod pickup_heartbeat_test {
+        use super::*;
+        use std::io::{BufRead, BufReader};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+
+        const STATUS: &str = "PUT /api/hosts/host-a/status";
+
+        type Seen = Arc<Mutex<Vec<(String, String, Vec<u8>)>>>;
+
+        /// A loopback Worker serving "METHOD /path" routes as support.http_fixture does.
+        pub(super) struct FakeWorker {
+            pub origin: String,
+            pub seen: Seen,
+        }
+
+        impl FakeWorker {
+            pub fn start(routes: Vec<(&'static str, u16, &'static str)>) -> FakeWorker {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+                let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+                let log = seen.clone();
+                std::thread::spawn(move || {
+                    for stream in listener.incoming() {
+                        let Ok(mut stream) = stream else { return };
+                        let mut reader = BufReader::new(stream.try_clone().unwrap());
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                            continue;
+                        }
+                        let mut parts = line.split_whitespace();
+                        let (method, path) = (
+                            parts.next().unwrap().to_string(),
+                            parts.next().unwrap().to_string(),
+                        );
+                        let mut length = 0;
+                        loop {
+                            let mut h = String::new();
+                            reader.read_line(&mut h).unwrap();
+                            let h = h.trim_end();
+                            if h.is_empty() {
+                                break;
+                            }
+                            if let Some((k, v)) = h.split_once(':') {
+                                if k.eq_ignore_ascii_case("content-length") {
+                                    length = v.trim().parse().unwrap();
+                                }
+                            }
+                        }
+                        let mut body = vec![0; length];
+                        reader.read_exact(&mut body).unwrap();
+                        log.lock()
+                            .unwrap()
+                            .push((method.clone(), path.clone(), body));
+                        let key = format!("{method} {path}");
+                        let (status, text) = routes
+                            .iter()
+                            .find(|(k, _, _)| *k == key || *k == path)
+                            .map_or((404, ""), |(_, s, t)| (*s, *t));
+                        let etag = crate::shared::project::sha(text.as_bytes());
+                        let reply = format!("HTTP/1.0 {status} X\r\nETag: \"{etag}\"\r\nContent-Length: {}\r\n\r\n{text}", text.len());
+                        let _ = stream.write_all(reply.as_bytes());
+                    }
+                });
+                FakeWorker { origin, seen }
+            }
+
+            pub fn keys(&self) -> Vec<String> {
+                self.seen
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|(m, p, _)| format!("{m} {p}"))
+                    .collect()
+            }
+
+            pub fn last_body(&self) -> Value {
+                loads(std::str::from_utf8(&self.seen.lock().unwrap().last().unwrap().2).unwrap())
+                    .unwrap()
+            }
+
+            pub fn clear(&self) {
+                self.seen.lock().unwrap().clear();
+            }
+        }
+
+        fn routes() -> Vec<(&'static str, u16, &'static str)> {
+            vec![
+                (STATUS, 200, ""),
+                ("/projects.json", 200, "[]"),
+                ("/api/board", 200, "{\"jobs\": []}"),
+            ]
+        }
+
+        /// Python's HostFixture: a home with a service token, a route and one checkout, on a real Worker.
+        fn setup(device: &str) -> (Fx, FakeWorker) {
+            let fx = Fx::new();
+            let worker = FakeWorker::start(routes());
+            fx.set_fakes(|f| {
+                f.api = None;
+                f.report_status = None;
+                f.backlog_triage_pass = None;
+            });
+            fs::write(fx.home.join(".env"), "FACTORY_ACCESS_CLIENT_ID=synthetic-id\nFACTORY_ACCESS_CLIENT_SECRET=synthetic-secret\n").unwrap();
+            fs::write(
+                fx.home.join("routes.md"),
+                "---\nprimary: provider-a model-a high\n---\n",
+            )
+            .unwrap();
+            let repo = fx.home.join("repo");
+            fs::create_dir(&repo).unwrap();
+            fs::write(
+                fx.home.join("paths.md"),
+                format!("---\nalpha: {}\n---\n", repo.display()),
+            )
+            .unwrap();
+            fs::write(fx.home.join("config.md"), format!("---\n# synthetic test home\napi_url: {}\n{device}claim_stale_minutes: 60\n---\nnotes stay\n", worker.origin)).unwrap();
+            (fx, worker)
+        }
+
+        fn plain(fx: &Fx, args: &[&str]) -> (i32, String, String) {
+            fx.set_fakes(|f| f.report_status = Some(Rc::new(|_, _, _, _| true)));
+            let result = fx.pickup(args);
+            fx.set_fakes(|f| f.report_status = None);
+            result
+        }
+
+        #[test]
+        fn test_one_status_put_after_every_other_request() {
+            for (name, code) in [("nothing to do", 0), ("launches", 0), ("fails", 1)] {
+                let (fx, worker) = setup("device: host-a\n");
+                if name != "nothing to do" {
+                    fx.set_fakes(|f| {
+                        f.pickup_pass = Some(Rc::new(move |io, home| {
+                            read_board(home)?;
+                            if name == "fails" {
+                                return Err(fail(
+                                    "launch of alpha-1 on primary failed: exit 1; see log",
+                                    1,
+                                ));
+                            }
+                            outln!(io, "launched alpha-1 alpha on primary session abc");
+                            Ok(())
+                        }))
+                    });
+                }
+                let quiet = plain(&fx, &["--triage-now"]);
+                worker.clear();
+                fs::remove_file(fx.home.join("backlog-triage-sweep.json")).unwrap();
+                let beat = fx.pickup(&["--triage-now"]);
+                assert_eq!(beat, quiet, "{name}");
+                assert_eq!(beat.0, code);
+                let keys = worker.keys();
+                assert_eq!(
+                    keys.first().map(String::as_str),
+                    Some("GET /api/halt"),
+                    "{name}: {keys:?}"
+                );
+                assert_eq!(
+                    keys.last().map(String::as_str),
+                    Some(STATUS),
+                    "{name}: {keys:?}"
+                );
+                assert_eq!(keys.iter().filter(|k| *k == STATUS).count(), 1);
+                let body = worker.last_body();
+                assert_eq!(read_json(&fx.home.join("host-status.json")).unwrap(), body);
+                assert_eq!(body["scheduler"], PICKUP_SCHEDULER);
+                assert!(is_stamp(&body["last_pickup"]));
+            }
+        }
+
+        #[test]
+        fn test_a_failed_board_read_still_sends_status() {
+            let (fx, worker) = setup("device: host-a\n");
+            fx.set_fakes(|f| f.read_board = Some(Rc::new(|_| Err(fail("boom", 5)))));
+            assert_eq!(fx.pickup(&[]).0, 5);
+            assert_eq!(worker.keys().last().map(String::as_str), Some(STATUS));
+        }
+
+        #[test]
+        fn test_dry_run_and_no_device_send_no_status() {
+            for (args, device) in [(&["--dry-run"][..], "device: host-a\n"), (&[], "")] {
+                let (fx, worker) = setup(device);
+                assert_eq!(fx.pickup(args), plain(&fx, args));
+                assert!(!worker.keys().iter().any(|k| k == STATUS), "{args:?}");
+                assert!(!fx.home.join("host-status.json").exists());
+            }
+        }
+
+        #[test]
+        fn test_failed_status_put_changes_nothing_and_writes_no_cache() {
+            for status in [403, 500] {
+                let mut r = routes();
+                r[0] = (STATUS, status, "boom");
+                let (fx, _) = setup("device: host-a\n");
+                let worker = FakeWorker::start(r);
+                fs::write(
+                    fx.home.join("config.md"),
+                    format!("---\napi_url: {}\ndevice: host-a\n---\n", worker.origin),
+                )
+                .unwrap();
+                let beat = fx.pickup(&[]);
+                assert_eq!(worker.keys().last().map(String::as_str), Some(STATUS));
+                assert_eq!(beat, plain(&fx, &[]));
+                assert!(!fx.home.join("host-status.json").exists());
+            }
+        }
+
+        #[test]
+        fn test_a_failing_triage_sweep_is_reported_until_it_recovers() {
+            let (fx, worker) = setup("device: host-a\n");
+            let cache = fx.home.join("host-status.json");
+            fx.set_fakes(|f| {
+                f.backlog_triage_pass = Some(Rc::new(|_| {
+                    Err(fail("GET .../api/backlog returned 500: boom", 5))
+                }))
+            });
+            fs::write(&cache, json!({"scheduler": PICKUP_SCHEDULER, "last_pickup": null, "triage_failed_since": "2026-01-01T09:00:00Z"}).to_string()).unwrap();
+            let (code, _, err) = fx.pickup(&["--triage-now"]);
+            assert_eq!(code, 0);
+            assert!(err.contains("backlog triage stopped"));
+            assert_eq!(
+                worker.last_body()["triage_failed_since"],
+                "2026-01-01T09:00:00Z"
+            );
+            assert_eq!(
+                read_json(&cache).unwrap()["triage_failed_since"],
+                "2026-01-01T09:00:00Z"
+            );
+            fs::remove_file(&cache).unwrap();
+            assert_eq!(fx.pickup(&["--triage-now"]).0, 0);
+            let body = worker.last_body();
+            assert_eq!(body["triage_failed_since"], body["last_pickup"]);
+            // Python's doctor command resends the cached status; its own slice ports that command.
+            let (scheduler, last, failing) = cached_status(&fx.home);
+            assert!(report_status(
+                &fx.home,
+                &scheduler,
+                last.as_deref(),
+                failing.as_deref(),
+                None,
+                false
+            ));
+            assert_eq!(
+                worker.last_body()["triage_failed_since"],
+                body["last_pickup"]
+            );
+            fx.set_fakes(|f| f.backlog_triage_pass = Some(Rc::new(|_| Ok(()))));
+            assert_eq!(fx.pickup(&["--triage-now"]).0, 0);
+            assert!(worker.last_body().get("triage_failed_since").is_none());
+            assert!(read_json(&cache)
+                .unwrap()
+                .get("triage_failed_since")
+                .is_none());
+        }
+    }
+
+    mod deferred_passes {
+        use super::*;
+
+        fn assert_deferred(result: (i32, String, String), what: &str) {
+            assert_eq!(result.0, 2);
+            assert!(
+                result.2.ends_with(&format!(
+                    "factory.py: pickup {what} is not ported to the Rust binary yet\n"
+                )),
+                "{}",
+                result.2
+            );
+        }
+
+        fn alpha_repo(fx: &Fx) {
+            fs::create_dir_all(fx.home.join("projects")).unwrap();
+            fs::write(
+                fx.home.join("projects/alpha.md"),
+                "---\nrepo: sample/alpha\nauto_babysit: 3\n---\n",
+            )
+            .unwrap();
+            alpha_on(fx);
+        }
+
+        #[test]
+        fn pr_state_sync() {
+            let fx = Fx::new();
+            alpha_repo(&fx);
+            fx.jobs(json!([{"id": "042-sample-export", "stage": "pr-open", "project": "alpha", "pr": "https://github.com/sample/alpha/pull/7", "updated": "2026-01-01T00:00:00Z"}]));
+            assert_deferred(fx.pickup(&[]), "PR state sync");
+        }
+
+        #[test]
+        fn auto_babysit_pr_signals() {
+            let fx = Fx::new();
+            alpha_repo(&fx);
+            fx.view(
+                "alpha",
+                200,
+                with(
+                    effective("alpha", Some(json!({"pickup": on()})), None),
+                    json!({"stage_notes": {"babysit": [{"text": "Fix it."}]}}),
+                ),
+            );
+            let mut data = json!({"jobs": [{"id": "042-sample-export", "stage": "pr-open", "project": "alpha", "pr": "https://github.com/sample/alpha/pull/7", "updated": "2026-01-01T00:00:00Z"}]});
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let mut io = Io {
+                out: &mut out,
+                err: &mut err,
+            };
+            let paths = paths_of(&fx.home);
+            let e = auto_babysit_pass(
+                &mut io,
+                &fx.home,
+                &mut data,
+                DEVICE,
+                120,
+                &paths,
+                &mut HashMap::new(),
+                false,
+            )
+            .unwrap_err();
+            assert_eq!((e.code, e.stderr.as_str()), (2, "factory.py: pickup auto-babysit PR signals is not ported to the Rust binary yet\n"));
+        }
+
+        #[test]
+        fn pr_close() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            fx.jobs(json!([{"id": "042-sample-export", "stage": "build", "project": "alpha", "pr": "https://github.com/sample/alpha/pull/7", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}}]));
+            assert_deferred(fx.pickup(&[]), "PR close");
+        }
+
+        #[test]
+        fn close_cleanup() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            fs::create_dir_all(fx.home.join("worktrees/alpha/042-sample-export")).unwrap();
+            fx.jobs(json!([{"id": "042-sample-export", "stage": "closed", "project": "alpha", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z", "closed": "2026-01-02T12:05:00Z"}}]));
+            assert_deferred(fx.pickup(&[]), "close cleanup");
+        }
+
+        #[test]
+        fn worktree_stop() {
+            let mv = Mv::new();
+            mv.moved(json!({}));
+            mv.gate();
         }
     }
 }
