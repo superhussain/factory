@@ -146,6 +146,7 @@ struct Fakes {
     audit_push: Option<Rc<dyn Fn(&str) -> Res<()>>>,
     usage_record: Option<Rc<dyn Fn(&Path, &str, &str, &str, &Value) -> Res<()>>>,
     outcomes: Option<Rc<dyn Fn(&str, &mut String) -> Res<()>>>,
+    stop_pids: Option<Rc<dyn Fn(&Path) -> Option<Vec<u32>>>>,
     pickup_scheduler: Option<&'static str>,
     launch_wait_seconds: Option<f64>,
     exe: Option<String>,
@@ -2896,6 +2897,14 @@ fn usage_pickup_record(io: &mut Io, home: &Path, job: &Value) -> Res<()> {
     usage_record(home, slug, job_id, device, &totals)?;
     outln!(io, "recorded {device} tokens on {job_id}");
     Ok(())
+}
+
+fn stop_pids(wt: &Path) -> Option<Vec<u32>> {
+    #[cfg(test)]
+    if let Some(f) = fake!(stop_pids) {
+        return f(wt);
+    }
+    crate::commands::worktree::stop_pids(wt)
 }
 
 fn tracer_follow_pass(home: &Path) -> Res<()> {
@@ -6675,7 +6684,7 @@ fn move_stop_pass(
     dry: bool,
     adapter: Option<&[String]>,
 ) -> Res<()> {
-    for i in 0..jobs_of(data).len() {
+    for i in 0..ops::board_jobs(data)?.len() {
         let j = data["jobs"][i].clone();
         let m = j.get("move");
         let mine: Vec<Value> = queued_stops(m)
@@ -6748,11 +6757,6 @@ fn move_stop_pass(
             }
             continue;
         }
-        // Stopping the worktree waits on the worktree slice; defer before any archive, so a run
-        // never archives sessions it cannot then record.
-        if home.join("worktrees").join(project).join(job_id).exists() {
-            return Err(deferred("worktree stop"));
-        }
         let mut failure = None;
         for a in &archives {
             let why = match adapter_run(adapter.unwrap(), &["archive", a, "--force"]) {
@@ -6766,6 +6770,12 @@ fn move_stop_pass(
                 break;
             }
         }
+        let wt = home.join("worktrees").join(project).join(job_id);
+        let alive = if wt.exists() {
+            stop_pids(&wt)
+        } else {
+            Some(Vec::new())
+        };
         if let Some((agent, why)) = failure {
             errln!(
                 io,
@@ -6773,9 +6783,29 @@ fn move_stop_pass(
             );
             continue;
         }
+        match alive {
+            Some(pids) if !pids.is_empty() => {
+                let pids: Vec<String> = pids.iter().map(u32::to_string).collect();
+                errln!(
+                    io,
+                    "factory.py: pickup could not stop {job_id}: processes still running: {}",
+                    pids.join(" ")
+                );
+                continue;
+            }
+            None => {
+                errln!(
+                    io,
+                    "factory.py: pickup could not stop {job_id}: processes were not checked"
+                );
+                continue;
+            }
+            Some(_) => {}
+        }
         let ats: Vec<Option<Value>> = mine.iter().map(|x| x.get("at").cloned()).collect();
         let done = cas(home, "/api/board", |text| {
             let mut board = load_board(text)?;
+            ops::board_jobs(&board)?;
             let Some(at) = job_index(&board, job_id) else {
                 return Ok((None, false));
             };
@@ -9865,12 +9895,13 @@ exit "$archive_code"
     const OTHER: &str = "9f1c2d3e-0000-4000-8000-000000000001";
     const LEFT_OUT: &str = " (left out --home because PASEO_HOME has unprintable characters)";
 
-    /// Python's MoveFixture. Stopping a worktree's processes waits on the worktree slice, so the
-    /// worktree folder exists only inside `gate`, which checks that exit; every other run follows
-    /// Python with no worktree, where stop_pids is never called.
+    /// Python's MoveFixture: the worktree exists, and the stop_pids fake logs each worktree and
+    /// answers with alive.
     pub(super) struct Mv {
         pub tk: Tk,
         pub wt: PathBuf,
+        pub stopped: Rc<RefCell<Vec<PathBuf>>>,
+        pub alive: Rc<RefCell<Option<Vec<u32>>>>,
     }
 
     impl std::ops::Deref for Mv {
@@ -9885,7 +9916,22 @@ exit "$archive_code"
             let tk = Tk::new();
             tk.set_adapter(Vec::new(), 0, 0);
             let wt = tk.home.join("worktrees/alpha/042-sample-export");
-            Mv { tk, wt }
+            fs::create_dir_all(&wt).unwrap();
+            let stopped = Rc::new(RefCell::new(Vec::new()));
+            let alive = Rc::new(RefCell::new(Some(Vec::new())));
+            let (log, answer) = (stopped.clone(), alive.clone());
+            tk.set_fakes(|f| {
+                f.stop_pids = Some(Rc::new(move |wt: &Path| {
+                    log.borrow_mut().push(wt.to_path_buf());
+                    answer.borrow().clone()
+                }))
+            });
+            Mv {
+                tk,
+                wt,
+                stopped,
+                alive,
+            }
         }
 
         pub fn moved(&self, extra: Value) -> Value {
@@ -9898,26 +9944,8 @@ exit "$archive_code"
             job
         }
 
-        /// With the worktree there, pickup stops at the deferred worktree stop and writes nothing.
-        pub fn gate(&self) {
-            fs::create_dir_all(&self.wt).unwrap();
-            let before = self.state.borrow().board.clone();
-            let (code, _, err) = self.pickup(&[]);
-            assert_eq!(
-                (code, err.as_str()),
-                (
-                    2,
-                    "factory.py: pickup worktree stop is not ported to the Rust binary yet\n"
-                )
-            );
-            assert_eq!(self.state.borrow().board, before);
-            assert!(
-                self.archives().is_empty(),
-                "the deferral comes before any archive"
-            );
-            fs::remove_dir_all(&self.wt).unwrap();
-            let _ = fs::remove_file(self.root.join("adapter-calls"));
-            self.clear_calls();
+        pub fn stops(&self) -> Vec<PathBuf> {
+            self.stopped.borrow().clone()
         }
 
         pub fn mv(&self) -> Value {
@@ -9963,24 +9991,26 @@ exit "$archive_code"
         fn test_old_host_stops_the_worktree_and_records_it() {
             let mv = Mv::new();
             mv.moved(json!({}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             assert_eq!(
                 out,
                 "stopped 042-sample-export alpha: moved to studio-mac\n"
             );
+            assert_eq!(mv.stops(), [mv.wt.clone()]);
             let m = mv.mv();
             assert!(is_stamp(&m["stopped"]));
             assert_eq!(m["at"], MOVE_AT);
             mv.clear_calls();
             assert_eq!(mv.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(mv.stops(), [mv.wt.clone()]);
             assert!(mv.puts().is_empty());
         }
 
         fn assert_stop_left_queued(mv: &Mv, project: &str, reason: &str) {
             assert_eq!(mv.pickup(&[]), out_err(0, "", &format!("factory.py: pickup skips the stop of 042-sample-export {project}: {reason}\n")));
             assert!(mv.puts().is_empty());
+            assert!(mv.stops().is_empty());
             assert!(mv.mv().get("stopped").is_none());
             assert_eq!(mv.pickup(&["--dry-run"]), out_err(0, &format!("skip stop 042-sample-export {project}: {reason}\nhost {DEVICE}: would launch 0\n"), ""));
         }
@@ -10051,10 +10081,10 @@ exit "$archive_code"
             let mv = Mv::new();
             mv.moved(json!({"from": "studio-mac", "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
                 "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": MOVE_AT}]}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             assert_eq!(out, "stopped 042-sample-export alpha: moved to cloud-box\n");
+            assert_eq!(mv.stops(), [mv.wt.clone()]);
             let m = mv.mv();
             assert!(m.get("stopped").is_none());
             let entry = &m["earlier"][0];
@@ -10073,7 +10103,6 @@ exit "$archive_code"
             let mv = Mv::new();
             mv.moved(json!({"from": DEVICE, "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
                 "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": MOVE_AT}, {"from": "lab-linux", "session": "x", "at": MOVE_AT}]}));
-            mv.gate();
             assert_eq!(
                 mv.pickup(&[]).1,
                 "stopped 042-sample-export alpha: moved to cloud-box\n"
@@ -10088,6 +10117,7 @@ exit "$archive_code"
         fn test_no_worktree_still_records_the_stop() {
             let mv = Mv::new();
             mv.moved(json!({}));
+            fs::remove_dir(&mv.wt).unwrap();
             assert_eq!(
                 mv.pickup(&[]),
                 out_err(
@@ -10096,6 +10126,7 @@ exit "$archive_code"
                     ""
                 )
             );
+            assert!(mv.stops().is_empty());
             assert!(mv.mv().get("stopped").is_some());
         }
 
@@ -10103,16 +10134,40 @@ exit "$archive_code"
         fn test_survivors_leave_stopped_unset_for_a_retry() {
             let mv = Mv::new();
             mv.moved(json!({}));
-            mv.gate();
+            *mv.alive.borrow_mut() = Some(vec![123, 456]);
+            assert_eq!(
+                mv.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: pickup could not stop 042-sample-export: processes still running: 123 456\n"
+                )
+            );
+            assert!(mv.puts().is_empty());
             assert!(mv.mv().get("stopped").is_none());
+            *mv.alive.borrow_mut() = Some(Vec::new());
+            assert_eq!(
+                mv.pickup(&[]).1,
+                "stopped 042-sample-export alpha: moved to studio-mac\n"
+            );
+            assert!(mv.mv().get("stopped").is_some());
         }
 
         #[test]
         fn test_unchecked_processes_leave_stopped_unset() {
             let mv = Mv::new();
             mv.moved(json!({}));
-            mv.gate();
+            *mv.alive.borrow_mut() = None;
+            assert_eq!(
+                mv.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: pickup could not stop 042-sample-export: processes were not checked\n"
+                )
+            );
             assert!(mv.puts().is_empty());
+            assert!(mv.mv().get("stopped").is_none());
         }
 
         #[test]
@@ -10130,20 +10185,14 @@ exit "$archive_code"
         fn test_a_newer_move_is_not_marked_stopped() {
             let mv = Mv::new();
             mv.moved(json!({}));
-            mv.gate();
             let state = mv.state.clone();
-            // The pass reads the board, then its stop write reads it again: the move changes between.
-            let reads = Rc::new(RefCell::new(0));
-            mv.state.borrow_mut().extra = Some(Rc::new(move |method, path, _| {
-                if (method, path) == ("GET", "/api/board") {
-                    *reads.borrow_mut() += 1;
-                }
-                if *reads.borrow() == 2 {
+            mv.set_fakes(|f| {
+                f.stop_pids = Some(Rc::new(move |_: &Path| {
                     state.borrow_mut().board["jobs"][0]["move"]["at"] =
                         "2026-11-08T11:00:00Z".into();
-                }
-                None
-            }));
+                    Some(Vec::new())
+                }))
+            });
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
             assert!(mv.puts().is_empty());
@@ -10214,7 +10263,6 @@ exit "$archive_code"
             let mut job = mv.job("042-sample-export");
             job["move"]["stopped"] = Value::Null;
             mv.jobs(json!([job]));
-            mv.gate();
             assert_eq!(
                 mv.pickup(&[]),
                 out_err(
@@ -10234,7 +10282,6 @@ exit "$archive_code"
             let mut job = mv.job("042-sample-export");
             job["move"]["stopped"] = Value::Null;
             mv.jobs(json!([job]));
-            mv.gate();
             assert_eq!(
                 mv.pickup(&[]),
                 out_err(
@@ -10259,7 +10306,6 @@ exit "$archive_code"
             let mut job = mv.job("042-sample-export");
             job["move"]["stopped"] = Value::Null;
             mv.jobs(json!([job]));
-            mv.gate();
             assert_eq!(
                 mv.pickup(&[]),
                 out_err(
@@ -10290,7 +10336,6 @@ exit "$archive_code"
         fn test_one_run_stops_then_recovers() {
             let mv = rerun();
             mv.moved(json!({"to": DEVICE}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             let job = mv.job("042-sample-export");
@@ -10312,7 +10357,6 @@ exit "$archive_code"
             let mut job = mv.job("042-sample-export");
             job["move"]["stopped"] = Value::Null;
             mv.jobs(json!([job]));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             let job = mv.job("042-sample-export");
@@ -10325,7 +10369,16 @@ exit "$archive_code"
         fn test_survivors_block_the_claim() {
             let mv = rerun();
             mv.moved(json!({"to": DEVICE}));
-            mv.gate();
+            *mv.alive.borrow_mut() = Some(vec![123]);
+            assert_eq!(
+                mv.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: pickup could not stop 042-sample-export: processes still running: 123\n"
+                )
+            );
+            assert!(mv.puts().is_empty());
             assert!(mv.launched().is_empty());
             assert!(mv.job("042-sample-export").get("claim").is_none());
         }
@@ -10356,7 +10409,6 @@ exit "$archive_code"
             let mv = archive();
             mv.set_stalls(json!({}));
             mv.moved(json!({"agent": AGENT, "server": "srv-lab"}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             assert_eq!(out, format!("archived session {AGENT} and stopped 042-sample-export alpha: moved to studio-mac\n"));
@@ -10379,7 +10431,6 @@ exit "$archive_code"
             mv.set_stalls(json!({}));
             mv.moved(json!({"from": "studio-mac", "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
                 "earlier": [{"from": DEVICE, "session": "a1b2c3", "agent": AGENT, "server": "srv-lab", "at": MOVE_AT}]}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             assert_eq!(out, format!("archived session {AGENT} and stopped 042-sample-export alpha: moved to cloud-box\n"));
@@ -10492,7 +10543,6 @@ exit "$archive_code"
             mv.claim_marker("041-other-job", AGENT);
             mv.set_stalls(json!({}));
             mv.moved(json!({"agent": AGENT, "server": "srv-lab"}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err), (0, mv.hint(AGENT)));
             assert_eq!(
@@ -10661,7 +10711,6 @@ exit "$archive_code"
         fn test_archives_every_agent_and_names_them() {
             let mv = archive();
             two_agents(&mv);
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             assert_eq!(out, format!("archived sessions {AGENT}, {AGENT2} and stopped 042-sample-export alpha: moved to cloud-box\n"));
@@ -10711,7 +10760,6 @@ exit "$archive_code"
             mv.set_stalls(json!({}));
             mv.moved(json!({"agent": AGENT2, "server": "srv-lab", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
                 "earlier": [{"from": DEVICE, "session": "a1b2c3", "agent": AGENT, "server": "srv-lab", "at": MOVE_AT}]}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!(code, 0);
             assert_eq!(out, format!("archived session {AGENT} and stopped 042-sample-export alpha: moved to cloud-box\n"));
@@ -17291,13 +17339,6 @@ exit "$archive_code"
             fs::create_dir_all(fx.home.join("worktrees/alpha/042-sample-export")).unwrap();
             fx.jobs(json!([{"id": "042-sample-export", "stage": "closed", "project": "alpha", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z", "closed": "2026-01-02T12:05:00Z"}}]));
             assert_deferred(fx.pickup(&[]), "close cleanup");
-        }
-
-        #[test]
-        fn worktree_stop() {
-            let mv = Mv::new();
-            mv.moved(json!({}));
-            mv.gate();
         }
     }
 }
