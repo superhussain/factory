@@ -56,6 +56,12 @@ fn walk(folder: &Path) -> io::Result<Vec<(String, PathBuf)>> {
     if folder.is_dir() {
         visit(folder, &[], &mut found)?;
     }
+    // PureWindowsPath compares parts case-folded.
+    #[cfg(windows)]
+    found.sort_by_cached_key(|(parts, _)| {
+        parts.iter().map(|p| p.to_lowercase()).collect::<Vec<_>>()
+    });
+    #[cfg(not(windows))]
     found.sort();
     Ok(found
         .into_iter()
@@ -279,6 +285,25 @@ pub(crate) fn sync_problems(
     Ok(problems)
 }
 
+/// `str(UnicodeDecodeError)` for `data.decode("utf-8")`.
+fn decode_error(data: &[u8], e: &std::str::Utf8Error) -> String {
+    let i = e.valid_up_to();
+    let n = e.error_len().unwrap_or(data.len() - i);
+    let reason = if matches!(data[i], 0x80..=0xc1 | 0xf5..=0xff) {
+        "invalid start byte"
+    } else if e.error_len().is_none() {
+        "unexpected end of data"
+    } else {
+        "invalid continuation byte"
+    };
+    let at = if n > 1 {
+        format!("bytes in position {i}-{}", i + n - 1)
+    } else {
+        format!("byte 0x{:02x} in position {i}", data[i])
+    };
+    format!("'utf-8' codec can't decode {at}: {reason}")
+}
+
 pub(crate) fn conflict_exit(conflicts: &[String]) -> Exit {
     fail(
         format!(
@@ -302,19 +327,7 @@ fn push_project(home: &Path, slug: &str) -> Res<()> {
     };
     let cannot = |e: String| fail(format!("cannot push local project: {e}"), 6);
     let original = fs::read(&document).map_err(|e| cannot(os_error(&e, Some(&document))))?;
-    let text = std::str::from_utf8(&original).map_err(|e| {
-        let (i, b) = (e.valid_up_to(), original[e.valid_up_to()]);
-        let reason = if matches!(b, 0x80..=0xc1 | 0xf5..=0xff) {
-            "invalid start byte"
-        } else if e.error_len().is_none() {
-            "unexpected end of data"
-        } else {
-            "invalid continuation byte"
-        };
-        cannot(format!(
-            "'utf-8' codec can't decode byte 0x{b:02x} in position {i}: {reason}"
-        ))
-    })?;
+    let text = std::str::from_utf8(&original).map_err(|e| cannot(decode_error(&original, &e)))?;
     let data = without_path(text).into_bytes();
     let etag = state["etag"].as_str().unwrap_or_default();
     let headers = [
@@ -662,9 +675,14 @@ mod tests {
             .into_iter()
             .map(|(rel, _)| rel)
             .collect();
+        let first = if cfg!(windows) {
+            ["a.md", "Z.md"]
+        } else {
+            ["Z.md", "a.md"]
+        };
         assert_eq!(
             rels,
-            ["Z.md", "a.md", "round-1", "round-1/x.md", "round-1.md"]
+            [first[0], first[1], "round-1", "round-1/x.md", "round-1.md"]
         );
         assert!(walk(&dir.join("missing")).unwrap().is_empty());
         fs::remove_dir_all(dir).unwrap();
@@ -813,5 +831,35 @@ mod tests {
             "factory.py: cannot push local project: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte\n"
         );
         fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn decode_error_matches_python() {
+        let cases: [(&[u8], &str); 5] = [
+            (b"\xe2\x82", "bytes in position 0-1: unexpected end of data"),
+            (
+                b"\xe2\x82x",
+                "bytes in position 0-1: invalid continuation byte",
+            ),
+            (
+                b"\xf0\x90\x80",
+                "bytes in position 0-2: unexpected end of data",
+            ),
+            (
+                b"\xe0\x80",
+                "byte 0xe0 in position 0: invalid continuation byte",
+            ),
+            (
+                b"a\xe2x",
+                "byte 0xe2 in position 1: invalid continuation byte",
+            ),
+        ];
+        for (data, want) in cases {
+            let e = std::str::from_utf8(data).unwrap_err();
+            assert_eq!(
+                decode_error(data, &e),
+                format!("'utf-8' codec can't decode {want}")
+            );
+        }
     }
 }
