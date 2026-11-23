@@ -43,7 +43,7 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    keep the old note until `trial settle` decides. A `skipped edits[i]: a trial is open for
    <scope> stage_notes.<stage>` line means that stage already has an open trial, and
    `skipped edits[i]: stage-note trials are paused after 2 reverts` means two trials reverted
-   and a person must run `trial resume <slug>` first.
+   and a person must run `trial resume <slug> <reason>` first, or ask an agent to run it with their words as the reason.
    An `uploaded retro run <run>` line means the findings and the cards' outcomes are on the
    `#/retros` page. A `retro upload failed` or `retro upload skipped` line on stderr means
    they are not; it never changes the exit code.
@@ -55,6 +55,6 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    A person decides each line on the dashboard Backlog decision page.
 
 Do the retro through these commands only, and edit neither the reply nor the run folder.
-Never run an autonomy command or `trial resume`, or decide a backlog line; a person decides each line.
+Never run an autonomy command or decide a backlog line; a person decides each line. Run `trial resume <slug> <reason>` only when a person asks, with their words as the reason.
 
 `schedules/retro.md` runs this each weekday from one host.
