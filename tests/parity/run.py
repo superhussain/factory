@@ -23,7 +23,7 @@ from support import FACTORY_BIN, ROOT, SKILL, http_fixture, isolated_env, snapsh
 import stub
 
 PYTHON = [sys.executable, "-B", str(SKILL / "runtime/factory.py")]
-TOOLS = ("gh", "paseo", "git")
+TOOLS = ("gh", "paseo", "git", "crontab")
 CASES = HERE / "cases"
 REQUEST_HEADERS = ("content-type", "if-match", "if-none-match", "cf-access-client-id", "cf-access-client-secret",
                    "user-agent", "authorization")
@@ -104,13 +104,31 @@ def now_stamps(data, start, end):
     return STAMP.sub(stamp, data)
 
 
+def place_skill(case, command, values):
+    """The command run from a copy of its runtime in the case's skill folder, beside the case's bundle.json."""
+    if "skill" not in case:
+        return command
+    skill = Path(expand(case["skill"], values))
+    (skill / "runtime").mkdir(parents=True)
+    if command == PYTHON:
+        for path in (SKILL / "runtime").glob("*.py"):
+            shutil.copy2(path, skill / "runtime")
+        command = PYTHON[:2] + [str(skill / "runtime" / "factory.py")]
+    else:
+        shutil.copy2(command[0], skill / "runtime" / "factory")
+        command = [str(skill / "runtime" / "factory")]
+    if "bundle" in case:
+        (skill / "bundle.json").write_text(expand(case["bundle"], values), encoding="utf-8")
+    return command
+
+
 def run_side(case, command):
     root = Path(tempfile.mkdtemp(prefix="parity-")).resolve()
     try:
         home, bin_dir, stub_dir = root / "home", root / "bin", root / "stub"
         routes = {}
         with http_fixture(routes) if "routes" in case else contextlib.nullcontext() as server:
-            values = {"home": str(home), "tmp": str(root), "today": time.strftime("%Y-%m-%d")}
+            values = {"home": str(home), "tmp": str(root), "today": time.strftime("%Y-%m-%d"), "root": str(ROOT)}
             if server:
                 values["api"] = server.origin
                 routes.update(routes_for(case, values))
@@ -130,6 +148,7 @@ def run_side(case, command):
             json_values = {name: json.dumps(value)[1:-1] for name, value in values.items()}
             for tool, entries in case["stubs"].items():
                 (stub_dir / f"{tool}.json").write_text(expand(json.dumps(entries), json_values), encoding="utf-8")
+            command = place_skill(case, command, values)
             env = isolated_env(home)
             # A side gets only the fake token from home/.env, so a real one never reaches the fixture or a diff.
             env.pop("FACTORY_ACCESS_CLIENT_ID", None)

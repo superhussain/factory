@@ -246,7 +246,7 @@ fn paseo_run(args: &[&str]) -> (i32, String) {
     crate::shared::proc::paseo_run(args)
 }
 
-fn pickup_scheduler() -> &'static str {
+pub(crate) fn pickup_scheduler() -> &'static str {
     #[cfg(test)]
     if let Some(s) = FAKES.with(|f| f.borrow().pickup_scheduler) {
         return s;
@@ -1503,7 +1503,7 @@ fn report_status(
 }
 
 /// (returncode, output) of a scheduler command; 127 when it is missing or times out.
-fn setup_run(argv: &[&str], stdin: Option<&str>) -> (i32, String) {
+pub(crate) fn setup_run(argv: &[&str], stdin: Option<&str>) -> (i32, String) {
     #[cfg(test)]
     if let Some(f) = fake!(setup_run) {
         return f(argv, stdin);
@@ -1561,14 +1561,14 @@ fn timer_path(scheduler: &str) -> PathBuf {
 }
 
 /// What the pickup timer runs: this binary, with the PATH its launchers need.
-struct TimerValues {
+pub(crate) struct TimerValues {
     argv: Vec<String>,
     path: String,
     log: String,
     exe: String,
 }
 
-fn timer_values(home: &Path) -> TimerValues {
+pub(crate) fn timer_values(home: &Path) -> TimerValues {
     let exe = exe();
     let mut folders = Vec::new();
     for route in setup_try(read_routes(home)).0.unwrap_or_default() {
@@ -1629,7 +1629,7 @@ fn timer_text(scheduler: &str, values: &TimerValues) -> String {
 }
 
 /// (installed, detail) for this host's pickup timer.
-fn timer_installed(scheduler: &str) -> (bool, String) {
+pub(crate) fn timer_installed(scheduler: &str) -> (bool, String) {
     if scheduler == "launchd" {
         let plist = timer_path(scheduler);
         if !plist.exists() {
@@ -1707,7 +1707,7 @@ fn pickup_line(line: &str) -> bool {
 }
 
 /// None when the installed timer runs what --install would write, else what differs.
-fn timer_drift(scheduler: &str, values: &TimerValues) -> Option<String> {
+pub(crate) fn timer_drift(scheduler: &str, values: &TimerValues) -> Option<String> {
     let want = &values.argv;
     let mut have_path = None;
     let have: Vec<String>;
