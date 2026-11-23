@@ -625,6 +625,156 @@
       },
       "exit": 2,
       "from": "tests/cli/test_factory.py::IdeaFilesTest.test_wrong_project_exits_2"
+    },
+    {
+      "id": "intake/idea-images-import-of-a-job-without-images-writes-nothing",
+      "argv": ["--home", "{home}", "idea-images", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"with images\",\"capture_id\":\"11111111-1111-4111-8111-111111111111\"}]}\n"
+        ],
+        "GET /api/idea-images/9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          "fake png one\n"
+        ],
+        "GET /api/idea-images/5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png": [
+          200,
+          "fake png two\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::IdeaImagesTest.test_import_of_a_job_without_images_writes_nothing"
+    },
+    {
+      "id": "intake/idea-images-import-stops-on-missing-or-corrupt-image-without-writing",
+      "argv": ["--home", "{home}", "idea-images", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"with images\",\"idea_images\":[\"9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png\",\"5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png\"],\"capture_id\":\"11111111-1111-4111-8111-111111111111\"}]}\n"
+        ],
+        "GET /api/idea-images/9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          "fake png one\n"
+        ]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_factory.py::IdeaImagesTest.test_import_stops_on_missing_or_corrupt_image_without_writing"
+    },
+    {
+      "id": "intake/idea-images-import-stops-on-missing-or-corrupt-image-without-writing-2",
+      "argv": ["--home", "{home}", "idea-images", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"with images\",\"idea_images\":[\"9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png\",\"5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png\"],\"capture_id\":\"11111111-1111-4111-8111-111111111111\"}]}\n"
+        ],
+        "GET /api/idea-images/9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          "fake png one\n"
+        ],
+        "GET /api/idea-images/5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png": [
+          200,
+          "fake png two"
+        ]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_factory.py::IdeaImagesTest.test_import_stops_on_missing_or_corrupt_image_without_writing"
+    },
+    {
+      "id": "intake/idea-images-import-refuses-projectless-and-malformed-metadata",
+      "argv": ["--home", "{home}", "idea-images", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":null,\"stage\":\"idea\",\"idea\":\"with images\",\"idea_images\":[\"9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png\",\"5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png\"],\"capture_id\":\"11111111-1111-4111-8111-111111111111\"}]}\n"
+        ],
+        "GET /api/idea-images/9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          "fake png one\n"
+        ],
+        "GET /api/idea-images/5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png": [
+          200,
+          "fake png two\n"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::IdeaImagesTest.test_import_refuses_projectless_and_malformed_metadata"
+    },
+    {
+      "id": "intake/idea-images-import-refuses-projectless-and-malformed-metadata-2",
+      "argv": ["--home", "{home}", "idea-images", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"with images\",\"idea_images\":[\"../escape.png\"],\"capture_id\":\"11111111-1111-4111-8111-111111111111\"}]}\n"
+        ],
+        "GET /api/idea-images/9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          "fake png one\n"
+        ],
+        "GET /api/idea-images/5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png": [
+          200,
+          "fake png two\n"
+        ]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::IdeaImagesTest.test_import_refuses_projectless_and_malformed_metadata"
+    },
+    {
+      "id": "intake/idea-images-import-preserves-a-differing-local-file-and-unresolved-remote",
+      "argv": ["--home", "{home}", "idea-images", "sample/021-local"],
+      "home": "intake-local",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"021-local\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"with images\",\"idea_images\":[\"9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png\",\"5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png\"],\"capture_id\":\"11111111-1111-4111-8111-111111111111\"}]}\n"
+        ],
+        "GET /api/idea-images/9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          "fake png one\n"
+        ],
+        "GET /api/idea-images/5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png": [
+          200,
+          "fake png two\n"
+        ]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::IdeaImagesTest.test_import_preserves_a_differing_local_file_and_unresolved_remote"
+    },
+    {
+      "id": "intake/idea-images-import-preserves-a-differing-local-file-and-unresolved-remote-2",
+      "argv": ["--home", "{home}", "idea-images", "sample/022-remote"],
+      "home": "intake-local",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"022-remote\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"with images\",\"idea_images\":[\"9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png\",\"5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png\"],\"capture_id\":\"11111111-1111-4111-8111-111111111111\"}]}\n"
+        ],
+        "GET /api/idea-images/9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          "fake png one\n"
+        ],
+        "GET /api/idea-images/5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png": [
+          200,
+          "fake png two\n"
+        ]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::IdeaImagesTest.test_import_preserves_a_differing_local_file_and_unresolved_remote"
     }
   ]
 }

@@ -934,8 +934,85 @@ pub fn stuck(_call: &Call) -> Res<()> {
     Err(not_ported("stuck"))
 }
 
-pub fn idea_images(_call: &Call) -> Res<()> {
+/// Push the imported files, then refuse when R2 does not hold them. Waits on the sync slice.
+fn push_imported(
+    _home: &Path,
+    _target: &str,
+    _slug: &str,
+    _job_id: &str,
+    _mine: &BTreeSet<String>,
+) -> Res<()> {
     Err(not_ported("idea-images"))
+}
+
+pub fn idea_images(call: &Call) -> Res<()> {
+    home_and(|home| idea_images_in(home, &call.args[0]))
+}
+
+fn idea_images_in(home: &Path, target: &str) -> Res<()> {
+    let (_, slug, job_id) = r2_target(target, true)?;
+    let job = import_job(home, target, &slug, &job_id)?;
+    if !truthy(job.get("idea_images")) {
+        println!("{target} has no pasted images; nothing to import");
+        return Ok(());
+    }
+    let Some(names) = import_names(&job["idea_images"], &IDEA_IMAGE_FILE) else {
+        return Err(fail(
+            format!("{job_id}'s idea_images on the board is malformed; nothing was imported"),
+            6,
+        ));
+    };
+    let folder = safe_job_folder(home, &slug, &job_id)?;
+    std::fs::create_dir_all(&folder).map_err(|e| fail(os_error(&e, Some(&folder)), 1))?;
+    let mut got: Vec<(String, Vec<u8>)> = Vec::new();
+    for name in &names {
+        let r = api(
+            home,
+            "GET",
+            &format!("/api/idea-images/{name}"),
+            None,
+            &[200, 404],
+            &[],
+        )?;
+        if r.status == 404 {
+            return Err(fail(
+                format!("idea image {name} is missing from the factory; nothing was written"),
+                5,
+            ));
+        }
+        if sha(&r.body) != name[..name.len() - ".png".len()] {
+            return Err(fail(
+                format!("idea image {name} does not match its name's SHA-256; nothing was written"),
+                5,
+            ));
+        }
+        got.push((format!("idea-image-{name}"), r.body));
+    }
+    let md: String = got
+        .iter()
+        .enumerate()
+        .map(|(i, (rel, _))| format!("![pasted image {}]({rel})\n", i + 1))
+        .collect();
+    got.push((
+        "idea-images.md".into(),
+        format!("Pasted image context for this idea:\n\n{md}").into_bytes(),
+    ));
+    for (rel, data) in &got {
+        let path = folder.join(rel);
+        let remote = format!("{}.remote", path.display());
+        if Path::new(&remote).exists() {
+            return Err(fail(format!("{remote} is unresolved; merge it into the file, delete the .remote, then retry"), 6));
+        }
+        if local_bytes(&path).is_some_and(|have| have != *data) {
+            return Err(fail(format!("{} differs from the factory's copy; nothing was overwritten. Inspect and delete it, then retry", path.display()), 6));
+        }
+    }
+    for (rel, data) in &got {
+        write_or_fail(&folder.join(rel), data)?;
+    }
+    println!("imported {} pasted image(s) into {target}", names.len());
+    let mine = got.into_iter().map(|(rel, _)| rel).collect();
+    push_imported(home, target, &slug, &job_id, &mine)
 }
 
 pub fn autonomy_cmd(_call: &Call) -> Res<()> {
@@ -961,6 +1038,19 @@ pub fn triage_cmd(_call: &Call) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deferred_stubs() {
+        let home = Path::new("/nonexistent");
+        let e = push_imported(home, "s/1-a", "s", "1-a", &BTreeSet::new()).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (
+                2,
+                "factory.py: idea-images is not ported to the Rust binary yet\n"
+            )
+        );
+    }
 
     #[test]
     fn empty_board() {
