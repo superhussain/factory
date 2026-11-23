@@ -2322,11 +2322,12 @@ function chatDecision(j) {
   return { text, title: text + (d.by ? ' by ' + d.by : '') + (d.at ? ' at ' + d.at : '') + (quote ? ': "' + quote + '"' : '') };
 }
 
-// The hold of each project's effective pipeline, filled by loadHoldConfigs. A project not loaded uses the defaults, as hold_config does.
+// The hold of each project's effective pipeline, filled by loadHoldConfigs. A project not yet settled shows no limit-based chip. A failed read settles to the defaults, as hold_config does.
 const HOLD_DEFAULT = { min_ideas: 5, max_wait_hours: 12 };
 const BACKPRESSURE_DEFAULT = 5;
 const holdConfigs = new Map();
 const backpressureConfigs = new Map();
+const holdSettled = new Set();
 // The epoch each slug's hold fetch started in. clearHoldConfigs moves the epoch, so an older fetch's result is dropped.
 const holdLoading = new Map();
 let holdEpoch = 0;
@@ -2334,6 +2335,7 @@ let holdEpoch = 0;
 function clearHoldConfigs() {
   holdConfigs.clear();
   backpressureConfigs.clear();
+  holdSettled.clear();
   holdLoading.clear();
   holdEpoch++;
 }
@@ -2363,6 +2365,10 @@ async function loadHoldConfigs() {
       }
     } catch {} finally {
       if (holdLoading.get(slug) === epoch) holdLoading.delete(slug);
+      if (epoch === holdEpoch && !holdSettled.has(slug)) {
+        holdSettled.add(slug);
+        set = true;
+      }
     }
   }));
   if (!set) return;
@@ -2387,7 +2393,7 @@ function backpressurePlain(j) {
 
 // The paused chip as { text, title } while the jobs waiting on you, in every project, reach the idea's project limit, or null.
 function backpressureState(j) {
-  if (!backpressurePlain(j)) return null;
+  if (!backpressurePlain(j) || !holdSettled.has(j.project)) return null;
   const waiting = jobs.filter(waitsOnYou).length;
   const limit = backpressureConfigs.get(j.project) ?? BACKPRESSURE_DEFAULT;
   if (waiting < limit) return null;
@@ -2409,6 +2415,7 @@ function batchState(j) {
   if (!batchRunnable(j)) return { text: 'Held for batching', title: HELD_TITLE };
   const starter = jobs.find((x) => batchStarter(x, j.project));
   if (starter) return { text: 'Batches behind ' + starter.id, title: 'Pickup launches ' + starter.id + ' next and batches this idea behind it. Settings, Pipeline, Batch follow-ups sets the numbers.' };
+  if (!holdSettled.has(j.project)) return { text: 'Held for batching', title: HELD_TITLE };
   const held = jobs.filter((x) => batchRunnable(x) && x.project === j.project);
   const { min_ideas: least, max_wait_hours: hours } = holdConfigs.get(j.project) || HOLD_DEFAULT;
   const age = (x) => /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(String(x.updated)) ? (Date.now() - Date.parse(x.updated)) / 3600000 : hours;
