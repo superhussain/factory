@@ -39,8 +39,10 @@ struct Timing {
     silence: Duration,
     max_backoff: Duration,
     connect_timeout: Duration,
-    /// How often the local Paseo agent list is read.
+    /// How often the local Paseo agent list is read while it holds a factory agent, at first.
     agent_poll: Duration,
+    /// The longest gap between reads of an agent list that has not changed.
+    agent_poll_max: Duration,
     /// How long after the last pass began a fallback pass is queued.
     fallback: Duration,
 }
@@ -53,6 +55,7 @@ const LIVE: Timing = Timing {
     max_backoff: Duration::from_secs(30),
     connect_timeout: Duration::from_secs(10),
     agent_poll: Duration::from_secs(15),
+    agent_poll_max: Duration::from_secs(60),
     fallback: Duration::from_secs(300),
 };
 
@@ -191,8 +194,9 @@ pub(crate) fn last_pass(home: &Path) -> Option<String> {
     Some(text.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-/// The ids of this host's running factory agents: Paseo agents titled `factory <id>`, as the
-/// documented launcher names them, since `paseo ls` shows no labels. None when paseo can't answer.
+/// The ids of this host's running factory agents: Paseo agents titled `factory <id>` or
+/// `babysit <id>`, as pickup's launches name them, since `paseo ls` shows no labels. None when
+/// paseo can't answer.
 fn running_agents() -> Option<Vec<String>> {
     // Tests that run the whole daemon never read this host's real agents.
     if cfg!(test) {
@@ -211,7 +215,8 @@ fn running_agents() -> Option<Vec<String>> {
     Some(factory_running(&agents))
 }
 
-/// The ids of the running agents in a `paseo ls --json` list whose title starts `factory `.
+/// The ids of the running agents in a `paseo ls --json` list titled `factory <id>` or
+/// `babysit <id>`.
 fn factory_running(agents: &serde_json::Value) -> Vec<String> {
     agents
         .as_array()
@@ -221,7 +226,7 @@ fn factory_running(agents: &serde_json::Value) -> Vec<String> {
             a["status"] == "running"
                 && a["name"]
                     .as_str()
-                    .is_some_and(|n| n.starts_with("factory "))
+                    .is_some_and(|n| n.starts_with("factory ") || n.starts_with("babysit "))
         })
         .filter_map(|a| a["id"].as_str().map(String::from))
         .collect()
@@ -420,9 +425,10 @@ fn read_loop(mut socket: Socket, t: &Timing, stop: Stop, tx: Sender<Event>) {
 
 /// Keeps one socket open, reconnecting with backoff, and calls `pass` once per burst.
 /// Each connect queues a `connect` pass. While connected it also queues a pass when an agent id
-/// `agents` listed at its last read is gone from the next read (read every `agent_poll`), when
+/// `agents` listed at its last read is gone from the next read, when
 /// `pass` continues with true (it launched a job, so the host may have room for another), and
-/// when no pass has begun for `fallback`. Returns when `pass` breaks, or when `stop` reports a
+/// when no pass has begun for `fallback`. While it cannot connect, it runs a fallback pass at
+/// start and then every `fallback`. Returns when `pass` breaks, or when `stop` reports a
 /// signal: then it logs `daemon: stopped (<signal>)` unless `pass` saw the signal first, and waits
 /// for the reader's close frame.
 #[allow(clippy::too_many_arguments)]
@@ -438,8 +444,13 @@ fn serve(
 ) {
     let mut attempt = 0;
     let mut last_start: Option<Instant> = None;
-    let mut running: Option<Vec<String>> = None;
+    // The factory agents the last read saw running. The list is read at start and after a pass
+    // that launched (watch), and again while it holds an agent: every agent_poll, doubling up to
+    // agent_poll_max while it stays the same. A read that finds none stops the reads.
+    let mut running: Vec<String> = Vec::new();
+    let mut watch = true;
     let mut polled: Option<Instant> = None;
+    let mut gap = t.agent_poll;
     loop {
         if let Some(signal) = stop() {
             log(&format!("daemon: stopped ({signal})"));
@@ -454,6 +465,15 @@ fn serve(
                     "connect failed: {reason}; retry in {:.1}s",
                     wait.as_secs_f64()
                 ));
+                // Without the socket, pickup still runs every fallback, and once at start, so
+                // takeover, schedules and the heartbeat keep going through an events outage.
+                if last_start.is_none_or(|at| at.elapsed() >= t.fallback) {
+                    last_start = Some(Instant::now());
+                    log("pickup pass (fallback)");
+                    if pass("fallback").is_break() {
+                        return;
+                    }
+                }
                 nap(wait, stop);
                 continue;
             }
@@ -470,21 +490,23 @@ fn serve(
                 wait_closed(&rx, t);
                 return;
             }
-            if polled.is_none_or(|at| at.elapsed() >= t.agent_poll) {
+            if (watch || !running.is_empty()) && polled.is_none_or(|at| at.elapsed() >= gap) {
                 polled = Some(Instant::now());
                 if let Some(now_running) = agents() {
-                    let gone = running
-                        .iter()
-                        .flatten()
-                        .find(|id| !now_running.contains(id))
-                        .cloned();
+                    watch = false;
+                    let gone = running.iter().find(|id| !now_running.contains(id)).cloned();
                     if let Some(id) = gone {
                         log(&format!("agent finished {id}"));
                         pending.get_or_insert_with(|| {
                             (Instant::now(), format!("agent finished {id}"))
                         });
                     }
-                    running = Some(now_running);
+                    gap = if now_running == running {
+                        (gap * 2).min(t.agent_poll_max)
+                    } else {
+                        t.agent_poll
+                    };
+                    running = now_running;
                 }
             }
             if pending.is_none() && last_start.is_some_and(|at| at.elapsed() >= t.fallback) {
@@ -521,6 +543,7 @@ fn serve(
                         }
                         ControlFlow::Continue(true) => {
                             pending = Some((Instant::now(), "room left".to_string()));
+                            (watch, polled, gap) = (true, None, t.agent_poll);
                         }
                         ControlFlow::Continue(false) => {}
                     }
@@ -742,6 +765,7 @@ mod tests {
         max_backoff: Duration::from_millis(100),
         connect_timeout: Duration::from_secs(1),
         agent_poll: Duration::from_millis(50),
+        agent_poll_max: Duration::from_millis(200),
         fallback: Duration::from_secs(60),
     };
 
@@ -949,6 +973,66 @@ mod tests {
         assert!(log_text(&home).contains(" agent finished a1\n"));
     }
 
+    /// The list is read at start and after a pass that launched; a read that finds no factory
+    /// agent stops the reads until the next launch.
+    #[test]
+    fn agent_reads_stop_when_none_run() {
+        let origin = quiet();
+        let home = home("agent-idle", &origin);
+        let t = Timing {
+            fallback: Duration::from_millis(600),
+            ..TEST
+        };
+        let reads = std::cell::Cell::new(0);
+        let agents = || {
+            reads.set(reads.get() + 1);
+            Some(Vec::new())
+        };
+        let seen = run_with(&home, &origin, 3, &t, &agents, &[1]);
+        assert_eq!(seen, ["connect", "room left", "fallback"]);
+        assert_eq!(reads.get(), 2);
+    }
+
+    /// While the same agents keep running, the gap between reads doubles up to agent_poll_max.
+    #[test]
+    fn agent_reads_back_off_while_nothing_changes() {
+        let origin = quiet();
+        let home = home("agent-backoff", &origin);
+        let t = Timing {
+            fallback: Duration::from_millis(1000),
+            ..TEST
+        };
+        let reads = std::cell::Cell::new(0);
+        let agents = || {
+            reads.set(reads.get() + 1);
+            Some(vec!["a1".to_string()])
+        };
+        let seen = run_with(&home, &origin, 2, &t, &agents, &[]);
+        assert_eq!(seen, ["connect", "fallback"]);
+        // Reads at 0, 50, 150, 350 ms, then every 200 ms: about 8 in 1 s, not 20.
+        assert!((5..=10).contains(&reads.get()), "{}", reads.get());
+    }
+
+    /// With no socket, a fallback pass runs at start and then every fallback.
+    #[test]
+    fn fallback_runs_while_the_socket_is_down() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        drop(listener);
+        let home = home("down", &origin);
+        let t = Timing {
+            fallback: Duration::from_millis(300),
+            ..TEST
+        };
+        let start = Instant::now();
+        assert_eq!(
+            run_with(&home, &origin, 2, &t, &|| None, &[]),
+            ["fallback", "fallback"]
+        );
+        assert!(start.elapsed() >= t.fallback);
+        assert!(log_text(&home).contains(" pickup pass (fallback)\n"));
+    }
+
     #[test]
     fn factory_running_keeps_running_factory_agents() {
         let list = serde_json::json!([
@@ -956,8 +1040,9 @@ mod tests {
             {"id": "a2", "name": "factory 2181-run-the-notes", "status": "idle"},
             {"id": "a3", "name": "explore the codebase", "status": "running"},
             {"id": "a4", "name": "factory 2230-board", "status": "closed"},
+            {"id": "a5", "name": "babysit 2224", "status": "running"},
         ]);
-        assert_eq!(factory_running(&list), ["a1"]);
+        assert_eq!(factory_running(&list), ["a1", "a5"]);
         assert!(factory_running(&serde_json::json!({})).is_empty());
     }
 
@@ -1135,7 +1220,7 @@ mod tests {
     fn handshake_403_logs_access_message() {
         let (origin, _) = fake(Some(403), |_| sleep(Duration::from_secs(1)));
         let home = home("403", &origin);
-        assert_eq!(run(&home, &origin, 1), ["connect"]);
+        assert_eq!(run(&home, &origin, 2), ["fallback", "connect"]);
         let message = access_message(&home.join(".env"));
         assert!(log_text(&home).contains(&format!("connect failed: {message}; retry in ")));
     }
@@ -1234,10 +1319,9 @@ mod tests {
             sleep(Duration::from_millis(200));
         });
         let home = home("secret", &origin);
-        assert_eq!(
-            run(&home, &origin, 3),
-            ["connect", "changed board.json", "connect"]
-        );
+        // The fallback pass at the failed first connect holds the connect pass to the minimum
+        // gap, so the board frame may join it: only the first two passes are fixed.
+        assert_eq!(run(&home, &origin, 3)[..2], ["fallback", "connect"]);
         let log = log_text(&home);
         assert!(log.contains("connect failed: ") && log.contains("frame ignored ("));
         assert!(!log.contains("test-secret"), "{log}");
