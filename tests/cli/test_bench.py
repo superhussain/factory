@@ -268,6 +268,8 @@ REVIEW = "VERDICT: CHANGES\n\n- `worker/export.js:44` drops the header row.\n"
 MODELS = {"claude-opus-5-5": {"input": 200000, "output": 20000, "cache_write": 30000, "cache_read": 999}}
 SUMMARY = "replayed {}, skipped {}, failed {} of 1 cases into opus-medium\n"
 RUNNING = "1018-add-y: running review-code ...\n"
+AGENTS = json.dumps({"factory-review-code": {"description": "Code reviewer.", "prompt": "Review the diff.\n",
+                                             "model": "opus"}})
 
 
 class BenchReplayCase(BenchCase):
@@ -295,7 +297,11 @@ class BenchReplayCase(BenchCase):
         (self.home / "projects").mkdir(parents=True)
         self.project = self.home / "projects/alpha.md"
         self.project.write_text("---\nrepo: example/alpha\n---\n", encoding="utf-8")
-        (self.home / "config.md").write_text("---\ndevice: host-a\n---\n", encoding="utf-8")
+        (self.home / "config.md").write_text(f"---\ndevice: host-a\nclaude_agents_dir: {self.root / 'agents'}\n---\n",
+                                             encoding="utf-8")
+        self.agent = self.root / "agents/factory-review-code.md"
+        self.agent.parent.mkdir()
+        self.agent.write_text("---\ndescription: Code reviewer.\nmodel: opus\n---\nReview the diff.\n", encoding="utf-8")
         (self.home / "paths.md").write_text(f"---\nalpha: {self.repo}\n---\n", encoding="utf-8")
         self.job = self.home / "jobs/alpha/1018-add-y"
         self.job.mkdir(parents=True)
@@ -364,9 +370,10 @@ class BenchReplayTest(BenchReplayCase):
         self.assertEqual(Path(call["cwd"]).name, "wt")
         session = call["argv"][call["argv"].index("--session-id") + 1]
         self.assertEqual(call["argv"], [
-            "-p", "--agent", "factory-review-code", "--session-id", session, "--permission-mode", "dontAsk",
-            "--allowedTools", "Read", "Grep", "Glob", "Write", "Bash(git:*)", "--add-dir", str(tmp / "job"),
-            "--model", "claude-opus-5-5"])
+            "-p", "--agent", "factory-review-code", "--agents", AGENTS, "--session-id", session,
+            "--setting-sources", "", "--permission-mode", "dontAsk", "--allowedTools", "Read", "Grep", "Glob", "Write",
+            "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)",
+            "--disallowedTools", "Bash(git *--out*)", "--add-dir", str(tmp / "job"), "--model", "claude-opus-5-5"])
         self.assertEqual(call["ceiling"], "0")
         self.assertEqual(call["stdin"], "\n".join([
             "Job id: 1018-add-y",
@@ -379,8 +386,8 @@ class BenchReplayTest(BenchReplayCase):
             "",
             "This is a reviewer benchmark replay. The pull request already merged; review it as if it were open. "
             f"There is no branch factory/1018-add-y: run git diff {self.base}...{self.head} wherever your "
-            "instructions name the branch diff. There is no pre-review.md, and Bash runs only git. "
-            "Write only Your file.\n"]))
+            "instructions name the branch diff. There is no pre-review.md, and Bash runs only git diff, git log, "
+            "git show and git blame. Write only Your file.\n"]))
         self.assertFalse(tmp.exists())
         self.assertEqual(len(self.git("worktree", "list").splitlines()), 1)
 
@@ -392,6 +399,17 @@ class BenchReplayTest(BenchReplayCase):
         self.assertNotIn("Project documents", call["stdin"])
         run_json = json.loads((self.arm / "1018-add-y/run.json").read_text(encoding="utf-8"))
         self.assertIsNone(run_json["model"])
+
+    def test_temp_root_resolved(self):
+        real, link = self.root / "real-tmp", self.root / "tmp-link"
+        real.mkdir()
+        link.symlink_to(real)
+        with patch.object(tempfile, "tempdir", str(link)):
+            self.assertEqual(self.replay("--role", "review-code")[0], 0)
+        [call] = self.calls()
+        add_dir = Path(call["argv"][call["argv"].index("--add-dir") + 1])
+        self.assertEqual(add_dir.parent.parent, real)
+        self.assertEqual(add_dir.parent, Path(call["cwd"]).parent)
 
     def test_score_reads_replay(self):
         self.assertEqual(self.replay("--role", "review-code")[0], 0)
@@ -497,6 +515,16 @@ class BenchReplayErrorTest(BenchReplayCase):
         empty.mkdir()
         os.environ["PATH"] = str(empty)
         self.assertFails(["--role", "review-code"], 4, "bench: replay needs claude on PATH")
+
+    def test_missing_agent(self):
+        for text in ("---\nmodel: opus\n---\nReview the diff.\n", None):
+            with self.subTest(text=text):
+                if text:
+                    self.agent.write_text(text, encoding="utf-8")
+                else:
+                    self.agent.unlink()
+                self.assertFails(["--role", "review-code"], 4,
+                                 f"bench: replay needs the factory-review-code agent at {self.agent}")
 
     def test_no_job_folder(self):
         (self.job / "spec.md").unlink()
