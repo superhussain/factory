@@ -260,7 +260,7 @@ export async function vapidAuthorization(env, endpoint) {
 // 410) drops its record. Every other failure is ignored, and nothing about a device is logged.
 async function sendOne(env, key, body) {
   const obj = await env.BUCKET.get(key);
-  if (!obj) return;
+  if (!obj) return false;
   const record = JSON.parse(await obj.text());
   const response = await fetch(record.endpoint, {
     method: "POST",
@@ -274,12 +274,15 @@ async function sendOne(env, key, body) {
     body: await encryptPayload(record, body),
   });
   if (response.status === 404 || response.status === 410) await env.BUCKET.delete(key);
+  return response.ok;
 }
 
-/** Sends the payload for events to every subscription under push/, in parallel. */
+/** Sends the payload for events to every subscription under push/, in parallel. Resolves to the
+ * number that answered 2xx. */
 export async function sendPushes(env, events) {
-  if (!events.length || !pushKey(env)) return;
+  if (!events.length || !pushKey(env)) return 0;
   const body = enc.encode(JSON.stringify(pushMessage(events)));
   const { objects } = await env.BUCKET.list({ prefix: "push/" });
-  await Promise.allSettled(objects.map((o) => sendOne(env, o.key, body)));
+  const results = await Promise.allSettled(objects.map((o) => sendOne(env, o.key, body)));
+  return results.filter((r) => r.status === "fulfilled" && r.value).length;
 }
