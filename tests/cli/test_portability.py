@@ -67,7 +67,7 @@ class PortabilityTest(IsolatedTestCase):
                     names = [node.module.split(".")[0]]
                 else:
                     continue
-                self.assertTrue(set(names) <= allowed | {"support", "test_factory", "test_suggest", "test_backlog_triage", "test_pr_state", "test_pickup", "test_autonomy_report"}, (path.name, names))
+                self.assertTrue(set(names) <= allowed | {"support", "test_factory", "test_suggest", "test_backlog_triage", "test_pr_state", "test_pickup", "test_autonomy_report", "run", "stub"}, (path.name, names))
 
     def test_exact_bundle_and_relative_installed_references(self):
         spec = importlib.util.spec_from_file_location("installer", ROOT / "tools/install.py")
@@ -111,13 +111,13 @@ class PortabilityTest(IsolatedTestCase):
         setup = (ROOT / ".github/actions/ci-setup/action.yml").read_text()
         self.assertIn("on: pull_request\n", workflow)
         self.assertNotIn("push", workflow)
-        self.assertEqual(workflow.count("actions/checkout@"), 4)
+        self.assertEqual(workflow.count("actions/checkout@"), 5)
         self.assertEqual(workflow.count("uses: ./.github/actions/ci-setup"), 4)
         self.assertIn("using: composite", setup)
         self.assertIn("actions/setup-python@", setup)
         self.assertIn("actions/setup-node@", setup)
-        self.assertEqual(workflow.count("runs-on: ubuntu-22.04"), 5)
-        self.assertEqual(workflow.count("runs-on:"), 5)
+        self.assertEqual(workflow.count("runs-on: ubuntu-22.04"), 6)
+        self.assertEqual(workflow.count("runs-on:"), 6)
         self.assertIn("python-version: '3.12'", setup)
         self.assertIn("node-version-file: .node-version", setup)
         pnpm_ref = "pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115"
