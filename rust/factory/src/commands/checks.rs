@@ -1,21 +1,24 @@
 //! checks, pr-state and pr-queue: reading a job's PR through gh.
 
-use std::collections::BTreeMap;
-use std::io::{self, Write};
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::{self, Read, Write};
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
+use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
+use ureq::Agent;
 
 use crate::cli::{not_ported, Call};
 use crate::shared::board::{dump_board, escalated, load_board, patch_job, read_board};
-use crate::shared::conf::{fm_get, frontmatter};
+use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::SLUG;
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::{is_link, read_text};
-use crate::shared::http::cas;
+use crate::shared::http::{cas, urlopen_error};
 use crate::shared::proc::{capture, which};
-use crate::shared::project::{project_files, r2_target};
+use crate::shared::project::{project_files, r2_target, sha};
 use crate::shared::py::{os_error, printable_line, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, DEFAULT};
 use crate::shared::pyre::{Flags, Pattern};
@@ -25,6 +28,19 @@ const CHECKS_USAGE: &str = "usage: checks <project-slug>/<job-id> [--timeout S]"
 const CHECKS_INTERVAL: f64 = 10.0;
 const CHECKS_REGISTER: u64 = 120;
 const HEAD_CHECKS_QUERY: &str = "query=query($o:String!,$r:String!,$sha:GitObjectID!){repository(owner:$o,name:$r){object(oid:$sha){...on Commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion startedAt} ...on StatusContext{context state createdAt}}}}}}}}";
+const PR_STATE_USAGE: &str = "usage: pr-state <project-slug>/<job-id> [--wait S]";
+const PR_STATE_FIELDS: &str =
+    "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName,headRefOid";
+const PR_REVIEWERS: &[&str] = &["OWNER", "MEMBER", "COLLABORATOR"];
+// gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
+const PR_GRAPHQL_QUERY: &str = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved path comments(first:100){nodes{authorAssociation body author{__typename login}}}}} latestReviews(first:100){nodes{author{__typename login}}}}}}";
+const PR_STATE_INTERVAL: f64 = 30.0;
+const HANDLED_CAP: u64 = 3;
+const BUILDKITE_API: &str = "https://api.buildkite.com/v2";
+const BUILDKITE_TAIL_LINES: usize = 80;
+const BUILDKITE_TAIL_CHARS: usize = 8000;
+const BUILDKITE_MAX_BYTES: usize = 16 * 1024 * 1024;
+const ENV_SECRET_MIN: usize = 12;
 const AUTONOMY_DAYS: i64 = 90;
 const AUTONOMY_CLASSES: &[&str] = &["internal", "visible"];
 const AUTONOMY_HOLD_NOTE: &str = "earned autonomy hold: a person reviews and merges";
@@ -34,6 +50,13 @@ static GH_PR_PARTS: Pattern = Pattern::new(r"https://github\.com/([\w.-]+)/([\w.
 static BRANCH: Pattern = Pattern::new(r"(?!-)[A-Za-z0-9._/-]{1,255}", Flags::NONE);
 static COMMIT: Pattern = Pattern::new(r"[0-9a-f]{40}", Flags::NONE);
 static NO_CHECKS: Pattern = Pattern::new(r"no (required )?checks reported", Flags::NONE);
+static HANDLED_SIG: Pattern = Pattern::new(r"(review|thread|check|conflict):[0-9a-f]{16}", Flags::NONE);
+static BUILDKITE_BUILD: Pattern = Pattern::new(
+    r"https://buildkite\.com/([A-Za-z0-9-]{1,100})/([A-Za-z0-9_-]{1,100})/builds/([0-9]{1,12})(?:#([0-9a-f-]{36}))?",
+    Flags::ASCII,
+);
+static BUILDKITE_JOB: Pattern = Pattern::new(r"[0-9a-f-]{36}", Flags::NONE);
+static BUILDKITE_STRIP: Pattern = Pattern::new(r"\x1b_bk;t=[0-9]+\x07|\x1b\[[0-9;?]*[A-Za-z]", Flags::NONE);
 
 #[derive(Clone)]
 pub(crate) enum GhCode {
@@ -515,8 +538,427 @@ pub fn checks_cmd(call: &Call) -> Res<()> {
     checks_loop(&mut host, &pr, timeout, &mut io::stdout(), &mut io::stderr())
 }
 
-pub fn pr_state_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("pr-state"))
+/// The branch a job's PR should target: the project base, or the archive repo's default branch for an archive PR.
+pub(crate) fn pr_base(h: &mut dyn Host, meta: &[(String, String)], pr: &str) -> Res<String> {
+    let repo = GH_PR.fullmatch(pr).unwrap()[1].to_string();
+    let archive = fm_get(meta, "archive").unwrap_or("");
+    let lower = repo.to_lowercase();
+    if archive.is_empty() || lower != archive.to_lowercase() || lower == fm_get(meta, "repo").unwrap_or("").to_lowercase() {
+        return Ok(fm_get(meta, "base").filter(|b| !b.is_empty()).unwrap_or("main").to_string());
+    }
+    let path = format!("repos/{repo}");
+    let answer = gh_answer(h.gh(&["api", &path, "--jq", ".default_branch"]), "gh api repos")?;
+    let base = strip(&answer);
+    if !BRANCH.is_full(base) {
+        return Err(fail("gh printed an unusable default_branch", 5));
+    }
+    Ok(base.to_string())
+}
+
+/// (checks, problem): the PR's checks as gh pr checks lists them and None, or [] and why the reply was
+/// unusable. gh's own no-checks reply is usable, as []. With required, only the checks that gate the merge.
+fn pr_checks(h: &mut dyn Host, pr: &str, required: bool) -> (Vec<Check>, Option<String>) {
+    let mut args = vec!["pr", "checks", pr];
+    if required {
+        args.push("--required");
+    }
+    args.extend(["--json", "name,bucket,link"]);
+    let Some(result) = h.gh(&args) else { return (vec![], Some("gh is not installed".into())) };
+    let code = match result.code {
+        GhCode::Timeout => return (vec![], Some("timed out after 60 seconds".into())),
+        GhCode::Exit(code) => code,
+    };
+    if let Ok(Value::Array(items)) = loads(&result.stdout) {
+        let checks: Option<Vec<Check>> = items
+            .iter()
+            .map(|c| {
+                Some(Check {
+                    name: c.get("name")?.as_str()?.into(),
+                    bucket: c.get("bucket")?.as_str()?.into(),
+                    link: c.get("link").and_then(Value::as_str).map(String::from),
+                })
+            })
+            .collect();
+        if let Some(checks) = checks {
+            return (checks, None);
+        }
+    }
+    if code == 1 && strip(&result.stdout).is_empty() && NO_CHECKS.search(&result.stderr).is_some() {
+        return (vec![], None);
+    }
+    (vec![], Some(if code != 0 { format!("exited {code} with no check list") } else { "printed no check list".into() }))
+}
+
+/// The signature babysit records for one PR item: its kind and a hash of what identifies it.
+pub(crate) fn handled_sig(kind: &str, parts: &[&str]) -> String {
+    format!("{kind}:{}", &sha(parts.join("\n").as_bytes())[..16])
+}
+
+/// The well-formed entries of a job's handled field, in board order.
+pub(crate) fn valid_handled(v: Option<&Value>) -> Map<String, Value> {
+    let Some(Value::Object(entries)) = v else { return Map::new() };
+    entries
+        .iter()
+        .filter_map(|(sig, e)| {
+            let (Value::Number(count), at) = (e.get("count")?, e.get("at")?) else { return None };
+            let digits = count.to_string();
+            let positive_int = !digits.contains(['.', 'e', 'E', '-']) && !digits.trim_start_matches('0').is_empty();
+            (HANDLED_SIG.is_full(sig) && positive_int && at.is_string()).then(|| (sig.clone(), json!({"count": count, "at": at})))
+        })
+        .collect()
+}
+
+/// The job's valid handled entries from the board, else {}.
+pub(crate) fn job_handled(home: &Path, job_id: &str) -> Res<Map<String, Value>> {
+    let data = read_board(home)?;
+    Ok(valid_handled(find_job(&data, job_id).and_then(|j| j.get("handled"))))
+}
+
+/// The body of one Buildkite GET, at most max + 1 bytes, or the problem line. The token goes only into its header.
+fn buildkite_get(url: &str, token: &str, max: usize) -> Result<Vec<u8>, String> {
+    static AGENT: OnceLock<Agent> = OnceLock::new();
+    let agent = AGENT.get_or_init(|| {
+        let tls = TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(RootCerts::PlatformVerifier).build();
+        Agent::config_builder()
+            .max_redirects(0)
+            .max_redirects_will_error(false)
+            .http_status_as_error(false)
+            .user_agent("factory")
+            .accept("")
+            .timeout_connect(Some(Duration::from_secs(30)))
+            .timeout_send_request(Some(Duration::from_secs(30)))
+            .timeout_recv_response(Some(Duration::from_secs(30)))
+            .tls_config(tls)
+            .build()
+            .new_agent()
+    });
+    let unreachable = |text: String| format!("can't reach Buildkite: {}", printable_line(&text.replace(token, "[token]"), 200));
+    let response = agent
+        .get(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/json")
+        .header("User-Agent", "factory")
+        .call()
+        .map_err(|e| unreachable(urlopen_error(&e)))?;
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        let scopes = if status == 401 || status == 403 { " (the token needs read_builds and read_build_logs)" } else { "" };
+        return Err(format!("Buildkite answered {status}{scopes}"));
+    }
+    let mut body = Vec::new();
+    response.into_body().into_reader().take(max as u64 + 1).read_to_end(&mut body).map_err(|e| unreachable(e.to_string()))?;
+    Ok(body)
+}
+
+/// ci_log for a failing check that links to a Buildkite build: the failed job's name and the stripped,
+/// redacted tail of its log, or a problem saying why there is none. Reads only the project's buildkite_org.
+fn buildkite_log(home: &Path, check: &Check, org: &str, api: &str, max: usize) -> Value {
+    let caps = BUILDKITE_BUILD.fullmatch(check.link.as_deref().unwrap_or("")).unwrap();
+    let (link_org, pipeline, number) = (&caps[1], &caps[2], &caps[3]);
+    let job_id = caps.get(4).map(|m| m.as_str());
+    let reading = |job: &str, tail: &str, problem: &str| json!({"check": check.name, "job": job, "tail": tail, "problem": problem});
+    if org.is_empty() {
+        return reading("", "", "set buildkite_org in the project frontmatter to read Buildkite logs");
+    }
+    if link_org != org {
+        let why = format!("the check links to Buildkite org {link_org}, not the project's buildkite_org {}", printable_line(org, 100));
+        return reading("", "", &why);
+    }
+    let env_file = home.join(".env");
+    let env = if env_file.exists() { read_conf(&env_file).unwrap_or_default() } else { Default::default() };
+    let token = env.get("BUILDKITE_API_TOKEN").map_or("", String::as_str);
+    if token.is_empty() {
+        return reading("", "", "set BUILDKITE_API_TOKEN in the factory .env to read Buildkite logs");
+    }
+    let get = |path: &str| -> Result<Map<String, Value>, String> {
+        let body = buildkite_get(&format!("{api}/organizations/{link_org}/pipelines/{pipeline}/builds/{number}{path}"), token, max)?;
+        let data = if body.len() <= max { std::str::from_utf8(&body).ok().and_then(|t| loads(t).ok()) } else { None };
+        match data {
+            Some(Value::Object(data)) => Ok(data),
+            _ => Err("Buildkite sent no usable log".into()),
+        }
+    };
+    let build = match get("") {
+        Ok(build) => build,
+        Err(problem) => return reading("", "", &problem),
+    };
+    let job = build
+        .get("jobs")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|j| j.get("id").and_then(Value::as_str).is_some_and(|id| BUILDKITE_JOB.is_full(id)))
+        .find(|j| match job_id {
+            Some(id) => j["id"] == id,
+            None => {
+                j.get("type").and_then(Value::as_str) == Some("script")
+                    && matches!(j.get("state").and_then(Value::as_str), Some("failed" | "timed_out"))
+            }
+        });
+    let Some(job) = job else { return reading("", "", &format!("no failed job in build {number}")) };
+    let log = get(&format!("/jobs/{}/log", job["id"].as_str().unwrap()));
+    let content = match log.as_ref().map(|l| l.get("content")) {
+        Ok(Some(Value::String(content))) => content,
+        Ok(_) => return reading("", "", "Buildkite sent no usable log"),
+        Err(problem) => return reading("", "", problem),
+    };
+    let mut text = BUILDKITE_STRIP.replace_all(content, |_| String::new()).replace("\r\n", "\n");
+    for value in env.values() {
+        if value.chars().count() >= ENV_SECRET_MIN {
+            text = text.replace(value.as_str(), "[redacted]");
+        }
+    }
+    let lines: Vec<&str> = text.trim_end_matches('\n').split('\n').map(|l| l.rsplit('\r').next().unwrap()).collect();
+    let tail = lines[lines.len().saturating_sub(BUILDKITE_TAIL_LINES)..].join("\n");
+    let chars = tail.chars().count();
+    let tail: String = tail.chars().skip(chars.saturating_sub(BUILDKITE_TAIL_CHARS)).collect();
+    reading(&str_or_empty(job.get("name")), &tail, "")
+}
+
+/// `int(digits)` as a JSON number of any size.
+fn py_int(digits: &str) -> Value {
+    let digits = digits.trim_start_matches('0');
+    loads(if digits.is_empty() { "0" } else { digits }).unwrap()
+}
+
+/// `str((item.get("author") or {}).get("login") or "")`.
+fn login(item: &Value) -> String {
+    str_or_empty(item.get("author").filter(|a| truthy(a)).and_then(|a| a.get("login")))
+}
+
+/// `(v or {}).get("nodes") or []`, as a list.
+fn nodes(v: Option<&Value>) -> &[Value] {
+    v.filter(|v| truthy(v)).and_then(|v| v.get("nodes")).and_then(Value::as_array).map_or(&[], Vec::as_slice)
+}
+
+/// Add one item to items or capped. False when it is a review or thread babysit already handled.
+fn note(handled: &Map<String, Value>, items: &mut Vec<Value>, capped: &mut Vec<Value>, kind: &str, label: &str, parts: &[&str]) -> bool {
+    let sig = handled_sig(kind, parts);
+    let seen = handled.get(&sig);
+    if (kind == "review" || kind == "thread") && seen.is_some() {
+        return false;
+    }
+    let count = seen.map_or(Value::from(0), |e| e["count"].clone());
+    let at_cap = count.as_f64().is_some_and(|n| n >= HANDLED_CAP as f64);
+    let entry = json!({"sig": sig, "label": printable_line(label, 100), "count": count});
+    let list = if at_cap { capped } else { items };
+    if !list.contains(&entry) {
+        list.push(entry);
+    }
+    true
+}
+
+/// One reading of the PR for a babysit session, with the next step it calls for. A handled review or thread
+/// is skipped, and a check or conflict worked HANDLED_CAP times reads as capped.
+pub(crate) fn pr_reading(h: &mut dyn Host, home: &Path, pr: &str, base: &str, org: &str, handled: &Map<String, Value>) -> Res<Value> {
+    let view = loads(&gh_pr_view(h, pr, &["--json", PR_STATE_FIELDS])?).ok().filter(Value::is_object);
+    let Some(view) = view else { return Err(fail("gh pr view printed no JSON object", 5)) };
+    let target = view.get("baseRefName").filter(|t| truthy(t)).cloned().unwrap_or_else(|| Value::from(base));
+    let Some(target) = target.as_str().filter(|t| BRANCH.is_full(t)).map(String::from) else {
+        return Err(fail("gh printed an unusable baseRefName", 5));
+    };
+    let (listed, problem) = pr_checks(h, pr, true);
+    if problem.is_some() && view.get("statusCheckRollup").is_some_and(truthy) {
+        return Err(fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5));
+    }
+    let buckets: BTreeSet<&str> = listed.iter().map(|c| c.bucket.as_str()).collect();
+    let checks = if buckets.contains("fail") || buckets.contains("cancel") {
+        "fail"
+    } else if buckets.contains("pending") {
+        "pending"
+    } else if !buckets.is_empty() {
+        "pass"
+    } else {
+        "none"
+    };
+    let head = match view.get("commits").filter(|c| truthy(c)) {
+        None | Some(Value::String(_)) => String::new(),
+        Some(Value::Array(commits)) => match commits.last() {
+            Some(last @ Value::Object(_)) => str_or_empty(last.get("committedDate")),
+            _ => String::new(),
+        },
+        Some(_) => return Err(fail("gh pr view printed commits that are not a list", 1)),
+    };
+    let new = parse_stamp(&head).is_some_and(|at| h.unix_time() - at < CHECKS_REGISTER as i64);
+
+    let parts: Vec<&str> = pr.split('/').collect();
+    let (o, r, n) = (format!("o={}", parts[3]), format!("r={}", parts[4]), format!("n={}", parts[6]));
+    let args = ["api", "graphql", "-f", PR_GRAPHQL_QUERY, "-f", &o, "-f", &r, "-F", &n, "--jq", ".data.repository.pullRequest"];
+    let pull = loads(&gh_answer(h.gh(&args), "gh api graphql")?).ok().filter(Value::is_object);
+    let Some(pull) = pull else { return Err(fail("gh api graphql printed no JSON object", 5)) };
+    let bot_logins: BTreeSet<String> = nodes(pull.get("latestReviews"))
+        .iter()
+        .filter(|r| r.get("author").filter(|a| truthy(a)).and_then(|a| a.get("__typename")).and_then(Value::as_str) == Some("Bot"))
+        .map(login)
+        .collect();
+    let author = login(&view);
+    let reviews: Vec<&Value> = view.get("latestReviews").and_then(Value::as_array).into_iter().flatten().filter(|r| r.is_object()).collect();
+    let replied = reviews
+        .iter()
+        .filter(|r| login(r) == author)
+        .map(|r| str_or_empty(r.get("submittedAt")))
+        .chain([head])
+        .max()
+        .unwrap();
+    let state_of = |r: &Value| r.get("state").and_then(Value::as_str).map(String::from);
+    let human: Vec<&Value> = reviews
+        .iter()
+        .copied()
+        .filter(|r| {
+            r.get("authorAssociation").and_then(Value::as_str).is_some_and(|a| PR_REVIEWERS.contains(&a))
+                && login(r) != author
+                && !bot_logins.contains(&login(r))
+        })
+        .collect();
+    let (mut items, mut capped) = (Vec::new(), Vec::new());
+
+    let mut unanswered = false;
+    for r in &human {
+        let at = str_or_empty(r.get("submittedAt"));
+        if matches!(state_of(r).as_deref(), Some("CHANGES_REQUESTED" | "COMMENTED")) && at > replied {
+            let who = login(r);
+            let body = str_or_empty(r.get("body"));
+            unanswered = note(handled, &mut items, &mut capped, "review", &who, &[&who, &body, &at]) || unanswered;
+        }
+    }
+    let decision = view.get("reviewDecision").filter(|d| truthy(d));
+    let approved = decision.and_then(Value::as_str) == Some("APPROVED")
+        || (decision.is_none()
+            && human.iter().any(|r| state_of(r).as_deref() == Some("APPROVED"))
+            && !human.iter().any(|r| state_of(r).as_deref() == Some("CHANGES_REQUESTED")));
+    let state = str_or_empty(view.get("state")).to_lowercase();
+    let in_queue = pull.get("isInMergeQueue") == Some(&Value::Bool(true)) || pull.get("mergeQueueEntry").is_some_and(Value::is_object);
+    let (mut bots, mut threads) = (0, 0);
+    for thread in nodes(pull.get("reviewThreads")) {
+        if !thread.is_object() || thread.get("isResolved").is_some_and(truthy) {
+            continue;
+        }
+        let comments: Vec<&Value> = nodes(thread.get("comments")).iter().filter(|c| c.is_object()).collect();
+        if comments.is_empty() || comments.iter().any(|c| login(c) == author) {
+            continue;
+        }
+        let first = comments[0];
+        let bot = first.get("author").filter(|a| truthy(a)).and_then(|a| a.get("__typename")).and_then(Value::as_str) == Some("Bot");
+        if !bot && !first.get("authorAssociation").and_then(Value::as_str).is_some_and(|a| PR_REVIEWERS.contains(&a)) {
+            continue;
+        }
+        let path = str_or_empty(thread.get("path"));
+        let label = if path.is_empty() { "a review thread" } else { &path };
+        if !note(handled, &mut items, &mut capped, "thread", label, &[&path, &str_or_empty(first.get("body"))]) {
+            continue;
+        }
+        if bot {
+            bots += 1;
+        } else {
+            threads += 1;
+        }
+    }
+    let queued = in_queue || view.get("autoMergeRequest").is_some_and(truthy);
+    let merge_state = view.get("mergeStateStatus").and_then(Value::as_str);
+    let conflict = merge_state == Some("DIRTY");
+    if conflict {
+        note(handled, &mut items, &mut capped, "conflict", &format!("a merge conflict with {target}"), &[&target]);
+    }
+    for c in &listed {
+        if c.bucket == "fail" || c.bucket == "cancel" {
+            note(handled, &mut items, &mut capped, "check", &c.name, &[&c.name]);
+        }
+    }
+    let sig_of = |i: &Value| i["sig"].as_str().unwrap().to_string();
+    let listed_sigs: BTreeSet<String> = items.iter().chain(&capped).map(sig_of).collect();
+    let mut rearm: Vec<String> = Vec::new();
+    for c in listed.iter().filter(|c| c.bucket == "pass" || c.bucket == "skipping") {
+        let sig = handled_sig("check", &[&c.name]);
+        if !rearm.contains(&sig) && handled.contains_key(&sig) && !listed_sigs.contains(&sig) {
+            rearm.push(sig);
+        }
+    }
+    if !matches!(merge_state, Some("DIRTY" | "UNKNOWN")) {
+        rearm.extend(handled.keys().filter(|s| s.starts_with("conflict:")).cloned());
+    }
+    let kinds: BTreeSet<String> = items.iter().map(|i| sig_of(i).split(':').next().unwrap().to_string()).collect();
+    let stacked = target != base;
+    let merge_queue = pull.get("isMergeQueueEnabled") == Some(&Value::Bool(true));
+    let mut behind = Value::Null;
+    let step = if state == "merged" || state == "closed" {
+        state.as_str()
+    } else if !capped.is_empty() {
+        "capped"
+    } else if kinds.contains("review") || kinds.contains("thread") {
+        "fix-reviews"
+    } else if kinds.contains("conflict") {
+        "rebase"
+    } else if kinds.contains("check") {
+        "fix-ci"
+    } else if checks == "pending" || (checks == "none" && new) {
+        "wait"
+    } else if !approved {
+        "needs-review"
+    } else if queued {
+        "wait"
+    } else if stacked {
+        "wait-base"
+    } else if merge_queue {
+        "merge"
+    } else {
+        let n = behind_by(h, pr, &target, view.get("headRefOid").unwrap_or(&Value::Null))?;
+        behind = Value::from(n);
+        if n != 0 { "update" } else { "merge" }
+    };
+    let failed = listed.iter().find(|c| {
+        (c.bucket == "fail" || c.bucket == "cancel") && c.link.as_deref().is_some_and(|l| BUILDKITE_BUILD.is_full(l))
+    });
+    let ci_log = match failed {
+        Some(c) if step == "fix-ci" => buildkite_log(home, c, org, BUILDKITE_API, BUILDKITE_MAX_BYTES),
+        _ => Value::Null,
+    };
+    let review = if unanswered { "changes" } else if approved { "approved" } else { "none" };
+    Ok(json!({
+        "pr": py_int(pr.rsplit('/').next().unwrap()), "state": state, "review": review, "bots": bots,
+        "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked, "base": target, "next": step,
+        "ci_log": ci_log, "threads": threads, "merge_queue": merge_queue, "items": items, "capped": capped,
+        "rearm": rearm, "behind": behind,
+    }))
+}
+
+/// The `while True` of pr-state: print one reading, re-reading every 30 seconds while next is wait or wait-base.
+fn pr_state_loop(
+    h: &mut dyn Host,
+    home: &Path,
+    pr: &str,
+    base: &str,
+    org: &str,
+    handled: &Map<String, Value>,
+    wait: u64,
+    out: &mut dyn Write,
+) -> Res<()> {
+    let start = h.monotonic();
+    loop {
+        let reading = pr_reading(h, home, pr, base, org, handled)?;
+        let elapsed = h.monotonic() - start;
+        if !matches!(reading["next"].as_str(), Some("wait" | "wait-base")) || elapsed >= wait as f64 {
+            writeln!(out, "{}", dumps(&reading, DEFAULT)).ok();
+            return Ok(());
+        }
+        h.sleep(PR_STATE_INTERVAL.min(wait as f64 - elapsed));
+    }
+}
+
+pub fn pr_state_cmd(call: &Call) -> Res<()> {
+    let args = &call.args[1..];
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    let wait = match args {
+        [] => 0,
+        [flag, value] if flag == "--wait" && small_int(value).is_some_and(|n| (1..=600).contains(&n)) => small_int(value).unwrap(),
+        _ => return Err(fail(format!("--wait takes one value from 1 to 600 seconds. {PR_STATE_USAGE}"), 2)),
+    };
+    let pr = board_pr(&home, &slug, &job_id, true)?;
+    let meta = project_meta(&home, &slug)?;
+    let mut host = System::new();
+    let base = pr_base(&mut host, &meta, &pr)?;
+    let handled = job_handled(&home, &job_id)?;
+    let org = fm_get(&meta, "buildkite_org").unwrap_or("");
+    pr_state_loop(&mut host, &home, &pr, &base, org, &handled, wait, &mut io::stdout())
 }
 
 pub fn pr_queue_cmd(_call: &Call) -> Res<()> {
@@ -919,5 +1361,221 @@ mod tests {
         }
         let mut fake = Fake::default().on(&["pr", "view"], vec![good]).on(&["api"], vec![ok("1\n")]);
         assert_eq!(pr_behind(&mut fake, PR).ok().unwrap(), (1, old(), "main".to_string()));
+    }
+
+    const SPR: &str = "https://github.com/example/sample/pull/44";
+    const HEAD: &str = "2026-01-02T10:00:00Z";
+    const PARENT: &str = "factory/041-sample-api";
+
+    /// test_pr_state's `view()` with the given fields replaced.
+    fn state_view(changes: Value) -> Option<GhOut> {
+        let mut view = json!({"state": "OPEN", "baseRefName": "main", "headRefOid": "a".repeat(40),
+            "reviewDecision": "APPROVED", "latestReviews": [], "mergeStateStatus": "CLEAN", "autoMergeRequest": null,
+            "author": {"login": "pr-owner"}, "statusCheckRollup": [],
+            "commits": [{"committedDate": "2026-01-01T09:00:00Z"}, {"committedDate": HEAD}]});
+        for (k, v) in changes.as_object().unwrap() {
+            view[k] = v.clone();
+        }
+        ok(&view.to_string())
+    }
+
+    fn buckets(buckets: &[&str]) -> Option<GhOut> {
+        let list: Vec<Value> = buckets.iter().enumerate().map(|(i, b)| json!({"bucket": b, "name": format!("check-{i}")})).collect();
+        ok(&Value::from(list).to_string())
+    }
+
+    fn state_fake(views: Vec<Option<GhOut>>, checks: Vec<Option<GhOut>>) -> Fake {
+        let graph = json!({"isInMergeQueue": false, "isMergeQueueEnabled": false, "mergeQueueEntry": null,
+            "reviewThreads": {"nodes": []}, "latestReviews": {"nodes": []}});
+        let compare = format!("repos/example/sample/compare/main...{}", "a".repeat(40));
+        Fake::default()
+            .on(&["pr", "view"], views)
+            .on(&["pr", "checks"], checks)
+            .on(&["api", "graphql"], vec![ok(&graph.to_string())])
+            .on(&["api", &compare], vec![ok("0\n")])
+    }
+
+    /// (exit code, the one printed reading) of pr_state_loop.
+    fn run_state(fake: &mut Fake, wait: u64) -> (i32, Value) {
+        let mut out = Vec::new();
+        let code = pr_state_loop(fake, Path::new("/nonexistent"), SPR, "main", "example-org", &Map::new(), wait, &mut out)
+            .map_or_else(|e| e.code, |()| 0);
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.matches('\n').count(), 1);
+        (code, loads(&text).unwrap())
+    }
+
+    fn views(fake: &Fake) -> usize {
+        fake.calls.iter().filter(|c| c[1] == "view").count()
+    }
+
+    // PrStateTest.test_no_checks_waits_while_the_head_commit_is_new
+    #[test]
+    fn new_head_commit_waits() {
+        for (age, step) in [(60, "wait"), (120, "merge")] {
+            let mut fake = state_fake(vec![state_view(json!({}))], vec![buckets(&[])]);
+            fake.unix = parse_stamp(HEAD).unwrap() + age;
+            let reading = pr_reading(&mut fake, Path::new("/nonexistent"), SPR, "main", "", &Map::new()).ok().unwrap();
+            assert_eq!(reading["next"], step);
+        }
+    }
+
+    // PrStateTest.test_wait_rereads_every_30_seconds_until_next_changes
+    #[test]
+    fn wait_rereads_every_30_seconds() {
+        let mut fake = state_fake(vec![state_view(json!({}))], vec![buckets(&["pending"]), buckets(&["pending"]), buckets(&["pass"])]);
+        let (code, reading) = run_state(&mut fake, 540);
+        assert_eq!((code, reading["next"].as_str()), (0, Some("merge")));
+        assert_eq!((fake.now, views(&fake)), (60.0, 3));
+    }
+
+    // PrStateTest.test_wait_rereads_a_stacked_pr_until_it_is_retargeted
+    #[test]
+    fn wait_rereads_stacked_pr() {
+        let stacked = state_view(json!({"baseRefName": PARENT}));
+        let mut fake = state_fake(vec![stacked.clone(), stacked, state_view(json!({}))], vec![buckets(&["pass"])]);
+        let (code, reading) = run_state(&mut fake, 540);
+        assert_eq!((code, reading["stacked"].clone(), reading["next"].as_str()), (0, Value::Bool(false), Some("merge")));
+        assert_eq!((fake.now, views(&fake)), (60.0, 3));
+    }
+
+    // PrStateTest.test_wait_stops_at_its_deadline
+    #[test]
+    fn wait_stops_at_deadline() {
+        let mut fake = state_fake(vec![state_view(json!({}))], vec![buckets(&["pending"])]);
+        let (code, reading) = run_state(&mut fake, 45);
+        assert_eq!((code, reading["next"].as_str(), fake.now), (0, Some("wait"), 45.0));
+    }
+
+    // PrStateTest.test_without_wait_a_wait_reading_prints_at_once
+    #[test]
+    fn no_wait_prints_at_once() {
+        let mut fake = state_fake(vec![state_view(json!({}))], vec![buckets(&["pending"])]);
+        let (code, reading) = run_state(&mut fake, 0);
+        assert_eq!((code, reading["next"].as_str(), fake.now, fake.calls.len()), (0, Some("wait"), 0.0, 3));
+    }
+
+    // LINT in test_pr_state.py
+    #[test]
+    fn handled_sig_value() {
+        assert_eq!(handled_sig("check", &["lint"]), "check:da966368ea663ea5");
+    }
+
+    const TOKEN: &str = "bk-synthetic-token-0001";
+    const BUILD: &str = "/v2/organizations/example-org/pipelines/sample-web/builds/812";
+    const JOB_ID: &str = "0190a1b2-0000-4000-8000-000000000001";
+    const LINK: &str = "https://buildkite.com/example-org/sample-web/builds/812";
+
+    fn leak(s: String) -> &'static str {
+        Box::leak(s.into_boxed_str())
+    }
+
+    fn build_jobs(jobs: &[(&str, &str, &str)]) -> &'static str {
+        let jobs: Vec<Value> = jobs
+            .iter()
+            .enumerate()
+            .map(|(i, (kind, state, name))| json!({"id": format!("0190a1b2-0000-4000-8000-00000000000{}", i + 1), "type": kind, "state": state, "name": name}))
+            .collect();
+        leak(json!({"jobs": jobs}).to_string())
+    }
+
+    fn bk_home(name: &str, env: &str) -> std::path::PathBuf {
+        let home = crate::shared::fs::temp_dir(name);
+        if !env.is_empty() {
+            std::fs::write(home.join(".env"), env).unwrap();
+        }
+        home
+    }
+
+    fn bk_check(link: &str) -> Check {
+        Check { name: "buildkite/sample-web".into(), bucket: "fail".into(), link: Some(link.into()) }
+    }
+
+    // PrStateTest.test_fix_ci_reads_the_failed_buildkite_job_log_tail
+    #[test]
+    fn buildkite_tail() {
+        let home = bk_home("bk-tail", &format!("BUILDKITE_API_TOKEN={TOKEN}\nSAMPLE_SECRET=sample-secret-value-0002\n"));
+        let mut lines: Vec<String> = (0..100).map(|i| format!("\x1b_bk;t=17000000{i:02}000\x07\x1b[32mstep {i}\x1b[0m")).collect();
+        lines.push("progress 10%\rprogress 100%".into());
+        lines.push(format!("using {TOKEN} and sample-secret-value-0002"));
+        lines.push("error  'unused' is defined but never used".into());
+        let log = lines.join("\r\n") + "\r\n";
+        let log_body = leak(json!({"url": "", "content": log, "size": log.len()}).to_string());
+        let (origin, seen) = crate::shared::http::tests::serve(vec![
+            (200, build_jobs(&[("script", "failed", "Lint frontend")]), vec![]),
+            (200, log_body, vec![]),
+        ]);
+        let got = buildkite_log(&home, &bk_check(&format!("{LINK}#{JOB_ID}")), "example-org", &format!("{origin}/v2"), BUILDKITE_MAX_BYTES);
+        let mut tail: Vec<String> = (23..100).map(|i| format!("step {i}")).collect();
+        tail.extend(["progress 100%".into(), "using [redacted] and [redacted]".into(), "error  'unused' is defined but never used".into()]);
+        assert_eq!(got, json!({"check": "buildkite/sample-web", "job": "Lint frontend", "tail": tail.join("\n"), "problem": ""}));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.iter().map(|s| s.path.as_str()).collect::<Vec<_>>(), [BUILD.to_string(), format!("{BUILD}/jobs/{JOB_ID}/log")]);
+        for s in seen.iter() {
+            let bearer = format!("Bearer {TOKEN}");
+            assert_eq!((s.header("Authorization"), s.header("Accept"), s.header("User-Agent")), (Some(bearer.as_str()), Some("application/json"), Some("factory")));
+        }
+        assert!(!got.to_string().contains(TOKEN));
+    }
+
+    // PrStateTest.test_fix_ci_picks_the_first_failed_buildkite_job
+    #[test]
+    fn buildkite_first_failed_job() {
+        let home = bk_home("bk-first", &format!("BUILDKITE_API_TOKEN={TOKEN}\n"));
+        let second = "0190a1b2-0000-4000-8000-000000000003";
+        let jobs = build_jobs(&[("waiter", "failed", ""), ("script", "passed", "Unit tests"), ("script", "timed_out", "Lint frontend"), ("script", "failed", "Type check")]);
+        let log = leak(json!({"content": "x".repeat(9000) + "\n"}).to_string());
+        let (origin, seen) = crate::shared::http::tests::serve(vec![(200, jobs, vec![]), (200, log, vec![])]);
+        let got = buildkite_log(&home, &bk_check(LINK), "example-org", &format!("{origin}/v2"), BUILDKITE_MAX_BYTES);
+        assert_eq!(got, json!({"check": "buildkite/sample-web", "job": "Lint frontend", "tail": "x".repeat(8000), "problem": ""}));
+        let paths: Vec<String> = seen.lock().unwrap().iter().map(|s| s.path.clone()).collect();
+        assert_eq!(paths, [BUILD.to_string(), format!("{BUILD}/jobs/{second}/log")]);
+        let (origin, seen) = crate::shared::http::tests::serve(vec![(200, build_jobs(&[("script", "passed", "Unit tests")]), vec![])]);
+        let got = buildkite_log(&home, &bk_check(LINK), "example-org", &format!("{origin}/v2"), BUILDKITE_MAX_BYTES);
+        assert_eq!(got["problem"], "no failed job in build 812");
+        assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    // PrStateTest.test_buildkite_problems_still_print_the_reading
+    #[test]
+    fn buildkite_problems() {
+        let problem = |name: &str, env: &str, replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>| {
+            let home = bk_home(name, env);
+            let origin = if replies.is_empty() {
+                let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+                let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+                drop(listener);
+                origin
+            } else {
+                crate::shared::http::tests::serve(replies).0
+            };
+            let got = buildkite_log(&home, &bk_check(&format!("{LINK}#{JOB_ID}")), "example-org", &format!("{origin}/v2"), BUILDKITE_MAX_BYTES);
+            assert!(!got.to_string().contains(TOKEN));
+            assert_eq!((got["job"].as_str(), got["tail"].as_str()), (Some(""), Some("")));
+            got["problem"].as_str().unwrap().to_string()
+        };
+        let env = leak(format!("BUILDKITE_API_TOKEN={TOKEN}\n"));
+        assert_eq!(problem("bk-none", "", vec![]), "set BUILDKITE_API_TOKEN in the factory .env to read Buildkite logs");
+        assert_eq!(problem("bk-401", env, vec![(401, "{}", vec![])]), "Buildkite answered 401 (the token needs read_builds and read_build_logs)");
+        assert_eq!(problem("bk-302", env, vec![(302, "{}", vec![("Location", "https://example.invalid/login")])]), "Buildkite answered 302");
+        assert_eq!(problem("bk-text", env, vec![(200, "not json", vec![])]), "Buildkite sent no usable log");
+        let jobs = build_jobs(&[("script", "failed", "Lint frontend")]);
+        assert_eq!(problem("bk-size", env, vec![(200, jobs, vec![]), (200, r#"{"size": 0}"#, vec![])]), "Buildkite sent no usable log");
+        let down = problem("bk-down", env, vec![]);
+        assert!(down.starts_with("can't reach Buildkite: "), "{down}");
+        #[cfg(target_os = "linux")]
+        assert_eq!(down, "can't reach Buildkite: <urlopen error [Errno 111] Connection refused>");
+    }
+
+    // PrStateTest.test_a_buildkite_log_over_the_read_cap_is_no_usable_log
+    #[test]
+    fn buildkite_read_cap() {
+        let home = bk_home("bk-cap", &format!("BUILDKITE_API_TOKEN={TOKEN}\n"));
+        let build = leak(json!({"jobs": [{"id": JOB_ID}]}).to_string());
+        let log = leak(json!({"content": "x".repeat(100)}).to_string());
+        let (origin, seen) = crate::shared::http::tests::serve(vec![(200, build, vec![]), (200, log, vec![])]);
+        let got = buildkite_log(&home, &bk_check(&format!("{LINK}#{JOB_ID}")), "example-org", &format!("{origin}/v2"), 64);
+        assert_eq!((got["problem"].as_str(), got["tail"].as_str()), (Some("Buildkite sent no usable log"), Some("")));
+        assert_eq!(seen.lock().unwrap().len(), 2);
     }
 }
