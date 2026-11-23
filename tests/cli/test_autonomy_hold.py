@@ -85,8 +85,9 @@ class AutonomyHoldTest(IsolatedTestCase):
         self.assertEqual(self.run_pass(board(shipping()), dry=True),
                          ("would hold 1031-add-w alpha PR #631 for a person\n", []))
 
-    def run_restore(self, *args, tty=True, typed="alpha visible"):
-        with http_fixture({"GET /projects.json": (200, [{"slug": "alpha"}]), "/api/board": (200, board())}) as server:
+    def run_restore(self, *args, tty=True, typed="alpha visible", data=None):
+        with http_fixture({"GET /projects.json": (200, [{"slug": "alpha"}]),
+                           "/api/board": (200, data or board())}) as server:
             (self.home / "config.md").write_text(f"---\napi_url: {server.origin}\n---\n", encoding="utf-8")
             with patch.object(factory.sys.stdin, "isatty", return_value=tty), \
                     patch("builtins.input", return_value=typed) as asked, \
@@ -124,3 +125,14 @@ class AutonomyHoldTest(IsolatedTestCase):
                          (2, "factory.py: autonomy restore needs an interactive terminal; a human runs it\n", []))
         code, _, _, puts = self.run_restore("alpha", "visible", typed="alpha")
         self.assertEqual((code, puts), (2, []))
+
+    def test_restore_keeps_malformed_entries(self):
+        kept = {"alpha/internal": "soon", "Bad Key": "2026-01-01T00:00:00Z"}
+        with patch.object(factory, "now", return_value="2026-11-20T10:00:00Z"):
+            code, _, _, puts = self.run_restore("alpha", "visible", data=board(restored=kept))
+        self.assertEqual((code, len(puts)), (0, 1))
+        self.assertEqual(puts[0]["autonomy"]["restored"], {**kept, "alpha/visible": "2026-11-20T10:00:00Z"})
+        code, err, asked, puts = self.run_restore("alpha", "visible", data=board(restored="bad"))
+        self.assertEqual((code, err, puts),
+                         (3, "factory.py: autonomy.restored is not a map; nothing was changed\n", []))
+        asked.assert_not_called()
