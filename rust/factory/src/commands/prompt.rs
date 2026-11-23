@@ -17,7 +17,7 @@ use crate::shared::exit::{fail, Exit, Res};
 use crate::shared::fs::{
     contained, io_fail, is_link, make_job_temp, mkdir_private, normpath, write_atomic,
 };
-use crate::shared::home::{runtime_py, skill_root};
+use crate::shared::home::{runtime_path, skill_root};
 use crate::shared::http::api;
 use crate::shared::project::{project_files, r2_target};
 use crate::shared::py::repr;
@@ -603,7 +603,7 @@ pub fn prompt_cmd(call: &Call) -> Res<()> {
         _ => job_id.clone(),
     };
     let references = skill_root()?.join("references");
-    let runtime = runtime_py()?;
+    let runtime = runtime_path()?;
     let temp = make_job_temp(&slug, &job_id)?;
     let mut lines = vec![
         format!("Job id: {job_id}"),

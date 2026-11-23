@@ -178,6 +178,9 @@ def run_side(case, command):
             # skill root is two folders up.
             runtime = os.path.realpath(command[-1])
             data = data.replace(os.path.join(os.path.dirname(runtime), "factory.py").encode(), b"{runtime}")
+            if "skill" in case:
+                # In a skill folder both sides sit in runtime/, so the binary beside factory.py reads {bin}.
+                data = data.replace(os.path.join(os.path.dirname(runtime), "factory").encode(), b"{bin}")
             data = data.replace(runtime.encode(), b"{runtime}").replace(os.path.abspath(command[-1]).encode(), b"{runtime}")
             data = data.replace(os.path.dirname(os.path.dirname(runtime)).encode(), b"{skill}")
             data = data.replace(str(home).encode(), b"{home}").replace(str(root).encode(), b"{tmp}")
