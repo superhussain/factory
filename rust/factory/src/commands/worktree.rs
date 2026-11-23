@@ -7,19 +7,27 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
-use crate::cli::{not_ported, Call};
+use crate::cli::Call;
 use crate::shared::conf::{fm_get, frontmatter};
-use crate::shared::exit::{fail, Res};
-use crate::shared::fs::resolve;
+use crate::shared::exit::{exit, fail, Res};
+use crate::shared::fs::{is_link, resolve};
+use crate::shared::home::device_name;
+use crate::shared::http::api;
 use crate::shared::proc::{capture, git, git_ok, origin_git, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
 use crate::shared::py::{is_space, os_error, strip};
-use crate::shared::pyjson::loads;
+use crate::shared::pyjson::{dumps, loads, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
 
 static REPO_PATH: Pattern = Pattern::new(r"[A-Za-z0-9_./-]{1,200}", Flags::ASCII);
+static COMMIT: Pattern = Pattern::new(r"[0-9a-f]{40}", Flags::ASCII);
+static GH_PR_PARTS: Pattern = Pattern::new(
+    r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})",
+    Flags::ASCII,
+);
+static USE_FLAG: Pattern = Pattern::new(r", use --\w+ to .*", Flags::NONE);
 static PREBUILD_DIR: Pattern = Pattern::new(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*", Flags::NONE);
 // Checked at the worktree root, every folder between it and a listed folder, and the listed folder itself. The
 // *mise* globs cover every mise config, rc, lock and conf.d name, such as .miserc.toml and .config/miserc.toml.
@@ -40,6 +48,11 @@ const PREBUILD_DIR_FILES: &[&str] = &[
 ];
 const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
 const PREBUILD_TIMEOUT: Duration = Duration::from_secs(600);
+const LSOF_FALLBACKS: &[&str] = &["/usr/sbin/lsof", "/usr/bin/lsof"];
+const GIT_TIMEOUT: Duration = Duration::from_secs(20);
+const GH_TIMEOUT: Duration = Duration::from_secs(60);
+const STOP_WAIT: Duration = Duration::from_secs(5);
+const STOP_POLL: Duration = Duration::from_millis(500);
 
 fn words(s: &str) -> impl Iterator<Item = &str> {
     s.split(is_space).filter(|w| !w.is_empty())
@@ -531,8 +544,658 @@ pub(crate) fn prebuild(home: &Path, slug: &str, job_id: &str, wt: &Path) -> Res<
     prebuild_with(home, slug, job_id, wt, which("mise"), which("pnpm")).map(drop)
 }
 
-pub fn cleanup(_call: &Call) -> Res<()> {
-    Err(not_ported("cleanup"))
+/// `lsof_exe`: found, else the first fallback this account can run.
+fn lsof_exe_with(found: Option<PathBuf>, fallbacks: &[&Path]) -> Option<PathBuf> {
+    found.or_else(|| {
+        fallbacks
+            .iter()
+            .find(|p| runnable(p))
+            .map(|p| p.to_path_buf())
+    })
+}
+
+fn runnable(p: &Path) -> bool {
+    let Ok(meta) = fs::metadata(p) else {
+        return false;
+    };
+    #[cfg(unix)]
+    return std::os::unix::fs::PermissionsExt::mode(&meta.permissions()) & 0o111 != 0;
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        true
+    }
+}
+
+/// PIDs whose cwd is inside wt. Windows can't read another process's cwd, so it matches command lines instead,
+/// which misses a process started with a relative path.
+#[cfg(windows)]
+fn worktree_pids(wt: &str, _proc_root: &Path, _lsof: Option<&Path>) -> Vec<u32> {
+    let out = crate::shared::proc::run(&[
+        "powershell",
+        "-NoProfile",
+        "-Command",
+        "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)\" }",
+    ]);
+    // The worktree path must end at a separator, quote, space, or the end, so 001-x doesn't match 001-xy.
+    let needle = wt.to_lowercase();
+    let matches = |line: &str| {
+        let line = line.to_lowercase();
+        line.match_indices(&needle).any(|(i, _)| {
+            line[i + needle.len()..]
+                .chars()
+                .next()
+                .is_none_or(|c| matches!(c, '\\' | '/' | '"' | '\'') || is_space(c))
+        })
+    };
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let (mut parents, mut hits) = (std::collections::HashMap::new(), Vec::new());
+    for line in crate::shared::py::splitlines(&out, false) {
+        let parts: Vec<&str> = line.splitn(3, '\t').collect();
+        if parts.len() == 3 && digits(parts[0]) {
+            let Ok(pid) = parts[0].parse::<u32>() else {
+                continue;
+            };
+            parents.insert(
+                pid,
+                if digits(parts[1]) {
+                    parts[1].parse().unwrap_or(0)
+                } else {
+                    0
+                },
+            );
+            if matches(parts[2]) {
+                hits.push(pid);
+            }
+        }
+    }
+    // Skip this process and every ancestor, so a launcher and its calling shell survive.
+    let (mut ancestors, mut pid) = (std::collections::HashSet::new(), std::process::id());
+    while pid != 0 && ancestors.insert(pid) {
+        pid = parents.get(&pid).copied().unwrap_or(0);
+    }
+    hits.into_iter()
+        .filter(|p| !ancestors.contains(p))
+        .collect()
+}
+
+/// PIDs whose cwd is inside wt, from proc_root, else from lsof.
+#[cfg(not(windows))]
+fn worktree_pids(wt: &str, proc_root: &Path, lsof: Option<&Path>) -> Vec<u32> {
+    let sep = format!("{wt}{}", std::path::MAIN_SEPARATOR);
+    let inside = |path: &str| path == wt || path.starts_with(&sep);
+    let mut found = Vec::new();
+    if proc_root.is_dir() {
+        for entry in fs::read_dir(proc_root).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.bytes().all(|b| b.is_ascii_digit()) {
+                continue;
+            }
+            let Ok(pid) = name.parse::<u32>() else {
+                continue;
+            };
+            if let Ok(cwd) = fs::read_link(entry.path().join("cwd")) {
+                if inside(&cwd.to_string_lossy()) {
+                    found.push(pid);
+                }
+            }
+        }
+        return found;
+    }
+    let Some(exe) = lsof else { return found };
+    let exe = exe.to_string_lossy();
+    let mut pid = None;
+    for line in crate::shared::py::splitlines(
+        &crate::shared::proc::run(&[&exe, "-a", "-d", "cwd", "-Fpn"]),
+        false,
+    ) {
+        if let Some(rest) = line.strip_prefix('p') {
+            pid = rest.parse::<u32>().ok();
+        } else if let (Some(rest), Some(p)) = (line.strip_prefix('n'), pid) {
+            if inside(rest) {
+                found.push(p);
+            }
+        }
+    }
+    found
+}
+
+#[cfg(unix)]
+fn terminate(pid: u32) {
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    const SIGTERM: i32 = 15;
+    // SAFETY: kill takes two integers and reads or writes no memory of this process.
+    unsafe {
+        kill(pid as i32, SIGTERM);
+    }
+}
+
+#[cfg(windows)]
+fn terminate(pid: u32) {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
+        fn TerminateProcess(process: isize, code: u32) -> i32;
+        fn CloseHandle(handle: isize) -> i32;
+    }
+    const PROCESS_TERMINATE: u32 = 0x0001;
+    // SAFETY: the handle comes from OpenProcess, is used only while open, and is closed once.
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle != 0 {
+            TerminateProcess(handle, 15);
+            CloseHandle(handle);
+        }
+    }
+}
+
+/// `proc_name(pid) != ""`.
+fn proc_alive(pid: u32) -> bool {
+    let pid = pid.to_string();
+    if cfg!(windows) {
+        let filter = format!("PID eq {pid}");
+        let out = crate::shared::proc::run(&["tasklist", "/FI", &filter, "/NH"]);
+        return !out.is_empty() && out.contains(&pid);
+    }
+    !strip(&crate::shared::proc::run(&[
+        "ps", "-p", &pid, "-o", "comm=",
+    ]))
+    .is_empty()
+}
+
+/// `stop_pids` with the proc folder and lsof given.
+fn stop_pids_with(wt: &Path, proc_root: &Path, lsof: Option<PathBuf>) -> Option<Vec<u32>> {
+    let real = resolve(wt).unwrap_or_else(|_| wt.to_path_buf());
+    if !cfg!(windows) && !proc_root.is_dir() && lsof.is_none() {
+        eprintln!(
+            "factory.py: lsof not found, so processes in {} were not checked",
+            real.display()
+        );
+        return None;
+    }
+    // Windows has no parent_id in std; its worktree_pids already skips every ancestor.
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut skip = vec![std::process::id()];
+    #[cfg(unix)]
+    skip.push(std::os::unix::process::parent_id());
+    let mut pids = worktree_pids(&real.to_string_lossy(), proc_root, lsof.as_deref());
+    pids.sort_unstable();
+    pids.dedup();
+    pids.retain(|p| !skip.contains(p));
+    for &pid in &pids {
+        terminate(pid);
+    }
+    let deadline = Instant::now() + STOP_WAIT;
+    loop {
+        let alive: Vec<u32> = pids.iter().copied().filter(|&p| proc_alive(p)).collect();
+        if alive.is_empty() || Instant::now() > deadline {
+            return Some(alive);
+        }
+        thread::sleep(STOP_POLL);
+    }
+}
+
+/// The PIDs still running in wt after SIGTERM, or None when processes were not checked.
+pub(crate) fn stop_pids(wt: &Path) -> Option<Vec<u32>> {
+    let fallbacks: Vec<&Path> = LSOF_FALLBACKS.iter().map(Path::new).collect();
+    stop_pids_with(
+        wt,
+        Path::new("/proc"),
+        lsof_exe_with(which("lsof"), &fallbacks),
+    )
+}
+
+/// (exit code, stdout, stderr) of program -C repo args. A timeout or a git that cannot start gives (None, "",
+/// reason), so the caller keeps what it was about to remove.
+fn run_git_with(
+    program: &str,
+    repo: &str,
+    args: &[&str],
+    timeout: Option<Duration>,
+) -> (Option<i32>, String, String) {
+    let argv = [&[program, "-C", repo], args].concat();
+    match capture(&argv, None, &[("GIT_TERMINAL_PROMPT", "0")], timeout) {
+        Ok(r) => (Some(r.code), strip(&r.stdout).to_string(), r.stderr),
+        Err(e) if e.kind() == io::ErrorKind::TimedOut => {
+            let secs = timeout.unwrap_or_default().as_secs();
+            (
+                None,
+                String::new(),
+                format!("git {} timed out after {secs} s", args[0]),
+            )
+        }
+        Err(_) => (
+            None,
+            String::new(),
+            format!("could not run git {}", args[0]),
+        ),
+    }
+}
+
+fn run_git(repo: &str, args: &[&str], timeout: Option<Duration>) -> (Option<i32>, String, String) {
+    run_git_with("git", repo, args, timeout)
+}
+
+fn first_error(repo: &str, args: &[&str], timeout: Option<Duration>) -> Option<String> {
+    match run_git(repo, args, timeout) {
+        (None, _, err) => Some(err),
+        (Some(0), _, _) => None,
+        (Some(code), _, err) => {
+            let err = USE_FLAG.replace_all(&err, |_| String::new());
+            let first = crate::shared::py::splitlines(strip(&err), false)
+                .first()
+                .map(|l| l.to_string());
+            Some(first.unwrap_or_else(|| format!("git exited {code}")))
+        }
+    }
+}
+
+fn not_merged(repo: &str, detail: Option<&str>) -> String {
+    let head = run_git(
+        repo,
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        Some(GIT_TIMEOUT),
+    )
+    .1;
+    let head = if head.is_empty() { "HEAD" } else { &head };
+    match detail {
+        Some(detail) => format!("not merged into {head} and {detail}"),
+        None => format!("not merged into {head}"),
+    }
+}
+
+/// None after deleting a branch whose tip origin holds, else the reason it stays.
+fn pushed_tip_error(repo: &str, branch: &str) -> Option<String> {
+    let r = format!("refs/heads/{branch}");
+    let tip = run_git(repo, &["rev-parse", &r], Some(GIT_TIMEOUT)).1;
+    if tip.is_empty() {
+        return Some(not_merged(repo, None));
+    }
+    let (code, out, _) = run_git(repo, &["ls-remote", "origin", &r], Some(GIT_TIMEOUT));
+    if code != Some(0) {
+        return Some(not_merged(repo, Some("origin could not be reached")));
+    }
+    if out.is_empty() {
+        return Some(not_merged(repo, Some("origin has no such branch")));
+    }
+    if words(&out).collect::<Vec<_>>() != [tip.as_str(), r.as_str()] {
+        return Some(not_merged(repo, Some("origin is at a different commit")));
+    }
+    delete_unless_checked_out(repo, branch, &tip)
+}
+
+/// None after deleting the branch, guarded by tip, unless a worktree has it checked out.
+fn delete_unless_checked_out(repo: &str, branch: &str, tip: &str) -> Option<String> {
+    let listed = run_git(
+        repo,
+        &["worktree", "list", "--porcelain"],
+        Some(GIT_TIMEOUT),
+    )
+    .1;
+    let checked_out = format!("branch refs/heads/{branch}");
+    let mut path = None;
+    for line in crate::shared::py::splitlines(&listed, false) {
+        if let Some(rest) = line.strip_prefix("worktree ") {
+            path = Some(rest);
+        } else if line == checked_out {
+            return Some(format!("checked out in {}", path.unwrap_or("None")));
+        }
+    }
+    first_error(
+        repo,
+        &["update-ref", "-d", &format!("refs/heads/{branch}"), tip],
+        Some(GIT_TIMEOUT),
+    )
+}
+
+/// None after deleting a branch whose tip merged_head contains, else the reason it stays.
+fn merged_head_error(
+    repo: &str,
+    branch: &str,
+    drop_pushed: bool,
+    merged_head: &str,
+) -> Option<String> {
+    let tip = run_git(
+        repo,
+        &["rev-parse", &format!("refs/heads/{branch}")],
+        Some(GIT_TIMEOUT),
+    )
+    .1;
+    if !tip.is_empty()
+        && run_git(
+            repo,
+            &["merge-base", "--is-ancestor", &tip, merged_head],
+            Some(GIT_TIMEOUT),
+        )
+        .0 == Some(0)
+    {
+        return delete_unless_checked_out(repo, branch, &tip);
+    }
+    if drop_pushed {
+        pushed_tip_error(repo, branch)
+    } else {
+        Some(not_merged(repo, None))
+    }
+}
+
+/// `cleanup_job` once `stop_pids` gave alive.
+fn cleanup_after_stop(
+    repo: &str,
+    wt: &Path,
+    branch: &str,
+    drop_pushed: bool,
+    merged_head: Option<&str>,
+    alive: Option<Vec<u32>>,
+) -> (Vec<String>, Vec<String>) {
+    let (mut removed, mut left) = (Vec::new(), Vec::new());
+    let wt_text = wt.to_string_lossy();
+    if wt.exists() {
+        let alive = alive.unwrap_or_default();
+        let error = if alive.is_empty() {
+            first_error(repo, &["worktree", "remove", &wt_text], None)
+        } else {
+            let pids: Vec<String> = alive.iter().map(u32::to_string).collect();
+            Some(format!("processes still running: {}", pids.join(" ")))
+        };
+        match error {
+            Some(error) => {
+                left.push(format!("worktree {wt_text}: {error}"));
+                left.push(format!(
+                    "branch {branch}: kept because its worktree remains"
+                ));
+            }
+            None => removed.push(format!("worktree {wt_text}")),
+        }
+    } else {
+        first_error(repo, &["worktree", "prune"], Some(GIT_TIMEOUT));
+    }
+    if left.is_empty() {
+        let r = format!("refs/heads/{branch}");
+        let (code, _, err) = run_git(
+            repo,
+            &["rev-parse", "--verify", "-q", &r],
+            Some(GIT_TIMEOUT),
+        );
+        let mut error = if code.is_none() { Some(err) } else { None };
+        if code == Some(0) {
+            error = match run_git(
+                repo,
+                &["merge-base", "--is-ancestor", &r, "HEAD"],
+                Some(GIT_TIMEOUT),
+            ) {
+                (None, _, err) => Some(err),
+                (Some(0), _, _) => {
+                    let upstream = format!("branch.{branch}.merge");
+                    if !run_git(repo, &["config", "--get", &upstream], Some(GIT_TIMEOUT))
+                        .1
+                        .is_empty()
+                    {
+                        first_error(
+                            repo,
+                            &["branch", "--unset-upstream", branch],
+                            Some(GIT_TIMEOUT),
+                        )
+                        .or_else(|| first_error(repo, &["branch", "-d", branch], Some(GIT_TIMEOUT)))
+                    } else {
+                        first_error(repo, &["branch", "-d", branch], Some(GIT_TIMEOUT))
+                    }
+                }
+                (Some(_), _, _) => match merged_head.filter(|h| !h.is_empty()) {
+                    Some(head) => merged_head_error(repo, branch, drop_pushed, head),
+                    None if drop_pushed => pushed_tip_error(repo, branch),
+                    None => Some(not_merged(repo, None)),
+                },
+            };
+            if error.is_none() {
+                removed.push(format!("branch {branch}"));
+            }
+        }
+        if let Some(error) = error {
+            left.push(format!("branch {branch}: {error}"));
+        }
+    }
+    (removed, left)
+}
+
+/// Stop and remove a job's worktree, then delete its branch when merged. With drop_pushed, also delete an unmerged
+/// branch that origin holds at the same commit and no worktree has checked out. With merged_head, also delete a
+/// branch whose tip that commit contains and no worktree has checked out. (removed, left).
+pub(crate) fn cleanup_job(
+    repo: &str,
+    wt: &Path,
+    branch: &str,
+    drop_pushed: bool,
+    merged_head: Option<&str>,
+) -> (Vec<String>, Vec<String>) {
+    let alive = if wt.exists() { stop_pids(wt) } else { None };
+    cleanup_after_stop(repo, wt, branch, drop_pushed, merged_head, alive)
+}
+
+#[derive(Debug, PartialEq)]
+enum GhCode {
+    Exit(i32),
+    Timeout,
+}
+
+/// (exit code, stdout) of gh args: Exit(1) with "" when it cannot start, Timeout past 60 seconds, None without gh.
+fn gh_cli(args: &[&str]) -> Option<(GhCode, String)> {
+    let gh = which("gh")?;
+    let gh = gh.to_string_lossy();
+    let argv = [&[gh.as_ref()], args].concat();
+    Some(match capture(&argv, None, &[], Some(GH_TIMEOUT)) {
+        Ok(r) => (GhCode::Exit(r.code), r.stdout),
+        Err(e) if e.kind() == io::ErrorKind::TimedOut => (GhCode::Timeout, String::new()),
+        Err(_) => (GhCode::Exit(1), String::new()),
+    })
+}
+
+/// The state and head commit of repo's pull request number from one gh api graphql call: Ok(Some((state, head
+/// oid))), Ok(None) when GitHub returns null for it, or Err(why).
+fn pr_state(repo: &str, number: u32, device: &str) -> Result<Option<(Value, Value)>, String> {
+    let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
+    let query = format!(
+        "query=query {{ repository(owner: \"{owner}\", name: \"{name}\") {{ p{number}: pullRequest(number: {number}) \
+         {{ state headRefOid }} }} }}"
+    );
+    let (code, out) = match gh_cli(&["api", "graphql", "-f", &query]) {
+        None => return Err(format!("gh is not installed on {device}")),
+        Some((GhCode::Timeout, _)) => {
+            return Err(format!(
+                "gh api graphql timed out after 60 seconds on {device}"
+            ))
+        }
+        Some((GhCode::Exit(code), out)) => (code, out),
+    };
+    let found = loads(&out)
+        .ok()
+        .and_then(|v| v.get("data")?.get("repository").cloned());
+    let Some(found) = found.filter(Value::is_object) else {
+        if code != 0 {
+            return Err(format!(
+                "gh api graphql exited {code} (check gh auth status on {device})"
+            ));
+        }
+        return Err(format!(
+            "gh api graphql returned no repository (check the project file's repo and gh auth status on {device})"
+        ));
+    };
+    Ok(found
+        .get(format!("p{number}"))
+        .filter(|p| p.is_object())
+        .map(|p| {
+            let field = |k: &str| p.get(k).cloned().unwrap_or(Value::Null);
+            (field("state"), field("headRefOid"))
+        }))
+}
+
+/// The head commit GitHub reports for a merged pull request URL, or None. A failed lookup warns and returns None.
+fn pr_merged_head(home: &Path, pr: &str) -> Option<String> {
+    let m = GH_PR_PARTS.fullmatch(pr)?;
+    let number: u32 = m[3].parse().ok()?;
+    match pr_state(&format!("{}/{}", &m[1], &m[2]), number, &device_name(home)) {
+        Err(why) => {
+            eprintln!(
+                "factory.py: cleanup could not read pull request {pr} ({why}), so it keeps a branch HEAD does not contain"
+            );
+            None
+        }
+        Ok(Some((Value::String(state), Value::String(head))))
+            if state == "MERGED" && COMMIT.is_full(&head) =>
+        {
+            Some(head)
+        }
+        Ok(_) => None,
+    }
+}
+
+/// The board's jobs, or why they could not be read.
+fn board_jobs(home: &Path) -> Result<Vec<Value>, String> {
+    let r = match api(home, "GET", "/api/board", None, &[200, 404], &[]) {
+        Ok(r) => r,
+        Err(e) => {
+            let reason =
+                words(&e.stderr)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .replacen("factory.py: ", "", 1);
+            return Err(if reason.is_empty() {
+                "unknown error".to_string()
+            } else {
+                reason
+            });
+        }
+    };
+    if r.status != 200 || r.body.is_empty() {
+        return Ok(Vec::new());
+    }
+    let board = String::from_utf8(r.body).ok().and_then(|t| loads(&t).ok());
+    match board
+        .as_ref()
+        .and_then(|b| b.get("jobs"))
+        .and_then(Value::as_array)
+    {
+        Some(jobs) => Ok(jobs.clone()),
+        None => Err("malformed board".to_string()),
+    }
+}
+
+/// The board's github.head for a merged job, else its merged pull request's head from GitHub, or None. An
+/// unreadable board warns and returns None.
+fn board_merged_head(home: &Path, slug: &str, job_id: &str) -> Res<Option<String>> {
+    let jobs = match board_jobs(home) {
+        Ok(jobs) => jobs,
+        Err(reason) => {
+            eprintln!(
+                "factory.py: cleanup could not read the board ({reason}), so it keeps a branch HEAD does not contain"
+            );
+            return Ok(None);
+        }
+    };
+    let str_of = |j: &Value, k: &str| j.get(k).and_then(Value::as_str).map(String::from);
+    let Some(job) = jobs.iter().find(|j| {
+        j.is_object()
+            && str_of(j, "id").as_deref() == Some(job_id)
+            && str_of(j, "project").as_deref() == Some(slug)
+    }) else {
+        return Ok(None);
+    };
+    let merged = str_of(job, "stage").as_deref() == Some("merged");
+    if let Some(github) = job.get("github").filter(|g| g.is_object()) {
+        let head = str_of(github, "head");
+        if merged
+            && github.get("merged").is_some_and(Value::is_string)
+            && head.as_deref().is_some_and(|h| COMMIT.is_full(h))
+        {
+            return Ok(head);
+        }
+    }
+    let Some(pr) = str_of(job, "pr").filter(|_| merged) else {
+        return Ok(None);
+    };
+    let Some(m) = GH_PR_PARTS.fullmatch(&pr) else {
+        return Ok(None);
+    };
+    let md = project_files(home, slug)?.0;
+    let repo = if md.exists() {
+        let meta = frontmatter(&md).map_err(|e| os_fail(&e, &md))?.0;
+        fm_get(&meta, "repo").unwrap_or("").to_string()
+    } else {
+        String::new()
+    };
+    let pr_repo = format!("{}/{}", &m[1], &m[2]);
+    if pr_repo.to_lowercase() == repo.to_lowercase() {
+        return Ok(pr_merged_head(home, &pr));
+    }
+    let why = if !md.exists() {
+        format!("{} is missing", md.display())
+    } else if repo.is_empty() {
+        format!("{} has no repo:", md.display())
+    } else {
+        format!("it is in {pr_repo}, not the project file's repo: {repo}")
+    };
+    eprintln!("factory.py: cleanup skipped the GitHub lookup for {pr}: {why}");
+    Ok(None)
+}
+
+/// Remove the job's prompts folder unless its worktree remains or a link is on its path.
+fn cleanup_prompts(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    removed: &mut Vec<String>,
+    left: &mut Vec<String>,
+) -> Res<()> {
+    let folder = home.join("prompts").join(slug).join(job_id);
+    if fs::symlink_metadata(&folder).is_err() {
+        return Ok(());
+    }
+    let shown = folder.display();
+    let linked = [
+        home.join("prompts"),
+        home.join("prompts").join(slug),
+        folder.clone(),
+    ]
+    .iter()
+    .any(|p| is_link(p).unwrap_or(true));
+    if left.iter().any(|entry| entry.starts_with("worktree ")) {
+        left.push(format!(
+            "prompts {shown}: kept because its worktree remains"
+        ));
+    } else if linked {
+        left.push(format!(
+            "prompts {shown}: a symlink or junction, left in place"
+        ));
+    } else if folder.is_dir() {
+        fs::remove_dir_all(&folder).map_err(|e| os_fail(&e, &folder))?;
+        removed.push(format!("prompts {shown}"));
+    }
+    Ok(())
+}
+
+pub fn cleanup(call: &Call) -> Res<()> {
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    let repo = checkout_of(&home, &slug)?;
+    let merged_head = board_merged_head(&home, &slug, &job_id)?;
+    let wt = home.join("worktrees").join(&slug).join(&job_id);
+    let (mut removed, mut left) = cleanup_job(
+        &repo,
+        &wt,
+        &format!("factory/{job_id}"),
+        false,
+        merged_head.as_deref(),
+    );
+    cleanup_prompts(&home, &slug, &job_id, &mut removed, &mut left)?;
+    println!(
+        "{}",
+        dumps(&json!({"removed": removed, "left": left}), INDENT2)
+    );
+    if left.is_empty() {
+        Ok(())
+    } else {
+        Err(exit(1))
+    }
 }
 
 #[cfg(test)]
@@ -1119,5 +1782,377 @@ mod tests {
         assert_eq!(run_logged(&argv, &dir, &log, Duration::from_secs(5)), Ok(3));
         assert_eq!(fs::read_to_string(&log).unwrap(), "started\nout\nerr\n");
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    const BRANCH: &str = "factory/001-test";
+    const LEFT: &str = "branch factory/001-test: not merged into main";
+
+    /// A checkout with main, and a job worktree whose branch holds one commit main lacks.
+    struct Checkout {
+        home: PathBuf,
+        repo: PathBuf,
+        wt: PathBuf,
+    }
+
+    impl Checkout {
+        fn new(name: &str) -> Checkout {
+            let home = temp_dir(name);
+            let repo = home.join("checkout");
+            fs::create_dir(&repo).unwrap();
+            sh_git(&repo, &["init", "-q"]);
+            sh_git(&repo, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+            commit(&repo, "base");
+            let wt = home.join("worktrees/sample/001-test");
+            sh_git(&repo, &["worktree", "add", "-q", &text(&wt), "-b", BRANCH]);
+            fs::write(wt.join("work.txt"), "work\n").unwrap();
+            sh_git(&wt, &["add", "work.txt"]);
+            sh_git(&wt, &["commit", "-q", "-m", "work"]);
+            Checkout { home, repo, wt }
+        }
+
+        fn merge(&self) {
+            sh_git(
+                &self.repo,
+                &["merge", "-q", "--no-ff", "-m", "merge", BRANCH],
+            );
+        }
+
+        fn origin(&self, push: bool) {
+            let origin = self.home.join("origin.git");
+            sh_git(&self.home, &["init", "-q", "--bare", &text(&origin)]);
+            sh_git(&self.repo, &["remote", "add", "origin", &text(&origin)]);
+            if push {
+                sh_git(&self.repo, &["push", "-q", "origin", BRANCH]);
+            }
+        }
+
+        fn more(&self) {
+            fs::write(self.wt.join("more.txt"), "more\n").unwrap();
+            sh_git(&self.wt, &["add", "more.txt"]);
+            sh_git(&self.wt, &["commit", "-q", "-m", "more"]);
+        }
+
+        fn clean(
+            &self,
+            drop_pushed: bool,
+            merged_head: Option<&str>,
+        ) -> (Vec<String>, Vec<String>) {
+            cleanup_job(
+                &text(&self.repo),
+                &self.wt,
+                BRANCH,
+                drop_pushed,
+                merged_head,
+            )
+        }
+
+        fn branch_exists(&self) -> bool {
+            !sh_git(&self.repo, &["branch", "--list", BRANCH]).is_empty()
+        }
+
+        fn shown_wt(&self) -> String {
+            format!("worktree {}", self.wt.display())
+        }
+    }
+
+    impl Drop for Checkout {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.home);
+        }
+    }
+
+    #[test]
+    fn cleanup_job_removes_a_merged_job() {
+        let t = Checkout::new("wt-clean-merged");
+        t.merge();
+        assert_eq!(
+            t.clean(false, None),
+            (vec![t.shown_wt(), format!("branch {BRANCH}")], vec![])
+        );
+        assert!(!t.wt.exists() && !t.branch_exists());
+
+        let t = Checkout::new("wt-clean-pruned");
+        t.merge();
+        fs::remove_dir_all(&t.wt).unwrap();
+        assert_eq!(
+            t.clean(false, None),
+            (vec![format!("branch {BRANCH}")], vec![])
+        );
+        assert!(!sh_git(&t.repo, &["worktree", "list"]).contains(&text(&t.wt)));
+    }
+
+    #[test]
+    fn dirty_worktree_is_kept() {
+        let t = Checkout::new("wt-clean-dirty");
+        t.merge();
+        fs::write(t.wt.join("untracked.txt"), "keep me\n").unwrap();
+        let (removed, left) = t.clean(false, None);
+        assert!(removed.is_empty());
+        assert_eq!(left.len(), 2);
+        assert!(
+            left[0].starts_with(&format!("{}: fatal: ", t.shown_wt())),
+            "{}",
+            left[0]
+        );
+        assert!(!left[0].contains("--force"));
+        assert!(
+            left[0].ends_with("contains modified or untracked files"),
+            "{}",
+            left[0]
+        );
+        assert_eq!(
+            left[1],
+            format!("branch {BRANCH}: kept because its worktree remains")
+        );
+        assert_eq!(
+            fs::read_to_string(t.wt.join("untracked.txt")).unwrap(),
+            "keep me\n"
+        );
+        assert!(t.branch_exists());
+    }
+
+    #[test]
+    fn running_process_keeps_everything() {
+        let t = Checkout::new("wt-clean-running");
+        t.merge();
+        let out = cleanup_after_stop(&text(&t.repo), &t.wt, BRANCH, false, None, Some(vec![4242]));
+        let left = vec![
+            format!("{}: processes still running: 4242", t.shown_wt()),
+            format!("branch {BRANCH}: kept because its worktree remains"),
+        ];
+        assert_eq!(out, (vec![], left));
+        assert!(t.wt.exists() && t.branch_exists());
+    }
+
+    #[test]
+    fn git_not_runnable() {
+        let out = run_git_with("/nonexistent/git", ".", &["worktree", "prune"], None);
+        assert_eq!(
+            out,
+            (
+                None,
+                String::new(),
+                "could not run git worktree".to_string()
+            )
+        );
+        let out = run_git_with(
+            "/nonexistent/git",
+            ".",
+            &["rev-parse", "HEAD"],
+            Some(GIT_TIMEOUT),
+        );
+        assert_eq!(out.2, "could not run git rev-parse");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_timeout_is_reported() {
+        assert_eq!(GIT_TIMEOUT, Duration::from_secs(20));
+        let dir = temp_dir("wt-slow-git");
+        let slow = dir.join("git");
+        fs::write(&slow, "#!/bin/sh\nsleep 5\n").unwrap();
+        chmod(&slow, 0o755);
+        let out = run_git_with(
+            &text(&slow),
+            ".",
+            &["merge-base", "--is-ancestor"],
+            Some(Duration::from_secs(1)),
+        );
+        assert_eq!(
+            out,
+            (
+                None,
+                String::new(),
+                "git merge-base timed out after 1 s".to_string()
+            )
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    mod cleanup_job_drop_pushed {
+        use super::*;
+
+        const UNREACHABLE: &str =
+            "branch factory/001-test: not merged into main and origin could not be reached";
+
+        #[test]
+        fn merged_head_keeps_a_branch_ahead_of_the_pr() {
+            let t = Checkout::new("wt-drop-ahead-of-pr");
+            let merged = sh_git(&t.wt, &["rev-parse", "HEAD"]);
+            t.more();
+            assert_eq!(
+                t.clean(true, Some(&merged)),
+                (vec![t.shown_wt()], vec![UNREACHABLE.to_string()])
+            );
+            assert!(t.branch_exists());
+        }
+
+        #[test]
+        fn merged_head_keeps_a_branch_checked_out_elsewhere() {
+            let t = Checkout::new("wt-drop-elsewhere");
+            let merged = sh_git(&t.wt, &["rev-parse", "HEAD"]);
+            sh_git(&t.repo, &["worktree", "remove", "--force", &text(&t.wt)]);
+            let elsewhere = t.home.join("elsewhere");
+            sh_git(
+                &t.repo,
+                &["worktree", "add", "-q", &text(&elsewhere), BRANCH],
+            );
+            let (removed, left) = t.clean(true, Some(&merged));
+            assert_eq!((removed.len(), left.len()), (0, 1));
+            assert_eq!(
+                left[0],
+                format!("branch {BRANCH}: checked out in {}", elsewhere.display())
+            );
+            assert!(t.branch_exists());
+        }
+
+        #[test]
+        fn cleanup_job_keeps_a_pushed_branch_by_default() {
+            let t = Checkout::new("wt-drop-default");
+            t.origin(true);
+            assert_eq!(
+                t.clean(false, None),
+                (vec![t.shown_wt()], vec![LEFT.to_string()])
+            );
+            assert!(t.branch_exists());
+        }
+
+        #[test]
+        fn cleanup_skips_ls_remote_without_a_branch_tip() {
+            // rev-parse echoes an unknown ref on stdout, so only a folder outside any repository gives an empty
+            // tip. A reached ls-remote there would add "and origin could not be reached".
+            let dir = temp_dir("wt-drop-no-tip");
+            assert_eq!(
+                pushed_tip_error(&text(&dir), BRANCH),
+                Some("not merged into HEAD".to_string())
+            );
+            fs::remove_dir_all(dir).unwrap();
+        }
+
+        #[test]
+        fn cleanup_deletes_a_branch_origin_holds() {
+            let t = Checkout::new("wt-drop-origin-holds");
+            t.origin(true);
+            assert_eq!(
+                t.clean(true, None),
+                (vec![t.shown_wt(), format!("branch {BRANCH}")], vec![])
+            );
+            assert!(!t.branch_exists());
+        }
+
+        #[test]
+        fn cleanup_keeps_a_branch_ahead_of_origin() {
+            let t = Checkout::new("wt-drop-ahead");
+            t.origin(true);
+            t.more();
+            let left = format!("{LEFT} and origin is at a different commit");
+            assert_eq!(t.clean(true, None), (vec![t.shown_wt()], vec![left]));
+            assert!(t.branch_exists());
+        }
+
+        #[test]
+        fn cleanup_keeps_a_branch_origin_lacks() {
+            let t = Checkout::new("wt-drop-lacks");
+            t.origin(false);
+            let left = format!("{LEFT} and origin has no such branch");
+            assert_eq!(t.clean(true, None), (vec![t.shown_wt()], vec![left]));
+            assert!(t.branch_exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_pids_without_lsof_is_unchecked() {
+        let dir = temp_dir("wt-no-lsof");
+        assert_eq!(stop_pids_with(&dir, &dir.join("no-proc"), None), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lsof_falls_back() {
+        let dir = temp_dir("wt-lsof");
+        let lsof = dir.join("lsof");
+        fs::write(&lsof, "#!/bin/sh\n").unwrap();
+        chmod(&lsof, 0o755);
+        let plain = dir.join("plain");
+        fs::write(&plain, "").unwrap();
+        let fallbacks = [dir.join("missing"), plain, lsof.clone()];
+        let fallbacks: Vec<&Path> = fallbacks.iter().map(PathBuf::as_path).collect();
+        assert_eq!(lsof_exe_with(None, &fallbacks), Some(lsof));
+        assert_eq!(
+            lsof_exe_with(Some(PathBuf::from("/found/lsof")), &fallbacks),
+            Some(PathBuf::from("/found/lsof"))
+        );
+        assert_eq!(lsof_exe_with(None, &fallbacks[..2]), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stop_pids_ends_a_child_in_the_worktree() {
+        let dir = temp_dir("wt-stop-child");
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .current_dir(&dir)
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let reaper = thread::spawn(move || child.wait().unwrap());
+        assert_eq!(stop_pids_with(&dir, Path::new("/proc"), None), Some(vec![]));
+        assert!(!reaper.join().unwrap().success());
+        assert!(!proc_alive(pid));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_prompt_folder_is_kept() {
+        let home = temp_dir("wt-linked-prompts");
+        let target = home.join("elsewhere");
+        fs::create_dir_all(target.join("001-test")).unwrap();
+        fs::write(target.join("001-test/keep.txt"), "keep\n").unwrap();
+        let folder = home.join("prompts/sample/001-test");
+        for (link, points_to) in [
+            (folder.clone(), target.join("001-test")),
+            (folder.parent().unwrap().to_path_buf(), target.clone()),
+        ] {
+            let _ = fs::remove_dir_all(home.join("prompts"));
+            fs::create_dir_all(link.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(&points_to, &link).unwrap();
+            let (mut removed, mut left) = (Vec::new(), Vec::new());
+            cleanup_prompts(&home, "sample", "001-test", &mut removed, &mut left).unwrap();
+            assert!(removed.is_empty());
+            assert_eq!(
+                left,
+                [format!(
+                    "prompts {}: a symlink or junction, left in place",
+                    folder.display()
+                )]
+            );
+            assert_eq!(
+                fs::read_to_string(target.join("001-test/keep.txt")).unwrap(),
+                "keep\n"
+            );
+        }
+        let _ = fs::remove_dir_all(home.join("prompts"));
+        fs::create_dir_all(&folder).unwrap();
+        let (mut removed, mut left) = (Vec::new(), vec!["worktree x: busy".to_string()]);
+        cleanup_prompts(&home, "sample", "001-test", &mut removed, &mut left).unwrap();
+        assert_eq!(
+            left[1],
+            format!(
+                "prompts {}: kept because its worktree remains",
+                folder.display()
+            )
+        );
+        left.clear();
+        cleanup_prompts(&home, "sample", "001-test", &mut removed, &mut left).unwrap();
+        assert_eq!(
+            (removed, left.len()),
+            (vec![format!("prompts {}", folder.display())], 0)
+        );
+        assert!(!folder.exists() && folder.parent().unwrap().is_dir());
+        fs::remove_dir_all(home).unwrap();
     }
 }
