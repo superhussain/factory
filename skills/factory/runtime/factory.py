@@ -1015,6 +1015,8 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
         fail("only factory.py sets started", 2)
     if "goal" in patch:
         fail("only factory.py push sets goal", 2)
+    if "decision" in patch:
+        fail("only factory.py push and pickup set decision", 2)
     if "agents" in patch:
         fail("only factory.py agent and pickup set agents", 2)
     if "move" in patch:
@@ -7229,7 +7231,8 @@ def close_pass(home, data, device, minutes, dry):
             found.pop("claim", None)
             stacked = open_stacked(board, job_id)
             patch_job(board, job_id, {"stage": "closed", "note": reason, "needs": None,
-                                      "close": {"closed": now()}})
+                                      "close": {"closed": now()},
+                                      "decision": {"verdict": "CLOSED", "decider": "person", "at": at}})
             return dump_board(board), (True, stacked)
         done, stacked = cas(home, "/api/board", change)
         if done:
@@ -10582,6 +10585,31 @@ def record_goal(home, slug, job_id, goal):
         print("recorded the spec Goal on the board" if goal else "cleared the board goal: spec.md has no Goal section")
 
 
+def record_decision(home, slug, job_id, decision):
+    """Copy decision.md's verdict and decider onto the job's board row with the time, or drop the
+    row's decision when the file has no verdict line. Leaves job.updated alone."""
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if not job or job.get("project") != slug:
+            return None, False
+        stored = job.get("decision")
+        if decision is None:
+            if stored is None:
+                return None, False
+            job.pop("decision")
+        elif isinstance(stored, dict) and {k: stored.get(k) for k in ("verdict", "decider")} == decision:
+            return None, False
+        else:
+            job["decision"] = {**decision, "at": now()}
+        data["updated"] = now()
+        return dump_board(data), True
+
+    if cas(home, "/api/board", change):
+        print(f"recorded the decision.md verdict on the board: {decision['verdict']}, decided by {decision['decider']}"
+              if decision else "cleared the board decision: decision.md has no verdict line")
+
+
 def push(target):
     home, slug, job_id = r2_target(target, False)
     if not job_id:
@@ -10593,7 +10621,7 @@ def push(target):
     rels = [p.relative_to(folder).as_posix() for p in sorted(folder.rglob("*"))
             if p.is_file() and not p.is_symlink()]
     rels = [r for r in rels if JOB_REL.fullmatch(r)]
-    pushed, conflicts, spec_pushed, spec_stale = 0, [], False, False
+    pushed, conflicts, spec_pushed, spec_stale, decision_pushed = 0, [], False, False, False
     for rel in rels:
         data = local_bytes(folder / rel)
         entry = manifest.get(rel)
@@ -10624,6 +10652,7 @@ def push(target):
         manifest[rel] = {"etag": strong(headers["ETag"]), "sha256": sha(data)}
         pushed += 1
         spec_pushed = spec_pushed or rel == "spec.md"
+        decision_pushed = decision_pushed or rel == "decision.md"
     pending = folder / ".goal-pending"
     if spec_pushed:
         write_atomic(pending, "")
@@ -10634,6 +10663,8 @@ def push(target):
             and not spec_stale:
         record_goal(home, slug, job_id, spec_goal((folder / "spec.md").read_text(encoding="utf-8")))
         pending.unlink(missing_ok=True)
+    if decision_pushed and "decision.md" not in conflicts:
+        record_decision(home, slug, job_id, decision_verdict((folder / "decision.md").read_text(encoding="utf-8")))
     if conflicts:
         conflict_exit(conflicts)
 
