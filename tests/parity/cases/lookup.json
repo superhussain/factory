@@ -293,6 +293,81 @@
       "home": "lookup-bad-minutes",
       "stubs": {},
       "exit": 2
+    },
+    {
+      "id": "lookup/where-project-bundle-entry",
+      "argv": ["--home", "{home}", "where", "sample"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample",
+              "repo": "octo/sample"
+            },
+            {
+              "slug": "other",
+              "repo": "octo/other"
+            }
+          ]
+        ],
+        "GET /api/projects/sample.md": [200, "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n"]
+      },
+      "exit": 0,
+      "skill": "{tmp}/skill",
+      "bundle": "{\"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"tree\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"entry\": [\"runtime/factory\"], \"binary_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"
+    },
+    {
+      "id": "lookup/where-project-bundle-no-entry",
+      "argv": ["--home", "{home}", "where", "sample"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample",
+              "repo": "octo/sample"
+            },
+            {
+              "slug": "other",
+              "repo": "octo/other"
+            }
+          ]
+        ],
+        "GET /api/projects/sample.md": [200, "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n"]
+      },
+      "exit": 0,
+      "skill": "{tmp}/skill",
+      "bundle": "{\"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"tree\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
+    },
+    {
+      "id": "lookup/where-project-bundle-bad-entry",
+      "argv": ["--home", "{home}", "where", "sample"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample",
+              "repo": "octo/sample"
+            },
+            {
+              "slug": "other",
+              "repo": "octo/other"
+            }
+          ]
+        ],
+        "GET /api/projects/sample.md": [200, "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n"]
+      },
+      "exit": 0,
+      "skill": "{tmp}/skill",
+      "bundle": "{\"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"tree\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"entry\": [\"../factory\"], \"binary_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"
     }
   ]
 }

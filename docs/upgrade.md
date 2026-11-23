@@ -40,10 +40,10 @@ The `hosted` group exercises assets, auth, protocol, local integration, browser
 and deployment tooling against the merged source (browser provisioning first if
 needed; see [development.md](development.md)).
 
-Then bring each host up to date with one command (`py -3` on Windows):
+Then bring each host up to date with one command (`factory.exe` on Windows):
 
 ```sh
-python3 <installed-skill>/runtime/factory.py catch-up
+<installed-skill>/runtime/factory catch-up
 ```
 
 It fetches the checkout's origin and installs the skill with origin's own

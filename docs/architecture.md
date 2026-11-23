@@ -55,7 +55,7 @@ device data. Locked integrity for the reviewed hook-bearing packages:
 | Hosted Worker/dashboard/assets | `worker/`, `web/`, imported text, fixed asset allowlist, v1 R2 keys and browser storage. |
 | Pipeline configuration | Hosted Worker: R2 `pipeline/` (current global and per-project documents) and `pipeline-history/` (create-only copy of every saved version). `worker/admission.js` holds the schema, text admission and security floors; see [trust.md](trust.md). Nothing is deleted; recovery is a forward save of an old version. |
 | Archived jobs | Hosted Worker only: `worker/archive.js` runs hourly (cron `17 * * * *`) when the global pipeline sets `archive`. It writes R2 `board-archive.json` first, then removes the moved rows from `board.json` and updates the board's top-level `archived` field (`max_id`, `fingerprints`). Clients round-trip `archived` unchanged; a board write that changes it, or adds an id up to `max_id`, gets a 400. `GET /api/board/archive` reads it by `id`, `page` or `q`. `q` matches id, title, project, Jira key, PR link and idea text. Job files stay where they are. A refused write makes the pass return `conflict` and log a `console.warn` that starts `archive pass conflict:` and names the key, visible in `wrangler tail`. The dashboard's "Show archived jobs" button under the merged and closed columns, and on the "No jobs yet" board once `archived` is set, pages it 50 rows at a time. A failed page shows its error under the clicked column and announces it once in the board status. |
-| Spend rollup | Hosted Worker only: worker/spend.js answers GET /api/spend from board.json and board-archive.json, read only. The Retros page shows it as Cost per merged PR. With weekly_tokens in a project file, it adds this week's percent, and the hourly cron pushes one nudge per project, week and threshold (50, 80, 100), recorded in spend-nudges.json. |
+| Spend rollup | Hosted Worker only: worker/spend.js answers GET /api/spend from board.json and board-archive.json, read only. The Retros page shows it as Cost per merged PR. With weekly_tokens in a project file, it adds this week's percent, and the hourly cron pushes one nudge per project, week and threshold (50, 80, 100), recorded in spend-nudges.json after a device accepts the push. |
 | Project files and documents | Hosted Worker: R2 `projects/<slug>.md` and `project-documents/<slug>/<name>` (current), and `project-history/<slug>/<name>/` (create-only copy of every saved version, `<name>` being `project.md`, `notes.md`, `decisions.md` or `runbook.md`). An object saved before history existed counts as version 1. Nothing is deleted; recovery is a forward save of an old version. |
 | Deployment tooling | `tools/deploy.py`, `tools/assets.mjs`, `tools/local.mjs`, private profile and generated production config/connection descriptor. |
 | Verification | `tests/worker/`, `tests/browser/`, hosted `tests/support/`, hosted fixtures, `tests/tools/`. |
@@ -112,7 +112,7 @@ carries `summary` (`""` when none), and a retro version also carries `run` and
 `host`. A person's PUT may send `X-Pipeline-Summary`, percent-encoded. Each entry's
 `history_copy` says whether its create-only copy exists. A PUT whose copy failed
 answers `X-Pipeline-History: missing`. Devices read only the effective view,
-through `factory.py pipeline <slug>`.
+through `factory pipeline <slug>`.
 
 Project file and document PUTs keep every saved version the same way. Each save
 answers `X-Project-Version` and may send `X-Project-Summary`, percent-encoded; a
@@ -176,7 +176,7 @@ date.
 | `POST /api/backlog/lesson` | a signed-in person | append an open lesson card's bullet to `<slug>/notes.md` as the next version |
 
 Audit routes store one JSON-lines file per host per job at
-`audit/<job>/<host>.jsonl`, written by `factory.py audit push`. The bound host
+`audit/<job>/<host>.jsonl`, written by `factory audit push`. The bound host
 owns its file and a re-push replaces it. The body is at most 1 MiB of UTF-8, and
 each line is a JSON object whose `host` and `job` are the route's. A job id that
 does not match `^\d+-[a-z0-9]+(?:-[a-z0-9]+)*$`, a bad host id or any other method
@@ -369,8 +369,10 @@ headers other than the upgrade ones are still dropped.
   rows per project and stage, under the stored `ETag`. Finished column headers then say
   `showing 10 of N`. Once a view needs older rows (show all, the jumper, a link to an older
   job, another route, the starred-only view) it reads `/api/board` once and keeps those rows.
-  `/board.json` without the query still returns the stored bytes. Concurrent slim misses in
-  one isolate share one read, `slimPending`, keyed by board `ETag`.
+  `/board.json` without the query still returns the stored bytes. Each slim miss does its own
+  read, since a promise one request starts cannot settle in another; the isolate keeps only
+  the last slim body as a string, `slimMemo`, keyed by board `ETag`. `node --expose-gc
+  tools/board-cpu.mjs` times each board write and slim step on a synthetic board.
 
 | Request to `/events/board` | Result |
 | --- | --- |
@@ -396,7 +398,7 @@ A device's `factory daemon` (`rust/factory/src/commands/daemon.rs`) opens one so
 Every dashboard edit goes through `casBoard` in `web/dashboard.html`. It runs the edit's
 pure helper (`addIdea`, `discardIdea`, `assignProject`, ...) on a copy of the rows the tab
 already holds, diffs them by id with `rowChanges`, and sends only the changed rows to
-`PATCH /api/board`. Devices and `factory.py` keep `GET`/`PUT /api/board`.
+`PATCH /api/board`. Devices and `factory` keep `GET`/`PUT /api/board`.
 
 ```mermaid
 sequenceDiagram

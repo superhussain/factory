@@ -686,11 +686,8 @@ test("the hourly cron pushes 042-sample-retry once when its wait goes stale", as
   });
 });
 
-test("the hourly cron pushes Spend 80%: sample once and writes nothing without a VAPID key", async (t) => {
-  const sent = stubFetch(t);
-  const { env, call } = setup();
-  const phone = await browser("https://fcm.googleapis.com/fcm/send/sample-cron");
-  await call("/api/push/subscriptions", { method: "PUT", body: phone.body });
+// Board row 070-sample-spent at 80% of sample's weekly_tokens, with 50% already sent.
+async function seedSpend(env) {
   const spent = row("070-sample-spent", "merged", {
     project: "sample",
     done: "2026-11-17T01:00:00Z",
@@ -709,6 +706,14 @@ test("the hourly cron pushes Spend 80%: sample once and writes nothing without a
       sent: { sample: [50] },
     }),
   );
+}
+
+test("the hourly cron pushes Spend 80%: sample once and writes nothing without a VAPID key", async (t) => {
+  const sent = stubFetch(t);
+  const { env, call } = setup();
+  const phone = await browser("https://fcm.googleapis.com/fcm/send/sample-cron");
+  await call("/api/push/subscriptions", { method: "PUT", body: phone.body });
+  await seedSpend(env);
   const { scheduled } = (await loadProduction()).default;
   const run = async (hhmm, cronEnv) => {
     const pending = [];
@@ -741,4 +746,61 @@ test("the hourly cron pushes Spend 80%: sample once and writes nothing without a
   });
   await run("13:17", cronEnv);
   assert.equal(sent.length, 1);
+});
+
+test("the hourly cron records Spend 80%: sample only after a push is accepted", async (t) => {
+  let status = 500;
+  const sent = stubFetch(t, () => status);
+  const { env, call } = setup();
+  const phone = await browser("https://fcm.googleapis.com/fcm/send/sample-cron");
+  await call("/api/push/subscriptions", { method: "PUT", body: phone.body });
+  await seedSpend(env);
+  const { scheduled } = (await loadProduction()).default;
+  const cronEnv = { ...serverEnv, BUCKET: env.BUCKET, FACTORY_VAPID_KEY: env.FACTORY_VAPID_KEY };
+  const run = async (hhmm) => {
+    const pending = [];
+    scheduled({ scheduledTime: at(hhmm).getTime() }, cronEnv, {
+      waitUntil: (p) => pending.push(p),
+    });
+    await Promise.allSettled(pending);
+  };
+  const nudges = async () => JSON.parse(await (await env.BUCKET.get("spend-nudges.json")).text());
+
+  await run("12:17");
+  assert.equal(sent.length, 1);
+  assert.deepEqual((await nudges()).sent, { sample: [50] });
+
+  status = 201;
+  await run("13:17");
+  assert.equal(sent.length, 2);
+  assert.equal((await decrypt(phone, sent[1].body)).title, "Spend 80%: sample");
+  assert.deepEqual((await nudges()).sent, { sample: [50, 80] });
+
+  await run("14:17");
+  assert.equal(sent.length, 2);
+});
+
+test("the hourly cron keeps Spend 80%: sample unrecorded when the subscription list fails", async (t) => {
+  const sent = stubFetch(t);
+  const { env, call } = setup();
+  const phone = await browser("https://fcm.googleapis.com/fcm/send/sample-cron");
+  await call("/api/push/subscriptions", { method: "PUT", body: phone.body });
+  await seedSpend(env);
+  const bucket = {
+    ...env.BUCKET,
+    list: (options) =>
+      options?.prefix === "push/"
+        ? Promise.reject(new Error("R2 list failed"))
+        : env.BUCKET.list(options),
+  };
+  const { scheduled } = (await loadProduction()).default;
+  const cronEnv = { ...serverEnv, BUCKET: bucket, FACTORY_VAPID_KEY: env.FACTORY_VAPID_KEY };
+  const pending = [];
+  scheduled({ scheduledTime: at("12:17").getTime() }, cronEnv, {
+    waitUntil: (p) => pending.push(p),
+  });
+  await Promise.allSettled(pending);
+  assert.equal(sent.length, 0);
+  const nudges = JSON.parse(await (await env.BUCKET.get("spend-nudges.json")).text());
+  assert.deepEqual(nudges.sent, { sample: [50] });
 });

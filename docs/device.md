@@ -2,7 +2,10 @@
 
 ## Prerequisites and copy installation
 
-Use Python 3.8+ and Git. No pip, npm, daemon or native agent runtime is required
+Use a Rust toolchain (rustup), Git and Python 3.8+. Python is required only for `tools/install.py` and the other `tools/*.py` scripts. Install rustup from https://rustup.rs. The installer builds the factory binary with cargo from PATH or
+`~/.cargo/bin`. Without cargo it installs only the Python runtime, `runtime/factory.py` run with `python3`
+(`py -3` on Windows), and no `runtime/factory` binary, so the `runtime/factory` commands below do not exist
+until job 2222. No pip, npm, daemon or native agent runtime is required
 for the device CLI. The repository installer copies only the self-contained skill.
 Choose an absolute destination directory, then run from this checkout:
 
@@ -11,13 +14,13 @@ python3 tools/install.py --destination <absolute-directory>
 ```
 
 The installed skill is `<absolute-directory>/factory`. Load its SKILL.md through
-your agent runtime, or invoke its Python CLI directly from any working directory:
+your agent runtime, or invoke its binary directly from any working directory:
 
 ```text
-python3 <installed-skill>/runtime/factory.py init
+<installed-skill>/runtime/factory init
 ```
 
-On Windows use `py -3` instead of `python3`, quoting paths containing spaces.
+On Windows the binary is `<installed-skill>\runtime\factory.exe`. Quote paths containing spaces. Use `py -3` instead of `python3` for `tools/install.py`.
 
 Use this installer on every host.
 
@@ -46,13 +49,14 @@ The installer touches no device state, native roles or schedules. It leaves othe
 
 ### Staying current
 
-Once a skill is installed, run `python3 <installed-skill>/runtime/factory.py catch-up`
+Once a skill is installed, run `<installed-skill>/runtime/factory catch-up`
 on each host instead of rerunning the installer by hand. It backs up first, installs
 origin's skill with origin's `tools/install.py`, and has the new bundle rewrite the
 pickup timer. The timer command comes from the installed `bundle.json`: its optional
 `entry` key, a list whose first item is a path relative to the skill, names the
-program to run; without it catch-up runs the bundle's `runtime/factory.py` with this
-Python. See [upgrade.md](upgrade.md) for the backup folder and how to restore it.
+program to run. Without it, as in a bundle installed where cargo was missing, catch-up runs
+the bundle's `runtime/factory.py` with Python. See [upgrade.md](upgrade.md) for the backup
+folder and how to restore it.
 
 ## Offline initialization and credentials
 
@@ -69,7 +73,7 @@ Set `api_url` manually to your HTTPS origin in device config, or import a nonsec
 descriptor containing exactly `{"version":1,"api_url":"https://example.invalid"}`:
 
 ```text
-python3 <installed-skill>/runtime/factory.py init --connection <connection.json>
+<installed-skill>/runtime/factory init --connection <connection.json>
 ```
 
 The descriptor is always HTTPS and contains no credentials or administrator data.
@@ -107,7 +111,7 @@ A command validates a pointer-selected home once, then reuses it until it exits.
 Existing state stays where it is. Explicitly select it offline:
 
 ```text
-python3 <installed-skill>/runtime/factory.py adopt-home <existing-absolute-directory>
+<installed-skill>/runtime/factory adopt-home <existing-absolute-directory>
 ```
 
 Do not pass `--home` to adoption. It validates complete flat config/paths metadata,
@@ -132,7 +136,7 @@ Global `--home` and `--session` each occur once with a nonempty value.
 ## Read-only doctor and project registration
 
 ```text
-python3 <installed-skill>/runtime/factory.py doctor
+<installed-skill>/runtime/factory doctor
 ```
 
 Doctor emits one versioned JSON report with `home`, `api_url` and ordered location,
@@ -147,7 +151,7 @@ or whole-Worker attestation.
 After entering endpoint/token, register each unrelated checkout explicitly:
 
 ```text
-python3 <installed-skill>/runtime/factory.py init <repo-path>
+<installed-skill>/runtime/factory init <repo-path>
 ```
 
 `init <repo>` is the sole registration flow, not a separate register verb.
@@ -159,13 +163,13 @@ actual repo, then use project push. Do not put credentials in project documents.
 ## Working commands
 
 ```text
-python3 <installed-skill>/runtime/factory.py where sample
-python3 <installed-skill>/runtime/factory.py claim <factory-home> small-feature sample
-python3 <installed-skill>/runtime/factory.py sync sample
-python3 <installed-skill>/runtime/factory.py handoff sample/001-small-feature --session <printed-tag>
-python3 <installed-skill>/runtime/factory.py clean sample/001-small-feature node_modules
-python3 <installed-skill>/runtime/factory.py clean sample/001-small-feature temp
-python3 <installed-skill>/runtime/factory.py orphans
+<installed-skill>/runtime/factory where sample
+<installed-skill>/runtime/factory claim <factory-home> small-feature sample
+<installed-skill>/runtime/factory sync sample
+<installed-skill>/runtime/factory handoff sample/001-small-feature --session <printed-tag>
+<installed-skill>/runtime/factory clean sample/001-small-feature node_modules
+<installed-skill>/runtime/factory clean sample/001-small-feature temp
+<installed-skill>/runtime/factory orphans
 ```
 
 Use the allocated ID, not the illustrative ID above. Claims without a supplied
@@ -202,7 +206,7 @@ value and runs the command without a shell. Wrap a command in `sh -c` when it
 needs the token by name:
 
 ```text
-python3 <installed-skill>/runtime/factory.py with-cloudflare -- sh -c 'printf "Authorization: Bearer %s\n" "$CLOUDFLARE_API_TOKEN" | curl -H @- https://api.cloudflare.com/client/v4/user/tokens/verify'
+<installed-skill>/runtime/factory with-cloudflare -- sh -c 'printf "Authorization: Bearer %s\n" "$CLOUDFLARE_API_TOKEN" | curl -H @- https://api.cloudflare.com/client/v4/user/tokens/verify'
 ```
 
 `printf` is a shell builtin, so the token reaches curl on stdin and never shows in a process list.
@@ -221,11 +225,11 @@ Otherwise it exits with the command's code, or `128 + N` when signal `N` ends it
 ## Session retro digest
 
 ```text
-python3 <installed-skill>/runtime/factory.py retro digest [--days N]
-python3 <installed-skill>/runtime/factory.py retro push
-python3 <installed-skill>/runtime/factory.py retro pull YYYY-MM-DD
-python3 <installed-skill>/runtime/factory.py retro aggregate [--days N]
-python3 <installed-skill>/runtime/factory.py retro admit <run>
+<installed-skill>/runtime/factory retro digest [--days N]
+<installed-skill>/runtime/factory retro push
+<installed-skill>/runtime/factory retro pull YYYY-MM-DD
+<installed-skill>/runtime/factory retro aggregate [--days N]
+<installed-skill>/runtime/factory retro admit <run>
 ```
 
 `retro digest` prints one JSON line per Claude Code main session whose
@@ -319,7 +323,7 @@ For each admitted red-flag card, `retro admit` sends its backlog line and groupe
 ## Tool-call audit
 
 ```text
-python3 <installed-skill>/runtime/factory.py audit <job-id>
+<installed-skill>/runtime/factory audit <job-id>
 ```
 
 `audit` lists every tool call that this host's Claude Code sessions made in a
@@ -363,7 +367,7 @@ A bad job id exits 2. A missing projects directory exits 4 with
 with `no Claude Code session on this host ran in a factory-<job-id> worktree`.
 
 ```text
-python3 <installed-skill>/runtime/factory.py audit push <job-id>
+<installed-skill>/runtime/factory audit push <job-id>
 ```
 
 `audit push` uploads the same rows, each with `host` (this host's `device:`) and
@@ -388,7 +392,7 @@ succeeds and this host's token totals for the job changed, it also writes them t
 ## Token usage
 
 ```text
-python3 <installed-skill>/runtime/factory.py usage [record] <project-slug>/<job-id>
+<installed-skill>/runtime/factory usage [record] <project-slug>/<job-id>
 ```
 
 `usage` sums the tokens this host's Claude Code transcripts spent on a job, by
@@ -442,7 +446,7 @@ job belongs to another project; board errors keep their usual exits.
 ## Post-merge outcomes
 
 ```text
-python3 <installed-skill>/runtime/factory.py outcomes [record] [<project-slug>]
+<installed-skill>/runtime/factory outcomes [record] [<project-slug>]
 ```
 
 `outcomes` sorts every board job at stage `merged` whose `done` falls in the last
@@ -502,7 +506,7 @@ job in one board write and prints `recorded 3 outcomes on the board`:
 It changes a job only when its result or evidence differs from what is stored,
 never touches the job's `updated`, and skips the write with
 `outcomes unchanged; nothing written` when nothing differs. An `unknown` job is
-never recorded. To clear a value, set `{"outcome": null}` with `factory.py board`.
+never recorded. To clear a value, set `{"outcome": null}` with `factory board`.
 Bad arguments exit 2 with `usage: factory.py outcomes [record] [<project-slug>]`.
 The only git write is the `origin/<base>` remote-tracking ref, and a failed fetch
 exits 5.
@@ -520,8 +524,8 @@ count beside tokens per merged PR.
 ## Reviewer benchmark
 
 ```text
-python3 <installed-skill>/runtime/factory.py bench score <cases-file> <arm-folder>...
-python3 <installed-skill>/runtime/factory.py bench cases <project-slug>
+<installed-skill>/runtime/factory bench score <cases-file> <arm-folder>...
+<installed-skill>/runtime/factory bench cases <project-slug>
 ```
 
 `bench score` compares reviewer prompts or models, called arms, on past pull
@@ -571,7 +575,7 @@ with any `review-*.md` files and an optional `run.json` in the shape
 ### Replay
 
 ```text
-python3 <installed-skill>/runtime/factory.py bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]
+<installed-skill>/runtime/factory bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]
 ```
 
 `bench replay` fills an arm folder for `bench score`. `--role` is
@@ -621,7 +625,7 @@ Without `claude`, fill a case folder by hand:
 1. In the project checkout, run `git worktree add --detach <scratch> <head>`.
 2. Run the arm's reviewer there with its prompt and model.
 3. Save its review as `<arm>/<case-id>/review-code.md`, and its wall seconds and
-   `factory.py usage` totals as `<arm>/<case-id>/run.json`.
+   `factory usage` totals as `<arm>/<case-id>/run.json`.
 4. Run `git worktree remove <scratch>`.
 
 Matching rule, for the defect `worker/export.js:40-52`:
@@ -704,7 +708,7 @@ from its own terminal:
 2. Within 15 minutes, run this on the host with the code Settings showed:
 
    ```text
-   python3 <installed-skill>/runtime/factory.py host pair <id> <code>
+   <installed-skill>/runtime/factory host pair <id> <code>
    ```
 
    It sets `device: <id>` in `config.md` and sends the host's first status.
@@ -721,7 +725,7 @@ hosts as checkboxes.
 ## Explicit native agents and platform verification
 
 ```text
-python3 <installed-skill>/runtime/factory.py init --agents both
+<installed-skill>/runtime/factory init --agents both
 ```
 
 Other selections are `none`, `claude` and `opencode`. See
@@ -729,8 +733,8 @@ Other selections are `none`, `claude` and `opencode`. See
 schedules. Installation, initialization and adoption never weaken security policies.
 
 The `CI` workflow runs parallel Ubuntu 22.04/Python 3.12 jobs on pull requests, and its
-`python` job runs the device suite. The runtime
-supports Python 3.8+. The following additional platform checks can run locally.
+`python` job runs the device suite. The `tools/*.py` scripts
+support Python 3.8+. The following additional platform checks can run locally.
 `FactoryTest.test_released_hold_fails_on_real_windows_junction` runs on Windows
 and is skipped elsewhere. POSIX-only permission cases
 `FactoryTest.test_released_hold_fails_on_unlistable_round_directory`,

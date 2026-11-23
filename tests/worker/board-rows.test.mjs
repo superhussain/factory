@@ -110,6 +110,53 @@ test("put frame", async () => {
   });
 });
 
+test("a row with its keys reordered, nested or not, is a changed row", async () => {
+  const nested = { ...BUILD, refs: [{ kind: "followup", id: SPEC.id }] };
+  const s = setup({ updated: UPDATED, jobs: [nested, SPEC] });
+  const reordered = { stage: SPEC.stage, project: SPEC.project, id: SPEC.id };
+  const inner = { ...BUILD, refs: [{ id: SPEC.id, kind: "followup" }] };
+  const response = await s.put({ updated: UPDATED, jobs: [inner, reordered] });
+  assert.equal(response.status, 200);
+  assert.deepEqual(JSON.parse(s.bodies[0][1]).rows, [inner, reordered]);
+});
+
+// The CPU budget at twice today's board, pinned as call counts so it never flakes: a write
+// parses the board once per copy it reads and serializes no unchanged row to diff it.
+test("a PUT and a PATCH on a 4,600-row board serialize only the changed row", async () => {
+  const rows = Array.from({ length: 4600 }, (_, i) => ({
+    id: `${1000 + i}-synthetic-row`,
+    project: "sample",
+    stage: i < 4500 ? "merged" : "build",
+    done: UPDATED,
+    refs: [{ kind: "followup", id: `${1001 + i}-synthetic-row` }],
+  }));
+  const s = setup({ updated: UPDATED, jobs: rows });
+  const { parse, stringify } = JSON;
+  const calls = { parse: 0, stringify: 0 };
+  JSON.parse = (...a) => (calls.parse++, parse(...a));
+  JSON.stringify = (...a) => (calls.stringify++, stringify(...a));
+  let put, patch, putCalls;
+  try {
+    const opened = { ...rows[4599], stage: "pr-open" };
+    put = await s.put({ updated: UPDATED, jobs: [...rows.slice(0, 4599), opened] });
+    putCalls = { ...calls };
+    patch = await s.patch({
+      rows: [{ id: opened.id, expect: opened, row: { ...opened, stage: "review" } }],
+    });
+  } finally {
+    JSON.parse = parse;
+    JSON.stringify = stringify;
+  }
+  assert.equal(put.status, 200);
+  assert.equal(patch.status, 200);
+  // The request body and the stored board; the rest of the count is small fixed fields.
+  assert.equal(putCalls.parse, 2);
+  assert.ok(putCalls.stringify < 50, `PUT stringify calls ${putCalls.stringify}`);
+  assert.ok(calls.stringify - putCalls.stringify < 50, `PATCH stringify calls ${calls.stringify}`);
+  assert.equal(JSON.parse(s.bodies[0][1]).rows.length, 1);
+  assert.equal(JSON.parse(s.bodies[1][1]).rows.length, 1);
+});
+
 const many = Array.from({ length: 101 }, (_, i) => ({
   id: `${3000 + i}-synthetic-row`,
   project: "sample",

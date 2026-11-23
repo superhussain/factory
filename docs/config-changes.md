@@ -117,7 +117,7 @@ This runbook stops here. Applying is your own gated step.
   in §8 first. Once the new origin answers an authenticated request, edit
   `api_url` in each device's `config.md` by hand (`init --connection` refuses to
   replace a different endpoint), then run
-  `python3 <installed-skill>/runtime/factory.py doctor` on that device.
+  `<installed-skill>/runtime/factory doctor` on that device.
 
 ## 5. Roll back
 

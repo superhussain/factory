@@ -18,18 +18,18 @@ Walk a person from nothing to a first job, one question at a time. The written v
 - Run read-only checks yourself and show their result. Use synthetic examples in explanations.
 - End with the summary table in phase 11.
 
-In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory.py` once phase 4 has chosen the skills folder.
+In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory` once phase 4 has chosen the skills folder.
 
 ## 1. Find where you are
 
-- Check: `git rev-parse --show-toplevel`, `test -f deploy/profile.json`, `test -f deploy/bootstrap.json`, `python3 skills/factory/runtime/factory.py doctor`.
+- Check: `git rev-parse --show-toplevel`, `test -f deploy/profile.json`, `test -f deploy/bootstrap.json`, `"$FACTORY" doctor` once phase 4 has installed the skill.
 - Ask, Goal: "What should we set up?" Options: New instance (Recommended when no profile), Add this computer to my instance, Register a project, Configure next steps.
 - A failing `doctor` here is expected on a new instance or a new computer. It only shows what is missing; do not treat it as an error.
 - Then jump: New instance and Add this computer to phase 2, Register a project to phase 6, Configure next steps to phase 8.
 
 ## 2. Tools
 
-- Check: `mise --version`, `python3 --version`, `git --version`, `gh auth status`.
+- Check: `mise --version`, `python3 --version` (for tools/*.py), `cargo --version`, `git --version`, `gh auth status`.
 - Ask, Install: "`<tool>` is missing. Install it now?" Options: Show me the command (Recommended), I installed it, Skip.
 - Then, after a yes, run `mise install` and `mise exec -- pnpm install --frozen-lockfile`.
 
@@ -54,11 +54,11 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory.py` onc
 - Ask, Skills: "Install the skill to which folder?" Options: `$HOME/.claude/skills` (Recommended), `$HOME/.agents/skills`, Other.
 - Then run `python3 tools/install.py --destination <dir>`.
 - On a differing install, ask Replace: "Replace the installed copy? A backup is kept." Options: Replace (Recommended), Keep.
-- Then run `python3 "$FACTORY" init --agents <choice>`.
+- Then run `"$FACTORY" init --agents <choice>`.
 
 ## 5. Check
 
-- Check: `python3 "$FACTORY" doctor`.
+- Check: `"$FACTORY" doctor`.
 - Ask: none while every check passes.
 - On a fail, name the check and its section in [troubleshooting.md](../../../docs/troubleshooting.md), then stop at that fix.
 
@@ -66,15 +66,15 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory.py` onc
 
 - Check: `git -C <path> remote get-url origin`.
 - Ask, Path: free text checkout path.
-- Then run `python3 "$FACTORY" init <path>` and `python3 "$FACTORY" pull <slug>`. Read the repo and draft all 12 sections in `<home>/projects/<slug>.md`. Ask one question per section you cannot infer (test command, dev ports, deploy on merge, UI paths).
+- Then run `"$FACTORY" init <path>` and `"$FACTORY" pull <slug>`. Read the repo and draft all 12 sections in `<home>/projects/<slug>.md`. Ask one question per section you cannot infer (test command, dev ports, deploy on merge, UI paths).
 - Ask, Draft: "I drafted the project file from the repo. Save it?" Options: Save (Recommended), Edit a section, Skip.
-- Then show the draft and run `python3 "$FACTORY" push <slug>`. Exit 6 follows the rule in [troubleshooting.md](../../../docs/troubleshooting.md#exit-6-sync-conflicts).
+- Then show the draft and run `"$FACTORY" push <slug>`. Exit 6 follows the rule in [troubleshooting.md](../../../docs/troubleshooting.md#exit-6-sync-conflicts).
 
 ## 7. Hosts
 
-- Check: `python3 "$FACTORY" where <slug>`.
+- Check: `"$FACTORY" where <slug>`.
 - Ask, Hosts: "Will another computer run factory work?" Options: No, just this one (Recommended), Yes.
-- On yes, list every host first. For each host, give Settings, Hosts, Add host, then `python3 "$FACTORY" host pair <id> <code>` for that host's own terminal, then Confirm. Say all hosts pair in one sitting. See [device.md](../../../docs/device.md#host-registration).
+- On yes, list every host first. For each host, give Settings, Hosts, Add host, then `"$FACTORY" host pair <id> <code>` for that host's own terminal, then Confirm. Say all hosts pair in one sitting. See [device.md](../../../docs/device.md#host-registration).
 
 ## 8. Pipeline
 
@@ -89,9 +89,9 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory.py` onc
 
 ## 9. Pickup
 
-- Only when pickup is yes. Check: `python3 "$FACTORY" pickup setup`. Run it yourself and show its output.
+- Only when pickup is yes. Check: `"$FACTORY" pickup setup`. Run it yourself and show its output.
 - Walk the missing lines in order, one per message. Write `routes.md` and `launchers.json` in the factory home after a yes. Give the dashboard controls for the pipeline line and wait for "done".
-- Hand over `python3 "$FACTORY" pickup setup --install` for their own terminal, then rerun `pickup setup` until it exits 0.
+- Hand over `"$FACTORY" pickup setup --install` for their own terminal, then rerun `pickup setup` until it exits 0.
 - Never offer a stored Paseo or Claude schedule prompt for pickup. It does not pick up ideas.
 
 ## 10. Extras

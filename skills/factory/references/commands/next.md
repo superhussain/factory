@@ -8,9 +8,9 @@ for a line that waits on a `Depends on:` prerequisite. An item may be followed b
 `backlog add --context` wrote. `next` ignores them except `Depends on:` lines.
 `next` and `batch` skip a line whose `Depends on:` line names an unchecked line or a job still open on the board. `batch` names each line it leaves out with a `skipping backlog:<key>` stderr line.
 
-1. Run `python3 <this skill's dir>/runtime/factory.py sync`, with no slug, since the
+1. Run `<this skill's dir>/runtime/factory sync`, with no slug, since the
    project isn't known before `next` runs. Conflicts don't block, as in the Claims table.
-2. Run `python3 <this skill's dir>/runtime/factory.py next --session <tag>` (no tag on
+2. Run `<this skill's dir>/runtime/factory next --session <tag>` (no tag on
    the first call) and read its JSON: `id`, `project`, and `feature`. It claims the
    id under that project and marks the line `- [x] <slug>: <feature> (<id>)`.
 3. Exit 3 means nothing in the backlog can run on this device. Say so and stop
@@ -24,10 +24,10 @@ for a line that waits on a `Depends on:` prerequisite. An item may be followed b
 
 A decision from the dashboard's backlog decision page checks lines off the same way.
 
-To queue work, run `factory.py backlog add "<slug>: <feature>" [--context <file>]`, or edit
+To queue work, run `factory backlog add "<slug>: <feature>" [--context <file>]`, or edit
 `backlog.md` in R2 by hand. Rework lines carry `(rework-of <id>)` like any other ref.
 Report a queued item with the `link:` line `backlog add` prints.
-To queue a lesson a person must accept, run `factory.py backlog lesson <slug>/<job-id> --fact-file <file> --why-file <file>`. `next` skips it.
+To queue a lesson a person must accept, run `factory backlog lesson <slug>/<job-id> --fact-file <file> --why-file <file>`. `next` skips it.
 
 A question for him about the backlog itself, such as which line to run next or
 whether to drop one, has no job folder. When the decisions-via-askuserquestion

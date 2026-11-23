@@ -11,7 +11,7 @@ export const FLOORS = Object.freeze(
     ],
     [
       "F2",
-      "Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. Security and code always run. ux and ui are SKIPPED only by factory.py review-plan when a round changes nothing a person sees, and the approver checks each skip.",
+      "Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. Security and code always run. ux and ui are SKIPPED only by factory review-plan when a round changes nothing a person sees, and the approver checks each skip.",
       "none",
     ],
     [
@@ -105,7 +105,7 @@ const PHRASES = [
   ["shell", /(?:curl|wget)[^\n]*\|\s*(?:sh|bash)|\brm -rf\b/i],
 ];
 
-// Rule 4 folds look-alikes first. NFKC handles fullwidth and other compatibility forms. This table handles the brackets, slashes, dashes and Cyrillic, Greek and Latin letters NFKC leaves alone. factory.py holds the same two strings.
+// Rule 4 folds look-alikes first. NFKC handles fullwidth and other compatibility forms. This table handles the brackets, slashes, dashes and Cyrillic, Greek and Latin letters NFKC leaves alone. the runtime holds the same two strings.
 const TAG_LOOKALIKES_FROM =
   "\u2039\u27e8\u3008\u276e\u02c2\u2044\u2215\u29f8\u2571\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u2043\u0430\u0435\u043e\u0440\u0441\u0455\u0410\u0415\u041e\u0420\u0421\u0405\u0422\u03b1\u03bf\u03c1\u0391\u0395\u039f\u03a1\u03a4\u0412\u0392\u041a\u039a\u043a\u03ba\u04c0\u04cf\u0261\u050d\u0456\u0406\u0399\u03b9\u0131\u041c\u039c\u043c\u0443\u0445\u04bb\u0458\u0501\u051b\u051d\u04af\u041d\u0425\u0408\u051a\u051c\u04ae";
 const TAG_LOOKALIKES_TO = "<<<<<////--------aeopcsAEOPCSTaopAEOPTBBKKkkllggiIIiiMMmyxhjdqwyHXJQWY";

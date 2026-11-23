@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::rc::Rc;
 use std::time::Duration;
@@ -52,6 +52,8 @@ struct Fakes {
     scheduler: Option<&'static str>,
     timer_installed: Option<bool>,
     timer_drift: Option<Option<String>>,
+    daemon_service: Option<Option<&'static str>>,
+    daemon_drift: Option<bool>,
     gh: Option<Rc<dyn Fn(&str, &[&str]) -> (i32, String)>>,
     setup_run: Option<Rc<dyn Fn(&[&str]) -> (i32, String)>>,
     backup: Option<Rc<dyn Fn() -> Result<PathBuf, String>>>,
@@ -86,7 +88,7 @@ fn timer_installed(scheduler: &str) -> bool {
     if let Some(t) = fake!(timer_installed) {
         return t;
     }
-    pickup::timer_installed(scheduler).0
+    pickup::timer_installed(scheduler, &pickup::PICKUP).0
 }
 
 /// `bool(timer_drift(scheduler, timer_values(home)))`.
@@ -95,7 +97,50 @@ fn timer_drift(scheduler: &str, home: &Path) -> bool {
     if let Some(d) = fake!(timer_drift) {
         return d.is_some_and(|s| !s.is_empty());
     }
-    pickup::timer_drift(scheduler, &pickup::timer_values(home)).is_some_and(|s| !s.is_empty())
+    pickup::timer_drift(scheduler, &pickup::timer_values(home, &pickup::PICKUP))
+        .is_some_and(|s| !s.is_empty())
+}
+
+/// Restarts the installed daemon service with the scheduler's own commands, so it runs the binary
+/// catch-up just installed. False when there was nothing to restart: cron with no daemon running.
+/// schtasks /End fails when the task is not running, so its failure does not count.
+fn restart_daemon(scheduler: &str, home: &Path) -> Result<bool, String> {
+    let argvs = pickup::daemon_restart_argvs(scheduler, home)?;
+    for argv in &argvs {
+        let r = run(argv, Some(TIMER_TIMEOUT));
+        if r.code != 0 && !(argv[0] == "schtasks" && argv[1] == "/End") {
+            let both = r.stderr + &r.stdout;
+            let text = strip(&both);
+            return Err(format!(
+                "{}: {}",
+                argv.join(" "),
+                text.split('\n').next().unwrap_or("")
+            ));
+        }
+    }
+    Ok(!argvs.is_empty())
+}
+
+/// The daemon service's scheduler when the service is installed on this host.
+fn daemon_service() -> Option<&'static str> {
+    #[cfg(test)]
+    if let Some(s) = fake!(daemon_service) {
+        return s;
+    }
+    let scheduler = pickup::daemon_scheduler();
+    pickup::timer_installed(scheduler, &pickup::DAEMON)
+        .0
+        .then_some(scheduler)
+}
+
+/// True when the installed daemon service runs another command or binary than --install writes.
+fn daemon_drift(scheduler: &str, home: &Path) -> bool {
+    #[cfg(test)]
+    if let Some(d) = fake!(daemon_drift) {
+        return d;
+    }
+    pickup::timer_drift(scheduler, &pickup::timer_values(home, &pickup::DAEMON))
+        .is_some_and(|s| !s.is_empty())
 }
 
 fn setup_run(argv: &[&str]) -> (i32, String) {
@@ -144,6 +189,19 @@ fn run(argv: &[String], timeout: Option<Duration>) -> Out {
     if let Some(r) = fake!(run).and_then(|f| f(argv, timeout)) {
         return finished(argv, timeout, r);
     }
+    #[cfg(test)]
+    assert!(
+        ![
+            "launchctl",
+            "systemctl",
+            "schtasks",
+            "crontab",
+            "kill",
+            "taskkill"
+        ]
+        .contains(&argv[0].as_str()),
+        "a test reached the host scheduler: {argv:?}"
+    );
     let args: Vec<&str> = argv.iter().map(String::as_str).collect();
     finished(argv, timeout, capture(&args, None, &[], timeout))
 }
@@ -251,25 +309,8 @@ fn python() -> Vec<String> {
 
 /// The argv prefix that runs an installed bundle: its bundle.json entry when valid, else its runtime.
 fn catch_up_entry(skill: &Path) -> Vec<String> {
-    let entry = read_text(&skill.join("bundle.json"))
-        .ok()
-        .and_then(|t| loads(&t).ok())
-        .and_then(|v| v.get("entry").cloned());
-    let args: Option<Vec<String>> = entry
-        .as_ref()
-        .and_then(Value::as_array)
-        .and_then(|a| a.iter().map(|v| v.as_str().map(String::from)).collect());
-    if let Some(args) = args.filter(|a| !a.is_empty() && !a[0].is_empty()) {
-        let first = Path::new(&args[0]);
-        if !first.is_absolute()
-            && !first.has_root()
-            && !first.components().any(|c| c == Component::ParentDir)
-        {
-            let program: PathBuf = skill.join(first).components().collect();
-            return std::iter::once(program.to_string_lossy().into_owned())
-                .chain(args[1..].iter().cloned())
-                .collect();
-        }
+    if let Some(entry) = crate::shared::home::bundle_entry(skill) {
+        return entry;
     }
     let mut argv = python();
     argv.push(
@@ -377,6 +418,11 @@ fn catch_up_backup(home: &Path, skill: &Path) -> Result<PathBuf, String> {
             "LaunchAgents",
         ),
         (user.join(".config"), ("factory-", ".cmd"), "config"),
+        (
+            user.join(".config").join("systemd").join("user"),
+            ("factory-", ".service"),
+            "systemd",
+        ),
     ];
     for (source, (prefix, suffix), name) in sources {
         let mut found: Vec<PathBuf> = fs::read_dir(&source)
@@ -541,19 +587,26 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
     let installed = stamp.as_ref().map(|s| py_str(s.get("commit")));
     let current = installed.as_deref() == Some(head.as_str());
     let scheduler = scheduler();
-    let timer = timer_installed(scheduler);
+    // One crontab read serves both checks, so a host without a daemon reads it as before.
+    let (timer, daemon) =
+        pickup::with_crontab_memo(|| (timer_installed(scheduler), daemon_service()));
     let stale = timer && (!current || timer_drift(scheduler, home));
+    // Only drift reinstalls the daemon: a new skill keeps its binary path, so the unit still matches.
+    let daemon_stale = daemon.is_some_and(|s| daemon_drift(s, home));
     if current {
         outln!(out, "skill: current at {h7}");
     } else {
         let have = installed.map_or_else(|| "unknown".to_string(), |c| short(&c));
         outln!(out, "skill: {have} installed, {h7} on origin/{base}");
     }
-    if current && !stale {
+    if current && !stale && !daemon_stale {
         if timer {
             outln!(out, "pickup timer: current");
         } else {
             outln!(out, "pickup timer: none on this host, left alone");
+        }
+        if daemon.is_some() {
+            outln!(out, "daemon service: current");
         }
     } else {
         let backup = match catch_up_backup(home, skill) {
@@ -638,6 +691,8 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             outln!(out, "pickup timer: skipped, skill install failed");
         } else if ok && !timer {
             outln!(out, "pickup timer: none on this host, left alone");
+        } else if ok && current && !stale {
+            outln!(out, "pickup timer: current");
         } else if ok {
             let home_text = home.to_string_lossy();
             let mut argv = catch_up_entry(skill);
@@ -662,6 +717,53 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             } else {
                 failed += 1;
                 outln!(out, "pickup timer: {text}");
+            }
+        }
+        if daemon.is_some() {
+            if backup.is_some() && !ok {
+                outln!(out, "daemon service: skipped, skill install failed");
+            } else if ok && !daemon_stale {
+                outln!(out, "daemon service: current");
+                // A new skill keeps the binary path, so the running daemon still runs the old one.
+                if !current {
+                    match restart_daemon(daemon.unwrap_or_default(), home) {
+                        Ok(true) => outln!(out, "daemon: restarted"),
+                        Ok(false) => outln!(
+                            out,
+                            "daemon: not running; the crontab starts the new binary within 5 minutes"
+                        ),
+                        Err(e) => {
+                            failed += 1;
+                            outln!(out, "daemon: restart failed: {e}");
+                        }
+                    }
+                }
+            } else if ok {
+                let binary = here.join(if cfg!(windows) {
+                    "factory.exe"
+                } else {
+                    "factory"
+                });
+                let argv = [
+                    binary.to_string_lossy().into_owned(),
+                    "--home".into(),
+                    home.to_string_lossy().into_owned(),
+                    "daemon".into(),
+                    "setup".into(),
+                    "--install".into(),
+                ];
+                let r = run(&argv, Some(TIMER_TIMEOUT));
+                if r.code == 0 {
+                    let text = strip(&r.stdout);
+                    outln!(
+                        out,
+                        "daemon service: {}",
+                        text.split('\n').next().unwrap_or("")
+                    );
+                } else {
+                    failed += 1;
+                    outln!(out, "daemon service: {}", strip(&(r.stderr + &r.stdout)));
+                }
             }
         }
     }
@@ -948,6 +1050,7 @@ mod tests {
                     scheduler: Some("cron"),
                     timer_installed: Some(false),
                     timer_drift: Some(Some("synthetic drift".into())),
+                    daemon_service: Some(None),
                     gh: Some(Rc::new(move |slug, args| {
                         let call = std::iter::once(slug)
                             .chain(args.iter().copied())
@@ -1039,6 +1142,65 @@ mod tests {
                 }))
             });
             calls
+        }
+
+        /// Fakes the `daemon setup --install` child on top of any timer fake.
+        fn daemon_calls(&self, out: &str, code: i32) -> Calls {
+            let calls: Calls = Rc::default();
+            let prev = FAKES.with(|f| f.borrow().run.clone());
+            let (seen, out) = (calls.clone(), out.to_string());
+            FAKES.with(|f| {
+                f.borrow_mut().run = Some(Rc::new(move |argv, timeout| {
+                    if !argv.iter().any(|a| a == "daemon") {
+                        return prev.as_ref().and_then(|p| p(argv, timeout));
+                    }
+                    assert_eq!(timeout, Some(Duration::from_secs(120)));
+                    seen.borrow_mut().push(argv.to_vec());
+                    Some(Ok(Out {
+                        code,
+                        stdout: out.clone(),
+                        stderr: String::new(),
+                    }))
+                }))
+            });
+            calls
+        }
+
+        /// Fakes the scheduler commands a daemon restart runs: it records each argv and replies
+        /// with code and out, except a failing schtasks /End when end_fails.
+        fn service_calls(&self, code: i32, out: &str, end_fails: bool) -> Calls {
+            let calls: Calls = Rc::default();
+            let prev = FAKES.with(|f| f.borrow().run.clone());
+            let (seen, out) = (calls.clone(), out.to_string());
+            FAKES.with(|f| {
+                f.borrow_mut().run = Some(Rc::new(move |argv, timeout| {
+                    let tools = ["launchctl", "systemctl", "schtasks", "kill", "taskkill"];
+                    if !tools.contains(&argv[0].as_str()) {
+                        return prev.as_ref().and_then(|p| p(argv, timeout));
+                    }
+                    assert_eq!(timeout, Some(Duration::from_secs(120)));
+                    seen.borrow_mut().push(argv.to_vec());
+                    let code = if end_fails && argv[1] == "/End" {
+                        1
+                    } else {
+                        code
+                    };
+                    Some(Ok(Out {
+                        code,
+                        stdout: out.clone(),
+                        stderr: String::new(),
+                    }))
+                }))
+            });
+            calls
+        }
+
+        fn daemon(&self, scheduler: Option<&'static str>, drift: bool) {
+            FAKES.with(|f| {
+                let mut f = f.borrow_mut();
+                f.daemon_service = Some(scheduler);
+                f.daemon_drift = Some(drift);
+            });
         }
 
         fn timer(&self, installed: bool) {
@@ -1351,6 +1513,233 @@ mod tests {
         fs::write(skill.join("bundle.json"), unknown.to_string()).unwrap();
         assert_eq!(bundle_stamp(&skill), None);
         fs::remove_dir_all(skill).unwrap();
+    }
+
+    fn argvs(list: &[&[&str]]) -> Vec<Vec<String>> {
+        list.iter()
+            .map(|a| a.iter().map(|w| w.to_string()).collect())
+            .collect()
+    }
+
+    fn daemon_lines(lines: &[String]) -> Vec<&str> {
+        lines
+            .iter()
+            .map(String::as_str)
+            .filter(|l| l.starts_with("daemon"))
+            .collect()
+    }
+
+    /// After a new skill, an installed service restarts once with its scheduler's own command; the
+    /// next run, with nothing new, restarts nothing.
+    #[test]
+    fn new_skill_restarts_launchd_and_systemd_services() {
+        let target = format!("gui/{}/factory.daemon", crate::commands::pickup::test_uid());
+        for (scheduler, want) in [
+            (
+                "launchd",
+                vec!["launchctl", "kickstart", "-k", target.as_str()],
+            ),
+            (
+                "systemd",
+                vec!["systemctl", "--user", "restart", "factory-daemon.service"],
+            ),
+        ] {
+            let t = T::new(&format!("restart-{scheduler}"));
+            t.daemon(Some(scheduler), false);
+            let calls = t.service_calls(0, "", false);
+            let (code, lines) = t.lines();
+            assert_eq!(code, 0, "{lines:?}");
+            assert_eq!(
+                daemon_lines(&lines),
+                ["daemon service: current", "daemon: restarted"]
+            );
+            assert_eq!(*calls.borrow(), argvs(&[&want]));
+            let (code, lines) = t.lines();
+            assert_eq!(code, 0);
+            assert_eq!(daemon_lines(&lines), ["daemon service: current"]);
+            assert_eq!(calls.borrow().len(), 1);
+        }
+    }
+
+    #[test]
+    fn new_skill_restarts_the_windows_task_and_its_loop_daemon() {
+        let t = T::new("restart-schtasks");
+        t.daemon(Some("schtasks"), false);
+        let marker = crate::commands::daemon::stop_marker(&t.home);
+        fs::create_dir_all(marker.parent().unwrap()).unwrap();
+        fs::write(&marker, "").unwrap();
+        let _lock = crate::commands::daemon::take_lock(&t.home)
+            .unwrap()
+            .unwrap();
+        let calls = t.service_calls(0, "", true);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"daemon: restarted".to_string()),
+            "{lines:?}"
+        );
+        let pid = std::process::id().to_string();
+        assert_eq!(
+            *calls.borrow(),
+            argvs(&[
+                &["schtasks", "/End", "/TN", "factory-daemon"],
+                &["kill", &pid],
+                &["schtasks", "/Run", "/TN", "factory-daemon"],
+            ])
+        );
+        assert!(!marker.exists(), "the restart clears the stop marker");
+    }
+
+    #[test]
+    fn new_skill_ends_a_running_cron_daemon_only() {
+        let t = T::new("restart-cron-idle");
+        t.daemon(Some("cron"), false);
+        let calls = t.service_calls(0, "", false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0);
+        assert_eq!(
+            daemon_lines(&lines),
+            [
+                "daemon service: current",
+                "daemon: not running; the crontab starts the new binary within 5 minutes"
+            ]
+        );
+        assert!(calls.borrow().is_empty());
+
+        let t = T::new("restart-cron-running");
+        t.daemon(Some("cron"), false);
+        let _lock = crate::commands::daemon::take_lock(&t.home)
+            .unwrap()
+            .unwrap();
+        let calls = t.service_calls(0, "", false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0);
+        assert!(
+            lines.contains(&"daemon: restarted".to_string()),
+            "{lines:?}"
+        );
+        assert_eq!(
+            *calls.borrow(),
+            argvs(&[&["kill", &std::process::id().to_string()]])
+        );
+    }
+
+    #[test]
+    fn failed_restart_is_a_failed_step() {
+        let t = T::new("restart-fails");
+        t.daemon(Some("systemd"), false);
+        t.service_calls(
+            1,
+            "Failed to restart factory-daemon.service: Unit not found.\n",
+            false,
+        );
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1);
+        assert!(lines.contains(&"daemon: restart failed: systemctl --user restart factory-daemon.service: Failed to restart factory-daemon.service: Unit not found.".to_string()), "{lines:?}");
+    }
+
+    #[test]
+    fn no_restart_without_the_service_or_after_a_reinstall() {
+        let t = T::new("restart-none");
+        let calls = t.service_calls(0, "", false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0);
+        assert!(daemon_lines(&lines).is_empty(), "{lines:?}");
+        assert!(calls.borrow().is_empty());
+
+        let t = T::new("restart-drift");
+        t.daemon(Some("launchd"), true);
+        let calls = t.service_calls(0, "", false);
+        t.daemon_calls(
+            "installed launchd service: /synthetic/factory.daemon.plist\n",
+            0,
+        );
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0);
+        assert_eq!(
+            daemon_lines(&lines),
+            ["daemon service: installed launchd service: /synthetic/factory.daemon.plist"]
+        );
+        assert!(calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn daemon_service_reinstalled_only_when_it_drifted() {
+        let t = T::new("daemon-drift");
+        t.timer(true);
+        t.drift(None);
+        let (reply, reply_code) = default_timer_reply();
+        t.timer_calls(reply, reply_code);
+        let calls = t.daemon_calls(
+            "installed launchd service: /synthetic/factory.daemon.plist\n",
+            0,
+        );
+
+        t.daemon(Some("launchd"), false);
+        t.service_calls(0, "", false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0);
+        assert!(
+            lines.contains(&"daemon service: current".to_string()),
+            "{lines:?}"
+        );
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0);
+        assert_eq!(
+            lines[3..5],
+            ["pickup timer: current", "daemon service: current"]
+        );
+        assert!(calls.borrow().is_empty());
+        let backups = t.backups().len();
+
+        t.daemon(Some("launchd"), true);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0);
+        assert_eq!(t.backups().len(), backups + 1);
+        assert_eq!(
+            lines[4..6],
+            [
+                "pickup timer: current",
+                "daemon service: installed launchd service: /synthetic/factory.daemon.plist"
+            ]
+        );
+        let home = t.home.to_string_lossy().into_owned();
+        let binary = t
+            .skill
+            .join("runtime/factory")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            *calls.borrow(),
+            [[
+                binary.as_str(),
+                "--home",
+                &home,
+                "daemon",
+                "setup",
+                "--install"
+            ]
+            .map(String::from)]
+        );
+
+        let calls = t.daemon_calls(
+            "could not install the launchd service factory.daemon: synthetic\n",
+            1,
+        );
+        let (code, lines) = t.lines();
+        assert_eq!((code, calls.borrow().len()), (1, 1));
+        assert!(
+            lines.contains(
+                &"daemon service: could not install the launchd service factory.daemon: synthetic"
+                    .to_string()
+            ),
+            "{lines:?}"
+        );
+
+        t.daemon(None, true);
+        let (code, lines) = t.lines();
+        assert_eq!((code, calls.borrow().len()), (0, 1));
+        assert!(!lines.iter().any(|l| l.starts_with("daemon service:")));
     }
 
     #[test]
