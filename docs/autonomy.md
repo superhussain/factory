@@ -358,6 +358,21 @@ admit nor counts toward the pause. A revert counts toward the daily retro cap. T
 open records, every unresumed revert and the newest 20 other settled ones. Settle skips malformed records, including
 one whose `opened` is not a board timestamp, and drops non-dict entries from `trials`
 when it writes the board.
+- **Settle-shaped.** The Worker's `checkTrialSettle` refuses, with 400, a board `PUT` or
+  `PATCH` that changes a stored `open` trial any way `trial settle` would not. Every key
+  outside `status`, `settled`, `arms`, `reads` and `revert_version` stays equal, a settled
+  record's `settled` is a board timestamp, and the written record must pass:
+
+| Written record for a stored `open` trial | Accepted when |
+| --- | --- |
+| missing | never |
+| `open` | only `arms` and `reads` differ |
+| `reverted` | `revert_version` is an integer above `version` |
+| `superseded` | the stored pipeline's `stage_notes[stage]` (missing is `""`) differs from `challenger` |
+| `inconclusive`, `revert-failed` | the Worker's clock is at least `opened` plus 28 days minus 5 minutes |
+| `kept` | each arm has 5 `merged` or `closed` jobs of the project on the stored board, started at or after `opened`, and no read is `b higher` |
+| any other status | never |
+
 - **Pause.** Two reverted trials without `resumed` pause a project's stage-note edits.
   Settle then prints
   `stage-note trials paused for <slug> after 2 reverts; a person runs trial resume <slug>`,
