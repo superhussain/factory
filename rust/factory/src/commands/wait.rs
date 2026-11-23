@@ -23,7 +23,7 @@ use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::pyval::{py_eq, truthy};
 
 static WAIT_ARTIFACT: Pattern = Pattern::new(
-    r"spec\.md|spec-evidence\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md",
+    r"spec\.md|spec-evidence\.md|build\.md|decision\.md|walkthrough\.html|build\.walkthrough\.html|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md",
     Flags::NONE,
 );
 static SKIPPED_REVIEW: Pattern = Pattern::new(r"round-[1-9][0-9]*/review-(ux|ui)\.md", Flags::NONE);
@@ -38,7 +38,15 @@ static ROUND: Pattern = Pattern::new("[1-9][0-9]*", Flags::NONE);
 
 /// True when line is a finished first line for artifact.
 fn wait_valid(artifact: &str, line: &str) -> bool {
-    if ["spec.md", "spec-evidence.md", "build.md"].contains(&artifact) {
+    if [
+        "spec.md",
+        "spec-evidence.md",
+        "build.md",
+        "walkthrough.html",
+        "build.walkthrough.html",
+    ]
+    .contains(&artifact)
+    {
         return !strip(line).is_empty();
     }
     if artifact == "decision.md" {
@@ -691,6 +699,31 @@ mod tests {
         assert_eq!(
             watch(&home, &["spec.md"], &io).unwrap(),
             "{\"event\": \"files\", \"files\": {\"spec.md\": \"# Spec: sample export\"}, \"pr\": null, \"elapsed\": 212}\n"
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn watch_walkthrough_artifacts() {
+        let (home, folder) = home("watch-walkthrough", "042-sample-export");
+        fs::write(
+            folder.join("walkthrough.html"),
+            "<!doctype html>\n<title>Spec walkthrough</title>\n",
+        )
+        .unwrap();
+        fs::write(
+            folder.join("build.walkthrough.html"),
+            "<!doctype html>\n<title>Build walkthrough</title>\n",
+        )
+        .unwrap();
+        let io = Io {
+            hold: &no_hold,
+            now: &|| 0.0,
+            sleep: &|_| {},
+        };
+        assert_eq!(
+            watch(&home, &["walkthrough.html", "build.walkthrough.html"], &io).unwrap(),
+            "{\"event\": \"files\", \"files\": {\"walkthrough.html\": \"<!doctype html>\", \"build.walkthrough.html\": \"<!doctype html>\"}, \"pr\": null, \"elapsed\": 0}\n"
         );
         fs::remove_dir_all(home).unwrap();
     }
