@@ -11,7 +11,7 @@ Paste this prompt into a coding agent running on the host, such as Paseo, Claude
 ```text
 Set up automatic factory pickup on this host. You are a coding agent on the machine that should pick up ideas. Work through these steps in order.
 
-1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: SKILL/runtime/factory pickup setup
+1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: SKILL/runtime/factory pickup setup On Windows the binary is SKILL\runtime\factory.exe; use that spelling in every command below.
    If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with python3 tools/install.py --destination <skills folder> --replace from a clone of the factory repo, then start again.
 2. It prints 7 numbered checks, each ok or missing, with a fix under each missing one. Fix checks 1 to 6 in order. After each fix, run pickup setup again.
    - home: run the doctor line it prints. If the factory home or its credentials are missing, stop and tell me. Never print or copy values from the .env file.
@@ -403,6 +403,7 @@ changes nothing. Then install one timer per host.
   `<installed-skill>\runtime\factory.exe --home <home> pickup >> "<home>\logs\pickup.log" 2>&1`,
   then
   `schtasks /Create /TN factory-pickup /SC MINUTE /MO 5 /TR "%USERPROFILE%\.config\factory-pickup.cmd" /F`.
+  On Windows the binary reads no time zone data, so usage limits default to 60 minutes.
 
 ## Stalled-session takeover
 

@@ -1185,7 +1185,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <p class="muted">Paste this prompt into a coding agent running on the host, such as Paseo, Claude Code or OpenCode. The agent runs pickup setup and fixes each missing check in order. It asks before it installs the timer, and tells you what to click when a fix is a dashboard setting.</p>
         <div class="snippet"><div class="actions"><button class="btn" type="button" data-copy="scheduler-agent-prompt" aria-label="Copy agent setup prompt">Copy</button></div><pre class="wrap"><code id="scheduler-agent-prompt">Set up automatic factory pickup on this host. You are a coding agent on the machine that should pick up ideas. Work through these steps in order.
 
-1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: SKILL/runtime/factory pickup setup
+1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: SKILL/runtime/factory pickup setup On Windows the binary is SKILL\runtime\factory.exe; use that spelling in every command below.
    If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with python3 tools/install.py --destination &lt;skills folder&gt; --replace from a clone of the factory repo, then start again.
 2. It prints 7 numbered checks, each ok or missing, with a fix under each missing one. Fix checks 1 to 6 in order. After each fix, run pickup setup again.
    - home: run the doctor line it prints. If the factory home or its credentials are missing, stop and tell me. Never print or copy values from the .env file.
@@ -1215,6 +1215,7 @@ A stored Paseo or Claude schedule prompt does not pick up ideas, so do not creat
       <h4>Placeholders</h4>
       <ul class="scheduler-list">
         <li>&lt;installed-skill&gt;: the folder where the factory skill is installed on this host.</li>
+        <li>&lt;installed-skill&gt;/runtime/factory: the factory binary. On Windows it is &lt;installed-skill&gt;\runtime\factory.exe, so use that spelling in the commands below.</li>
         <li>&lt;home&gt;: this host's factory home, the folder that holds config.md and launchers.json.</li>
         <li>&lt;launcher bin dir&gt;: the folder that holds your launcher program, so the scheduler finds it on PATH.</li>
         <li>&lt;program&gt; and &lt;arg&gt;: your launcher program and its arguments.</li>
@@ -5000,7 +5001,7 @@ function renderPipelineTrials() {
       const code = document.createElement('code');
       const reason = document.createElement('span');
       reason.textContent = '"<reason>"';
-      code.append('factory trial resume ' + p + ' ', reason);
+      code.append('<installed-skill>/runtime/factory trial resume ' + p + ' ', reason);
       line.append('Stage-note trials for ' + p + ' are paused after ' + TRIAL_PAUSE_REVERTS + ' reverts. Retro edits no ' + p + ' stage note until a person runs ', code, ' or asks an agent to run it.');
       return line;
     }));
@@ -5347,7 +5348,7 @@ async function hostWrite(id, method, path, body, etag, done) {
 
 function showHostCode(id, code, expires) {
   $('host-code-text').textContent = 'Pairing code for ' + id + ': ' + code + '. It works once and expires at ' + expires.slice(11, 16) + ' UTC. It is not shown again.';
-  $('host-code-command').textContent = 'factory host pair ' + id + ' ' + code;
+  $('host-code-command').textContent = '<installed-skill>/runtime/factory host pair ' + id + ' ' + code;
   $('host-code').hidden = false;
 }
 function clearHostCode() {
