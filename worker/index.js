@@ -496,7 +496,8 @@ async function boardRefusal(env, stored, data, sameBase, principal) {
         checkSpecApproval(stored.jobs, data.jobs, principal) ??
         checkResolve(stored.jobs, data.jobs, principal) ??
         checkSteer(stored.jobs, data.jobs, principal) ??
-        checkTrials(stored.doc, data))
+        checkTrials(stored.doc, data) ??
+        (await checkTrialSettle(env, stored, data)))
       : null)
   );
 }
@@ -3195,6 +3196,93 @@ function checkTrials(storedDoc, data) {
       !stored.includes(canonicalJson(t))
     )
       return `a board write cannot set resumed or resumed_by on trial ${label(t, i)}: only POST /api/trials/resume clears a stage-note trial pause. Nothing was written.`;
+  return null;
+}
+
+const BOARD_STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const TRIAL_SETTLED = ["kept", "reverted", "superseded", "inconclusive", "revert-failed"];
+const TRIAL_SETTLE_KEYS = ["status", "settled", "arms", "reads", "revert_version"];
+const TRIAL_MAX_DAYS = 28;
+const TRIAL_ARM_FINISHED = 5;
+const TRIAL_CLOCK_SKEW_MS = 300000;
+
+// The runtime's trial_arm: SHA-256 of <trialId>/<jobId>, first 4 bytes big-endian, mod 100,
+// below 50 is "b".
+async function trialArm(trialId, jobId) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${trialId}/${jobId}`),
+  );
+  return new DataView(digest).getUint32(0) % 100 < 50 ? "b" : "a";
+}
+
+// Only trial settle moves an open stage-note trial. A write keeps each stored open trial, changes
+// only its settle keys, and settles it only with evidence the Worker can check against the stored
+// board, the stored pipeline and its clock. An error message, or null.
+async function checkTrialSettle(env, stored, data) {
+  const trials = (doc) =>
+    (Array.isArray(doc?.trials) ? doc.trials : []).filter((t) => typeof t === "object" && t);
+  // A board stamp's time, or NaN when it is not one.
+  const time = (s) => (typeof s === "string" && BOARD_STAMP.test(s) ? Date.parse(s) : NaN);
+  const written = trials(data);
+  const seen = new Set();
+  for (const s of trials(stored.doc)) {
+    if (s.status !== "open" || typeof s.id !== "string" || seen.has(s.id)) continue;
+    seen.add(s.id);
+    const label = quoteIdCut(s.id, QUOTED_ID_MAX);
+    const w = written.find((t) => t.id === s.id);
+    if (!w)
+      return `a board write cannot drop the open trial ${label}: only trial settle moves an open stage-note trial. Nothing was written.`;
+    const free = w.status === "open" ? ["arms", "reads"] : TRIAL_SETTLE_KEYS;
+    const changed = [...new Set([...Object.keys(s), ...Object.keys(w)])]
+      .sort()
+      .find((k) => !free.includes(k) && canonicalJson(s[k]) !== canonicalJson(w[k]));
+    if (changed !== undefined)
+      return `a board write cannot change ${changed} on the open trial ${label}: trial settle sets only status, settled, arms, reads and revert_version. Nothing was written.`;
+    if (w.status === "open") continue;
+    if (!TRIAL_SETTLED.includes(w.status))
+      return `a board write cannot set the open trial ${label} to an unknown status: trial settle uses kept, reverted, superseded, inconclusive or revert-failed. Nothing was written.`;
+    const opened = time(s.opened);
+    let why = null;
+    if (Number.isNaN(time(w.settled))) why = "settled must be a board timestamp";
+    else if (w.status === "reverted") {
+      if (!Number.isInteger(w.revert_version) || !(w.revert_version > s.version))
+        why = "revert_version must be a whole number above the trial's version";
+    } else if (w.status === "superseded") {
+      try {
+        if (typeof s.project !== "string" || !/^[\w-]+$/.test(s.project)) throw new Error();
+        const obj = await env.BUCKET.get(pipelineKey("projects/" + s.project));
+        const notes = obj ? JSON.parse(await obj.text())?.stage_notes : undefined;
+        if ((notes?.[s.stage] ?? "") === s.challenger)
+          why = "the stored stage note still equals the challenger";
+      } catch {
+        why = "the stored pipeline for its project cannot be read";
+      }
+    } else if (w.status !== "kept") {
+      if (!(Date.now() >= opened + TRIAL_MAX_DAYS * DAY_MS - TRIAL_CLOCK_SKEW_MS))
+        why = `it opened less than ${TRIAL_MAX_DAYS} days ago`;
+    } else if (
+      !["rounds", "tokens"].every(
+        (m) => typeof w.reads?.[m] === "string" && w.reads[m] !== "b higher",
+      )
+    )
+      why = "reads.rounds and reads.tokens must each be a read other than b higher";
+    else {
+      const count = { a: 0, b: 0 };
+      for (const j of stored.jobs)
+        if (
+          typeof j?.id === "string" &&
+          j.project === s.project &&
+          time(j.started) >= opened &&
+          (j.stage === "merged" || j.stage === "closed")
+        )
+          count[await trialArm(s.id, j.id)]++;
+      if (count.a < TRIAL_ARM_FINISHED || count.b < TRIAL_ARM_FINISHED)
+        why = `each arm needs ${TRIAL_ARM_FINISHED} finished jobs on the board, and arm a has ${count.a}, arm b has ${count.b}`;
+    }
+    if (why)
+      return `a board write cannot settle the open trial ${label} as ${w.status}: ${why}. Nothing was written.`;
+  }
   return null;
 }
 

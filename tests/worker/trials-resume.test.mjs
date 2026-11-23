@@ -121,7 +121,7 @@ test("settle-style and admit-style board writes still pass", async () => {
   const settled = await put((ts) =>
     ts.map((t) =>
       t.id === "factory-spec-v10"
-        ? { ...t, status: "reverted", settled: "2026-11-22T09:00:00Z" }
+        ? { ...t, status: "reverted", settled: "2026-11-22T09:00:00Z", revert_version: 11 }
         : t,
     ),
   );
