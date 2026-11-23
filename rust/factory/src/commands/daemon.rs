@@ -4,8 +4,8 @@
 use std::collections::hash_map::RandomState;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::hash::{BuildHasher, Hasher};
-use std::io;
-use std::net::{TcpStream, ToSocketAddrs};
+use std::io::{self, IsTerminal};
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -66,12 +66,19 @@ pub fn daemon(_call: &Call) -> Res<()> {
         "factory daemon: watching {url}; log {}",
         home.join("logs").join("daemon").display()
     );
+    let terminal = io::stderr().is_terminal();
     serve(
         &url,
         &headers,
         &LIVE,
         &home.join(".env"),
-        &|msg| log_line(&home, msg),
+        &|msg| {
+            log_line(&home, msg);
+            // A person watching the terminal sees why the socket never opens.
+            if terminal && msg.starts_with("connect failed: ") {
+                eprintln!("factory daemon: {msg}");
+            }
+        },
         &mut |_| {
             let code = run_pickup(&exe, &home);
             log_line(&home, &format!("pickup exited {code}"));
@@ -156,18 +163,33 @@ fn connect(
         } else {
             80
         });
-    let addr = (host.as_str(), port)
+    let mut stream = Err(format!("no address for {host}"));
+    for addr in (host.as_str(), port)
         .to_socket_addrs()
         .map_err(|e| e.to_string())?
-        .next()
-        .ok_or_else(|| format!("no address for {host}"))?;
-    let stream = TcpStream::connect_timeout(&addr, t.connect_timeout).map_err(|e| e.to_string())?;
-    stream
-        .set_read_timeout(Some(t.connect_timeout))
-        .and_then(|_| stream.set_write_timeout(Some(t.connect_timeout)))
-        .map_err(|e| e.to_string())?;
+    {
+        stream = TcpStream::connect_timeout(&addr, t.connect_timeout).map_err(|e| e.to_string());
+        if stream.is_ok() {
+            break;
+        }
+    }
+    let stream = stream?;
     let tcp = stream.try_clone().map_err(|e| e.to_string())?;
-    let socket = match tungstenite::client_tls(request, stream) {
+    // tungstenite panics when a TLS handshake read times out, so the handshake runs with no
+    // socket timeout and this watchdog shuts the socket down at connect_timeout instead.
+    let watchdog = stream.try_clone().map_err(|e| e.to_string())?;
+    let (done, wait) = mpsc::channel::<()>();
+    let limit = t.connect_timeout;
+    std::thread::spawn(move || {
+        if wait.recv_timeout(limit) == Err(RecvTimeoutError::Timeout) {
+            let _ = watchdog.shutdown(Shutdown::Both);
+        }
+    });
+    let result = tungstenite::client_tls(request, stream);
+    if done.send(()).is_err() {
+        return Err("timed out".to_string());
+    }
+    let socket = match result {
         Ok((socket, _)) => socket,
         Err(HandshakeError::Interrupted(_)) => return Err("timed out".to_string()),
         Err(HandshakeError::Failure(tungstenite::Error::Http(response))) => {
@@ -182,7 +204,8 @@ fn connect(
         }
         Err(HandshakeError::Failure(e)) => return Err(e.to_string()),
     };
-    tcp.set_read_timeout(Some(t.ping_every))
+    tcp.set_read_timeout(Some(tick(t)))
+        .and_then(|_| tcp.set_write_timeout(Some(t.connect_timeout)))
         .map_err(|e| e.to_string())?;
     Ok(socket)
 }
@@ -194,10 +217,16 @@ fn changed_key(text: &str) -> Option<String> {
     Some(frame.get("key")?.as_str()?.to_string())
 }
 
-/// Reads frames until the socket closes, pinging on each read timeout. It always sends
-/// `Closed` before it stops.
+/// The read timeout: short enough that silence is noticed within a fifth of `ping_every`.
+fn tick(t: &Timing) -> Duration {
+    t.ping_every / 5
+}
+
+/// Reads frames until the socket closes. It sends `ping` after `ping_every` with no frame or
+/// ping, and always sends `Closed` before it stops.
 fn read_loop(mut socket: Socket, t: &Timing, tx: Sender<Event>) {
     let mut last = Instant::now();
+    let mut pinged = last;
     loop {
         let event = match socket.read() {
             Ok(Message::Close(frame)) => Event::Closed(format!(
@@ -222,13 +251,16 @@ fn read_loop(mut socket: Socket, t: &Timing, tx: Sender<Event>) {
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                 ) =>
             {
-                if last.elapsed() < t.silence {
+                if last.elapsed() >= t.silence {
+                    Event::Closed(format!("no frame for {:.1}s", t.silence.as_secs_f64()))
+                } else if last.max(pinged).elapsed() < t.ping_every {
+                    continue;
+                } else {
+                    pinged = Instant::now();
                     match socket.send(Message::text("ping")) {
                         Ok(()) => continue,
                         Err(e) => Event::Closed(e.to_string()),
                     }
-                } else {
-                    Event::Closed(format!("no frame for {:.1}s", t.silence.as_secs_f64()))
                 }
             }
             Err(e) => Event::Closed(e.to_string()),
@@ -686,6 +718,56 @@ mod tests {
         assert_eq!(
             e.stderr,
             format!("factory.py: {}\n", token_message(&home.join(".env")))
+        );
+    }
+
+    #[test]
+    fn stalled_tls_handshake_times_out() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let held: Vec<_> = listener.incoming().take(1).collect();
+            sleep(Duration::from_secs(2));
+            drop(held);
+        });
+        let t = Timing {
+            connect_timeout: Duration::from_millis(300),
+            ..TEST
+        };
+        let start = Instant::now();
+        let url = format!("wss://127.0.0.1:{port}{HOST_EVENTS_PATH}");
+        let e = connect(&url, &[], &t, Path::new(".env")).err().unwrap();
+        assert_eq!(e, "timed out");
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn connect_tries_every_address() {
+        let (origin, seen) = fake(None, |_| sleep(Duration::from_secs(1)));
+        let url = host_url(&origin).replace("127.0.0.1", "localhost");
+        assert!(connect(&url, &[], &TEST, Path::new(".env")).is_ok());
+        assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn silence_closes_on_time() {
+        let (origin, _) = fake(None, |_| sleep(Duration::from_secs(1)));
+        let t = Timing {
+            silence: Duration::from_millis(240),
+            ..TEST
+        };
+        let socket = connect(&host_url(&origin), &[], &t, Path::new(".env")).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let start = Instant::now();
+        std::thread::spawn(move || read_loop(socket, &t, tx));
+        let Ok(Event::Closed(reason)) = rx.recv() else {
+            panic!("expected Closed")
+        };
+        assert_eq!(reason, "no frame for 0.2s");
+        let took = start.elapsed();
+        assert!(
+            took >= t.silence && took < Duration::from_millis(290),
+            "{took:?}"
         );
     }
 }
