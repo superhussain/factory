@@ -155,7 +155,10 @@ flowchart LR
 - A passed spec-approval gate records `spec_approval` with `decider: "person"` and `via`
   `dashboard`, `tracer` or `command`. Only a signed-in person writes `via: "dashboard"`.
 - A job's `decision` carries `decider` too: `person` for `/factory approve` and a
-  person's close, `model` for the approver.
+  person's close, `model` for the approver. Push reads `decider` from the line after
+  the verdict in `decision.md`, so any writer of that file, the approver included, can
+  claim `person`. Nothing gates on `decider` today. A future gate on it must take
+  `person` from a path only a person can use.
 - Honest limit: the Worker cannot yet tell a human from a service token, so a token
   holder could forge an approval with a raw PUT. The runtime guards stop automation,
   except an agent that runs `--chat-file`, which only the chat-decisions

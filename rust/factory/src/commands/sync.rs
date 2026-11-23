@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
@@ -432,18 +432,30 @@ fn decision_change(
     Ok((Some(dump_board(&data)), true))
 }
 
-fn record_decision(home: &Path, slug: &str, job_id: &str, decision: Option<Value>) -> Res<()> {
+fn record_decision(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    decision: Option<Value>,
+    out: &mut dyn Write,
+) -> Res<()> {
     if cas(home, "/api/board", |text| {
         decision_change(text, slug, job_id, decision.as_ref())
     })? {
         match &decision {
-            Some(d) => println!(
+            Some(d) => writeln!(
+                out,
                 "recorded the decision.md verdict on the board: {}, decided by {}",
                 py_str(d.get("verdict")),
                 py_str(d.get("decider"))
-            ),
-            None => println!("cleared the board decision: decision.md has no verdict line"),
-        }
+            )
+            .ok(),
+            None => writeln!(
+                out,
+                "cleared the board decision: decision.md has no verdict line"
+            )
+            .ok(),
+        };
     }
     Ok(())
 }
@@ -566,7 +578,13 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
     if decision_pushed && !conflicts.iter().any(|c| c == "decision.md") {
         let path = folder.join("decision.md");
         let text = read_text(&path).map_err(|e| os_fail(e, &path))?;
-        record_decision(&home, &slug, &job_id, decision_verdict(&text))?;
+        record_decision(
+            &home,
+            &slug,
+            &job_id,
+            decision_verdict(&text),
+            &mut io::stdout(),
+        )?;
     }
     if !conflicts.is_empty() {
         return Err(conflict_exit(&conflicts));
@@ -890,13 +908,19 @@ mod tests {
             (200, "{}", vec![("ETag", "\"b2\"")]),
         ]);
         let home = home_for("sync-decision", &origin);
+        let mut out = Vec::new();
         record_decision(
             &home,
             "alpha",
             "042-sample-export",
             Some(loads(PERSON_APPROVE).unwrap()),
+            &mut out,
         )
         .unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "recorded the decision.md verdict on the board: APPROVE, decided by person\n"
+        );
         let seen = seen.lock().unwrap();
         assert_eq!(
             (seen[1].method.as_str(), seen[1].header("If-Match")),
@@ -919,14 +943,36 @@ mod tests {
         let board = r#"{"updated":"","jobs":[{"id":"042-sample-export","project":"alpha","decision":{"verdict":"APPROVE","decider":"person","at":"2026-11-23T15:00:00Z"}}]}"#;
         let (origin, seen) = serve(vec![(200, board, vec![("ETag", "\"b1\"")])]);
         let home = home_for("sync-decision-same", &origin);
+        let mut out = Vec::new();
         record_decision(
             &home,
             "alpha",
             "042-sample-export",
             Some(loads(PERSON_APPROVE).unwrap()),
+            &mut out,
         )
         .unwrap();
         assert_eq!(seen.lock().unwrap().len(), 1);
+        assert!(out.is_empty());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn push_prints_cleared_decision() {
+        use crate::shared::http::tests::serve;
+        let board = r#"{"updated":"","jobs":[{"id":"042-sample-export","project":"alpha","decision":{"verdict":"APPROVE","decider":"model","at":"x"}}]}"#;
+        let (origin, seen) = serve(vec![
+            (200, board, vec![("ETag", "\"b1\"")]),
+            (200, "{}", vec![("ETag", "\"b2\"")]),
+        ]);
+        let home = home_for("sync-decision-cleared", &origin);
+        let mut out = Vec::new();
+        record_decision(&home, "alpha", "042-sample-export", None, &mut out).unwrap();
+        assert_eq!(seen.lock().unwrap()[1].method, "PUT");
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "cleared the board decision: decision.md has no verdict line\n"
+        );
         fs::remove_dir_all(home).unwrap();
     }
 
