@@ -1,6 +1,7 @@
 pub mod audit;
 pub mod checks;
 pub mod claims;
+pub mod daemon;
 pub mod intake;
 pub mod lookup;
 pub mod ops;
