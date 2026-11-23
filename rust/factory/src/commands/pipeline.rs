@@ -9,22 +9,25 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, read_board};
+use crate::shared::board::{
+    dump_board, escalated, lead_of, load_board, patch_job, read_board, riders_of,
+};
 use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::{
-    tag_lookalike, BABYSIT_SENTENCE, BATCH_REF, JOB_ID, JOB_REL, NOTE_INVISIBLE, NOTE_LINK,
-    NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE,
-    REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL, SLUG,
+    tag_lookalike, BABYSIT_SENTENCE, BACKLOG_LINE, BACKLOG_PICK, BATCH_REF, IDEA, JOB_ID, JOB_REL,
+    MAX_CANDIDATES, MAX_RIDERS, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG,
+    PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE, REVIEW_ROUTE_KEYS, ROUTE_EFFORTS,
+    ROUTE_MODEL, SLUG, TERMINAL,
 };
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::{is_link, mkdir_private, read_text, resolve, write_atomic};
-use crate::shared::home::factory_home;
+use crate::shared::home::{factory_home, holder};
 use crate::shared::http::{access_message, api, cas};
 use crate::shared::proc::capture;
 use crate::shared::project::{project_files, r2_target, safe_job_folder};
 use crate::shared::py::{
-    is_space, os_error, printable_line, repr, round_half_even, round_int, splitlines, strip,
-    universal_newlines,
+    is_space, os_error, printable_line, repr, round_half_even, round_int, rstrip, splitlines,
+    strip, universal_newlines,
 };
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2, NO_ASCII};
 use crate::shared::pyre::{translate, Flags, Pattern};
@@ -3842,18 +3845,837 @@ pub fn verdict_cmd(call: &Call) -> Res<()> {
     flushed(|o| verdict(&home, &slug, &job_id, n, reviewer, value, o))
 }
 
+// ---- batch and stack ----
+
+static NOT_BEFORE: Pattern = Pattern::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", Flags::NONE);
+static BACKLOG_SUFFIX: Pattern = Pattern::new(
+    r" \((rework-of|follow-up-of|sub-job-of|depends-on) (\w[\w.-]*)\)$",
+    Flags::ASCII,
+);
+static LESSON_MARK: Pattern = Pattern::new(
+    r"^Lesson: from \w[\w.-]{0,80}, queued \d{4}-\d\d-\d\d$",
+    Flags {
+        multiline: true,
+        ascii: true,
+        ..Flags::NONE
+    },
+);
+static DEPENDS_ON: Pattern = Pattern::new(r"^Depends on: ([\w-]+: \S.*)$", Flags::M);
+static AUDIT_CONTROL: Pattern = Pattern::new(
+    r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]",
+    Flags::NONE,
+);
+static ID_NUMBER: Pattern = Pattern::new(r"^(\d{3,})-", Flags::NONE);
+static WORD: Pattern = Pattern::new("[a-z0-9]+", Flags::NONE);
+
+/// Python's `str(v)` for a JSON value.
+fn py_str(v: Option<&Value>) -> String {
+    match v {
+        None | Some(Value::Null) => "None".into(),
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Bool(b)) => if *b { "True" } else { "False" }.into(),
+        Some(other) => other.to_string(),
+    }
+}
+
+fn audit_clean(text: &str) -> String {
+    AUDIT_CONTROL.replace_all(text, |_| "?".into())
+}
+
+fn mine(c: &Value, device: &str, session: &str) -> bool {
+    c.get("device").and_then(Value::as_str) == Some(device)
+        && c.get("session").and_then(Value::as_str) == Some(session)
+}
+
+/// The job's claim if another session holds it and checked in within the last minutes.
+fn blocking(j: &Value, device: &str, session: &str, minutes: u32) -> Option<Value> {
+    let c = j.get("claim").filter(|c| truthy(Some(c)))?;
+    if mine(c, device, session) {
+        return None;
+    }
+    let seen = stamp_of(c.get("seen"))?;
+    (unix_now() - seen < i64::from(minutes) * 60).then(|| c.clone())
+}
+
+/// True while a job waits on a human: it has an ask, or it is an unapproved explorer card.
+fn gated(j: &Value) -> bool {
+    if j.get("needs")
+        .and_then(Value::as_str)
+        .is_some_and(|n| !strip(n).is_empty())
+    {
+        return true;
+    }
+    j.get("origin").and_then(Value::as_object).is_some_and(|o| {
+        o.get("gate").and_then(Value::as_str) == Some("human") && !truthy(o.get("approved"))
+    })
+}
+
+fn dict_has_str(j: &Value, key: &str, field: &str) -> bool {
+    j.get(key)
+        .and_then(Value::as_object)
+        .is_some_and(|p| p.get(field).is_some_and(Value::is_string))
+}
+
+/// True when the dashboard paused pickup for this job.
+fn paused(j: &Value) -> bool {
+    dict_has_str(j, "paused", "at")
+}
+
+/// True when the dashboard queued a close that pickup has not done yet.
+fn closing(j: &Value) -> bool {
+    dict_has_str(j, "close", "at") && !j["close"].as_object().unwrap().contains_key("closed")
+}
+
+/// True when the dashboard asked pickup to take this job first.
+fn prioritized(j: &Value) -> bool {
+    dict_has_str(j, "priority", "at")
+}
+
+/// The job's not_before stamp while it is still in the future, else None.
+fn waiting_until(j: &Value) -> Option<String> {
+    let t = j.get("not_before")?.as_str()?;
+    (NOT_BEFORE.is_full(t) && t > now().as_str()).then(|| t.to_string())
+}
+
+/// The ids of the board jobs not merged or closed.
+fn open_job_ids(jobs: &[Value]) -> Vec<Value> {
+    jobs.iter()
+        .filter(|j| !str_of(j, "stage").is_some_and(|s| TERMINAL.contains(&s)))
+        .map(|j| j.get("id").cloned().unwrap_or(Value::Null))
+        .collect()
+}
+
+/// The first depends-on id of an idea whose job is still open on the board, else None.
+fn waiting_on(j: &Value, jobs: &[Value]) -> Option<Value> {
+    if str_of(j, "stage") != Some(IDEA) {
+        return None;
+    }
+    let open = open_job_ids(jobs);
+    j.get("refs")?.as_array()?.iter().find_map(|r| {
+        let id = r.get("id")?;
+        (r.get("kind").and_then(Value::as_str) == Some("depends-on") && open.contains(id))
+            .then(|| id.clone())
+    })
+}
+
+/// True when pickup holds this idea for a batch.
+fn batch_hold(j: &Value) -> bool {
+    if str_of(j, "stage") != Some(IDEA) || j.get("capture_id").is_some() || prioritized(j) {
+        return false;
+    }
+    let refs = list_of(j, "refs");
+    refs.iter()
+        .any(|r| r.get("kind").and_then(Value::as_str) == Some("follow-up-of"))
+        || j.get("backlog")
+            .and_then(Value::as_object)
+            .and_then(|b| b.get("by"))
+            == Some(&json!("triage"))
+}
+
+/// The highest id the Worker has archived off the board, so no new job reuses it.
+fn archive_floor(data: &Value) -> u64 {
+    data.get("archived")
+        .and_then(|a| a.get("max_id"))
+        .filter(|m| m.is_u64())
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn next_job_id(names: &[String], feature_slug: &str, floor: u64) -> String {
+    let max = names
+        .iter()
+        .filter_map(|n| ID_NUMBER.match_start(n))
+        .filter_map(|m| m.get(1).unwrap().as_str().parse::<u64>().ok())
+        .chain([floor])
+        .max()
+        .unwrap_or(0);
+    format!("{:03}-{feature_slug}", max + 1)
+}
+
+/// The first three words of the feature, kebab-cased, for its job id.
+fn feature_slug(feature: &str) -> String {
+    let lower = feature.to_lowercase();
+    let words: Vec<&str> = WORD.find_iter(&lower).map(|m| m.as_str()).take(3).collect();
+    let joined: String = words.join("-").chars().take(40).collect();
+    let slug = joined.trim_matches('-');
+    if slug.is_empty() {
+        "item".into()
+    } else {
+        slug.into()
+    }
+}
+
+/// The indented block under lines[i], with its indent and blank edge lines removed.
+fn context_below(lines: &[&str], i: usize) -> String {
+    let mut held: Vec<&str> = Vec::new();
+    for below in &lines[i + 1..] {
+        if !below.is_empty() && !below.starts_with("  ") {
+            break;
+        }
+        held.push(below.get(2..).unwrap_or(""));
+    }
+    while held.first().is_some_and(|l| strip(l).is_empty()) {
+        held.remove(0);
+    }
+    while held.last().is_some_and(|l| strip(l).is_empty()) {
+        held.pop();
+    }
+    held.join("\n")
+}
+
+/// One unchecked backlog line of the project, as `backlog_candidates` keeps it.
+#[derive(Clone)]
+struct Line {
+    raw: String,
+    feature: String,
+    suffix: Option<(String, String)>,
+    entry: Value,
+    context: String,
+}
+
+/// {"backlog:<key>": line} for the project's unchecked backlog lines, in file order.
+fn backlog_candidates(text: &str, slug: &str) -> Vec<(String, Line)> {
+    let lines: Vec<&str> = text
+        .split('\n')
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
+        .collect();
+    let mut found: Vec<(String, Line)> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let Some(m) = BACKLOG_LINE.match_start(line) else {
+            continue;
+        };
+        let context = context_below(&lines, i);
+        let key = format!(
+            "backlog:{}",
+            &crate::shared::project::sha(line.as_bytes())[..12]
+        );
+        if m.get(1).unwrap().as_str() != slug
+            || found.iter().any(|(k, _)| *k == key)
+            || LESSON_MARK.search(&context).is_some()
+        {
+            continue;
+        }
+        let feature = rstrip(m.get(2).unwrap().as_str()).to_string();
+        let suffix = BACKLOG_SUFFIX.search(&feature);
+        let body = strip(match &suffix {
+            Some(s) => &feature[..s.get(0).unwrap().start()],
+            None => &feature,
+        })
+        .to_string();
+        let suffix = suffix.map(|s| {
+            (
+                s.get(1).unwrap().as_str().to_string(),
+                s.get(2).unwrap().as_str().to_string(),
+            )
+        });
+        let title: String = body.chars().take(80).collect();
+        let idea = if context.is_empty() {
+            body.clone()
+        } else {
+            format!("{body}\n\n{context}")
+        };
+        found.push((
+            key.clone(),
+            Line {
+                raw: line.to_string(),
+                feature,
+                suffix,
+                entry: json!({"id": key, "title": title, "idea": idea}),
+                context,
+            },
+        ));
+    }
+    found
+}
+
+/// (refs, waiting) for the Depends on: lines in context.
+fn backlog_depends(
+    text: &str,
+    context: &str,
+    same_call: &[(String, String)],
+) -> (Vec<Value>, Option<String>) {
+    let lines: Vec<&str> = text.split('\n').map(rstrip).collect();
+    let (mut refs, mut waiting) = (Vec::new(), None);
+    for m in DEPENDS_ON.find_iter(context) {
+        let item = rstrip(&m.as_str()["Depends on: ".len()..]).to_string();
+        if lines.iter().any(|l| *l == format!("- [ ] {item}")) {
+            match same_call.iter().find(|(k, _)| *k == item) {
+                Some((_, id)) => refs.push(json!({"id": id, "kind": "depends-on"})),
+                None => {
+                    waiting = waiting.or(Some(item));
+                }
+            }
+            continue;
+        }
+        let prefix = format!("- [x] {item} (");
+        let job_id = lines.iter().find_map(|l| {
+            let id = l.strip_prefix(&prefix)?.strip_suffix(')')?;
+            (!id.is_empty() && !id.contains(['(', ')'])).then_some(id)
+        });
+        if let Some(id) = job_id.filter(|id| JOB_ID.is_full(id) && !id.contains("..")) {
+            refs.push(json!({"id": id, "kind": "depends-on"}));
+        }
+    }
+    (refs, waiting)
+}
+
+/// (refs, why) for a line's Depends on: context.
+fn backlog_waits(
+    text: &str,
+    context: &str,
+    open_ids: &[Value],
+    together: &[Value],
+    same_call: &[(String, String)],
+) -> (Vec<Value>, Option<String>) {
+    let (refs, waiting) = backlog_depends(text, context, same_call);
+    if let Some(waiting) = waiting {
+        return (
+            refs,
+            Some(format!(
+                "it depends on \"{waiting}\", which is still unchecked"
+            )),
+        );
+    }
+    let held = refs
+        .iter()
+        .map(|r| &r["id"])
+        .find(|id| open_ids.contains(id) && !together.contains(id))
+        .map(|id| format!("it depends on {}, which is still open", py_str(Some(id))));
+    (refs, held)
+}
+
+/// Why this idea cannot ride in a batch, else None.
+fn batch_problem(
+    data: &Value,
+    j: &Value,
+    slug: &str,
+    device: &str,
+    session: &str,
+    minutes: u32,
+) -> Option<String> {
+    let jobs = data["jobs"].as_array().cloned().unwrap_or_default();
+    if str_of(j, "project") != Some(slug) {
+        return Some("another project".into());
+    }
+    if str_of(j, "stage") != Some(IDEA) {
+        return Some("not an idea".into());
+    }
+    if gated(j) {
+        return Some("waits on a human".into());
+    }
+    if paused(j) {
+        return Some("paused".into());
+    }
+    if closing(j) {
+        return Some("closing".into());
+    }
+    if let Some(t) = waiting_until(j) {
+        return Some(format!("not before {t}"));
+    }
+    if let Some(id) = waiting_on(j, &jobs) {
+        return Some(format!("waits on {}", py_str(Some(&id))));
+    }
+    if truthy(j.get("idea_images")) {
+        return Some("has pasted images".into());
+    }
+    if truthy(j.get("idea_files")) {
+        return Some("has attached files".into());
+    }
+    if j.get("tracer").is_some() {
+        return Some("follows Tracer".into());
+    }
+    let backlog = j.get("backlog").filter(|b| truthy(Some(b)));
+    if backlog.and_then(|b| b.get("decision")) == Some(&json!("rework")) {
+        return Some("marked for rework".into());
+    }
+    if let Some(held) = blocking(j, device, session, minutes) {
+        return Some(format!(
+            "held by {} session {}",
+            py_str(held.get("device")),
+            py_str(held.get("session"))
+        ));
+    }
+    if let Some(lead) = lead_value(j).filter(|l| truthy(Some(l))) {
+        return Some(format!("already batched into {}", py_str(Some(&lead))));
+    }
+    if let Some(id) = str_of(j, "id") {
+        if !riders_of(data, id).is_empty() {
+            return Some("leads a batch".into());
+        }
+    }
+    None
+}
+
+fn job_by<'a>(data: &'a Value, id: &str) -> Option<&'a Value> {
+    data["jobs"]
+        .as_array()?
+        .iter()
+        .find(|j| str_of(j, "id") == Some(id))
+}
+
+fn rider_jobs(data: &Value, lead_id: &str) -> Vec<Value> {
+    data["jobs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|j| lead_of(j).as_deref() == Some(lead_id))
+        .cloned()
+        .collect()
+}
+
+fn entry(j: &Value) -> Value {
+    let idea = if truthy(j.get("idea")) {
+        j["idea"].clone()
+    } else {
+        j.get("title").cloned().unwrap_or(Value::Null)
+    };
+    json!({"id": j["id"], "title": j.get("title").cloned().unwrap_or(Value::Null), "idea": idea, "hold": batch_hold(j)})
+}
+
+fn remove_job_field(data: &mut Value, id: &str, key: &str) {
+    if let Some(j) = data["jobs"]
+        .as_array_mut()
+        .and_then(|jobs| jobs.iter_mut().find(|j| str_of(j, "id") == Some(id)))
+    {
+        if let Some(map) = j.as_object_mut() {
+            map.shift_remove(key);
+        }
+    }
+}
+
+fn batch(home: &Path, slug: &str, lead_id: &str, ids: &[String], o: &mut Out) -> Res<()> {
+    let (device, session, minutes) = holder(home)?;
+    let mut idea_ids: Vec<String> = Vec::new();
+    for id in ids {
+        if !idea_ids.contains(id) {
+            idea_ids.push(id.clone());
+        }
+    }
+    for id in &idea_ids {
+        if !BACKLOG_PICK.is_full(id) && (!JOB_ID.is_full(id) || id.contains("..")) {
+            return Err(fail(
+                format!(
+                    "bad job id {}: a job id is letters, digits, dots, dashes and underscores, like 003-rate-limiting. Nothing was written.",
+                    repr(id)
+                ),
+                2,
+            ));
+        }
+    }
+    let r = api(home, "GET", "/api/backlog", None, &[200, 404], &[])?;
+    let backlog_text = if r.status == 200 {
+        r.text()?
+    } else {
+        String::new()
+    };
+    let lines = backlog_candidates(&backlog_text, slug);
+    let line = |k: &str| &lines.iter().find(|(key, _)| key == k).unwrap().1;
+    let line_picks: Vec<String> = idea_ids
+        .iter()
+        .filter(|i| BACKLOG_PICK.is_full(i))
+        .cloned()
+        .collect();
+    let job_picks: Vec<String> = idea_ids
+        .iter()
+        .filter(|i| !BACKLOG_PICK.is_full(i))
+        .cloned()
+        .collect();
+    for pick in &line_picks {
+        if !lines.iter().any(|(k, _)| k == pick) {
+            return Err(fail(
+                format!("no unchecked {slug} backlog line {pick}. Nothing was written."),
+                4,
+            ));
+        }
+    }
+    let jobs_dir = home.join("jobs");
+    let mut local: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&jobs_dir).into_iter().flatten().flatten() {
+        local.push(entry.file_name().to_string_lossy().into_owned());
+        if entry.path().is_dir() {
+            for sub in std::fs::read_dir(entry.path())
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                local.push(sub.file_name().to_string_lossy().into_owned());
+            }
+        }
+    }
+    let (result, made, waiting) = cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(lead) = job_by(&data, lead_id).cloned() else {
+            return Err(fail(
+                format!("no job {lead_id} on the board. Nothing was written."),
+                4,
+            ));
+        };
+        let alone = lead
+            .get("priority")
+            .and_then(Value::as_object)
+            .is_some_and(|p| p.get("alone") == Some(&Value::Bool(true)));
+        let jobs = data["jobs"].as_array().cloned().unwrap_or_default();
+        let open_ids = open_job_ids(&jobs);
+        let together: Vec<Value> = std::iter::once(json!(lead_id))
+            .chain(
+                rider_jobs(&data, lead_id)
+                    .iter()
+                    .map(|j| j.get("id").cloned().unwrap_or(Value::Null)),
+            )
+            .collect();
+        let mut depends: Vec<(String, Vec<Value>)> = Vec::new();
+        let mut made: Vec<(String, String)> = Vec::new();
+        for pick in &line_picks {
+            let mut names = local.clone();
+            names.extend(jobs.iter().map(|j| match j.get("id") {
+                None => String::new(),
+                Some(v) => py_str(Some(v)),
+            }));
+            names.extend(made.iter().map(|(_, id)| id.clone()));
+            let title = line(pick).entry["title"].as_str().unwrap().to_string();
+            made.push((
+                pick.clone(),
+                next_job_id(&names, &feature_slug(&title), archive_floor(&data)),
+            ));
+        }
+        let same_call: Vec<(String, String)> = line_picks
+            .iter()
+            .zip(&made)
+            .map(|(p, (_, id))| (rstrip(&line(p).raw[6..]).to_string(), id.clone()))
+            .collect();
+        if !idea_ids.is_empty() {
+            if !mine(lead.get("claim").unwrap_or(&json!({})), &device, &session) {
+                return Err(fail(
+                    format!("{lead_id} is not held by this session. Nothing was written."),
+                    6,
+                ));
+            }
+            if alone {
+                return Err(fail(
+                    format!("{lead_id} was started alone from the dashboard, so it takes no riders. Nothing was written."),
+                    2,
+                ));
+            }
+            if str_of(&lead, "stage") != Some("spec") {
+                return Err(fail(
+                    format!(
+                        "batch runs while {lead_id} is at spec, not {}. Nothing was written.",
+                        py_str(lead.get("stage"))
+                    ),
+                    2,
+                ));
+            }
+            if lead.get("tracer").is_some() {
+                return Err(fail(
+                    format!("cannot batch into {lead_id}: follows Tracer"),
+                    2,
+                ));
+            }
+            if riders_of(&data, lead_id).len() + idea_ids.len() > MAX_RIDERS {
+                return Err(fail(
+                    format!("a batch holds at most {MAX_RIDERS} riders"),
+                    2,
+                ));
+            }
+            for pick in &line_picks {
+                let (refs, why) = backlog_waits(
+                    &backlog_text,
+                    &line(pick).context,
+                    &open_ids,
+                    &together,
+                    &same_call,
+                );
+                if let Some(why) = why {
+                    return Err(fail(
+                        audit_clean(&format!("cannot batch {pick}: {why}. Nothing was written.")),
+                        2,
+                    ));
+                }
+                depends.push((pick.clone(), refs));
+            }
+            let mut picked: Vec<String> = Vec::new();
+            for idea_id in &job_picks {
+                let Some(j) = job_by(&data, idea_id) else {
+                    return Err(fail(
+                        format!("no job {idea_id} on the board. Nothing was written."),
+                        4,
+                    ));
+                };
+                if let Some(problem) = batch_problem(&data, j, slug, &device, &session, minutes) {
+                    return Err(fail(
+                        audit_clean(&format!(
+                            "cannot batch {idea_id}: {problem}. Nothing was written."
+                        )),
+                        2,
+                    ));
+                }
+                picked.push(idea_id.clone());
+            }
+            for id in &picked {
+                let refs = job_by(&data, id)
+                    .map(|j| list_of(j, "refs"))
+                    .unwrap_or_default();
+                remove_job_field(&mut data, id, "claim");
+                let mut refs = refs;
+                refs.push(json!({"id": lead_id, "kind": BATCH_REF}));
+                patch_job(
+                    &mut data,
+                    id,
+                    &json!({"stage": "spec", "note": format!("batched into {lead_id}"), "refs": refs}),
+                );
+            }
+        }
+        for pick in &line_picks {
+            let l = line(pick);
+            let mut refs: Vec<Value> = match &l.suffix {
+                Some((kind, id)) if !id.contains("..") => vec![json!({"id": id, "kind": kind})],
+                _ => Vec::new(),
+            };
+            refs.extend(
+                depends
+                    .iter()
+                    .find(|(k, _)| k == pick)
+                    .map(|(_, r)| r.clone())
+                    .unwrap_or_default(),
+            );
+            refs.push(json!({"id": lead_id, "kind": BATCH_REF}));
+            let id = &made.iter().find(|(k, _)| k == pick).unwrap().1;
+            patch_job(
+                &mut data,
+                id,
+                &json!({"project": slug, "title": l.entry["title"], "idea": l.entry["idea"], "stage": "spec",
+                        "note": format!("batched into {lead_id}"), "refs": refs}),
+            );
+        }
+        let mut candidates: Vec<Value> = data["jobs"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|j| {
+                str_of(j, "id").is_some_and(|id| id != lead_id && JOB_ID.is_full(id))
+                    && batch_problem(&data, j, slug, &device, &session, minutes).is_none()
+            })
+            .map(entry)
+            .collect();
+        let mut waiting: Vec<String> = Vec::new();
+        for (k, v) in &lines {
+            if line_picks.contains(k) {
+                continue;
+            }
+            match backlog_waits(&backlog_text, &v.context, &open_ids, &together, &[]).1 {
+                None => candidates.push(v.entry.clone()),
+                Some(why) => {
+                    waiting.push(format!("skipping {k} \"{}\": {why}", rstrip(&v.raw[6..])))
+                }
+            }
+        }
+        if alone {
+            candidates.clear();
+            waiting.clear();
+        }
+        candidates.truncate(MAX_CANDIDATES);
+        let riders: Vec<Value> = rider_jobs(&data, lead_id).iter().map(entry).collect();
+        let result = json!({"lead": lead_id, "riders": riders, "candidates": candidates});
+        let new = if idea_ids.is_empty() {
+            None
+        } else {
+            Some(dump_board(&data))
+        };
+        Ok((new, (result, made, waiting)))
+    })?;
+    let mut result = result;
+    let drop = |ids: Vec<String>| {
+        cas(home, "/api/board", |text| {
+            let mut data = load_board(text)?;
+            let jobs = data["jobs"].as_array().cloned().unwrap_or_default();
+            let keep: Vec<Value> = jobs
+                .iter()
+                .filter(|j| {
+                    !(str_of(j, "id").is_some_and(|id| ids.iter().any(|x| x == id))
+                        && lead_of(j).as_deref() == Some(lead_id)
+                        && str_of(j, "stage") == Some("spec"))
+                })
+                .cloned()
+                .collect();
+            if keep.len() == jobs.len() {
+                return Ok((None, ()));
+            }
+            data["jobs"] = Value::Array(keep);
+            data["updated"] = json!(now());
+            Ok((Some(dump_board(&data)), ()))
+        })
+    };
+    if !made.is_empty() {
+        let marked = cas(home, "/api/backlog", |text| {
+            let mut rows: Vec<String> = text.unwrap_or("").split('\n').map(String::from).collect();
+            let mut marked: Vec<String> = Vec::new();
+            for row in rows.iter_mut() {
+                let trimmed = row.strip_suffix('\r').unwrap_or(row).to_string();
+                if let Some((pick, id)) = made
+                    .iter()
+                    .find(|(p, _)| !marked.contains(p) && line(p).raw == trimmed)
+                {
+                    *row = format!("- [x] {slug}: {} ({id})", line(pick).feature);
+                    marked.push(pick.clone());
+                }
+            }
+            let missing: Vec<(String, String)> = made
+                .iter()
+                .filter(|(p, _)| !marked.contains(p))
+                .cloned()
+                .collect();
+            Ok(((!marked.is_empty()).then(|| rows.join("\n")), missing))
+        });
+        let missing = match marked {
+            Ok(missing) => missing,
+            Err(e) => {
+                o.err.push_str(&e.stderr);
+                let riders = made
+                    .iter()
+                    .map(|(_, id)| id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                match drop(made.iter().map(|(_, id)| id.clone()).collect()) {
+                    Err(e2) => {
+                        o.err.push_str(&e2.stderr);
+                        writeln!(o.err, "factory.py: batch could not remove {riders}; they stay on the board at spec, batched into {lead_id}, and their backlog lines stay unchecked").unwrap();
+                    }
+                    Ok(()) => writeln!(
+                        o.err,
+                        "factory.py: batch removed {riders}; their backlog lines stay unchecked"
+                    )
+                    .unwrap(),
+                }
+                return Err(crate::shared::exit::exit(e.code));
+            }
+        };
+        for (pick, rider_id) in missing {
+            drop(vec![rider_id.clone()])?;
+            writeln!(
+                o.err,
+                "factory.py: {pick} changed before batch could check it off; removed {rider_id}"
+            )
+            .unwrap();
+            let riders: Vec<Value> = result["riders"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r["id"] != json!(rider_id))
+                .cloned()
+                .collect();
+            result["riders"] = Value::Array(riders);
+        }
+    }
+    for line in &waiting {
+        writeln!(o.err, "{}", audit_clean(line)).unwrap();
+    }
+    writeln!(o.out, "{}", dumps(&result, INDENT2)).unwrap();
+    Ok(())
+}
+
+/// List the project's ideas and backlog lines that can ride in a job at spec, or attach riders.
+pub fn batch_cmd(call: &Call) -> Res<()> {
+    let (home, slug, lead_id) = r2_target(&call.args[0], true)?;
+    flushed(|o| batch(&home, &slug, &lead_id, &call.args[1..], o))
+}
+
+fn stack(home: &Path, _slug: &str, lead_id: &str, rider_id: &str, o: &mut Out) -> Res<()> {
+    let (device, session, _) = holder(home)?;
+    if !JOB_ID.is_full(rider_id) || rider_id.contains("..") {
+        return Err(fail(
+            format!("bad job id {}. Nothing was written.", repr(rider_id)),
+            2,
+        ));
+    }
+    let result = cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(lead) = job_by(&data, lead_id).cloned() else {
+            return Err(fail(
+                format!("no job {lead_id} on the board. Nothing was written."),
+                4,
+            ));
+        };
+        let Some(rider) = job_by(&data, rider_id).cloned() else {
+            return Err(fail(
+                format!("no job {rider_id} on the board. Nothing was written."),
+                4,
+            ));
+        };
+        if !mine(
+            lead.get("claim")
+                .filter(|c| truthy(Some(c)))
+                .unwrap_or(&json!({})),
+            &device,
+            &session,
+        ) {
+            return Err(fail(
+                format!("{lead_id} is not held by this session. Nothing was written."),
+                6,
+            ));
+        }
+        if str_of(&lead, "stage") != Some("spec") {
+            return Err(fail(
+                format!(
+                    "stack runs while {lead_id} is at spec, not {}. Nothing was written.",
+                    py_str(lead.get("stage"))
+                ),
+                2,
+            ));
+        }
+        if lead_value(&rider) != Some(json!(lead_id)) {
+            return Err(fail(
+                format!(
+                    "cannot stack {rider_id}: not batched into {lead_id}. Nothing was written."
+                ),
+                2,
+            ));
+        }
+        if str_of(&rider, "stage").is_some_and(|s| TERMINAL.contains(&s)) {
+            return Err(fail(
+                format!(
+                    "cannot stack {rider_id}: it is {}. Nothing was written.",
+                    py_str(rider.get("stage"))
+                ),
+                2,
+            ));
+        }
+        let other = rider_jobs(&data, lead_id).into_iter().find(|j| {
+            str_of(j, "id") != Some(rider_id) && j.get("stacked") == Some(&Value::Bool(true))
+        });
+        if let Some(other) = other {
+            return Err(fail(
+                format!(
+                    "cannot stack {rider_id}: {} is already stacked on {lead_id}. Nothing was written.",
+                    py_str(other.get("id"))
+                ),
+                2,
+            ));
+        }
+        let result = json!({"lead": lead_id, "stacked": rider_id});
+        if rider.get("stacked") == Some(&Value::Bool(true)) {
+            return Ok((None, result));
+        }
+        patch_job(
+            &mut data,
+            rider_id,
+            &json!({"stacked": true, "note": format!("stacked PR on {lead_id}")}),
+        );
+        Ok((Some(dump_board(&data)), result))
+    })?;
+    writeln!(o.out, "{}", dumps(&result, INDENT2)).unwrap();
+    Ok(())
+}
+
+/// Mark one rider of a job at spec to ship as its own PR stacked on the job's PR.
+pub fn stack_cmd(call: &Call) -> Res<()> {
+    let (home, slug, lead_id) = r2_target(&call.args[0], true)?;
+    flushed(|o| stack(&home, &slug, &lead_id, &call.args[1], o))
+}
+
 // ---- not ported yet ----
 
 pub fn lesson_cmd(_call: &Call) -> Res<()> {
     Err(not_ported("lesson"))
-}
-
-pub fn batch_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("batch"))
-}
-
-pub fn stack_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("stack"))
 }
 
 pub fn agent_cmd(_call: &Call) -> Res<()> {
@@ -6911,6 +7733,145 @@ mod tests {
             );
             assert!(text.starts_with("GROUNDING: UNVERIFIED 1\n\nHead: None\nDiff: unreadable: could not fetch origin main\n"));
             assert!(text.contains("| review-code.md | `a/b.py:1` | no-file | no file |\n"));
+        }
+    }
+
+    mod batch {
+        use super::super::*;
+        use crate::shared::fs::temp_dir;
+        use crate::shared::http::tests::serve;
+        use std::fs;
+
+        const NOW: &str = "2026-01-01T12:00:00Z";
+        const LEAD: &str = "090-sample-export-csv";
+
+        fn idea(id: &str, extra: Value) -> Value {
+            let mut j = json!({"id": id, "project": "sample", "stage": "idea", "title": format!("Title {id}")});
+            for (k, v) in extra.as_object().unwrap() {
+                j[k] = v.clone();
+            }
+            j
+        }
+
+        #[test]
+        fn problem_reasons() {
+            let data = json!({"jobs": [idea("050-sample-lead", json!({}))]});
+            let fresh = now();
+            let cases = [
+                (
+                    idea("1-a", json!({"project": "elsewhere"})),
+                    "another project",
+                ),
+                (idea("1-a", json!({"stage": "build"})), "not an idea"),
+                (idea("1-a", json!({"needs": "pick"})), "waits on a human"),
+                (idea("1-a", json!({"paused": {"at": NOW}})), "paused"),
+                (idea("1-a", json!({"close": {"at": NOW}})), "closing"),
+                (
+                    idea("1-a", json!({"idea_images": ["x"]})),
+                    "has pasted images",
+                ),
+                (
+                    idea("1-a", json!({"idea_files": ["x"]})),
+                    "has attached files",
+                ),
+                (idea("1-a", json!({"tracer": {}})), "follows Tracer"),
+                (
+                    idea("1-a", json!({"backlog": {"decision": "rework"}})),
+                    "marked for rework",
+                ),
+                (
+                    idea(
+                        "1-a",
+                        json!({"claim": {"device": "d", "session": "s", "since": NOW, "seen": fresh}}),
+                    ),
+                    "held by d session s",
+                ),
+                (
+                    idea(
+                        "1-a",
+                        json!({"refs": [{"id": "050-sample-lead", "kind": "batched-into"}]}),
+                    ),
+                    "already batched into 050-sample-lead",
+                ),
+            ];
+            for (j, reason) in cases {
+                assert_eq!(
+                    batch_problem(&data, &j, "sample", "test", "tag", 120).as_deref(),
+                    Some(reason)
+                );
+            }
+            let mut data = data;
+            data["jobs"].as_array_mut().unwrap().push(idea(
+                "2-b",
+                json!({"refs": [{"id": "050-sample-lead", "kind": "batched-into"}]}),
+            ));
+            let lead = idea("050-sample-lead", json!({}));
+            assert_eq!(
+                batch_problem(&data, &lead, "sample", "test", "tag", 120).as_deref(),
+                Some("leads a batch")
+            );
+            assert_eq!(
+                batch_problem(
+                    &json!({"jobs": []}),
+                    &idea("3-c", json!({})),
+                    "sample",
+                    "test",
+                    "tag",
+                    120
+                ),
+                None
+            );
+        }
+
+        #[test]
+        fn refuses_more_than_twenty_riders() {
+            let claim = json!({"device": "test", "session": "", "since": NOW, "seen": NOW});
+            let mut jobs = vec![
+                json!({"id": LEAD, "project": "sample", "stage": "spec", "title": "Add CSV export", "claim": claim}),
+            ];
+            let mut ids: Vec<String> = vec![
+                "091-sample-typo".into(),
+                "092-sample-csv-name".into(),
+                "093-sample-login".into(),
+            ];
+            ids.extend((100..118).map(|n| format!("{n}-sample-more")));
+            jobs.extend(ids.iter().map(|id| idea(id, json!({}))));
+            let board: &'static str = Box::leak(
+                json!({"updated": "", "jobs": jobs})
+                    .to_string()
+                    .into_boxed_str(),
+            );
+            let (origin, seen) = serve(vec![
+                (404, "", vec![]),
+                (200, board, vec![("ETag", "\"e1\"")]),
+            ]);
+            let home = temp_dir("batch-twenty-one");
+            fs::write(
+                home.join("config.md"),
+                format!("---\napi_url: {origin}\ndevice: test\n---\n"),
+            )
+            .unwrap();
+            let mut o = Out::default();
+            let e = batch(&home, "sample", LEAD, &ids, &mut o).unwrap_err();
+            assert_eq!(
+                (e.code, e.stderr.as_str()),
+                (2, "factory.py: a batch holds at most 20 riders\n")
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            assert!(seen.lock().unwrap().iter().all(|r| r.method == "GET"));
+        }
+
+        #[test]
+        fn needs_only_patch_skips_unchanged_riders() {
+            let mut data = json!({"updated": "", "jobs": [
+                {"id": LEAD, "project": "sample", "stage": "spec"},
+                idea("091-sample-typo", json!({"stage": "spec", "refs": [{"id": LEAD, "kind": "batched-into"}]}))]});
+            patch_job(&mut data, LEAD, &json!({"stage": "build"}));
+            assert_eq!(data["jobs"][1]["stage"], "build");
+            let before = data["jobs"][1]["updated"].clone();
+            std::thread::sleep(std::time::Duration::from_millis(1100));
+            patch_job(&mut data, LEAD, &json!({"needs": null}));
+            assert_eq!(data["jobs"][1]["updated"], before);
         }
     }
 }
