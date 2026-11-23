@@ -1,0 +1,3 @@
+---
+device: example-host
+---

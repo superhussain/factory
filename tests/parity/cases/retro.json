@@ -1,0 +1,1068 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "retro/usage-push-extra",
+      "argv": ["--home", "{home}", "retro", "push", "now"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroDigestTest.test_usage_errors"
+    },
+    {
+      "id": "retro/usage-digest-flag-only",
+      "argv": ["--home", "{home}", "retro", "digest", "--days"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroDigestTest.test_usage_errors"
+    },
+    {
+      "id": "retro/usage-digest-zero",
+      "argv": ["--home", "{home}", "retro", "digest", "--days", "0"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroDigestTest.test_usage_errors"
+    },
+    {
+      "id": "retro/usage-digest-ninety-one",
+      "argv": ["--home", "{home}", "retro", "digest", "--days", "91"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroDigestTest.test_usage_errors"
+    },
+    {
+      "id": "retro/usage-digest-letter",
+      "argv": ["--home", "{home}", "retro", "digest", "--days", "x"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroDigestTest.test_usage_errors"
+    },
+    {
+      "id": "retro/usage-digest-superscript",
+      "argv": ["--home", "{home}", "retro", "digest", "--days", "²"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroDigestTest.test_usage_errors"
+    },
+    {
+      "id": "retro/usage-digest-weeks",
+      "argv": ["--home", "{home}", "retro", "digest", "--weeks", "2"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroDigestTest.test_usage_errors"
+    },
+    {
+      "id": "retro/usage-aggregate-thirty-one",
+      "argv": ["--home", "{home}", "retro", "aggregate", "--days", "31"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAggregateTest.test_empty_window_and_usage"
+    },
+    {
+      "id": "retro/usage-aggregate-now",
+      "argv": ["--home", "{home}", "retro", "aggregate", "now"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAggregateTest.test_empty_window_and_usage"
+    },
+    {
+      "id": "retro/usage-admit-dotdot",
+      "argv": ["--home", "{home}", "retro", "admit", "../x"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_none_missing_and_usage"
+    },
+    {
+      "id": "retro/usage-admit-more",
+      "argv": ["--home", "{home}", "retro", "admit", "r1", "more"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_none_missing_and_usage"
+    },
+    {
+      "id": "retro/usage-admit-none",
+      "argv": ["--home", "{home}", "retro", "admit"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_none_missing_and_usage"
+    },
+    {
+      "id": "retro/usage-pull-none",
+      "argv": ["--home", "{home}", "retro", "pull"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroPullTest.test_empty_day_and_bad_dates"
+    },
+    {
+      "id": "retro/usage-pull-feb-30",
+      "argv": ["--home", "{home}", "retro", "pull", "2026-02-30"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroPullTest.test_empty_day_and_bad_dates"
+    },
+    {
+      "id": "retro/usage-pull-short-day",
+      "argv": ["--home", "{home}", "retro", "pull", "2026-11-1"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroPullTest.test_empty_day_and_bad_dates"
+    },
+    {
+      "id": "retro/usage-pull-slashes",
+      "argv": ["--home", "{home}", "retro", "pull", "11/11/2026"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroPullTest.test_empty_day_and_bad_dates"
+    },
+    {
+      "id": "retro/usage-pull-letter",
+      "argv": ["--home", "{home}", "retro", "pull", "x"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroPullTest.test_empty_day_and_bad_dates"
+    },
+    {
+      "id": "retro/usage-unknown",
+      "argv": ["--home", "{home}", "retro", "sync"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroDigestTest.test_usage_errors"
+    },
+    {
+      "id": "retro/digest-window",
+      "argv": ["--home", "{home}", "retro", "digest", "--days", "90"],
+      "home": "retro-digest",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroDigestTest.test_window_job_and_host"
+    },
+    {
+      "id": "retro/digest-no-transcripts",
+      "argv": ["--home", "{home}", "retro", "digest"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 4,
+      "from": "tests/cli/test_retro.py::RetroDigestTest.test_usage_errors"
+    },
+    {
+      "id": "retro/push-no-device",
+      "argv": ["--home", "{home}", "retro", "push"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroPushTest.test_push_needs_a_paired_device"
+    },
+    {
+      "id": "retro/push-bad-device",
+      "argv": ["--home", "{home}", "retro", "push"],
+      "home": "retro-bad-device",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroPushTest.test_push_needs_a_paired_device"
+    },
+    {
+      "id": "retro/push-no-transcripts",
+      "argv": ["--home", "{home}", "retro", "push"],
+      "home": "minimal",
+      "stubs": {},
+      "routes": {},
+      "exit": 4,
+      "from": "tests/cli/test_retro.py::RetroPushTest.test_push_puts_the_digest_once"
+    },
+    {
+      "id": "retro/push-unrouted",
+      "argv": ["--home", "{home}", "retro", "push"],
+      "home": "retro-push",
+      "stubs": {},
+      "routes": {},
+      "exit": 5,
+      "from": "tests/cli/test_retro.py::RetroPushTest.test_push_puts_the_digest_once"
+    },
+    {
+      "id": "retro/pull-hosts",
+      "argv": ["--home", "{home}", "retro", "pull", "2026-11-11"],
+      "home": "minimal",
+      "stubs": {},
+      "routes": {
+        "GET /api/retro/2026-11-11": [200, ["pc", "../x", 5, "mac"]],
+        "GET /api/retro/pc/2026-11-11.jsonl": [200, "{\"host\": \"pc\"}\n"],
+        "GET /api/retro/mac/2026-11-11.jsonl": [200, "{\"host\": \"mac\"}\n{\"host\": \"mac\"}\n"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroPullTest.test_pull_prints_each_listed_host_in_order"
+    },
+    {
+      "id": "retro/pull-empty",
+      "argv": ["--home", "{home}", "retro", "pull", "2026-11-11"],
+      "home": "minimal",
+      "stubs": {},
+      "routes": {
+        "GET /api/retro/2026-11-11": [200, []]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroPullTest.test_empty_day_and_bad_dates"
+    },
+    {
+      "id": "retro/pull-host-object",
+      "argv": ["--home", "{home}", "retro", "pull", "2026-11-11"],
+      "home": "minimal",
+      "stubs": {},
+      "routes": {
+        "GET /api/retro/2026-11-11": [
+          200,
+          {
+            "pc": 1
+          }
+        ],
+        "GET /api/retro/pc/2026-11-11.jsonl": [200, "{\"host\": \"pc\"}\n"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroPullTest.test_pull_prints_each_listed_host_in_order"
+    },
+    {
+      "id": "retro/pull-unrouted",
+      "argv": ["--home", "{home}", "retro", "pull", "2026-11-11"],
+      "home": "minimal",
+      "stubs": {},
+      "routes": {},
+      "exit": 5,
+      "from": "tests/cli/test_retro.py::RetroPullTest.test_empty_day_and_bad_dates"
+    },
+    {
+      "id": "retro/aggregate-unrouted",
+      "argv": ["--home", "{home}", "retro", "aggregate"],
+      "home": "minimal",
+      "stubs": {},
+      "routes": {},
+      "exit": 5,
+      "from": "tests/cli/test_retro.py::RetroAggregateTest.test_empty_window_and_usage"
+    },
+    {
+      "id": "retro/admit-ranked",
+      "argv": ["--home", "{home}", "retro", "admit", "ranked"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_findings_ranked_by_count_times_cost"
+    },
+    {
+      "id": "retro/admit-quoted",
+      "argv": ["--home", "{home}", "retro", "admit", "quoted"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_quoted_command_drops_one_finding"
+    },
+    {
+      "id": "retro/admit-override",
+      "argv": ["--home", "{home}", "retro", "admit", "override"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_override_phrasing_still_dropped"
+    },
+    {
+      "id": "retro/admit-unknown-fixed",
+      "argv": ["--home", "{home}", "retro", "admit", "unknown-fixed"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_unknown_fixed_by_rejected"
+    },
+    {
+      "id": "retro/admit-fixed",
+      "argv": ["--home", "{home}", "retro", "admit", "fixed"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_fixed_finding_dropped"
+    },
+    {
+      "id": "retro/admit-recurring",
+      "argv": ["--home", "{home}", "retro", "admit", "recurring"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_finding_recurring_after_merge_kept"
+    },
+    {
+      "id": "retro/admit-bad-start",
+      "argv": ["--home", "{home}", "retro", "admit", "bad-start"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_finding_recurring_after_merge_kept"
+    },
+    {
+      "id": "retro/admit-none",
+      "argv": ["--home", "{home}", "retro", "admit", "none"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 3,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_none_missing_and_usage"
+    },
+    {
+      "id": "retro/admit-no-reply",
+      "argv": ["--home", "{home}", "retro", "admit", "no-reply"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 4,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_none_missing_and_usage"
+    },
+    {
+      "id": "retro/admit-no-aggregate",
+      "argv": ["--home", "{home}", "retro", "admit", "no-aggregate"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 4,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_none_missing_and_usage"
+    },
+    {
+      "id": "retro/admit-missing",
+      "argv": ["--home", "{home}", "retro", "admit", "missing"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 4,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_none_missing_and_usage"
+    },
+    {
+      "id": "retro/admit-env-secret",
+      "argv": ["--home", "{home}", "retro", "admit", "env-secret"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_env_value_writes_nothing"
+    },
+    {
+      "id": "retro/admit-oversize",
+      "argv": ["--home", "{home}", "retro", "admit", "oversize"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-array",
+      "argv": ["--home", "{home}", "retro", "admit", "array"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-schema",
+      "argv": ["--home", "{home}", "retro", "admit", "schema"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-run-mismatch",
+      "argv": ["--home", "{home}", "retro", "admit", "run-mismatch"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-extra-key",
+      "argv": ["--home", "{home}", "retro", "admit", "extra-key"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-no-findings",
+      "argv": ["--home", "{home}", "retro", "admit", "no-findings"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-thirteen",
+      "argv": ["--home", "{home}", "retro", "admit", "thirteen"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-six-cards",
+      "argv": ["--home", "{home}", "retro", "admit", "six-cards"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-three-edits",
+      "argv": ["--home", "{home}", "retro", "admit", "three-edits"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroEditTest.test_more_than_two_edits_writes_nothing"
+    },
+    {
+      "id": "retro/admit-bad-title-empty",
+      "argv": ["--home", "{home}", "retro", "admit", "bad-title-empty"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-bad-title-link",
+      "argv": ["--home", "{home}", "retro", "admit", "bad-title-link"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-bad-category",
+      "argv": ["--home", "{home}", "retro", "admit", "bad-category"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-bad-count-bool",
+      "argv": ["--home", "{home}", "retro", "admit", "bad-count-bool"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-bad-cost-float",
+      "argv": ["--home", "{home}", "retro", "admit", "bad-cost-float"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-bad-sessions",
+      "argv": ["--home", "{home}", "retro", "admit", "bad-sessions"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-bad-project",
+      "argv": ["--home", "{home}", "retro", "admit", "bad-project"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-bad-missing-fix",
+      "argv": ["--home", "{home}", "retro", "admit", "bad-missing-fix"],
+      "home": "retro-admit",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_retro.py::RetroAdmitTest.test_bad_reply_writes_nothing"
+    },
+    {
+      "id": "retro/admit-edit-saved",
+      "argv": ["--home", "{home}", "retro", "admit", "edit-saved"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "PUT /api/retros/edit-saved": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroEditTest.test_valid_edit_is_applied_and_listed"
+    },
+    {
+      "id": "retro/admit-edit-bad-stage",
+      "argv": ["--home", "{home}", "retro", "admit", "edit-bad-stage"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "PUT /api/retros/edit-bad-stage": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroEditTest.test_bad_edits_are_skipped_and_good_ones_still_sent"
+    },
+    {
+      "id": "retro/admit-edit-too-long",
+      "argv": ["--home", "{home}", "retro", "admit", "edit-too-long"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "PUT /api/retros/edit-too-long": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroEditTest.test_bad_edits_are_skipped_and_good_ones_still_sent"
+    },
+    {
+      "id": "retro/admit-edit-refused",
+      "argv": ["--home", "{home}", "retro", "admit", "edit-refused"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [409, "autonomy is paused; no retro edit"],
+        "PUT /api/board": [200, ""],
+        "PUT /api/retros/edit-refused": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroEditTest.test_worker_refusals_are_skipped_without_changing_the_exit_code"
+    },
+    {
+      "id": "retro/admit-edit-cap",
+      "argv": ["--home", "{home}", "retro", "admit", "edit-cap"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "PUT /api/retros/edit-cap": [200, "ok"],
+        "GET /api/pipeline/history/projects/factory": [
+          200,
+          [
+            {
+              "version": 9,
+              "saved_at": "2999-01-01T00:00:00.000Z",
+              "summary": "a",
+              "run": "r1",
+              "host": "wsl"
+            },
+            {
+              "version": 8,
+              "saved_at": "2999-01-01T00:00:00.000Z",
+              "summary": "b",
+              "run": "r0",
+              "host": "wsl"
+            },
+            {
+              "version": 7,
+              "saved_at": "2026-11-01T00:00:00.000Z",
+              "summary": ""
+            }
+          ]
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroEditTest.test_device_daily_cap_counts_recent_retro_versions"
+    },
+    {
+      "id": "retro/admit-edit-global",
+      "argv": ["--home", "{home}", "retro", "admit", "edit-global"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "PUT /api/retros/edit-global": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroEditTest.test_global_and_unlisted_scopes_are_skipped"
+    },
+    {
+      "id": "retro/admit-edit-paused",
+      "argv": ["--home", "{home}", "retro", "admit", "edit-paused"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": true,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "PUT /api/retros/edit-paused": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroEditTest.test_paused_autonomy_sends_no_put"
+    },
+    {
+      "id": "retro/admit-edit-trial-open",
+      "argv": ["--home", "{home}", "retro", "admit", "edit-trial-open"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            },
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "edit-trial",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2026-11-09T09:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ]
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "PUT /api/retros/edit-trial-open": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialOpenTest.test_open_trial_skips_the_edit_before_the_daily_cap"
+    },
+    {
+      "id": "retro/admit-edit-trials-paused",
+      "argv": ["--home", "{home}", "retro", "admit", "edit-trials-paused"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            },
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 5,
+                "run": "edit-trial",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2026-11-09T09:00:00Z",
+                "status": "reverted",
+                "id": "factory-spec-v5"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 6,
+                "run": "edit-trial",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2026-11-09T09:00:00Z",
+                "status": "reverted",
+                "id": "factory-spec-v6"
+              }
+            ]
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "PUT /api/retros/edit-trials-paused": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialOpenTest.test_paused_project_skips_stage_note_edits"
+    },
+    {
+      "id": "retro/admit-edit-chain",
+      "argv": ["--home", "{home}", "retro", "admit", "edit-chain"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "PUT /api/retros/edit-chain": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroEditTest.test_second_edit_on_a_scope_builds_on_the_first"
+    },
+    {
+      "id": "retro/admit-doc-saved",
+      "argv": ["--home", "{home}", "retro", "admit", "doc-saved"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "ok",
+          {
+            "X-Project-Version": "5"
+          }
+        ],
+        "PUT /api/retros/doc-saved": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroDocEditTest.test_valid_doc_edit_is_applied_and_listed"
+    },
+    {
+      "id": "retro/admit-doc-no-match",
+      "argv": ["--home", "{home}", "retro", "admit", "doc-no-match"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "ok",
+          {
+            "X-Project-Version": "5"
+          }
+        ],
+        "PUT /api/retros/doc-no-match": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroDocEditTest.test_bad_doc_edits_are_skipped_and_good_ones_still_sent"
+    },
+    {
+      "id": "retro/admit-doc-unlisted",
+      "argv": ["--home", "{home}", "retro", "admit", "doc-unlisted"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "ok",
+          {
+            "X-Project-Version": "5"
+          }
+        ],
+        "PUT /api/retros/doc-unlisted": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroDocEditTest.test_unlisted_file_is_skipped"
+    },
+    {
+      "id": "retro/admit-doc-chain",
+      "argv": ["--home", "{home}", "retro", "admit", "doc-chain"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "ok",
+          {
+            "X-Project-Version": "5"
+          }
+        ],
+        "PUT /api/retros/doc-chain": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroDocEditTest.test_doc_edits_build_on_each_other"
+    },
+    {
+      "id": "retro/admit-doc-cap",
+      "argv": ["--home", "{home}", "retro", "admit", "doc-cap"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "ok",
+          {
+            "X-Project-Version": "5"
+          }
+        ],
+        "PUT /api/retros/doc-cap": [200, "ok"],
+        "GET /api/project-history/factory/notes.md": [
+          200,
+          [
+            {
+              "version": 9,
+              "saved_at": "2999-01-01T00:00:00.000Z",
+              "summary": "a",
+              "run": "r1",
+              "host": "wsl"
+            },
+            {
+              "version": 8,
+              "saved_at": "2999-01-01T00:00:00.000Z",
+              "summary": "b",
+              "run": "r0",
+              "host": "wsl"
+            },
+            {
+              "version": 7,
+              "saved_at": "2026-11-01T00:00:00.000Z",
+              "summary": ""
+            }
+          ]
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroDocEditTest.test_doc_daily_cap_counts_recent_retro_versions"
+    },
+    {
+      "id": "retro/admit-upload-404",
+      "argv": ["--home", "{home}", "retro", "admit", "upload-404"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "PUT /api/retros/upload-404": [404, "Not found"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroUploadTest.test_old_worker_prints_a_line_and_keeps_the_exit_code"
+    },
+    {
+      "id": "retro/admit-upload-409",
+      "argv": ["--home", "{home}", "retro", "admit", "upload-409"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "PUT /api/retros/upload-409": [409, "retro run belongs to another host"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroUploadTest.test_another_hosts_run_prints_a_line"
+    },
+    {
+      "id": "retro/admit-upload-500",
+      "argv": ["--home", "{home}", "retro", "admit", "upload-500"],
+      "home": "retro-admit",
+      "stubs": {},
+      "routes": {
+        "PUT /api/retros/upload-500": [500, "Worker crashed"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_retro.py::RetroUploadTest.test_a_failed_request_keeps_the_exit_code"
+    }
+  ]
+}
