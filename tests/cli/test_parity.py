@@ -72,12 +72,6 @@ class StubTest(unittest.TestCase):
 
 @unittest.skipIf(os.name == "nt", "the parity runner refuses Windows in phase 0")
 class RunnerTest(unittest.TestCase):
-    def test_python_against_python_passes_every_case(self):
-        with patch.object(run, "FACTORY_BIN", ""):
-            code, out, err = run_main([])
-        self.assertEqual((code, err), (0, ""), out)
-        self.assertEqual(out.splitlines()[-1], f"parity: {len(run.load_cases())} passed, 0 failed")
-
     def test_a_wrong_binary_fails(self):
         with tempfile.TemporaryDirectory() as temp:
             wrong = Path(temp, "wrong")

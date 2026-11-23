@@ -1,9 +1,13 @@
 """Differential runner: run each parity case on Python and on a factory binary, then compare.
 
-python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]...
+python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N]
+
+Each case side runs in its own temp root with its own home, stub folder and HTTP port, so cases run in a process
+pool. Results print in case order. --shard K/N keeps every Nth case starting at the Kth, for a CI matrix.
 """
 import argparse
 import calendar
+import concurrent.futures
 import contextlib
 import difflib
 import fnmatch
@@ -209,7 +213,13 @@ def main(argv):
     parser.add_argument("--bin")
     parser.add_argument("--ids")
     parser.add_argument("--case", action="append", default=[])
+    parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
+    parser.add_argument("--shard")
     args = parser.parse_args(argv)
+    shard = re.fullmatch(r"([1-9]\d*)/([1-9]\d*)", args.shard or "1/1")
+    if args.jobs < 1 or not shard or int(shard[1]) > int(shard[2]):
+        print("parity: --jobs takes a positive count and --shard takes K/N with 1 <= K <= N", file=sys.stderr)
+        return 2
     if os.name == "nt":
         print("parity: POSIX hosts only in phase 0", file=sys.stderr)
         return 2
@@ -232,12 +242,14 @@ def main(argv):
             return 2
     if patterns:
         cases = [case for case in cases if any(fnmatch.fnmatchcase(case["id"], p) for p in patterns)]
+    cases = cases[int(shard[1]) - 1::int(shard[2])]
     bin_command = [os.path.abspath(binary)] if binary else PYTHON
     failed = 0
-    for case in cases:
-        lines = run_case(case, bin_command)
-        print("\n".join(lines) if lines else f"PASS {case['id']}")
-        failed += bool(lines)
+    # Processes, not threads: each case's Python-side work holds the GIL, so threads barely overlap.
+    with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs) as pool:
+        for case, lines in zip(cases, pool.map(run_case, cases, [bin_command] * len(cases), chunksize=4)):
+            print("\n".join(lines) if lines else f"PASS {case['id']}", flush=True)
+            failed += bool(lines)
     print(f"parity: {len(cases) - failed} passed, {failed} failed")
     return 1 if failed else 0
 
