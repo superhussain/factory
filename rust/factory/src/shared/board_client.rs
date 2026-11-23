@@ -306,8 +306,20 @@ fn canonical(v: &Value, out: &mut String) {
         }
         Value::Object(map) => {
             let mut keys: Vec<&String> = map.keys().collect();
-            // JavaScript sorts keys by UTF-16 code units.
-            keys.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
+            // canonicalJson sorts keys by UTF-16 code units, but the object it builds still lists
+            // array-index keys ("0" to "4294967294", no leading zero) first, in numeric order.
+            let index = |k: &str| {
+                (k == "0" || !k.starts_with('0'))
+                    .then(|| k.parse::<u32>().ok())
+                    .flatten()
+                    .filter(|n| *n < u32::MAX && n.to_string() == k)
+            };
+            keys.sort_by(|a, b| match (index(a), index(b)) {
+                (Some(x), Some(y)) => x.cmp(&y),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => a.encode_utf16().cmp(b.encode_utf16()),
+            });
             out.push('{');
             for (i, key) in keys.iter().enumerate() {
                 if i > 0 {
@@ -632,6 +644,12 @@ mod tests {
         assert_eq!(
             row_sha256(&row),
             "2d406ceeddb2bd9f5727782ba827e461e2bcb83e54dee79b720b5bc5ec93829c"
+        );
+        // Array-index keys come first in numeric order, as JavaScript objects list them.
+        let mixed: Value = serde_json::from_str(r#"{"id":"2001-x","b":1,"10":"ten","2":"two","a":{"01":1,"1":2,"4294967295":3,"4294967294":4,"-1":5,"Z":6}}"#).unwrap();
+        assert_eq!(
+            row_sha256(&mixed),
+            "3eb214f8f550773261ce4bfca39a504f606119572fee6e6d56d9937452a5d51d"
         );
         for (x, js) in [
             (100.0, "100"),
