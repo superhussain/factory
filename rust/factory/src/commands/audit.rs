@@ -1246,10 +1246,10 @@ pub(crate) fn usage_record(
 ) -> Res<()> {
     cas(home, "/api/board", |text| {
         let mut data = load_board(text)?;
-        let Some(job) = data["jobs"].as_array().and_then(|jobs| {
-            jobs.iter()
-                .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
-        }) else {
+        let Some(job) = board_jobs(&data)?
+            .iter()
+            .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
+        else {
             return Err(fail(
                 format!("no job {slug}/{job_id} on the board. Nothing was written."),
                 4,
@@ -1389,13 +1389,37 @@ static GH_PR_PARTS: Pattern = Pattern::new(
 /// {job id: (result, evidence)}.
 type Results = HashMap<String, (String, Vec<String>)>;
 
-/// (owner/name, number) of a GitHub pull request URL.
-fn pr_parts(pr: Option<&Value>) -> Option<(String, i64)> {
-    let c = GH_PR_PARTS.fullmatch(pr.and_then(Value::as_str).unwrap_or(""))?;
-    Some((
-        format!("{}/{}", group(&c, 1), group(&c, 2)),
-        group(&c, 3).parse().unwrap(),
-    ))
+/// The board's job list. Fails where Python would raise: no `jobs` list, or an entry that is not
+/// an object.
+fn board_jobs(data: &Value) -> Res<&Vec<Value>> {
+    data.get("jobs")
+        .and_then(Value::as_array)
+        .filter(|jobs| jobs.iter().all(Value::is_object))
+        .ok_or_else(|| fail("the board's jobs are not a list of objects", 1))
+}
+
+/// `str(j["id"])`, failing where Python raises KeyError.
+fn job_id(j: &Value) -> Res<String> {
+    match j.get("id") {
+        Some(id) => Ok(py_str(Some(id))),
+        None => Err(fail("a board job has no id", 1)),
+    }
+}
+
+/// (owner/name, number) of a GitHub pull request URL. A truthy non-string pr fails, as Python's
+/// `fullmatch` raises on it.
+fn pr_parts(pr: Option<&Value>) -> Res<Option<(String, i64)>> {
+    let text = match pr {
+        Some(Value::String(s)) => s.as_str(),
+        _ if truthy(pr) => return Err(fail("a board job's pr is not a string", 1)),
+        _ => "",
+    };
+    Ok(GH_PR_PARTS.fullmatch(text).map(|c| {
+        (
+            format!("{}/{}", group(&c, 1), group(&c, 2)),
+            group(&c, 3).parse().unwrap(),
+        )
+    }))
 }
 
 /// The board text with each known result written to its job's outcome, touching only jobs whose
@@ -1406,6 +1430,7 @@ fn outcomes_change(
     stamp: &str,
 ) -> Res<(Option<String>, usize)> {
     let mut data = load_board(text)?;
+    board_jobs(&data)?;
     let mut changed = 0;
     for j in data["jobs"].as_array_mut().into_iter().flatten() {
         let Some((result, evidence)) = j
@@ -1439,16 +1464,14 @@ pub(crate) fn outcomes(record: bool, slug: Option<&str>, out: &mut String) -> Re
     let home = factory_home()?;
     let data = read_board(&home)?;
     let cutoff = unix_now() - OUTCOME_DAYS * 86_400;
-    let all: Vec<&Value> = data["jobs"].as_array().into_iter().flatten().collect();
-    let recent: Vec<&Value> = all
+    let recent: Vec<&Value> = board_jobs(&data)?
         .iter()
-        .copied()
         .filter(|j| {
             j.get("stage").and_then(Value::as_str) == Some("merged")
                 && j.get("done")
                     .and_then(Value::as_str)
                     .and_then(parse_stamp)
-                    .is_none_or(|done| done > cutoff)
+                    .is_some_and(|done| done > cutoff)
         })
         .collect();
     let project = |j: &Value| {
@@ -1486,6 +1509,19 @@ pub(crate) fn outcomes(record: bool, slug: Option<&str>, out: &mut String) -> Re
         }
         return Ok(());
     }
+    for j in board_jobs(&data)? {
+        let refs = j
+            .get("refs")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten();
+        if refs
+            .filter_map(Value::as_object)
+            .any(|r| r.get("kind").and_then(Value::as_str) == Some("rework-of"))
+        {
+            job_id(j)?;
+        }
+    }
     let (paths, device) = (read_paths(&home), retro_host()?);
     let mut results = Results::new();
     let mut slugs: Vec<String> = jobs.iter().filter_map(|j| project(j)).collect();
@@ -1505,18 +1541,20 @@ pub(crate) fn outcomes(record: bool, slug: Option<&str>, out: &mut String) -> Re
         let mut prs: Vec<(i64, Vec<String>)> = Vec::new();
         for j in jobs.iter().filter(|j| project(j).as_deref() == Some(slug)) {
             let unknown = |why: String| ("unknown".to_string(), vec![why]);
+            let parts = pr_parts(j.get("pr"))?;
+            let id = job_id(j)?;
             if checkout.is_empty() {
                 results.insert(
-                    id(j),
+                    id,
                     unknown(format!("no checkout of {slug} in paths.md on {device}")),
                 );
                 continue;
             }
-            match pr_parts(j.get("pr")) {
+            match parts {
                 Some((pr_repo, n)) if pr_repo.to_lowercase() == repo.to_lowercase() => {
                     match prs.iter_mut().find(|(m, _)| *m == n) {
-                        Some((_, ids)) => ids.push(id(j)),
-                        None => prs.push((n, vec![id(j)])),
+                        Some((_, ids)) => ids.push(id),
+                        None => prs.push((n, vec![id])),
                     }
                 }
                 _ => {
@@ -1525,7 +1563,7 @@ pub(crate) fn outcomes(record: bool, slug: Option<&str>, out: &mut String) -> Re
                     } else {
                         repo
                     };
-                    results.insert(id(j), unknown(format!("PR is not in {repo}")));
+                    results.insert(id, unknown(format!("PR is not in {repo}")));
                 }
             }
         }
@@ -1912,7 +1950,7 @@ fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<()> {
                 4,
             ));
         }
-        let (pr_repo, _) = pr_parts(c.get("pr")).unwrap();
+        let (pr_repo, _) = pr_parts(c.get("pr"))?.unwrap();
         if pr_repo.to_lowercase() != repo.to_lowercase() {
             return Err(fail(
                 format!("bench: {id}: pr is not in {repo}, the repo of project {slug}"),
@@ -1997,25 +2035,23 @@ fn bench_draft(args: &[String]) -> Res<()> {
         .0;
     let repo = fm_get(&meta, "repo").unwrap_or("");
     let board = read_board(&home)?;
-    let mut jobs: Vec<&Value> = board["jobs"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|j| {
-            j.get("project").and_then(Value::as_str) == Some(slug)
-                && matches!(
-                    j.get("outcome")
-                        .and_then(Value::as_object)
-                        .and_then(|o| o.get("result"))
-                        .and_then(Value::as_str),
-                    Some("reverted" | "reworked")
-                )
-        })
-        .collect();
-    jobs.sort_by_key(|j| py_str(j.get("id")));
+    let mut jobs: Vec<(String, &Value)> = Vec::new();
+    for j in board_jobs(&board)?.iter().filter(|j| {
+        j.get("project").and_then(Value::as_str) == Some(slug)
+            && matches!(
+                j.get("outcome")
+                    .and_then(Value::as_object)
+                    .and_then(|o| o.get("result"))
+                    .and_then(Value::as_str),
+                Some("reverted" | "reworked")
+            )
+    }) {
+        jobs.push((job_id(j)?, j));
+    }
+    jobs.sort_by(|a, b| a.0.cmp(&b.0));
     let mut prs = 0;
-    for j in jobs {
-        match pr_parts(j.get("pr")) {
+    for (id, j) in jobs {
+        match pr_parts(j.get("pr"))? {
             Some((pr_repo, _)) if pr_repo.to_lowercase() == repo.to_lowercase() => prs += 1,
             _ => {
                 let repo = if repo.is_empty() {
@@ -2023,10 +2059,7 @@ fn bench_draft(args: &[String]) -> Res<()> {
                 } else {
                     repo
                 };
-                eprintln!(
-                    "factory.py: bench cases skips {}: PR is not in {repo}",
-                    py_str(j.get("id"))
-                );
+                eprintln!("factory.py: bench cases skips {id}: PR is not in {repo}");
             }
         }
     }
@@ -2334,5 +2367,48 @@ mod tests {
             outcomes_change(Some(&board), &results, "x").unwrap(),
             (None, 0)
         );
+    }
+
+    #[test]
+    fn malformed_board_fails() {
+        for board in [
+            json!({"jobs": null}),
+            json!({"updated": ""}),
+            json!([]),
+            json!({"jobs": ["x", {"id": "a"}]}),
+        ] {
+            assert_eq!(board_jobs(&board).unwrap_err().code, 1, "{board}");
+        }
+        assert_eq!(board_jobs(&json!({"jobs": [{}]})).unwrap().len(), 1);
+        assert_eq!(job_id(&json!({"project": "alpha"})).unwrap_err().code, 1);
+        assert_eq!(job_id(&json!({"id": "1017-add-x"})).unwrap(), "1017-add-x");
+        assert_eq!(pr_parts(Some(&json!(7))).unwrap_err().code, 1);
+        for falsy in [json!(0), json!(""), json!(null), json!([])] {
+            assert_eq!(pr_parts(Some(&falsy)).unwrap(), None, "{falsy}");
+        }
+        assert_eq!(
+            pr_parts(Some(&json!("https://github.com/example/alpha/pull/7"))).unwrap(),
+            Some(("example/alpha".to_string(), 7))
+        );
+    }
+
+    #[test]
+    fn usage_record_malformed_board_writes_nothing() {
+        use crate::shared::http::tests::{home_for, serve};
+        for (name, board) in [
+            ("null", r#"{"jobs": null}"#),
+            (
+                "entry",
+                r#"{"jobs": ["x", {"id": "1017-add-x", "project": "alpha"}]}"#,
+            ),
+        ] {
+            let (origin, seen) = serve(vec![(200, board, vec![("ETag", "\"a\"")])]);
+            let home = home_for(&format!("usage-record-{name}"), &origin);
+            let e = usage_record(&home, "alpha", "1017-add-x", "host-a", &json!({})).unwrap_err();
+            assert_eq!(e.code, 1, "{name}");
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen.len(), 1);
+            assert_eq!(seen[0].method, "GET");
+        }
     }
 }
