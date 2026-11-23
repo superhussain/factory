@@ -3,24 +3,31 @@
 python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]...
 """
 import argparse
+import calendar
+import contextlib
 import difflib
 import fnmatch
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1] / "tests" / "cli"))
-from support import ROOT, SKILL, factory_command, isolated_env, snapshot
+from support import ROOT, SKILL, factory_command, http_fixture, isolated_env, snapshot
 import stub
 
 PYTHON = [sys.executable, "-B", str(SKILL / "runtime/factory.py")]
 TOOLS = ("gh", "paseo", "git")
 CASES = HERE / "cases"
+REQUEST_HEADERS = ("content-type", "if-match", "if-none-match", "cf-access-client-id", "cf-access-client-secret",
+                   "user-agent")
+STAMP = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
 
 def load_cases(folder=CASES):
@@ -60,6 +67,35 @@ def read_ids(path):
     return patterns
 
 
+def routes_for(case):
+    """The case's routes for http_fixture, as fresh lists because list replies pop. A string body is sent as text."""
+    def reply(route):
+        status, body, *extra = route
+        return (status, body.encode("utf-8") if isinstance(body, str) else body, *extra)
+    return {key: [reply(r) for r in value] if isinstance(value[0], list) else reply(value)
+            for key, value in case["routes"].items()}
+
+
+def request_lines(server, normalize):
+    lines = []
+    for method, path, headers, body in server.requests:
+        kept = {name.lower(): value for name, value in headers.items() if name.lower() in REQUEST_HEADERS}
+        line = json.dumps({"method": method, "path": path, "headers": kept,
+                           "body": body.decode("utf-8", "surrogateescape")}, sort_keys=True)
+        lines.append(normalize(line.encode("ascii")).decode("ascii"))
+    return lines
+
+
+def now_stamps(data, start, end):
+    def stamp(match):
+        try:
+            seconds = calendar.timegm(time.strptime(match.group().decode(), "%Y-%m-%dT%H:%M:%SZ"))
+        except ValueError:
+            return match.group()
+        return b"{now}" if start <= seconds <= end else match.group()
+    return STAMP.sub(stamp, data)
+
+
 def run_side(case, command):
     root = Path(tempfile.mkdtemp(prefix="parity-")).resolve()
     try:
@@ -75,14 +111,26 @@ def run_side(case, command):
         for tool, entries in case["stubs"].items():
             (stub_dir / f"{tool}.json").write_text(json.dumps(entries), encoding="utf-8")
         env = isolated_env(home)
+        env.update(case.get("env", {}))
         env.update(PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""), FACTORY_STUB_DIR=str(stub_dir),
                    PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
         argv = [arg.replace("{home}", str(home)) for arg in case["argv"]]
-        result = subprocess.run(command + argv, env=env, cwd=root, stdin=subprocess.DEVNULL, capture_output=True,
-                                timeout=60)
+        stdin = {"input": case["stdin"].encode("utf-8")} if "stdin" in case else {"stdin": subprocess.DEVNULL}
+        with http_fixture(routes_for(case)) if "routes" in case else contextlib.nullcontext() as server:
+            if server:
+                (home / "config.md").write_text(f"---\napi_url: {server.origin}\ndevice: parity\n---\n",
+                                                encoding="utf-8")
+                (home / ".env").write_text("FACTORY_ACCESS_CLIENT_ID=parity-client-id\n"
+                                           "FACTORY_ACCESS_CLIENT_SECRET=parity-client-secret\n", encoding="utf-8")
+            start = int(time.time())
+            result = subprocess.run(command + argv, env=env, cwd=root, capture_output=True, timeout=60, **stdin)
+            end = time.time()
 
         def normalize(data):
-            return data.replace(str(home).encode(), b"{home}").replace(str(root).encode(), b"{tmp}")
+            if server:
+                data = data.replace(server.origin.encode(), b"{api}")
+            data = data.replace(str(home).encode(), b"{home}").replace(str(root).encode(), b"{tmp}")
+            return now_stamps(data, start, end)
 
         tree = [f"{path} {mode:o} {normalize(data)!r}" if data is not None else f"{path} {mode:o}"
                 for path, (mode, data) in snapshot(home).items()]
@@ -91,6 +139,7 @@ def run_side(case, command):
         for tool in TOOLS:
             log = stub_dir / f"{tool}.calls.jsonl"
             fields.append((f"{tool} calls", normalize(log.read_bytes()) if log.exists() else b""))
+        fields.append(("requests", "\n".join(request_lines(server, normalize)) if server else ""))
         return [(name, value.decode("utf-8", "surrogateescape") if isinstance(value, bytes) else value)
                 for name, value in fields]
     finally:
@@ -98,7 +147,10 @@ def run_side(case, command):
 
 
 def run_case(case, bin_command):
-    for (field, python), (_, binary) in zip(run_side(case, PYTHON), run_side(case, bin_command)):
+    python = run_side(case, PYTHON)
+    if ("routes" in case or "exit" in case) and python[0][1] != str(case.get("exit")):
+        return [f"FAIL {case['id']}: python exit {python[0][1]}, case expects {case.get('exit')}"]
+    for (field, python), (_, binary) in zip(python, run_side(case, bin_command)):
         if python != binary:
             diff = difflib.unified_diff(python.splitlines(), binary.splitlines(), "python", "bin", lineterm="")
             return [f"FAIL {case['id']}: {field} differs"] + list(diff)[:40]
