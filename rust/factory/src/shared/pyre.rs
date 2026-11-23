@@ -82,7 +82,9 @@ impl Pattern {
 
 fn prefix(flags: Flags) -> String {
     let mut out = String::new();
-    for (on, flag) in [(flags.ignore_case, "(?i)"), (flags.multiline, "(?m)"), (flags.dotall, "(?s)")] {
+    // ASCII ignore-case folds letters in body() instead, since (?i) also folds Unicode look-alikes.
+    let unicode_case = flags.ignore_case && !flags.ascii;
+    for (on, flag) in [(unicode_case, "(?i)"), (flags.multiline, "(?m)"), (flags.dotall, "(?s)")] {
         if on {
             out.push_str(flag);
         }
@@ -100,6 +102,8 @@ fn body(src: &str, flags: Flags) -> String {
     let space = if flags.ascii { "\\t\\n\\x0B\\x0C\\r " } else { "\\s\\x1C-\\x1F" };
     let digit = if flags.ascii { "0-9" } else { "\\d" };
     let w = format!("[{word}]");
+    let fold = flags.ascii && flags.ignore_case;
+    let swap = |c: char| if c.is_ascii_lowercase() { c.to_ascii_uppercase() } else { c.to_ascii_lowercase() };
     let mut out = String::with_capacity(src.len());
     let mut chars = src.chars().peekable();
     let mut in_class = false;
@@ -121,7 +125,22 @@ fn body(src: &str, flags: Flags) -> String {
                         _ => {
                             out.push('\\');
                             out.push(e);
+                            match copy_escape_tail(e, &mut chars, &mut out) {
+                                Some(c) if fold && c.is_ascii_alphabetic() => out.push(swap(c)),
+                                _ => {}
+                            }
                         }
+                    }
+                }
+                c if fold && c.is_ascii_alphabetic() => {
+                    let mut ahead = chars.clone();
+                    match (ahead.next(), ahead.next()) {
+                        (Some('-'), Some(d)) if d.is_ascii_alphabetic() => {
+                            chars.next();
+                            chars.next();
+                            out.extend([c, '-', d, swap(c), '-', swap(d)]);
+                        }
+                        _ => out.extend([c, swap(c)]),
                     }
                 }
                 _ => out.push(c),
@@ -154,15 +173,64 @@ fn body(src: &str, flags: Flags) -> String {
                     'b' => out.push_str(&format!("(?:(?<={w})(?!{w})|(?<!{w})(?={w}))")),
                     'B' => out.push_str(&format!("(?:(?<={w})(?={w})|(?<!{w})(?!{w}))")),
                     _ => {
+                        let start = out.len();
                         out.push('\\');
                         out.push(e);
+                        match copy_escape_tail(e, &mut chars, &mut out) {
+                            Some(c) if fold && c.is_ascii_alphabetic() => {
+                                out.truncate(start);
+                                out.extend(['[', c, swap(c), ']']);
+                            }
+                            _ => {}
+                        }
                     }
                 }
             }
+            '(' if chars.peek() == Some(&'?') => {
+                out.push('(');
+                out.push(chars.next().unwrap());
+                // Group names and inline flags are not pattern text, so they are copied unfolded.
+                if chars.peek().is_some_and(char::is_ascii_alphabetic) {
+                    for n in chars.by_ref() {
+                        out.push(n);
+                        if matches!(n, '>' | ')' | ':') {
+                            break;
+                        }
+                    }
+                }
+            }
+            c if fold && c.is_ascii_alphabetic() => out.extend(['[', c, swap(c), ']']),
             _ => out.push(c),
         }
     }
     out
+}
+
+/// Copies the hex digits of `\x`, `\u` and `\U` and the braces of `\p{..}`, so folding never touches
+/// them. Returns the character a hex escape stands for.
+fn copy_escape_tail(e: char, chars: &mut std::iter::Peekable<std::str::Chars>, out: &mut String) -> Option<char> {
+    let count = match e {
+        'x' => 2,
+        'u' => 4,
+        'U' => 8,
+        'p' | 'P' if chars.peek() == Some(&'{') => {
+            for n in chars.by_ref() {
+                out.push(n);
+                if n == '}' {
+                    break;
+                }
+            }
+            return None;
+        }
+        'p' | 'P' => 1,
+        _ => return None,
+    };
+    let hex: String = chars.by_ref().take(count).collect();
+    out.push_str(&hex);
+    if e == 'p' || e == 'P' {
+        return None;
+    }
+    u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
 }
 
 #[cfg(test)]
@@ -215,6 +283,19 @@ mod tests {
             "[\\t\\n\\x0B\\x0C\\r ](?=\\n?\\z)"
         );
         assert_eq!(translate(r"a", Flags { ignore_case: true, multiline: true, ..Flags::NONE }), "(?i)(?m)a");
+    }
+
+    #[test]
+    fn ascii_ignore_case_folds_ascii_only() {
+        static ROLE: Pattern = Pattern::new(r"\b(?:system prompt)\b", Flags { ascii: true, ignore_case: true, ..Flags::NONE });
+        assert!(ROLE.search("SYSTEM Prompt").is_some());
+        assert!(ROLE.search("\u{17f}ystem prompt").is_none());
+        static CLASS: Pattern = Pattern::new(r"\b[a-z0-9-]+\.[a-z]{2,}/[^.\n]\x41(?P<Name>k)", Flags { ascii: true, ignore_case: true, ..Flags::NONE });
+        assert!(CLASS.search("Ab-1.CoM/xak").is_some());
+        assert!(CLASS.search("ab.c\u{212a}/xak").is_none());
+        assert!(CLASS.search("ab.co/xA\u{212a}").is_none());
+        static UNICODE: Pattern = Pattern::new("s", Flags::I);
+        assert!(UNICODE.search("\u{17f}").is_some());
     }
 
     #[test]
