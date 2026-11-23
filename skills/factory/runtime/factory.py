@@ -4163,10 +4163,11 @@ def experiment_arm(job_id, percent):
 
 
 # Retro stage-note trials: an open trial that cannot compare after TRIAL_MAX_DAYS keeps its edit;
-# a trial whose revert the Worker still refuses then is settled revert-failed and keeps its edit.
-# TRIAL_PAUSE_REVERTS unresumed reverts pause a project's stage-note edits, and the board keeps
-# the newest TRIAL_KEEP settled records.
+# a trial whose revert the Worker then refuses with a lasting status (TRIAL_LASTING_REFUSALS) is settled
+# revert-failed and keeps its edit. TRIAL_PAUSE_REVERTS unresumed reverts pause a project's stage-note
+# edits, and the board keeps the newest TRIAL_KEEP settled records.
 TRIAL_MAX_DAYS = 28
+TRIAL_LASTING_REFUSALS = (400, 403, 404, 413)
 TRIAL_PAUSE_REVERTS = 2
 TRIAL_KEEP = 20
 
@@ -12565,6 +12566,7 @@ RETRO_RUN_SCHEMA = "factory.retro-run/1"
 RETRO_DOC_EDIT_SCHEMA = "factory.retro-doc-edit/1"
 RETRO_EDIT_CHANGE = 600
 MAX_RETRO_EDITS = 2
+MAX_RETRO_LESSON_CARDS = 1
 RETRO_MERGED_MAX = 100
 RETRO_LESSONS_MAX = 20
 RETRO_EDITS_PER_DAY = 2
@@ -14470,7 +14472,7 @@ def check_retro(doc):
     def first(*checks):
         return next(((where, err) for where, err in checks if err), None)
 
-    err = check_keys(doc, ("schema", "run", "findings", "suggestions"), ("edits",))
+    err = check_keys(doc, ("schema", "run", "findings", "suggestions"), ("edits", "lesson_cards"))
     if err:
         return f"reply: {err}"
     found = first(
@@ -14479,7 +14481,8 @@ def check_retro(doc):
          else "must match [A-Za-z0-9_-]{1,64}"),
         ("findings", check_list(doc["findings"], 1, 12)),
         ("suggestions", check_list(doc["suggestions"], 0, MAX_PER_RUN)),
-        ("edits", check_list(doc.get("edits", []), 0, MAX_RETRO_EDITS)))
+        ("edits", check_list(doc.get("edits", []), 0, MAX_RETRO_EDITS)),
+        ("lesson_cards", check_list(doc.get("lesson_cards", []), 0, MAX_RETRO_LESSON_CARDS)))
     return "%s: %s" % found if found else None
 
 
@@ -14540,6 +14543,19 @@ def check_doc_edit(e, agg):
     if retro_changed_chars(text, next_text) > RETRO_EDIT_CHANGE:
         return "find", f"changes more than {RETRO_EDIT_CHANGE} characters"
     return None
+
+
+def check_lesson_card(c, agg):
+    """The first violation of one retro lesson card as (field, problem), or None.
+    field is None for the whole card."""
+    err = check_keys(c, ("job", "fact", "why"))
+    if err:
+        return None, err
+    if c["job"] not in [r["job"] for r in agg.get("lessons", [])]:
+        return "job", "must be a job in aggregate.json lessons"
+    return next(((where, err) for where, err in (
+        ("fact", check_text(c["fact"], 1, 200)),
+        ("why", check_text(c["why"], 1, 300))) if err), None)
 
 
 def retro_edits_today(home, scope):
@@ -14659,6 +14675,29 @@ def retro_apply_edits(home, run, edits, agg):
     return results
 
 
+def retro_queue_lessons(home, agg, cards):
+    """Queue each checked lesson card as a held backlog line while autonomy runs. A bad card is rejected
+    and a fact already in its project's notes.md is skipped; neither stops admit."""
+    autonomy = None
+    for i, c in enumerate(cards):
+        bad = check_lesson_card(c, agg)
+        if bad:
+            print(f"rejected lesson_cards[{i}]" + (f".{bad[0]}" if bad[0] else "") + f": {bad[1]}")
+            continue
+        project = next(r["project"] for r in agg["lessons"] if r["job"] == c["job"])
+        file = f"{project}/notes.md"
+        lines = agg.get("documents", {}).get(file, {}).get("text", "").split("\n")
+        if any(line == f"- {c['fact']}" or line.startswith(f"- {c['fact']} (") for line in lines):
+            print(f"skipped lesson_cards[{i}]: already in {file}")
+            continue
+        if autonomy is None:
+            autonomy = load_autonomy(load_board(api(home, "GET", "/api/board")[2]))
+        if autonomy["paused"] is not False:
+            print(f"skipped lesson_cards[{i}]: autonomy is paused")
+            continue
+        queue_lesson(project, c["job"], c["fact"], c["why"])
+
+
 def trial_settle(home):
     """Decide each open stage-note trial with compare(): revert the edit when arm b reads higher on
     rounds or tokens, else keep it. Writes every record in one board write."""
@@ -14693,7 +14732,7 @@ def trial_settle(home):
                                     headers={"Content-Type": "application/json"})
             if status != 200:
                 why = f"{status} {printable_line(text, 200)}".strip()
-                if expired:
+                if expired and status in TRIAL_LASTING_REFUSALS:
                     update.update(status="revert-failed", settled=now())
                     print(f"trial {tid} revert failed after {TRIAL_MAX_DAYS} days: kept the edit: {why}")
                 else:
@@ -15025,7 +15064,8 @@ def retro_admit(run):
         results = retro_apply_edits(home, run, doc["edits"], agg)
         write_atomic(findings, render_findings(agg, dict(doc, findings=kept), rejected, edits=results, fixed=fixed,
                                                cards=bad_cards))
-    reply_findings = [f if i in fixes and not fixes[i] else None for i, f in enumerate(doc["findings"])]
+    retro_queue_lessons(home, agg, doc.get("lesson_cards", []))
+    reply_findings =[f if i in fixes and not fixes[i] else None for i, f in enumerate(doc["findings"])]
     upload = ([], [])
     outcomes = []
     try:
