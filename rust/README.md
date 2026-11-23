@@ -31,6 +31,7 @@ All paths are under `rust/factory/src/`. `shared` is the core every command uses
 | `shared/board.rs` | `load_board`, `dump_board`, `read_board`, `merge_patch`, `patch_job`, `lead_of`, `batch_refs`, `riders_of`, `mirror_batch`, `unchanged`, `escalated` |
 | `shared/project.rs` | `r2_target`, `project_files`, `strong`, `project_etag`, `sha`, `local_bytes`, `read_project_state`, `save_project_state`, `pull_project`, `read_paths`, `safe_job_folder` |
 | `commands/lookup.rs` | `where_cmd`, `job`, `builds`, plus `main_checkout` and `remotes` for other slices |
+| `commands/daemon.rs` | `daemon`: one blocking `tungstenite` socket on the Worker's `/events/host`, a reader thread, and one `factory pickup` pass per burst of `changed` frames, logged to `<home>/logs/daemon/` |
 
 - Board data stays `serde_json::Value` with `preserve_order` and `arbitrary_precision`, so unknown fields and big numbers round-trip.
 - Regexes and the HTTP agent are `OnceLock` statics, compiled or built on first use.
@@ -57,6 +58,7 @@ Each port slice owns one command file. `cli.rs` and `commands/mod.rs` already po
 | `intake.rs` | next, backlog, ideas, stuck, unclaim, idea-images, idea-files, deny-notes, inbox, triage, suggest, control, needs, autonomy, halt |
 | `pipeline.rs` | pipeline, documents, verdict, escalation, repeats, review-plan, review-floor, pre-review, grounding, batch, stack, lesson, agent, trial, experiment, routes |
 | `ops.rs` | stop, clean, orphans, archive-workspace, pr-handled |
+| `daemon.rs` | daemon (binary only, in `cli.rs` `EXTRA`) |
 
 A handler keeps the Python function's name, except `where`, which is `where_cmd`.
 
@@ -90,3 +92,4 @@ A handler keeps the Python function's name, except `where`, which is `where_cmd`
 - A Worker body that is not UTF-8 fails 1 with `the Worker sent a body that is not UTF-8`. Python fails 5 with `can't reach {url}: 'utf-8' codec ...`.
 - TLS error text and Windows OS error text differ from Python's.
 - HTTP header names go out in lowercase (`http` crate). Python sends `User-agent` style. Python also sends `Accept-Encoding: identity` and `Connection: close`.
+- `daemon` exists only in the binary and is not in the usage text.
