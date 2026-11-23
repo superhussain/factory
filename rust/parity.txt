@@ -1,0 +1,5 @@
+# Case ids the factory binary must pass. Port slices add lines.
+main/no-args
+main/unknown-command
+doctor/extra
+arity/*
