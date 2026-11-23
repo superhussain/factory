@@ -9,18 +9,19 @@ use std::time::UNIX_EPOCH;
 use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::board::{dump_board, load_board, patch_job};
+use crate::shared::board::{dump_board, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
-use crate::shared::consts::{NEW_JOB_ID, NOTE_SECRETS, PASEO_ID, ROUTE_MODEL};
+use crate::shared::consts::{NEW_JOB_ID, NOTE_SECRETS, PASEO_ID, ROUTE_MODEL, SLUG};
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::read_text;
 use crate::shared::home::factory_home;
 use crate::shared::http::{access_message, api, cas};
 use crate::shared::proc::hostname;
-use crate::shared::project::r2_target;
+use crate::shared::project::{project_files, r2_target, read_paths};
 use crate::shared::py::{is_space, os_error, repr, rstrip, strip, universal_newlines};
 use crate::shared::pyjson::{dumps, float_repr, loads, DEFAULT};
 use crate::shared::pyre::{Captures, Flags, Pattern};
+use crate::shared::time::{now, parse_stamp, unix_now};
 
 static HOST_NAME: Pattern = Pattern::new(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", Flags::ASCII);
 const RETRO_DENIALS: &[&str] = &[
@@ -1375,8 +1376,260 @@ pub fn usage_cmd(call: &Call) -> Res<()> {
     Ok(())
 }
 
-pub fn outcomes_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("outcomes"))
+const OUTCOME_DAYS: i64 = 90;
+const OUTCOME_RESULTS: [&str; 4] = ["held", "reworked", "reverted", "unknown"];
+static GH_PR_PARTS: Pattern = Pattern::new(
+    r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})",
+    Flags::ASCII,
+);
+
+/// {job id: (result, evidence)}.
+type Results = HashMap<String, (String, Vec<String>)>;
+
+/// (owner/name, number) of a GitHub pull request URL.
+fn pr_parts(pr: Option<&Value>) -> Option<(String, i64)> {
+    let c = GH_PR_PARTS.fullmatch(pr.and_then(Value::as_str).unwrap_or(""))?;
+    Some((
+        format!("{}/{}", group(&c, 1), group(&c, 2)),
+        group(&c, 3).parse().unwrap(),
+    ))
+}
+
+/// The board text with each known result written to its job's outcome, touching only jobs whose
+/// result or evidence changed, and never a job's updated. Returns how many jobs changed.
+fn outcomes_change(
+    text: Option<&str>,
+    results: &Results,
+    stamp: &str,
+) -> Res<(Option<String>, usize)> {
+    let mut data = load_board(text)?;
+    let mut changed = 0;
+    for j in data["jobs"].as_array_mut().into_iter().flatten() {
+        let Some((result, evidence)) = j
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|id| results.get(id))
+        else {
+            continue;
+        };
+        if result == "unknown" {
+            continue;
+        }
+        let old = j.get("outcome").and_then(Value::as_object);
+        if old.and_then(|o| o.get("result")) == Some(&json!(result))
+            && old.and_then(|o| o.get("evidence")) == Some(&json!(evidence))
+        {
+            continue;
+        }
+        j["outcome"] = json!({"result": result, "at": stamp, "evidence": evidence});
+        changed += 1;
+    }
+    if changed == 0 {
+        return Ok((None, 0));
+    }
+    data["updated"] = Value::from(stamp);
+    Ok((Some(dump_board(&data)), changed))
+}
+
+/// `outcomes_cmd` after its argument check: each line it prints, plus `\n`, goes to out.
+pub(crate) fn outcomes(record: bool, slug: Option<&str>, out: &mut String) -> Res<()> {
+    let home = factory_home()?;
+    let data = read_board(&home)?;
+    let cutoff = unix_now() - OUTCOME_DAYS * 86_400;
+    let all: Vec<&Value> = data["jobs"].as_array().into_iter().flatten().collect();
+    let recent: Vec<&Value> = all
+        .iter()
+        .copied()
+        .filter(|j| {
+            j.get("stage").and_then(Value::as_str) == Some("merged")
+                && j.get("done")
+                    .and_then(Value::as_str)
+                    .and_then(parse_stamp)
+                    .is_none_or(|done| done > cutoff)
+        })
+        .collect();
+    let project = |j: &Value| {
+        j.get("project")
+            .and_then(Value::as_str)
+            .filter(|p| !p.is_empty())
+            .map(String::from)
+    };
+    let id = |j: &Value| py_str(j.get("id"));
+    let mut orphans: Vec<String> = recent
+        .iter()
+        .filter(|j| project(j).is_none())
+        .map(|j| id(j))
+        .collect();
+    orphans.sort();
+    let jobs: Vec<&Value> = recent
+        .iter()
+        .copied()
+        .filter(|j| project(j).is_some_and(|p| slug.is_none_or(|s| p == s)))
+        .collect();
+    let skipped = (!orphans.is_empty() && slug.is_none()).then(|| {
+        format!(
+            "merged jobs with no project, skipped: {}",
+            orphans.join(", ")
+        )
+    });
+    let mut line = |text: &str| {
+        out.push_str(text);
+        out.push('\n');
+    };
+    if jobs.is_empty() {
+        line(&format!("no jobs merged in the last {OUTCOME_DAYS} days"));
+        if let Some(skipped) = &skipped {
+            line(skipped);
+        }
+        return Ok(());
+    }
+    let (paths, device) = (read_paths(&home), retro_host()?);
+    let mut results = Results::new();
+    let mut slugs: Vec<String> = jobs.iter().filter_map(|j| project(j)).collect();
+    slugs.sort();
+    slugs.dedup();
+    for slug in &slugs {
+        let md = project_files(&home, slug)?.0;
+        let meta = if md.exists() {
+            frontmatter(&md)
+                .map_err(|e| fail(os_error(&e, Some(&md)), 1))?
+                .0
+        } else {
+            Vec::new()
+        };
+        let repo = fm_get(&meta, "repo").unwrap_or("");
+        let checkout = fm_get(&paths, slug).unwrap_or("");
+        let mut prs: Vec<(i64, Vec<String>)> = Vec::new();
+        for j in jobs.iter().filter(|j| project(j).as_deref() == Some(slug)) {
+            let unknown = |why: String| ("unknown".to_string(), vec![why]);
+            if checkout.is_empty() {
+                results.insert(
+                    id(j),
+                    unknown(format!("no checkout of {slug} in paths.md on {device}")),
+                );
+                continue;
+            }
+            match pr_parts(j.get("pr")) {
+                Some((pr_repo, n)) if pr_repo.to_lowercase() == repo.to_lowercase() => {
+                    match prs.iter_mut().find(|(m, _)| *m == n) {
+                        Some((_, ids)) => ids.push(id(j)),
+                        None => prs.push((n, vec![id(j)])),
+                    }
+                }
+                _ => {
+                    let repo = if repo.is_empty() {
+                        "the project file repo"
+                    } else {
+                        repo
+                    };
+                    results.insert(id(j), unknown(format!("PR is not in {repo}")));
+                }
+            }
+        }
+        if prs.is_empty() {
+            continue;
+        }
+        if Path::new(checkout).is_dir() {
+            return Err(not_ported("outcomes"));
+        }
+        let problem = format!("no folder at {checkout} on {device}");
+        for ids in prs.into_iter().map(|(_, ids)| ids) {
+            for i in ids {
+                results.insert(i, ("unknown".into(), vec![problem.clone()]));
+            }
+        }
+    }
+    line(&format!(
+        "outcomes of jobs merged in the last {OUTCOME_DAYS} days"
+    ));
+    let result_of = |j: &Value| results[&id(j)].0.clone();
+    let mut rows: Vec<Vec<String>> = vec![std::iter::once("project")
+        .chain(OUTCOME_RESULTS)
+        .map(String::from)
+        .collect()];
+    for slug in &slugs {
+        let mut row = vec![slug.clone()];
+        for r in OUTCOME_RESULTS {
+            let n = jobs
+                .iter()
+                .filter(|j| project(j).as_deref() == Some(slug) && result_of(j) == r)
+                .count();
+            row.push(n.to_string());
+        }
+        rows.push(row);
+    }
+    let widths: Vec<usize> = (0..rows[0].len())
+        .map(|i| rows.iter().map(|r| r[i].chars().count()).max().unwrap())
+        .collect();
+    for row in &rows {
+        let cells: Vec<String> = row
+            .iter()
+            .zip(&widths)
+            .enumerate()
+            .map(|(i, (cell, w))| {
+                if i == 0 {
+                    format!("{cell:<w$}")
+                } else {
+                    format!("{cell:>w$}")
+                }
+            })
+            .collect();
+        line(&cells.join("  "));
+    }
+    for slug in &slugs {
+        for r in OUTCOME_RESULTS {
+            let mut ids: Vec<String> = jobs
+                .iter()
+                .filter(|j| project(j).as_deref() == Some(slug) && result_of(j) == r)
+                .map(|j| id(j))
+                .collect();
+            ids.sort();
+            if ids.is_empty() {
+                continue;
+            }
+            let listed: Vec<String> = ids
+                .iter()
+                .map(|i| {
+                    if r == "unknown" {
+                        format!("{i} ({})", results[i].1[0])
+                    } else {
+                        i.clone()
+                    }
+                })
+                .collect();
+            line(&format!("{slug} {r}: {}", listed.join(", ")));
+        }
+    }
+    if let Some(skipped) = &skipped {
+        line(skipped);
+    }
+    if record {
+        let changed = cas(&home, "/api/board", |text| {
+            outcomes_change(text, &results, &now())
+        })?;
+        line(&if changed > 0 {
+            format!("recorded {changed} outcomes on the board")
+        } else {
+            "outcomes unchanged; nothing written".to_string()
+        });
+    }
+    Ok(())
+}
+
+pub fn outcomes_cmd(call: &Call) -> Res<()> {
+    let args = &call.args;
+    let record = args.first().is_some_and(|a| a == "record");
+    let rest = if record { &args[1..] } else { &args[..] };
+    if rest.len() > 1 || rest.first().is_some_and(|s| !SLUG.is_full(s)) {
+        return Err(fail(
+            "usage: factory.py outcomes [record] [<project-slug>]",
+            2,
+        ));
+    }
+    let mut out = String::new();
+    let result = outcomes(record, rest.first().map(String::as_str), &mut out);
+    print!("{out}");
+    result
 }
 
 pub fn bench_cmd(_call: &Call) -> Res<()> {
@@ -1600,5 +1853,41 @@ mod tests {
             (vec![(OPUS.to_string(), [10, 20, 30, 40])], 0)
         );
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn outcomes_change_writes_known() {
+        let board = json!({"updated": "2026-01-09T12:00:00Z", "jobs": [
+            {"id": "1017-add-x", "updated": "u"}, {"id": "1018-add-y", "updated": "u"},
+            {"id": "1019-add-z", "updated": "u"}, {"id": "1020-add-w", "updated": "u"},
+            {"id": "1021-same", "updated": "u", "outcome": {"result": "held", "at": "old", "evidence": ["e"]}}]})
+        .to_string();
+        let mut results = Results::new();
+        for (id, result) in [
+            ("1017-add-x", "held"),
+            ("1018-add-y", "reworked"),
+            ("1019-add-z", "reverted"),
+            ("1020-add-w", "unknown"),
+            ("1021-same", "held"),
+        ] {
+            results.insert(id.into(), (result.into(), vec!["e".into()]));
+        }
+        let (text, changed) =
+            outcomes_change(Some(&board), &results, "2026-02-01T00:00:00Z").unwrap();
+        assert_eq!(changed, 3);
+        let data: Value = serde_json::from_str(&text.unwrap()).unwrap();
+        assert_eq!(data["updated"], "2026-02-01T00:00:00Z");
+        assert_eq!(
+            data["jobs"][0]["outcome"],
+            json!({"result": "held", "at": "2026-02-01T00:00:00Z", "evidence": ["e"]})
+        );
+        assert_eq!(data["jobs"][0]["updated"], "u");
+        assert!(data["jobs"][3].get("outcome").is_none());
+        assert_eq!(data["jobs"][4]["outcome"]["at"], "old");
+        results.retain(|id, _| id == "1021-same");
+        assert_eq!(
+            outcomes_change(Some(&board), &results, "x").unwrap(),
+            (None, 0)
+        );
     }
 }
