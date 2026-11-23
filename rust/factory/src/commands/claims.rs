@@ -230,6 +230,7 @@ const REFUSED: &[(&str, bool, &str)] = &[
     ("origin", false, "only factory.py suggest sets origin"),
     ("started", false, "only factory.py sets started"),
     ("goal", false, "only factory.py push sets goal"),
+    ("decision", false, "only factory.py push and pickup set decision"),
     ("agents", false, "only factory.py agent and pickup set agents"),
     ("move", false, "only the dashboard, factory.py pickup and factory.py control set move. To relay a person's chat, run factory.py control <job-id> move <host>|rerun --chat-file <file>"),
     ("priority", false, "only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's chat, run factory.py control <job-id> prioritize --chat-file <file>"),
@@ -1736,6 +1737,29 @@ mod tests {
     fn refused_home(name: &str) -> PathBuf {
         let (origin, _) = serve(vec![]);
         home_for(name, &origin)
+    }
+
+    #[test]
+    fn test_board_refuses_decision() {
+        let home = refused_home("claims-refuses-decision");
+        let opts = WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: None,
+        };
+        let patch = json!({"decision": {"verdict": "APPROVE", "decider": "person"}})
+            .as_object()
+            .unwrap()
+            .clone();
+        let e = board_write(&home, "042-sample-export", patch, &opts).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (
+                2,
+                "factory.py: only factory.py push and pickup set decision\n"
+            )
+        );
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

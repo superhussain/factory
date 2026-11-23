@@ -7272,7 +7272,8 @@ fn close_pass(
             patch_job(
                 &mut board,
                 job_id,
-                &json!({"stage": "closed", "note": reason, "needs": null, "close": {"closed": now()}}),
+                &json!({"stage": "closed", "note": reason, "needs": null, "close": {"closed": now()},
+                    "decision": {"verdict": "CLOSED", "decider": "person", "at": at}}),
             );
             Ok((Some(dump_board(&board)), (true, stacked)))
         })?;
@@ -14028,6 +14029,10 @@ exit "$archive_code"
             assert_eq!(
                 job["close"].as_object().unwrap().keys().collect::<Vec<_>>(),
                 ["reason", "at", "closed"]
+            );
+            assert_eq!(
+                job["decision"],
+                json!({"verdict": "CLOSED", "decider": "person", "at": "2026-01-02T12:00:00Z"})
             );
             fx.clear_calls();
             assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
