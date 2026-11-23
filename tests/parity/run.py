@@ -88,6 +88,12 @@ def main(argv):
     if os.name == "nt":
         print("parity: POSIX hosts only in phase 0", file=sys.stderr)
         return 2
+    if args.ids and not Path(args.ids).is_file():
+        print(f"parity: no such file {args.ids}", file=sys.stderr)
+        return 2
+    if args.bin and not os.access(args.bin, os.X_OK):
+        print(f"parity: not executable {args.bin}", file=sys.stderr)
+        return 2
     cases = load_cases()
     patterns = list(args.case)
     if args.ids:
