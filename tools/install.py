@@ -25,7 +25,10 @@ KEEP = 3  # binaries kept in the cache, newest first
 LOCK_WAIT = 1800  # seconds a Windows install waits for another one's build
 # A literal include_str! or include_bytes! path, relative to the .rs file that holds it.
 EMBED = re.compile(r'include_(?:str|bytes)!\(\s*"([^"]+)"\s*\)')
-NO_CARGO = "cargo not found; install rustup from https://rustup.rs, then run the install again"
+NO_CARGO = ("cargo not found; install rustup with rustup-init.exe from https://win.rustup.rs/x86_64 (see https://rustup.rs), "
+            "then run the install again" if os.name == "nt" else
+            "cargo not found; install rustup with curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh "
+            "(see https://rustup.rs), then run the install again")
 
 
 def fail(message):

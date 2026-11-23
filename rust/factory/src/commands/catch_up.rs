@@ -1596,7 +1596,10 @@ mod tests {
         let (code, out, _) = t.call();
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(code, 1);
-        assert!(lines.contains(&"skill: install: cargo not found; install rustup from https://rustup.rs, then run the install again"), "{out}");
+        assert!(
+            lines.contains(&format!("skill: install: {}", crate::shared::build::NO_CARGO).as_str()),
+            "{out}"
+        );
         assert!(lines.contains(&"pickup timer: skipped, skill install failed"));
         assert!(t.installs.borrow().is_empty() && calls.borrow().is_empty());
         assert_eq!(t.installed(), t.a);

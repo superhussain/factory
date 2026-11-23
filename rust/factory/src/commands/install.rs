@@ -1010,7 +1010,7 @@ mod tests {
             (exit.code, exit.stderr.as_str()),
             (
                 2,
-                "install: cargo not found; install rustup from https://rustup.rs, then run the install again\n"
+                format!("install: {}\n", crate::shared::build::NO_CARGO).as_str()
             )
         );
         assert_eq!(snapshot(&t.destination), before);

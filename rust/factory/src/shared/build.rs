@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use sha2::{Digest, Sha256};
 
-use super::fs::{is_link, normpath_with, write_atomic};
+use super::fs::{is_link, normpath_with, same_path, write_atomic};
 use super::proc::{capture, executable, which};
 use super::project::sha;
 use super::py::{os_error, round_int, strip};
@@ -27,8 +27,11 @@ pub const LOCK: &str = ".build.lock";
 const PROFILE: &str = "host";
 /// Binaries kept in the cache, newest first.
 const KEEP: usize = 3;
-pub const NO_CARGO: &str =
-    "cargo not found; install rustup from https://rustup.rs, then run the install again";
+pub const NO_CARGO: &str = if cfg!(windows) {
+    "cargo not found; install rustup with rustup-init.exe from https://win.rustup.rs/x86_64 (see https://rustup.rs), then run the install again"
+} else {
+    "cargo not found; install rustup with curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh (see https://rustup.rs), then run the install again"
+};
 // A literal include_str! or include_bytes! path, relative to the .rs file that holds it.
 static EMBED: Pattern = Pattern::new(r#"include_(?:str|bytes)!\(\s*"([^"]+)"\s*\)"#, Flags::NONE);
 
@@ -39,6 +42,8 @@ pub struct Host {
     pub var: Box<dyn Fn(&str) -> Option<OsString>>,
     /// cargo on PATH.
     pub cargo: Option<PathBuf>,
+    /// The running binary.
+    pub exe: Option<PathBuf>,
 }
 
 impl Host {
@@ -51,6 +56,7 @@ impl Host {
             home: PathBuf::from(home),
             var: Box::new(|name| std::env::var_os(name).filter(|v| !v.is_empty())),
             cargo: which("cargo"),
+            exe: std::env::current_exe().ok(),
         })
     }
 
@@ -141,6 +147,12 @@ fn build(
             return Ok(binary);
         }
     }
+    if let Some(own) = own_build(checkout, host, &files) {
+        let bytes = fs::read(&own).map_err(|e| os_error(&e, Some(&own)))?;
+        store(&bins, &stored, &binary, &sum, &bytes)?;
+        let _ = writeln!(err, "install: Rust binary from {}", own.display());
+        return Ok(binary);
+    }
     make_dirs(&target).map_err(|e| os_error(&e, Some(&target)))?;
     // One stable source path keeps cargo's incremental artifacts valid from one checkout to the next.
     let src = private_dir(&cache.join("build-src"))?;
@@ -171,28 +183,7 @@ fn build(
     )?;
     let built_path = target.join(PROFILE).join(name);
     let built = fs::read(&built_path).map_err(|e| os_error(&e, Some(&built_path)))?;
-    match fs::create_dir(&stored) {
-        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => {
-            return Err(os_error(&e, Some(&stored)))
-        }
-        _ => {}
-    }
-    // The sha256 goes last, so a reader never matches a half-written binary.
-    write_atomic(&binary, &built).map_err(|e| os_error(&e, Some(&binary)))?;
-    executable_by_owner(&binary)?;
-    write_atomic(&sum, format!("{}\n", sha(&built)).as_bytes())
-        .map_err(|e| os_error(&e, Some(&sum)))?;
-    let mut others: Vec<(std::time::SystemTime, PathBuf)> = fs::read_dir(&bins)
-        .map_err(|e| os_error(&e, Some(&bins)))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| *p != stored)
-        .map(|p| (fs::metadata(&p).and_then(|m| m.modified()), p))
-        .map(|(m, p)| m.map(|m| (m, p)).map_err(|e| os_error(&e, None)))
-        .collect::<Result<_, _>>()?;
-    others.sort_by(|a, b| b.0.cmp(&a.0));
-    for (_, old) in others.into_iter().skip(KEEP - 1) {
-        fs::remove_dir_all(&old).map_err(|e| os_error(&e, Some(&old)))?;
-    }
+    store(&bins, &stored, &binary, &sum, &built)?;
     drop(lock);
     let _ = writeln!(
         err,
@@ -200,6 +191,61 @@ fn build(
         round_int(start.elapsed().as_secs_f64())
     );
     Ok(binary)
+}
+
+/// The running binary when it is this checkout's own rust/target host build and no input changed
+/// after it was built. install.sh and install.ps1 build there, then run its install, so the cache
+/// takes that build rather than compiling the same inputs again at the build-src path.
+fn own_build(checkout: &Path, host: &Host, files: &BTreeMap<String, Vec<u8>>) -> Option<PathBuf> {
+    let name = Path::new(BINARY).file_name()?;
+    let own = checkout
+        .join("rust")
+        .join("target")
+        .join(PROFILE)
+        .join(name);
+    if !host.exe.as_deref().is_some_and(|exe| same_path(exe, &own)) {
+        return None;
+    }
+    let built = fs::metadata(&own).and_then(|m| m.modified()).ok()?;
+    let fresh = files.keys().all(|rel| {
+        fs::metadata(checkout.join(rel))
+            .and_then(|m| m.modified())
+            .is_ok_and(|m| m <= built)
+    });
+    fresh.then_some(own)
+}
+
+/// Store bytes as the cached binary under stored, then keep only the newest KEEP folders in bins.
+fn store(
+    bins: &Path,
+    stored: &Path,
+    binary: &Path,
+    sum: &Path,
+    bytes: &[u8],
+) -> Result<(), String> {
+    match fs::create_dir(stored) {
+        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => {
+            return Err(os_error(&e, Some(stored)))
+        }
+        _ => {}
+    }
+    // The sha256 goes last, so a reader never matches a half-written binary.
+    write_atomic(binary, bytes).map_err(|e| os_error(&e, Some(binary)))?;
+    executable_by_owner(binary)?;
+    write_atomic(sum, format!("{}\n", sha(bytes)).as_bytes())
+        .map_err(|e| os_error(&e, Some(sum)))?;
+    let mut others: Vec<(std::time::SystemTime, PathBuf)> = fs::read_dir(bins)
+        .map_err(|e| os_error(&e, Some(bins)))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p != stored)
+        .map(|p| (fs::metadata(&p).and_then(|m| m.modified()), p))
+        .map(|(m, p)| m.map(|m| (m, p)).map_err(|e| os_error(&e, None)))
+        .collect::<Result<_, _>>()?;
+    others.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, old) in others.into_iter().skip(KEEP - 1) {
+        fs::remove_dir_all(&old).map_err(|e| os_error(&e, Some(&old)))?;
+    }
+    Ok(())
 }
 
 /// catch-up runs the cached binary in place, and a stored one may predate the exec bit.
@@ -230,7 +276,12 @@ fn run(args: &[&str], cwd: &Path, env: &[(&str, &str)]) -> Result<String, String
 fn files_under(dir: &Path, base: &Path, skip: &str) -> io::Result<Vec<PathBuf>> {
     let mut found = Vec::new();
     for entry in fs::read_dir(dir)? {
-        let path = entry?.path();
+        let entry = entry?;
+        let path = entry.path();
+        // As os.walk does, a linked folder is not walked, so a link loop cannot recurse.
+        if entry.file_type()?.is_symlink() && path.is_dir() {
+            continue;
+        }
         if path.is_dir() {
             if dir != base || path.file_name().is_none_or(|n| n != skip) {
                 found.extend(files_under(&path, base, skip)?);
@@ -275,6 +326,12 @@ pub fn build_inputs(checkout: &Path) -> Result<BTreeMap<String, Vec<u8>>, String
                 continue;
             };
             let path = normpath_with(&format!("{folder}/{}", embedded.as_str()), false);
+            if path == ".." || path.starts_with("../") || Path::new(&path).has_root() {
+                return Err(format!(
+                    "{rel} embeds {}, which is outside the checkout",
+                    embedded.as_str()
+                ));
+            }
             let data = read(&path)?;
             files.insert(path, data);
         }
@@ -360,6 +417,7 @@ pub(crate) mod tests {
             home: root.to_path_buf(),
             var: Box::new(move |name| vars.get(name).cloned()),
             cargo,
+            exe: None,
         }
     }
 
@@ -686,6 +744,87 @@ pub(crate) mod tests {
         assert!(files.contains_key("skills/factory/templates/config.md"));
         assert!(embedded > 10);
         assert!(!files.keys().any(|r| r.starts_with("rust/target/")));
+    }
+
+    #[test]
+    fn the_checkouts_own_fresh_build_is_cached_instead_of_rebuilt() {
+        let root = temp_dir("build-own");
+        let checkout = checkout(&root);
+        fake_rustc(&root.join("bin"), "1.100.0");
+        let cargo = fake_cargo(&root, "rebuilt");
+        let own = checkout.join("rust/target/host/factory");
+        fs::create_dir_all(own.parent().unwrap()).unwrap();
+        fs::write(&own, "own build").unwrap();
+        let mut machine = host(&root, &[], Some(cargo));
+        machine.exe = Some(own.clone());
+        let mut err = Vec::new();
+        let path = rust_binary(&checkout, &machine, &mut err).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"own build");
+        assert_eq!(
+            String::from_utf8(err).unwrap(),
+            format!("install: Rust binary from {}\n", own.display())
+        );
+        assert!(!root.join("runs").exists());
+        // An input edited after the build, or another running binary, means a real build.
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        fs::write(checkout.join("rust/lib.rs"), "// edited\n").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(checkout.join("rust/lib.rs"))
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        let path = rust_binary(&checkout, &machine, &mut Vec::new()).unwrap();
+        assert_eq!(fs::read(path).unwrap(), b"rebuilt");
+        fs::write(checkout.join("rust/lib.rs"), "// edited again\n").unwrap();
+        machine.exe = Some(root.join("elsewhere/factory"));
+        rust_binary(&checkout, &machine, &mut Vec::new()).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("runs"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_embed_outside_the_checkout_is_refused() {
+        let root = temp_dir("build-escape");
+        let checkout = root.join("checkout");
+        fs::create_dir_all(checkout.join("rust/src")).unwrap();
+        fs::write(root.join("secret.txt"), "outside").unwrap();
+        fs::write(
+            checkout.join("rust/src/main.rs"),
+            "const X: &str = include_str!(\"../../../secret.txt\");\n",
+        )
+        .unwrap();
+        assert_eq!(
+            build_inputs(&checkout),
+            Err(
+                "rust/src/main.rs embeds ../../../secret.txt, which is outside the checkout".into()
+            )
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_linked_folder_is_not_walked() {
+        let root = temp_dir("build-link-loop");
+        let checkout = root.join("checkout");
+        fs::create_dir_all(checkout.join("rust/src")).unwrap();
+        fs::write(checkout.join("rust/src/main.rs"), "fn main() {}\n").unwrap();
+        std::os::unix::fs::symlink(checkout.join("rust"), checkout.join("rust/src/loop")).unwrap();
+        fs::write(root.join("linked.rs"), "// linked file\n").unwrap();
+        std::os::unix::fs::symlink(root.join("linked.rs"), checkout.join("rust/src/linked.rs"))
+            .unwrap();
+        let files = build_inputs(&checkout).unwrap();
+        assert_eq!(
+            files.keys().cloned().collect::<Vec<_>>(),
+            ["rust/src/linked.rs", "rust/src/main.rs"]
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

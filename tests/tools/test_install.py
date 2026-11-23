@@ -175,7 +175,8 @@ class InstallTest(IsolatedTestCase):
         result = subprocess.run([sys.executable, "-B", str(checkout / "tools/install.py"), "--destination",
                                  str(self.destination)], capture_output=True, text=True, env=dict(os.environ, PATH=str(empty)))
         self.assertEqual((result.returncode, result.stdout, result.stderr),
-                         (2, "", "install: cargo not found; install rustup from https://rustup.rs, then run the install again\n"))
+                         (2, "", "install: " + self.installer.NO_CARGO + "\n"))
+        self.assertIn("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh", result.stderr)
         self.assertFalse(self.destination.exists())
         self.assertFalse((self.root / ".cache").exists())
         (checkout / "rust/Cargo.toml").unlink()
