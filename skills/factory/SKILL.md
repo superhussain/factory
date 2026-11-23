@@ -495,8 +495,10 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   command is `python3`, `git`, or `gh`.
 - Orchestrators run `suggest approve`, `backlog decide`, `control` and `needs answer` only with
   person text in files, per [chat decisions](references/chat-decisions.md). They never run
-  `autonomy resume`, `autonomy allow`, `autonomy promote` or `/factory approve-spec`, or approve
-  scope in Tracer; a human does, there or on the dashboard.
+  `/factory approve-spec` or approve scope in Tracer; a human does, there or on the dashboard.
+- No agent runs `autonomy resume`, `autonomy allow`, `autonomy restore` or `autonomy promote`,
+  even when a person asks, and never under a pseudo-terminal such as `script -qc`. Tell the
+  person the exact command to type.
 - An agent that sees an incident needing every host stopped, such as runaway launches or a leaked
   secret, runs `factory.py halt set --reason <text>` and tells the person. It never clears the
   flag. A person resumes from the dashboard.

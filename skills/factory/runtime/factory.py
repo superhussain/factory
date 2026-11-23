@@ -4618,20 +4618,22 @@ def backpressure_config(home, slug):
 
 
 def backpressure_holds(home, jobs, waiting, runnable):
-    """{id: skip line} for plain ideas pickup does not launch while waiting jobs reach the project's
-    backpressure.needs_you. Prioritized ideas, approved specs and moved jobs still launch."""
+    """{id: skip line} for plain ideas pickup does not launch while the project's own waiting jobs
+    reach its backpressure.needs_you. waiting maps project slug to that count, so one project's
+    review queue never pauses another. Prioritized ideas, approved specs and moved jobs still launch."""
     limits, lines = {}, {}
-    if waiting < 1:
-        return lines
     for j in jobs:
         if j["stage"] != IDEA or prioritized(j) or not runnable(j):
             continue
         slug = j["project"]
+        count = waiting.get(slug, 0)
+        if count < 1:
+            continue
         if slug not in limits:
             limits[slug] = backpressure_config(home, slug)
-        if waiting >= limits[slug]:
+        if count >= limits[slug]:
             lines[j["id"]] = \
-                f"skip {j['id']} {slug}: backpressure ({waiting} waiting on you, pauses at {limits[slug]})"
+                f"skip {j['id']} {slug}: backpressure ({count} waiting on you, pauses at {limits[slug]})"
     return lines
 
 
@@ -7408,7 +7410,10 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
             return f"skip {j['id']} {project}: experiment {experiment['name']} limited until {exp_limited}"
         return None
 
-    waiting = sum(1 for j in data["jobs"] if waits_on_you(j))
+    waiting = {}
+    for j in data["jobs"]:
+        if waits_on_you(j):
+            waiting[j.get("project")] = waiting.get(j.get("project"), 0) + 1
     holds = {**batch_holds(home, jobs, lambda j: base_skip(j) is None),
              **backpressure_holds(home, jobs, waiting, lambda j: base_skip(j) is None),
              **daily_cap_holds(home, device, jobs, lambda j: base_skip(j) is None, dry)}
