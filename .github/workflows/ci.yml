@@ -145,6 +145,8 @@ jobs:
         run: |
           rustup toolchain install
           rustup target add aarch64-apple-darwin x86_64-pc-windows-gnu
+      - name: Format
+        run: cargo fmt --check
       - name: Build and test linux-x64
         run: |
           cargo build --release --locked
