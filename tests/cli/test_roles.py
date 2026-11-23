@@ -292,6 +292,12 @@ class RolesTest(IsolatedTestCase):
         self.assertIn("| `/factory retro [--days N]` | [retro](references/commands/retro.md) |",
                       (SKILL / "SKILL.md").read_text(encoding="utf-8"))
 
+    def test_agents_never_lift_autonomy(self):
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("- No agent runs `autonomy resume`, `autonomy allow`, `autonomy restore` or `autonomy promote`,\n",
+                      skill)
+        self.assertIn("`script -qc`", skill)
+
     def test_retro_schedule(self):
         schedule = (SKILL / "schedules/retro.md").read_text(encoding="utf-8")
         for value in ("<installed-skill>", "<python-launcher>", "retro: autonomy paused", "no claude route: runtime <runtime>", "If `runtime` is not `claude`",
