@@ -174,8 +174,10 @@ def run_side(case, command):
         def normalize(data):
             if server:
                 data = data.replace(server.origin.encode(), b"{api}")
-            # Python prints factory.py's path and the binary its own; the skill root is two folders up.
+            # Python prints factory.py's path and the binary its own or the factory.py beside it; the
+            # skill root is two folders up.
             runtime = os.path.realpath(command[-1])
+            data = data.replace(os.path.join(os.path.dirname(runtime), "factory.py").encode(), b"{runtime}")
             data = data.replace(runtime.encode(), b"{runtime}").replace(os.path.abspath(command[-1]).encode(), b"{runtime}")
             data = data.replace(os.path.dirname(os.path.dirname(runtime)).encode(), b"{skill}")
             data = data.replace(str(home).encode(), b"{home}").replace(str(root).encode(), b"{tmp}")

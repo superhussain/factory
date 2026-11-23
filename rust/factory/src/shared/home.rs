@@ -131,6 +131,15 @@ pub fn skill_root() -> Res<PathBuf> {
         .to_path_buf())
 }
 
+/// The `factory.py` beside this binary: what `where` and prompts name as the runtime, since every
+/// doc runs `python3 <runtime>`, and the launcher in that file hands off to this binary.
+pub fn runtime_py() -> Res<PathBuf> {
+    let exe = std::env::current_exe()
+        .and_then(|p| resolve(&p))
+        .map_err(|e| fail(os_error(&e, None), 1))?;
+    Ok(exe.with_file_name("factory.py"))
+}
+
 fn valid_manifest(path: &Path) -> Option<()> {
     let manifest = pyjson::loads(&super::fs::read_text(path).ok()?).ok()?;
     for (rel, value) in manifest.as_object()? {
@@ -287,6 +296,15 @@ mod tests {
 
     fn err(r: Res<PathBuf>) -> String {
         r.unwrap_err().stderr
+    }
+
+    #[test]
+    fn runtime_is_the_factory_py_beside_the_binary() {
+        let exe = resolve(&std::env::current_exe().unwrap()).unwrap();
+        assert_eq!(
+            runtime_py().unwrap(),
+            exe.parent().unwrap().join("factory.py")
+        );
     }
 
     #[test]

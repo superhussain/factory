@@ -197,8 +197,12 @@ class StatusTest(HostFixture):
             good = {"commit": "a" * 40, "tree": "b" * 64}
             stamp_file.write_text(json.dumps(good))
             self.assertEqual(factory.bundle_stamp(), good)
+            stamp_file.write_text(json.dumps({**good, "entry": ["runtime/factory"], "binary_sha256": "c" * 64}))
+            self.assertEqual(factory.bundle_stamp(), good)
             for bad in ({"commit": "a" * 40}, {"commit": "A" * 40, "tree": "b" * 64},
-                        {"commit": "a" * 40, "tree": "b" * 65}, {**good, "extra": "c" * 7}, ["x"]):
+                        {"commit": "a" * 40, "tree": "b" * 65}, {**good, "extra": "c" * 7}, ["x"],
+                        {**good, "entry": "runtime/factory"}, {**good, "entry": [1]},
+                        {**good, "binary_sha256": "c" * 7}):
                 stamp_file.write_text(json.dumps(bad))
                 self.assertIsNone(factory.bundle_stamp())
             stamp_file.write_text("not json")

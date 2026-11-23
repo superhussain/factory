@@ -930,20 +930,32 @@ fn host_os() -> &'static str {
     }
 }
 
-/// bundle.json's text as {commit, tree}, or None when it has any other shape.
+/// bundle.json's text as {commit, tree}, or None when it has any other shape. A Rust build adds
+/// entry and binary_sha256 beside them.
 fn stamp_shape(text: &str) -> Option<Value> {
-    let stamp = loads(text).ok()?;
+    stamp_of(&loads(text).ok()?)
+}
+
+/// A parsed bundle.json as {commit, tree}: commit and tree 7 to 64 lowercase hex, plus an optional
+/// entry (list of strings) and binary_sha256 (64 hex), and no other key.
+pub(crate) fn stamp_of(stamp: &Value) -> Option<Value> {
     let map = stamp.as_object()?;
-    let hex = |v: &Value| {
-        v.as_str().is_some_and(|s| {
-            (7..=64).contains(&s.len()) && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    let hex = |v: Option<&Value>, sizes: std::ops::RangeInclusive<usize>| {
+        v.and_then(Value::as_str).is_some_and(|s| {
+            sizes.contains(&s.len()) && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
         })
     };
-    (map.len() == 2
-        && map.contains_key("commit")
-        && map.contains_key("tree")
-        && map.values().all(hex))
-    .then_some(stamp)
+    (map.keys()
+        .all(|k| ["commit", "tree", "entry", "binary_sha256"].contains(&k.as_str()))
+        && hex(map.get("commit"), 7..=64)
+        && hex(map.get("tree"), 7..=64)
+        && map
+            .get("entry")
+            .is_none_or(|e| e.as_array().is_some_and(|a| a.iter().all(Value::is_string)))
+        && map
+            .get("binary_sha256")
+            .is_none_or(|v| hex(Some(v), 64..=64)))
+    .then(|| json!({"commit": map["commit"], "tree": map["tree"]}))
 }
 
 /// {commit, tree} from the bundle.json install.py writes beside the skill, or None.
@@ -1684,8 +1696,18 @@ mod tests {
     fn bundle_stamp_shape() {
         let good = r#"{"commit": "abcdef0", "tree": "0123456789abcdef"}"#;
         assert_eq!(stamp_shape(good), Some(loads(good).unwrap()));
+        let sha = "0".repeat(64);
+        let rust = format!(
+            r#"{{"commit": "abcdef0", "tree": "0123456789abcdef", "entry": ["runtime/factory"], "binary_sha256": "{sha}"}}"#
+        );
+        assert_eq!(stamp_shape(&rust), Some(loads(good).unwrap()));
+        let entry_only = r#"{"commit": "abcdef0", "tree": "0123456789abcdef", "entry": []}"#;
+        assert_eq!(stamp_shape(entry_only), Some(loads(good).unwrap()));
         for bad in [
             r#"{"commit": "abcdef0", "tree": "0123456", "extra": "0123456"}"#,
+            r#"{"commit": "abcdef0", "tree": "0123456", "entry": "runtime/factory"}"#,
+            r#"{"commit": "abcdef0", "tree": "0123456", "entry": [1]}"#,
+            r#"{"commit": "abcdef0", "tree": "0123456", "binary_sha256": "abcdef0"}"#,
             r#"{"commit": "ABCDEF0", "tree": "0123456"}"#,
             r#"{"commit": "abcdef", "tree": "0123456"}"#,
             r#"{"commit": 1234567, "tree": "0123456"}"#,

@@ -80,7 +80,6 @@ static HOST_NAME: Pattern = Pattern::new("[A-Za-z0-9][A-Za-z0-9._-]{0,63}", Re::
 static WORKER_MODEL: Pattern = Pattern::new(r"[A-Za-z0-9._:@/\[\]-]{1,128}", Re::ASCII);
 static REPO_PATH: Pattern = Pattern::new("[A-Za-z0-9_./-]{1,200}", Re::ASCII);
 static CHECKOUT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Re::NONE);
-static BUNDLE_HASH: Pattern = Pattern::new("[0-9a-f]{7,64}", Re::NONE);
 static POSITIVE: Pattern = Pattern::new("[1-9][0-9]*", Re::NONE);
 static ENV_ASSIGN: Pattern = Pattern::new("(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=", Re::NONE);
 static COMMIT: Pattern = Pattern::new("[0-9a-f]{40}", Re::ASCII);
@@ -1359,15 +1358,7 @@ fn bundle_stamp() -> Option<Value> {
     if let Some(f) = fake!(bundle_stamp) {
         return f();
     }
-    let stamp = read_json(&skill_root().ok()?.join("bundle.json"))?;
-    let map = stamp.as_object()?;
-    let ok = map.len() == 2
-        && ["commit", "tree"].iter().all(|k| {
-            map.get(*k)
-                .and_then(Value::as_str)
-                .is_some_and(|v| BUNDLE_HASH.is_full(v))
-        });
-    ok.then_some(stamp)
+    crate::commands::setup::stamp_of(&read_json(&skill_root().ok()?.join("bundle.json"))?)
 }
 
 /// When the first merge on origin's base that commit lacks landed, from the first checkout
