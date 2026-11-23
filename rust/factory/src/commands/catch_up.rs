@@ -160,7 +160,7 @@ fn git_argv(repo: &Path, args: &[&str]) -> Vec<String> {
 }
 
 /// Lowercase hex characters from n random bytes: `secrets.token_hex(n)`.
-fn random_hex(n: usize) -> String {
+pub(crate) fn random_hex(n: usize) -> String {
     let mut buf = vec![0u8; n];
     #[cfg(unix)]
     {
