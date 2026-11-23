@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "usage/running-example",
+      "from": "tests/cli/test_usage.py UsageCommandTest.test_running_example",
+      "argv": ["--home", "{home}", "usage", "alpha/1017-add-x"],
+      "home": "audit-usage",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "usage/warnings",
+      "from": "tests/cli/test_usage.py UsageCommandTest.test_failures_warn",
+      "argv": ["--home", "{home}", "usage", "alpha/1023-bad-lines"],
+      "home": "audit-usage",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "usage/none",
+      "from": "tests/cli/test_usage.py UsageCommandTest.test_failures_warn",
+      "argv": ["--home", "{home}", "usage", "alpha/1018-add-x"],
+      "home": "audit-usage",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "usage/no-root",
+      "from": "tests/cli/test_usage.py UsageCommandTest.test_failures_warn",
+      "argv": ["--home", "{home}", "usage", "alpha/1017-add-x"],
+      "home": "audit-usage",
+      "stubs": {},
+      "env": {
+        "CLAUDE_CONFIG_DIR": "/nonexistent-parity-claude"
+      },
+      "exit": 0
+    },
+    {
+      "id": "usage/bad-verb",
+      "from": "tests/cli/test_usage.py UsageCommandTest.test_usage_errors",
+      "argv": ["--home", "{home}", "usage", "x", "alpha/1017-add-x"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "usage/record-slug-only",
+      "from": "tests/cli/test_usage.py UsageCommandTest.test_usage_errors",
+      "argv": ["--home", "{home}", "usage", "record", "alpha"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "usage/slug-only",
+      "from": "tests/cli/test_usage.py UsageCommandTest.test_usage_errors",
+      "argv": ["--home", "{home}", "usage", "alpha"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "usage/record",
+      "from": "tests/cli/test_usage.py UsageRecordTest.test_keeps_other_hosts",
+      "argv": ["--home", "{home}", "usage", "record", "alpha/1017-add-x"],
+      "home": "audit-usage",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-02T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1017-add-x",
+                "project": "alpha",
+                "stage": "build",
+                "tokens": {
+                  "host-b": {
+                    "at": "2026-01-02T12:00:00Z",
+                    "transcripts": 1,
+                    "models": {
+                      "claude-opus-5-5": {
+                        "input": 300,
+                        "output": 9100,
+                        "cache_write": 52000,
+                        "cache_read": 610000
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0
+    },
+    {
+      "id": "usage/record-no-job",
+      "from": "tests/cli/test_usage.py UsageRecordTest.test_errors",
+      "argv": ["--home", "{home}", "usage", "record", "alpha/1017-add-x"],
+      "home": "audit-usage",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-02T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1999-other",
+                "project": "alpha",
+                "stage": "build",
+                "tokens": {
+                  "host-b": {
+                    "at": "2026-01-02T12:00:00Z",
+                    "transcripts": 1,
+                    "models": {
+                      "claude-opus-5-5": {
+                        "input": 300,
+                        "output": 9100,
+                        "cache_write": 52000,
+                        "cache_read": 610000
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 4
+    },
+    {
+      "id": "usage/record-wrong-project",
+      "from": "tests/cli/test_usage.py UsageRecordTest.test_errors",
+      "argv": ["--home", "{home}", "usage", "record", "alpha/1017-add-x"],
+      "home": "audit-usage",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-02T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1017-add-x",
+                "project": "beta",
+                "stage": "build",
+                "tokens": {
+                  "host-b": {
+                    "at": "2026-01-02T12:00:00Z",
+                    "transcripts": 1,
+                    "models": {
+                      "claude-opus-5-5": {
+                        "input": 300,
+                        "output": 9100,
+                        "cache_write": 52000,
+                        "cache_read": 610000
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2
+    },
+    {
+      "id": "usage/record-no-device",
+      "from": "tests/cli/test_usage.py UsageRecordTest.test_errors",
+      "argv": ["--home", "{home}", "usage", "record", "alpha/1017-add-x"],
+      "home": "audit-bad-device",
+      "stubs": {},
+      "exit": 2
+    }
+  ]
+}

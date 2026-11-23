@@ -1,0 +1,1 @@
+{"seconds": 220, "models": {"model-a": {"input": 100000, "output": 20000, "cache_write": 30000, "cache_read": 0}}}

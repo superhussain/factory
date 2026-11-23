@@ -1,0 +1,1 @@
+{"cases": [{"id": "1018-add-y", "pr": "https://example.test/pull/1", "head": "3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d", "source": "reworked", "defects": [{"path": "worker/export.js", "lines": [40, 52], "severity": "high"}]}]}

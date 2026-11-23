@@ -115,7 +115,7 @@ def http_fixture(routes):
                 self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
-        do_POST = do_PUT = do_GET
+        do_POST = do_PUT = do_PATCH = do_GET
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.requests = requests
     server.origin = "http://127.0.0.1:" + str(server.server_port)

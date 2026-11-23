@@ -1,8 +1,11 @@
 //! Python `re` patterns on fancy-regex: `translate` rewrites the parts whose meaning differs.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
-use fancy_regex::Regex;
+use fancy_regex::{Regex, RegexBuilder};
+
+use super::py::repr;
 
 pub type Captures<'t> = fancy_regex::Captures<'t, str>;
 
@@ -43,18 +46,26 @@ impl Flags {
 pub struct Pattern {
     src: &'static str,
     flags: Flags,
+    limit: usize,
     search: OnceLock<Regex>,
     start: OnceLock<Regex>,
     full: OnceLock<Regex>,
 }
 
-const BACKTRACK: &str = "regex backtrack limit";
+const BACKTRACK_LIMIT: usize = 100_000_000;
+
+static WARNED: AtomicBool = AtomicBool::new(false);
 
 impl Pattern {
     pub const fn new(src: &'static str, flags: Flags) -> Pattern {
+        Pattern::with_limit(src, flags, BACKTRACK_LIMIT)
+    }
+
+    const fn with_limit(src: &'static str, flags: Flags, limit: usize) -> Pattern {
         Pattern {
             src,
             flags,
+            limit,
             search: OnceLock::new(),
             start: OnceLock::new(),
             full: OnceLock::new(),
@@ -73,45 +84,99 @@ impl Pattern {
                 prefix(self.flags),
                 body(self.src, self.flags)
             );
-            Regex::new(&source).unwrap_or_else(|e| panic!("bad pattern {:?}: {e}", self.src))
+            RegexBuilder::new(&source)
+                .backtrack_limit(self.limit)
+                .build()
+                .unwrap_or_else(|e| panic!("bad pattern {:?}: {e}", self.src))
+        })
+    }
+
+    /// A search that hit the backtrack limit counts as no match, with one warning per process.
+    fn no_match<T>(&self, result: Result<Option<T>, fancy_regex::Error>) -> Option<T> {
+        result.unwrap_or_else(|_| {
+            if !WARNED.swap(true, Ordering::Relaxed) {
+                eprintln!(
+                    "factory.py: pattern {} hit the regex backtrack limit; treating it as no match",
+                    repr(self.src)
+                );
+            }
+            None
         })
     }
 
     /// `re.search`.
     pub fn search<'t>(&self, s: &'t str) -> Option<Captures<'t>> {
-        self.compiled("search").captures(s).expect(BACKTRACK)
+        self.no_match(self.compiled("search").captures(s))
     }
 
     /// `re.match`.
     pub fn match_start<'t>(&self, s: &'t str) -> Option<Captures<'t>> {
-        self.compiled("start").captures(s).expect(BACKTRACK)
+        self.no_match(self.compiled("start").captures(s))
     }
 
     /// `re.fullmatch`.
     pub fn fullmatch<'t>(&self, s: &'t str) -> Option<Captures<'t>> {
-        self.compiled("full").captures(s).expect(BACKTRACK)
+        self.no_match(self.compiled("full").captures(s))
     }
 
     pub fn is_full(&self, s: &str) -> bool {
-        self.compiled("full").is_match(s).expect(BACKTRACK)
+        self.no_match(self.compiled("full").is_match(s).map(Some))
+            .unwrap_or(false)
     }
 
-    /// `re.finditer`, as matches.
+    /// `re.finditer`, as matches. It stops at a search that hit the backtrack limit.
     pub fn find_iter<'r, 't>(
         &'r self,
         s: &'t str,
     ) -> impl Iterator<Item = fancy_regex::Match<'t>> + use<'r, 't> {
         self.compiled("search")
             .find_iter(s)
-            .map(|m| m.expect(BACKTRACK))
+            .map_while(|m| self.no_match(m.map(Some)))
     }
 
-    /// `re.sub` with a function.
+    /// `re.sub` with a function. Past the backtrack limit it exits, so unredacted text is never written.
     pub fn replace_all(&self, s: &str, f: impl FnMut(&Captures) -> String) -> String {
+        match self.compiled("search").try_replacen(s, 0, f) {
+            Ok(out) => out.into_owned(),
+            Err(_) => self.stop(),
+        }
+    }
+
+    /// `re.search` for a redaction gate. Past the backtrack limit it exits rather than count it as no match.
+    pub fn search_or_stop<'t>(&self, s: &'t str) -> Option<Captures<'t>> {
         self.compiled("search")
-            .try_replacen(s, 0, f)
-            .expect(BACKTRACK)
-            .into_owned()
+            .captures(s)
+            .unwrap_or_else(|_| self.stop())
+    }
+
+    /// `re.fullmatch` for a redaction gate. Past the backtrack limit it exits.
+    pub fn is_full_or_stop(&self, s: &str) -> bool {
+        self.compiled("full")
+            .is_match(s)
+            .unwrap_or_else(|_| self.stop())
+    }
+
+    /// `re.finditer` for a redaction gate. Past the backtrack limit it exits.
+    pub fn find_all_or_stop<'t>(&self, s: &'t str) -> Vec<fancy_regex::Match<'t>> {
+        self.compiled("search")
+            .find_iter(s)
+            .map(|m| m.unwrap_or_else(|_| self.stop()))
+            .collect()
+    }
+
+    /// Exit 1 so a redaction never writes text a pattern could not finish reading.
+    fn stop(&self) -> ! {
+        let msg = format!(
+            "factory.py: pattern {} hit the regex backtrack limit; stopping so unredacted text is never written",
+            repr(self.src)
+        );
+        #[cfg(test)]
+        panic!("{msg}");
+        #[cfg(not(test))]
+        {
+            eprintln!("{msg}");
+            std::process::exit(1)
+        }
     }
 }
 
@@ -388,5 +453,26 @@ mod tests {
         assert_eq!(W.replace_all("W/\"x\"", |_| String::new()), "\"x\"");
         let found: Vec<&str> = SLUG.find_iter("a b-c").map(|m| m.as_str()).collect();
         assert_eq!(found, ["a", "b-c"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn redaction_gate_stops_at_the_backtrack_limit() {
+        let p = Pattern::with_limit(
+            r"\bgit\b[^;&|\n]*\bpush\b[^;&|\n]*\s(?:--force(?:-with-lease)?|-f)(?=[\s=]|$)",
+            Flags::NONE,
+            1_000,
+        );
+        p.search_or_stop(&"git ".repeat(500));
+    }
+
+    #[test]
+    fn backtrack_limit_is_no_match() {
+        let p = Pattern::with_limit(
+            r"\bgit\b[^;&|\n]*\bpush\b[^;&|\n]*\s(?:--force(?:-with-lease)?|-f)(?=[\s=]|$)",
+            Flags::NONE,
+            1_000,
+        );
+        assert!(p.search(&"git ".repeat(500)).is_none());
     }
 }

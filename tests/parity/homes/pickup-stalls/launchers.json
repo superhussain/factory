@@ -1,0 +1,1 @@
+{"version": 1, "launchers": {"primary": ["paseo", "run", "--model", "{model}", "--effort", "{effort}", "{id}", "{prompt}"], "fallback": ["paseo", "run", "{id}"]}}

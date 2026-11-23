@@ -224,9 +224,16 @@ fn new_agent(roots: RootCerts, origin: &str) -> Agent {
         .new_agent()
 }
 
-fn platform_agent(origin: &str) -> &'static Agent {
-    static AGENT: OnceLock<Agent> = OnceLock::new();
-    AGENT.get_or_init(|| new_agent(RootCerts::PlatformVerifier, origin))
+/// The largest response body any request reads.
+pub const MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
+
+/// One agent per origin, so each origin gets its own proxy choice.
+pub(crate) fn platform_agent(origin: &str) -> &'static Agent {
+    static AGENTS: OnceLock<Mutex<HashMap<String, &'static Agent>>> = OnceLock::new();
+    let mut agents = AGENTS.get_or_init(Default::default).lock().unwrap();
+    agents
+        .entry(origin.to_string())
+        .or_insert_with(|| Box::leak(Box::new(new_agent(RootCerts::PlatformVerifier, origin))))
 }
 
 fn fallback_agent(origin: &str) -> Option<Agent> {
@@ -275,18 +282,23 @@ fn host_not_found() -> &'static str {
     }
 }
 
-/// What Python's urllib prints for a failed request, on one line of at most 200 characters.
-pub fn urlopen_error(e: &ureq::Error) -> String {
-    let detail = match e {
+/// What Python's urllib prints for a failed request, untruncated.
+pub fn urlopen_detail(e: &ureq::Error) -> String {
+    match e {
         ureq::Error::Io(io) if io.raw_os_error().is_some() => {
             format!("<urlopen error {}>", os_error(io, None))
         }
         ureq::Error::Timeout(ureq::Timeout::Connect) => "<urlopen error timed out>".to_string(),
         ureq::Error::Timeout(_) => "timed out".to_string(),
         ureq::Error::HostNotFound => host_not_found().to_string(),
+        ureq::Error::BodyExceedsLimit(n) => format!("response body over {n} bytes"),
         other => format!("<urlopen error {other}>"),
-    };
-    printable_line(&detail, 200)
+    }
+}
+
+/// `urlopen_detail` on one line of at most 200 characters.
+pub fn urlopen_error(e: &ureq::Error) -> String {
+    printable_line(&urlopen_detail(e), 200)
 }
 
 fn send(
@@ -295,6 +307,7 @@ fn send(
     url: &str,
     headers: &[(String, String)],
     body: Option<&[u8]>,
+    limit: u64,
 ) -> Result<Response, ureq::Error> {
     let mut request = ureq::http::Request::builder().method(method).uri(url);
     for (name, value) in headers {
@@ -319,7 +332,7 @@ fn send(
     let body = response
         .into_body()
         .with_config()
-        .limit(u64::MAX)
+        .limit(limit)
         .read_to_vec()?;
     Ok(Response {
         status,
@@ -385,7 +398,14 @@ pub fn api(
             }
         }
     }
-    let mut result = send(platform_agent(&key.0), method, &url, &sent, body);
+    let mut result = send(
+        platform_agent(&key.0),
+        method,
+        &url,
+        &sent,
+        body,
+        MAX_BODY_BYTES,
+    );
     if result.as_ref().is_err_and(cert_error) {
         let ssl_env = std::env::var_os("SSL_CERT_FILE").is_some_and(|v| !v.is_empty())
             || std::env::var_os("SSL_CERT_DIR").is_some_and(|v| !v.is_empty());
@@ -395,7 +415,7 @@ pub fn api(
             None
         };
         if let Some(agent) = fallback {
-            result = send(&agent, method, &url, &sent, body);
+            result = send(&agent, method, &url, &sent, body, MAX_BODY_BYTES);
         }
     }
     if let Err(e) = &result {
@@ -577,6 +597,22 @@ pub(crate) mod tests {
         )
         .unwrap();
         home
+    }
+
+    #[test]
+    fn agents_are_per_origin() {
+        let a = platform_agent("https://a.example");
+        let b = platform_agent("https://b.example");
+        assert!(!std::ptr::eq(a, b));
+        assert!(std::ptr::eq(a, platform_agent("https://a.example")));
+    }
+
+    #[test]
+    fn body_over_cap_fails() {
+        let (origin, _) = serve(vec![(200, "0123456789abcdef0123456789abcdef", vec![])]);
+        let agent = platform_agent(&origin);
+        let e = send(agent, "GET", &format!("{origin}/x"), &[], None, 16).unwrap_err();
+        assert_eq!(urlopen_detail(&e), "response body over 16 bytes");
     }
 
     #[test]
