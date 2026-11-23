@@ -35,7 +35,7 @@ const project = (title) => `---\nrepo: example/sample\nbase: main\ntitle: ${titl
 const TITLE =
   "Pickup starts no new idea while 5 jobs wait on you. It pauses at 5. Approved specs, moved jobs and prioritized ideas still start. Settings, Pipeline, Review backpressure sets the number.";
 
-async function openBoard(browser, origin, pipeline) {
+async function openBoard(browser, origin, pipeline, onPage) {
   await seedProject(origin, "sample", project("Synthetic sample"));
   await seedProject(origin, "other", project("Synthetic other"));
   await seedPipeline(origin, pipeline);
@@ -45,6 +45,7 @@ async function openBoard(browser, origin, pipeline) {
   page.on("pageerror", (error) => errors.push(String(error)));
   await blockLiveEvents(page);
   await page.setViewport({ width: 1280, height: 900 });
+  if (onPage) await onPage(page);
   await page.goto(origin + "/", { waitUntil: "domcontentloaded" });
   return { page, errors };
 }
@@ -121,8 +122,76 @@ test("backpressure chip respects the limit", { timeout: 120000 }, async () => {
         !document.querySelector(".chip.backpressure"),
     );
     assert.deepEqual(await pausedChips(page), {});
-    assert.ok(await page.$('.card[data-id="122-follow-up"] .chip.held'));
+    await page.waitForFunction(
+      () =>
+        document.querySelector('.card[data-id="122-follow-up"] .chip.held')?.textContent ===
+        "Batch ready",
+    );
+    assert.deepEqual(await pausedChips(page), {});
     assert.deepEqual(await clippedChips(page), []);
     assert.deepEqual(errors, []);
   });
 });
+
+// Routes /api/pipeline/effective/sample to answer(request) and lets every other request through.
+const routeEffective = (answer) => async (page) => {
+  await page.setBypassServiceWorker(true);
+  await page.setRequestInterception(true);
+  page.on("request", (request) =>
+    new URL(request.url()).pathname === "/api/pipeline/effective/sample"
+      ? answer(request)
+      : request.continue(),
+  );
+};
+
+const heldText = (page, id) =>
+  page.$eval(`.card[data-id="${id}"] .chip.held`, (el) => el.textContent);
+
+test("backpressure chip waits for the effective view", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    let held;
+    let arrived;
+    const asked = new Promise((done) => (arrived = done));
+    const { page, errors } = await openBoard(
+      browser,
+      origin,
+      { schema: 1, backpressure: { needs_you: 6 } },
+      routeEffective((request) => {
+        held = request;
+        arrived();
+      }),
+    );
+    await asked;
+    await page.waitForSelector('.card[data-id="122-follow-up"] .chip.held');
+    assert.deepEqual(await pausedChips(page), {});
+    assert.equal(await heldText(page, "122-follow-up"), "Held for batching");
+    await held.continue();
+    await page.waitForFunction(
+      () =>
+        document.querySelector('.card[data-id="122-follow-up"] .chip.held')?.textContent ===
+        "Batch ready",
+    );
+    assert.deepEqual(await pausedChips(page), {});
+    assert.deepEqual(errors, []);
+  });
+});
+
+test(
+  "backpressure chip falls back when the effective view fails",
+  { timeout: 120000 },
+  async () => {
+    await prepareAssets();
+    await withBrowserFixture(async ({ browser, origin }) => {
+      const { page, errors } = await openBoard(
+        browser,
+        origin,
+        { schema: 1 },
+        routeEffective((request) => request.respond({ status: 500, body: "fixture failure" })),
+      );
+      await page.waitForSelector('.card[data-id="120-add-csv-export"] .chip.backpressure');
+      assert.equal((await pausedChips(page))["120-add-csv-export"], "Paused: 5 waiting on you");
+      assert.deepEqual(errors, []);
+    });
+  },
+);
