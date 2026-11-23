@@ -5545,7 +5545,12 @@ fn takeover(
     stalls.sort_by(|a, b| get_str(b, "reset").cmp(&get_str(a, "reset")));
     for stall in &stalls {
         let session = get_str(stall, "session").unwrap();
-        let seconds = stamp_of(stall.get("reset")).unwrap() - unix_now();
+        // Python subtracts a now with microseconds and truncates, so a whole-second reset reads
+        // one second short.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |d| d.as_secs_f64());
+        let seconds = (stamp_of(stall.get("reset")).unwrap() as f64 - now).trunc() as i64;
         if seconds.div_euclid(60) <= threshold {
             let line = format!(
                 "resets in {} min, within {threshold}; left to the limit-resume sweep",
@@ -8256,6 +8261,7 @@ exit "$code"
                     checkout_problem: Some(Rc::new(|_, _, _| Ok(None))),
                     orphan_pickup_scan: Some(Rc::new(|_| {})),
                     outcomes_pickup_record: Some(Rc::new(|_| {})),
+                    launch_wait_seconds: Some(60.0),
                     ..Fakes::default()
                 }
             });
@@ -8416,8 +8422,20 @@ exit "$code"
         out
     }
 
-    fn lines(text: &str) -> Vec<&str> {
+    pub(super) fn lines(text: &str) -> Vec<&str> {
         text.lines().collect()
+    }
+
+    /// True when the whole text matches pattern.
+    pub(super) fn matches(pattern: &str, text: &str) -> bool {
+        fancy_regex::Regex::new(&format!(r"\A(?:{pattern})\z"))
+            .unwrap()
+            .is_match(text)
+            .unwrap()
+    }
+
+    pub(super) fn out_err(code: i32, out: &str, err: &str) -> (i32, String, String) {
+        (code, out.to_string(), err.to_string())
     }
 
     mod deferred {
@@ -8527,6 +8545,14 @@ exit "$code"
     mod pickup_test {
         use super::*;
 
+        fn sweep_counter(fx: &Fx) -> Rc<RefCell<usize>> {
+            fx.sweeps.clone()
+        }
+
+        fn launched_re(id: &str, project: &str, route: &str) -> String {
+            format!("launched {id} {project} on {route} session [0-9a-f]{{6}}\n")
+        }
+
         #[test]
         fn test_usage() {
             let fx = Fx::new();
@@ -8558,6 +8584,804 @@ exit "$code"
             let session = crate::cli::main(vec!["pickup".into(), "--session".into()]);
             assert_eq!(session, 2);
             assert!(fx.calls().is_empty());
+        }
+
+        #[test]
+        fn test_triage_runs_at_most_every_30_minutes() {
+            let fx = Fx::new();
+            fx.assert_silent(fx.pickup(&[]));
+            fx.assert_silent(fx.pickup(&[]));
+            assert_eq!(*fx.sweeps.borrow(), 1);
+            save_triage_sweep(&fx.home, &stamp(-31)).unwrap();
+            fx.assert_silent(fx.pickup(&[]));
+            assert_eq!(*fx.sweeps.borrow(), 2);
+        }
+
+        #[test]
+        fn test_a_bad_or_future_sweep_stamp_runs_the_pass() {
+            let fx = Fx::new();
+            for text in [
+                "not json".to_string(),
+                json!({"version": 2, "at": now()}).to_string(),
+                json!({"version": 1, "at": stamp(60)}).to_string(),
+            ] {
+                *fx.sweeps.borrow_mut() = 0;
+                fs::write(fx.home.join("backlog-triage-sweep.json"), &text).unwrap();
+                fx.assert_silent(fx.pickup(&[]));
+                assert_eq!(*fx.sweeps.borrow(), 1, "{text}");
+            }
+        }
+
+        #[test]
+        fn test_triage_now_runs_the_pass_inside_the_interval() {
+            let fx = Fx::new();
+            fx.assert_silent(fx.pickup(&[]));
+            fx.assert_silent(fx.pickup(&["--triage-now"]));
+            assert_eq!(*fx.sweeps.borrow(), 2);
+        }
+
+        #[test]
+        fn test_a_worker_error_in_the_triage_pass_still_launches_ideas() {
+            let fx = Fx::new();
+            let cause = "GET https://factory.example.test/api/backlog returned 500: boom";
+            fx.set_fakes(|f| f.backlog_triage_pass = Some(Rc::new(move |_| Err(fail(cause, 5)))));
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({}))]));
+            fx.view("alpha", 200, effective("alpha", None, Some(json!({"pickup": on()}))));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert_eq!(err, format!("factory.py: {cause}\nfactory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now\n"));
+            assert!(matches(&launched_re("001-alpha", "alpha", "primary"), &out), "{out}");
+            assert_eq!(fx.launched().len(), 1);
+        }
+
+        #[test]
+        fn test_a_non_worker_exit_in_the_triage_pass_stops_pickup() {
+            let fx = Fx::new();
+            fx.set_fakes(|f| f.backlog_triage_pass = Some(Rc::new(|_| Err(fail("boom", 2)))));
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({}))]));
+            fx.view("alpha", 200, effective("alpha", None, Some(json!({"pickup": on()}))));
+            assert_eq!(fx.pickup(&[]).0, 2);
+            assert!(fx.launched().is_empty());
+            assert!(fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_a_worker_error_in_the_tracer_build_pass_still_launches_ideas() {
+            let fx = Fx::new();
+            let cause = "PUT https://factory.example.test/api/board returned 503: busy";
+            fx.set_fakes(|f| {
+                f.tracer_follow_pass = Some(Rc::new(|_| Ok(())));
+                f.tracer_build_pass = Some(Rc::new(move |_, _| Err(fail(cause, 5))));
+            });
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({}))]));
+            fx.view("alpha", 200, effective("alpha", None, Some(json!({"pickup": on()}))));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert_eq!(err, format!("factory.py: {cause}\nfactory.py: Tracer build pass stopped; Building in Tracer marks wait for the next pickup run\n"));
+            assert!(matches(&launched_re("001-alpha", "alpha", "primary"), &out));
+            assert_eq!(fx.launched().len(), 1);
+            assert_eq!(*fx.sweeps.borrow(), 1);
+        }
+
+        #[test]
+        fn test_a_worker_error_in_the_tracer_follow_pass_still_launches_ideas() {
+            let fx = Fx::new();
+            let cause = "GET https://factory.example.test/api/board returned 503: busy";
+            let built = Rc::new(RefCell::new(Vec::new()));
+            let seen = built.clone();
+            fx.set_fakes(|f| {
+                f.tracer_follow_pass = Some(Rc::new(move |_| Err(fail(cause, 5))));
+                f.tracer_build_pass = Some(Rc::new(move |home, jobs| {
+                    seen.borrow_mut().push((home.to_path_buf(), jobs.cloned()));
+                    Ok(false)
+                }));
+            });
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({}))]));
+            let jobs = fx.state.borrow().board["jobs"].clone();
+            fx.view("alpha", 200, effective("alpha", None, Some(json!({"pickup": on()}))));
+            let (code, _, err) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert_eq!(err, format!("factory.py: {cause}\nfactory.py: Tracer follow pass stopped; followed jobs wait for the next pickup run\n"));
+            assert_eq!(*built.borrow(), vec![(fx.home.clone(), Some(jobs))]);
+            assert_eq!(*fx.sweeps.borrow(), 1);
+            assert_eq!(fx.launched().len(), 1);
+        }
+
+        #[test]
+        fn test_a_non_worker_exit_in_a_tracer_pass_stops_pickup() {
+            let fx = Fx::new();
+            let built = Rc::new(RefCell::new(0));
+            let seen = built.clone();
+            fx.set_fakes(|f| {
+                f.tracer_follow_pass = Some(Rc::new(|_| Err(fail("boom", 2))));
+                f.tracer_build_pass = Some(Rc::new(move |_, _| {
+                    *seen.borrow_mut() += 1;
+                    Ok(false)
+                }));
+            });
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({}))]));
+            fx.view("alpha", 200, effective("alpha", None, Some(json!({"pickup": on()}))));
+            assert_eq!(fx.pickup(&[]).0, 2);
+            assert_eq!(*built.borrow(), 0);
+            assert_eq!(*fx.sweeps.borrow(), 0);
+            assert!(fx.launched().is_empty());
+            assert!(fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_without_tracer_json_one_board_read() {
+            let fx = Fx::new();
+            save_triage_sweep(&fx.home, &now()).unwrap();
+            fx.set_fakes(|f| f.tracer_build_pass = Some(Rc::new(|_, _| Ok(false))));
+            fx.jobs(json!([idea("001-tracer", "alpha", json!({"tracer": {"building": true}}))]));
+            fx.view("alpha", 200, effective("alpha", None, Some(json!({"pickup": on()}))));
+            let (code, _, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let boards: Vec<_> = fx.calls().into_iter().filter(|c| c.1 == "/api/board").collect();
+            assert_eq!(boards, vec![("GET".to_string(), "/api/board".to_string())]);
+        }
+
+        #[test]
+        fn test_an_idea_triage_queues_launches_in_the_same_run() {
+            let fx = Fx::new();
+            let state = fx.state.clone();
+            fx.set_fakes(|f| {
+                f.backlog_triage_pass = Some(Rc::new(move |_| {
+                    let mut s = state.borrow_mut();
+                    s.board["jobs"].as_array_mut().unwrap().push(idea("001-alpha", "alpha", json!({})));
+                    Ok(())
+                }))
+            });
+            fx.view("alpha", 200, effective("alpha", None, Some(json!({"pickup": on()}))));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(matches(&launched_re("001-alpha", "alpha", "primary"), &out));
+            assert_eq!(fx.launched().len(), 1);
+        }
+
+        #[test]
+        fn test_dry_run_skips_the_backlog_triage_pass() {
+            let fx = Fx::new();
+            assert_eq!(fx.pickup(&["--dry-run"]).0, 0);
+            assert_eq!(*sweep_counter(&fx).borrow(), 0);
+        }
+
+        #[test]
+        fn test_skips_tracer_building() {
+            let fx = Fx::new();
+            fx.set_fakes(|f| f.tracer_build_pass = Some(Rc::new(|_, _| Ok(false))));
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            fx.jobs(json!([idea("001-tracer", "alpha", json!({"tracer": {"building": true}})), idea("002-alpha", "alpha", json!({}))]));
+            let (_, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!(err, "");
+            assert!(lines(&out).contains(&"skip 001-tracer alpha: building in Tracer"));
+            assert!(!out.contains("would launch 001-tracer"));
+            let (code, _, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let records = fx.launched();
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].argv[0], "002-alpha");
+            assert!(fx.job("001-tracer").get("claim").is_none());
+        }
+
+        fn recover(note: &str) {
+            let fx = Fx::new();
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            fx.jobs(json!([{"id": "001-sample", "stage": "build", "project": "alpha", "note": note, "updated": stamp(0)}]));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let tag = fx.job("001-sample")["claim"]["session"].as_str().unwrap().to_string();
+            assert_eq!(out, format!("launched 001-sample alpha on primary session {tag}\n"));
+            let records = fx.launched();
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].env("FACTORY_PROMPT"), format!("/factory recover 001-sample --session {tag}\n\n{UNATTENDED}"));
+        }
+
+        #[test]
+        fn test_launches_recover_for_tracer_approved_build() {
+            recover("spec approved in Tracer");
+        }
+
+        #[test]
+        fn test_launches_recover_for_dashboard_approved_build() {
+            recover("spec approved on the dashboard");
+        }
+
+        #[test]
+        fn test_skips_build_without_tracer_note() {
+            let fx = Fx::new();
+            fx.set_fakes(|f| f.tracer_build_pass = Some(Rc::new(|_, _| Ok(false))));
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            fx.jobs(json!([
+                {"id": "001-sample", "stage": "build", "project": "alpha", "note": "building after Tracer approval", "updated": "2026-01-01T00:00:00Z"},
+                {"id": "002-sample", "stage": "build", "project": "alpha", "note": "spec approved in Tracer", "updated": "2026-01-01T00:00:00Z", "tracer": {"building": true}}]));
+            let (_, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!(err, "");
+            assert!(!out.contains("001-sample"));
+            assert!(lines(&out).contains(&"skip 002-sample alpha: building in Tracer"));
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert!(fx.launched().is_empty());
+            assert!(fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_launches_with_argv_env_and_cwd() {
+            let fx = Fx::new();
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({}))]));
+            fx.view("alpha", 200, effective("alpha", None, Some(json!({"pickup": on()}))));
+            let (code, out, err) = fx.pickup(&[]);
+            let claim = fx.job("001-alpha")["claim"].clone();
+            let tag = claim["session"].as_str().unwrap().to_string();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out, format!("launched 001-alpha alpha on primary session {tag}\n"));
+            assert!(matches("[0-9a-f]{6}", &tag));
+            assert_eq!(claim["device"], DEVICE);
+            let prompt = format!("/factory idea 001-alpha --session {tag}\n\n{UNATTENDED}");
+            let records = fx.launched();
+            assert_eq!(records.len(), 1);
+            let a = fx.repo_a.display().to_string();
+            assert_eq!(records[0].argv, ["001-alpha", "alpha", &a, &tag, "provider-a", "model-a", "high", &prompt, "{unknown}", "x-001-alpha-y"]);
+            assert_eq!(resolve(Path::new(&records[0].cwd)).unwrap(), resolve(&fx.repo_a).unwrap());
+            let mut env = records[0].env.clone();
+            env.sort();
+            let mut want: Vec<(String, String)> = [("FACTORY_JOB_ID", "001-alpha"), ("FACTORY_PROJECT", "alpha"), ("FACTORY_REPO_PATH", &a), ("FACTORY_SESSION", &tag), ("FACTORY_PROVIDER", "provider-a"), ("FACTORY_MODEL", "model-a"), ("FACTORY_EFFORT", "high"), ("FACTORY_PROMPT", &prompt)].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            want.sort();
+            assert_eq!(env, want);
+            let log = fx.home.join("logs/pickup").join(format!("001-alpha-{tag}.log"));
+            assert_eq!(strip(&fs::read_to_string(&log).unwrap()), "started");
+            #[cfg(unix)]
+            assert_eq!(std::os::unix::fs::PermissionsExt::mode(&fs::metadata(&log).unwrap().permissions()) & 0o777, 0o600);
+            // The claim, then the orchestrator row in agents.
+            assert_eq!(fx.puts().len(), 2);
+            let sessions: Vec<Value> = fx.job("001-alpha")["agents"].as_array().unwrap().iter().map(|r| r["session"].clone()).collect();
+            assert_eq!(sessions, vec![Value::from(tag)]);
+            for (path, data) in snapshot(&fx.root) {
+                assert!(!path.file_name().unwrap().to_string_lossy().contains("pwned"));
+                if let (Some(data), false) = (data, path == fx.fake) {
+                    assert!(!String::from_utf8_lossy(&data).contains(IDEA_TEXT), "{}", path.display());
+                }
+            }
+            assert!(!out.contains(IDEA_TEXT));
+        }
+
+        #[test]
+        fn test_project_overrides_global() {
+            let fx = Fx::new();
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({})), idea("002-beta", "beta", json!({}))]));
+            let global = Some(json!({"pickup": on()}));
+            fx.view("alpha", 200, effective("alpha", global.clone(), Some(json!({"pickup": {"enabled": false, "hosts": []}}))));
+            fx.view("beta", 200, effective("beta", global, Some(json!({}))));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(matches(&launched_re("002-beta", "beta", "primary"), &out));
+            assert!(fx.job("001-alpha").get("claim").is_none());
+            fx.jobs(json!([idea("003-alpha", "alpha", json!({}))]));
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": {"enabled": false, "hosts": []}})), Some(json!({"pickup": on()}))));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(matches(&launched_re("003-alpha", "alpha", "primary"), &out));
+        }
+
+        #[test]
+        fn test_a_failed_agent_row_keeps_the_pass_going() {
+            let fx = Fx::new();
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({})), idea("002-alpha", "alpha", json!({}))]));
+            let give_up = "/api/board kept changing under us; gave up after 20 tries";
+            fx.set_fakes(|f| f.record_agent = Some(Rc::new(move |_, _, _| Err(fail(give_up, 5)))));
+            let (code, out, err) = fx.pickup(&["--limit", "2", "--max-inflight", "2"]);
+            assert_eq!(code, 0);
+            let firsts: Vec<String> = lines(&out).iter().map(|l| l.split(' ').take(2).collect::<Vec<_>>().join(" ")).collect();
+            assert_eq!(firsts, ["launched 001-alpha", "launched 002-alpha"]);
+            assert_eq!(fx.launched().len(), 2);
+            for id in ["001-alpha", "002-alpha"] {
+                assert_eq!(err.matches(&format!("factory.py: {id} launched, but its agent row was not recorded; the pass goes on\n")).count(), 1);
+            }
+            assert!(err.contains(&format!("factory.py: {give_up}\n")));
+        }
+
+        #[test]
+        fn test_config_errors_exit_2_before_claim() {
+            let fx = Fx::new();
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({}))]));
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            let launchers = fx.home.join("launchers.json");
+            let l = launchers.display();
+            let invalid = format!("cannot read {l}: use {{\"version\": 1, \"launchers\": {{\"<route>\": [\"<program>\", \"<arg>\", ...]}}}}");
+            let mut cases = vec![(None, format!("no launchers in {l}: map each route in routes.md to a command; see references/pickup.md"))];
+            let many = json!({"version": 1, "launchers": {"primary": vec!["prog"; 65]}}).to_string();
+            let long = json!({"version": 1, "launchers": {"primary": ["p".repeat(4097)]}}).to_string();
+            for text in ["{", "[]", r#"{"version": 2, "launchers": {}}"#, r#"{"version": true, "launchers": {}}"#, r#"{"version": 1}"#, r#"{"version": 1, "launchers": [], "x": 1}"#, r#"{"version": 1, "launchers": {"primary": []}}"#, r#"{"version": 1, "launchers": {"primary": "prog"}}"#, r#"{"version": 1, "launchers": {"bad route": ["prog"]}}"#, r#"{"version": 1, "launchers": {"primary": ["prog", ""]}}"#, r#"{"version": 1, "launchers": {"primary": ["prog", 1]}}"#, r#"{"version": 1, "launchers": {"primary": ["prog", "a\u0000b"]}}"#, &many, &long] {
+                cases.push((Some(text.to_string()), invalid.clone()));
+            }
+            cases.push((Some(json!({"version": 1, "launchers": {"fallback": ["prog"]}}).to_string()), format!("no launcher for route primary in {l}")));
+            cases.push((Some(json!({"version": 1, "launchers": {"primary": ["no-such-launcher-program", "{id}"]}}).to_string()), "launcher for route primary runs no-such-launcher-program, which is not on PATH".into()));
+            for (text, message) in cases {
+                fx.clear_calls();
+                match &text {
+                    None => fs::remove_file(&launchers).unwrap(),
+                    Some(text) => fs::write(&launchers, text).unwrap(),
+                }
+                for args in [&[][..], &["--dry-run"]] {
+                    assert_eq!(fx.pickup(args), out_err(2, "", &format!("factory.py: {message}\n")), "{text:?}");
+                }
+                assert!(fx.puts().is_empty());
+            }
+            fs::write(&fx.routes, "---\nprimary: provider-a model-a\n---\n").unwrap();
+            fx.write_launchers(json!({"primary": ["/bin/sh", fx.fake, "--effort", "{effort}"]}));
+            assert_eq!(fx.pickup(&[]), out_err(2, "", "factory.py: route primary sets no effort, but its launcher uses {effort}\n"));
+            assert!(fx.puts().is_empty());
+            assert!(fx.launched().is_empty());
+        }
+
+        fn limited(fx: &Fx, line: &str, minutes: i64) {
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({}))]));
+            let limits = fx.home.join("route-limits.json");
+            let _ = fs::remove_file(&limits);
+            fx.configure(line, 1, 0);
+            let before = unix_now();
+            let (code, out, err) = fx.pickup(&[]);
+            let after = unix_now();
+            let until = read_json(&limits).unwrap()["primary"].as_str().unwrap().to_string();
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out, format!("limited primary until {until}\nreleased 001-alpha\n"));
+            assert!(fx.job("001-alpha").get("claim").is_none());
+            let when = parse_stamp(&until).unwrap();
+            assert!(before + minutes * 60 <= when && when <= after + minutes * 60, "{until}");
+        }
+
+        #[test]
+        fn test_limit_failure_marks_route_and_releases() {
+            let fx = Fx::new();
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            limited(&fx, "You've hit your usage limit. Resets in 3 hours.", 180);
+            limited(&fx, "Rate limit reached; try again in 45m", 45);
+            limited(&fx, "Error: weekly limit exceeded", 60);
+            let now = parse_stamp("2026-10-28T22:00:00Z").unwrap();
+            assert_eq!(limit_minutes("session limit, resets in 9999 minutes", now), 1440);
+            assert_eq!(limit_minutes("usage limit", now), 60);
+            if zone_offset("America/Toronto", now).is_none() {
+                return; // the zone data is unavailable, as Python's skipTest
+            }
+            let weekly = "You've hit your weekly limit · resets ";
+            assert_eq!(limit_minutes(&format!("{weekly}Oct 28, 9pm (America/Toronto)"), now), 180);
+            assert_eq!(limit_minutes(&format!("{weekly}5pm (America/Toronto)"), now), 1380);
+            assert_eq!(limit_minutes(&format!("{weekly}6:30pm (America/Toronto)"), now), 30);
+            assert_eq!(limit_minutes(&format!("{weekly}Jan 2, 9am (America/Toronto)"), parse_stamp("2026-12-30T15:00:00Z").unwrap()), 1440);
+            assert_eq!(limit_minutes(&format!("{weekly}Oct 28, 9pm (Nowhere/Zone)"), now), 60);
+        }
+
+        #[test]
+        fn test_other_failure_releases_and_exits_1() {
+            let fx = Fx::new();
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({}))]));
+            fx.configure("boom", 3, 0);
+            let (code, out, err) = fx.pickup(&[]);
+            let logs = sorted_entries(&fx.home.join("logs/pickup"));
+            assert_eq!(logs.len(), 1);
+            assert_eq!(code, 1);
+            let until = fx.job("001-alpha")["not_before"].as_str().unwrap().to_string();
+            assert_eq!(out, format!("released 001-alpha\nbacked off 001-alpha until {until} (launch failure 1)\n"));
+            assert_eq!(err, format!("factory.py: launch of 001-alpha on primary failed: exit 3; see {}\n", logs[0].display()));
+            assert_eq!(strip(&fs::read_to_string(&logs[0]).unwrap()), "boom");
+            assert!(fx.job("001-alpha").get("claim").is_none());
+            assert!(!fx.home.join("route-limits.json").exists());
+            let missing = fx.root.join("no-such-program");
+            fx.write_launchers(json!({"primary": [missing]}));
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({}))]));
+            let (code, out, err) = fx.pickup(&[]);
+            let until = fx.job("001-alpha")["not_before"].as_str().unwrap().to_string();
+            assert_eq!((code, out), (1, format!("released 001-alpha\nbacked off 001-alpha until {until} (launch failure 1)\n")));
+            assert!(matches(r"factory\.py: launch of 001-alpha on primary failed: .*no-such-program.*; see (?s:.*)", &err), "{err}");
+            assert!(fx.job("001-alpha").get("claim").is_none());
+        }
+
+        #[test]
+        fn test_long_running_launch_counts_as_launched() {
+            let fx = Fx::new();
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            fx.jobs(json!([idea("001-alpha", "alpha", json!({}))]));
+            fx.configure("started", 0, 60);
+            fx.set_fakes(|f| f.launch_wait_seconds = Some(0.5));
+            let (code, out, err) = fx.pickup(&[]);
+            let deadline = Instant::now() + Duration::from_secs(60);
+            while fx.launched().is_empty() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            let records = fx.launched();
+            let _ = Command::new("kill").arg(records[0].pid.to_string()).status();
+            assert_eq!((code, err.as_str()), (0, ""));
+            let tag = records[0].env("FACTORY_SESSION").to_string();
+            assert_eq!(out, format!("launched 001-alpha alpha on primary session {tag}\n"));
+            assert_eq!(fx.job("001-alpha")["claim"]["session"], Value::from(tag));
+        }
+
+        fn host_board(fx: &Fx, jobs: Vec<Value>) {
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            let mut all = jobs;
+            for n in [4, 5, 6] {
+                all.push(idea(&format!("00{n}-alpha"), "alpha", json!({})));
+            }
+            fx.jobs(Value::Array(all));
+            fx.clear_launched();
+        }
+
+        fn in_flight(id: &str, stage: &str, project: &str, extra: Value) -> Value {
+            with(json!({"id": id, "stage": stage, "project": project, "updated": stamp(0)}), extra)
+        }
+
+        #[test]
+        fn test_host_cap_counts_this_host() {
+            let fx = Fx::new();
+            fx.state.borrow_mut().hosts = Some(json!([host("other-host", json!(5)), host(DEVICE, json!(2))]));
+            host_board(&fx, vec![
+                in_flight("001-build", "build", "beta", json!({"claim": held(DEVICE)})),
+                in_flight("002-spec", "spec", "alpha", json!({"claim": held("other-host")})),
+                in_flight("003-spec", "spec", "alpha", json!({}))]);
+            let (code, out, err) = fx.pickup(&["--limit", "3"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(matches(&launched_re("004-alpha", "alpha", "primary"), &out));
+            assert_eq!(fx.launched().len(), 1);
+        }
+
+        #[test]
+        fn test_host_cap_lower_of_flag_and_record() {
+            let fx = Fx::new();
+            for (record, args, launches) in [(3, &["--max-inflight", "1"][..], 1), (1, &["--max-inflight", "4"], 1), (3, &[], 3)] {
+                fx.state.borrow_mut().hosts = Some(json!([host(DEVICE, json!(record))]));
+                host_board(&fx, Vec::new());
+                let mut all = vec!["--limit", "3"];
+                all.extend(args);
+                let (code, out, err) = fx.pickup(&all);
+                assert_eq!((code, err.as_str()), (0, ""));
+                assert_eq!(out.matches("launched ").count(), launches);
+                assert_eq!(fx.launched().len(), launches);
+            }
+        }
+
+        #[test]
+        fn test_host_cap_zero_pauses() {
+            let fx = Fx::new();
+            fx.state.borrow_mut().hosts = Some(json!([host(DEVICE, json!(0))]));
+            host_board(&fx, Vec::new());
+            assert_eq!(fx.pickup(&["--limit", "3"]), out_err(0, "", ""));
+            assert!(fx.launched().is_empty());
+            assert!(fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_host_cap_skips_jobs_waiting_on_a_human() {
+            let fx = Fx::new();
+            fx.state.borrow_mut().hosts = Some(json!([host(DEVICE, json!(2))]));
+            host_board(&fx, vec![
+                in_flight("001-approve", "approve", "beta", json!({"needs": "PLAN Jira key", "claim": held(DEVICE)})),
+                in_flight("002-spec", "spec", "alpha", json!({"origin": {"gate": "human"}, "claim": held(DEVICE)}))]);
+            let (code, out, err) = fx.pickup(&["--limit", "2"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out.matches("launched ").count(), 2);
+        }
+
+        #[test]
+        fn test_project_cap_skips_jobs_waiting_on_a_human() {
+            let fx = Fx::new();
+            host_board(&fx, vec![
+                in_flight("001-approve", "approve", "alpha", json!({"needs": "PLAN Jira key", "claim": held(DEVICE)})),
+                in_flight("002-spec", "spec", "alpha", json!({"origin": {"gate": "human"}, "claim": held(DEVICE)})),
+                in_flight("003-spec", "spec", "alpha", json!({}))]);
+            let (code, out, err) = fx.pickup(&["--limit", "3", "--max-inflight", "2"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(matches(&launched_re("004-alpha", "alpha", "primary"), &out));
+            assert_eq!(fx.launched().len(), 1);
+        }
+
+        #[test]
+        fn test_host_record_ignored_when_invalid() {
+            let fx = Fx::new();
+            for hosts in [json!([host(DEVICE, json!(-1))]), json!([host(DEVICE, json!("2"))]), json!([host(DEVICE, json!(9))]), json!([host("other-host", json!(2))])] {
+                fx.state.borrow_mut().hosts = Some(hosts.clone());
+                host_board(&fx, vec![
+                    in_flight("001-build", "build", "beta", json!({"claim": held(DEVICE)})),
+                    in_flight("002-spec", "spec", "alpha", json!({})),
+                    in_flight("003-review", "review", "beta", json!({"claim": held(DEVICE)}))]);
+                let (code, out, err) = fx.pickup(&["--limit", "3", "--max-inflight", "2"]);
+                assert_eq!((code, err.as_str()), (0, ""), "{hosts}");
+                assert!(matches(&launched_re("004-alpha", "alpha", "primary"), &out), "{hosts} {out}");
+            }
+        }
+    }
+
+    const FAKE_ADAPTER: &str = r#"#!/bin/sh
+dir=$(dirname "$0")
+. "$dir/adapter.conf"
+printf '%s\n' "$*" >> "$dir/adapter-calls"
+if [ "$1" = list ]; then cat "$dir/adapter-stalls.json"; exit "$list_code"; fi
+exit "$archive_code"
+"#;
+
+    /// Python's TakeoverTest fixture: a fake stall adapter and two launchers that take the prompt.
+    pub(super) struct Tk {
+        pub fx: Fx,
+        pub adapter: PathBuf,
+    }
+
+    impl std::ops::Deref for Tk {
+        type Target = Fx;
+        fn deref(&self) -> &Fx {
+            &self.fx
+        }
+    }
+
+    impl Tk {
+        pub fn new() -> Tk {
+            let fx = Fx::new();
+            let adapter = fx.root.join("fake_adapter.sh");
+            fs::write(&adapter, FAKE_ADAPTER).unwrap();
+            let fake = fx.fake.display().to_string();
+            let mut primary = vec!["/bin/sh".to_string(), fake.clone()];
+            primary.extend(PLACEHOLDERS.map(String::from));
+            fx.write_launchers(json!({"primary": primary, "fallback": ["/bin/sh", fake, "{id}", "{prompt}"]}));
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            Tk { fx, adapter }
+        }
+
+        pub fn set_adapter(&self, stalls: Vec<Value>, list_code: i32, archive_code: i32) {
+            let doc = json!({"version": 1, "stalls": stalls});
+            fs::write(self.root.join("adapter-stalls.json"), doc.to_string()).unwrap();
+            fs::write(self.root.join("adapter.conf"), format!("list_code={list_code}\narchive_code={archive_code}\n")).unwrap();
+            let _ = fs::remove_file(self.root.join("adapter-calls"));
+        }
+
+        pub fn set_stalls(&self, extra: Value) {
+            let doc = with(json!({"version": 1, "adapter": ["/bin/sh", self.adapter]}), extra);
+            fs::write(self.home.join("stalls.json"), doc.to_string()).unwrap();
+        }
+
+        pub fn stall(&self, extra: Value) -> Value {
+            with(json!({"session": "agent-1", "reset": stamp(180), "provider": "provider-a", "model": "model-a"}), extra)
+        }
+
+        pub fn stall_job(&self, extra: Value) -> Value {
+            with(json!({"id": "010-run", "stage": "build", "project": "alpha", "title": IDEA_TEXT,
+                "idea": IDEA_TEXT, "updated": stamp(-25 * 60),
+                "claim": {"device": DEVICE, "session": "dead1", "since": stamp(-40), "seen": stamp(-40)},
+                "paseo": {"server": "srv", "agent": "agent-1"}}), extra)
+        }
+
+        pub fn recorded(&self) -> Vec<Vec<String>> {
+            fs::read_to_string(self.root.join("adapter-calls"))
+                .unwrap_or_default()
+                .lines()
+                .map(|l| l.split(' ').map(String::from).collect())
+                .collect()
+        }
+
+        pub fn limited_until(&self) -> Value {
+            read_json(&self.home.join("route-limits.json")).unwrap()
+        }
+    }
+
+    fn calls(list: &[&[&str]]) -> Vec<Vec<String>> {
+        list.iter().map(|c| c.iter().map(|s| s.to_string()).collect()).collect()
+    }
+
+    mod takeover_test {
+        use super::*;
+
+        #[test]
+        fn test_no_stalls_file_is_unchanged() {
+            let tk = Tk::new();
+            tk.jobs(json!([tk.stall_job(json!({}))]));
+            assert_eq!(tk.pickup(&["--dry-run"]), out_err(0, &format!("host {DEVICE}: would launch 0\n"), ""));
+            assert!(tk.recorded().is_empty());
+            assert!(tk.puts().is_empty());
+            assert_eq!(tk.pickup(&[]), out_err(0, "", ""));
+            assert!(tk.recorded().is_empty());
+            assert!(tk.puts().is_empty());
+            assert!(tk.launched().is_empty());
+        }
+
+        #[test]
+        fn test_reset_within_threshold_is_left_to_sweep() {
+            let tk = Tk::new();
+            tk.set_adapter(vec![tk.stall(json!({"reset": stamp(20)}))], 0, 0);
+            tk.set_stalls(json!({}));
+            tk.jobs(json!([tk.stall_job(json!({}))]));
+            assert_eq!(tk.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(tk.recorded(), calls(&[&["list"]]));
+            assert!(tk.puts().is_empty());
+            assert!(!tk.home.join("route-limits.json").exists());
+            let (code, out, err) = tk.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(matches("skip stall agent-1: resets in 1[89] min, within 30; left to the limit-resume sweep\nhost host-a: would take over 0\nhost host-a: would launch 0\n", &out), "{out}");
+            assert_eq!(tk.recorded(), calls(&[&["list"], &["list"]]));
+            tk.set_stalls(json!({"takeover_minutes": 10}));
+            let (code, out, err) = tk.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let first = lines(&out)[0];
+            assert!(first.starts_with("would take over 010-run alpha from agent-1 on fallback: "), "{first}");
+            assert!(first.contains("--session <session>"));
+            assert_eq!(lines(&out)[lines(&out).len() - 2..], [format!("host {DEVICE}: would take over 1").as_str(), &format!("host {DEVICE}: would launch 0")]);
+            let (code, _, err) = tk.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(tk.recorded(), calls(&[&["list"], &["list"], &["list"], &["list"], &["archive", "agent-1"]]));
+        }
+
+        #[test]
+        fn test_paused_host_skips_takeover() {
+            let tk = Tk::new();
+            tk.state.borrow_mut().hosts = Some(json!([host(DEVICE, json!(0))]));
+            tk.set_adapter(vec![tk.stall(json!({}))], 0, 0);
+            tk.set_stalls(json!({}));
+            tk.jobs(json!([tk.stall_job(json!({}))]));
+            assert_eq!(tk.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(tk.recorded(), calls(&[&["list"]]));
+            assert!(tk.puts().is_empty());
+            assert!(tk.launched().is_empty());
+            assert!(!tk.home.join("route-limits.json").exists());
+            let want = format!("skip stall agent-1 010-run: host {DEVICE} paused (max in flight 0)\nhost {DEVICE}: would take over 0\nhost {DEVICE}: would launch 0\n");
+            assert_eq!(tk.pickup(&["--dry-run"]), out_err(0, &want, ""));
+            tk.state.borrow_mut().hosts = Some(json!([host(DEVICE, json!(2))]));
+            tk.set_adapter(vec![tk.stall(json!({}))], 0, 0);
+            let (code, out, err) = tk.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(out.contains("took over 010-run alpha from agent-1 on fallback"));
+        }
+
+        #[test]
+        fn test_takeover_claims_archives_and_recovers() {
+            let tk = Tk::new();
+            let before = unix_now();
+            tk.set_adapter(vec![tk.stall(json!({}))], 0, 0);
+            tk.set_stalls(json!({}));
+            tk.jobs(json!([tk.stall_job(json!({}))]));
+            let (code, out, err) = tk.pickup(&[]);
+            let after = unix_now();
+            assert_eq!((code, err.as_str()), (0, ""));
+            let records = tk.launched();
+            assert_eq!(records.len(), 1);
+            let tag = records[0].env("FACTORY_SESSION").to_string();
+            assert!(matches("[0-9a-f]{6}", &tag));
+            let until = tk.limited_until();
+            assert_eq!(until.as_object().unwrap().keys().collect::<Vec<_>>(), ["primary"]);
+            let primary = until["primary"].as_str().unwrap();
+            assert_eq!(out, format!("limited primary until {primary}\ntook over 010-run alpha from agent-1 on fallback session {tag}\n"));
+            let when = parse_stamp(primary).unwrap();
+            assert!(before + 179 * 60 <= when && when <= after + 181 * 60);
+            let claim = tk.job("010-run")["claim"].clone();
+            assert_eq!((claim["device"].as_str(), claim["session"].as_str()), (Some(DEVICE), Some(tag.as_str())));
+            assert!(tk.job("010-run").get("paseo").is_none());
+            assert_eq!(tk.recorded(), calls(&[&["list"], &["archive", "agent-1"]]));
+            let prompt = format!("/factory recover 010-run --session {tag}\n\n{UNATTENDED}");
+            assert_eq!(records[0].argv, ["010-run", prompt.as_str()]);
+            let mut env = records[0].env.clone();
+            env.sort();
+            let a = tk.repo_a.display().to_string();
+            let mut want: Vec<(String, String)> = [("FACTORY_JOB_ID", "010-run"), ("FACTORY_PROJECT", "alpha"), ("FACTORY_REPO_PATH", a.as_str()), ("FACTORY_SESSION", &tag), ("FACTORY_PROVIDER", "provider-b"), ("FACTORY_MODEL", "model-b"), ("FACTORY_EFFORT", ""), ("FACTORY_PROMPT", &prompt)].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            want.sort();
+            assert_eq!(env, want);
+        }
+
+        #[test]
+        fn test_idea_stage_relaunches_idea_prompt() {
+            let tk = Tk::new();
+            tk.set_adapter(vec![tk.stall(json!({}))], 0, 0);
+            tk.set_stalls(json!({}));
+            tk.jobs(json!([tk.stall_job(json!({"stage": "idea"}))]));
+            let (code, _, err) = tk.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let records = tk.launched();
+            assert!(records[0].env("FACTORY_PROMPT").starts_with("/factory idea 010-run --session "));
+        }
+
+        #[test]
+        fn test_archive_kept_and_failed_restore_claim() {
+            let tk = Tk::new();
+            tk.set_adapter(vec![tk.stall(json!({}))], 0, 3);
+            tk.set_stalls(json!({}));
+            tk.jobs(json!([tk.stall_job(json!({}))]));
+            let (code, out, err) = tk.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(*lines(&out).last().unwrap(), "kept 010-run: session agent-1 is no longer stalled");
+            let job = tk.job("010-run");
+            assert_eq!((job["claim"]["device"].as_str(), job["claim"]["session"].as_str()), (Some(DEVICE), Some("dead1")));
+            assert_eq!(job["paseo"], json!({"server": "srv", "agent": "agent-1"}));
+            assert_eq!(tk.recorded(), calls(&[&["list"], &["archive", "agent-1"]]));
+            tk.set_adapter(vec![tk.stall(json!({}))], 0, 1);
+            let (code, _, err) = tk.pickup(&[]);
+            assert_eq!(code, 1);
+            assert_eq!(err, "factory.py: takeover of 010-run undone: archive of agent-1 failed: exit 1\n");
+            let job = tk.job("010-run");
+            assert_eq!((job["claim"]["device"].as_str(), job["claim"]["session"].as_str()), (Some(DEVICE), Some("dead1")));
+            assert_eq!(job["paseo"], json!({"server": "srv", "agent": "agent-1"}));
+        }
+
+        #[test]
+        fn test_bad_stalls_file_exits_2() {
+            let tk = Tk::new();
+            tk.set_adapter(Vec::new(), 0, 0);
+            tk.set_stalls(json!({}));
+            let stalls = tk.home.join("stalls.json");
+            let invalid = format!("cannot read {}: use {{\"version\": 1, \"adapter\": [\"<program>\", \"<arg>\", ...], \"takeover_minutes\": 30}}", stalls.display());
+            tk.jobs(json!([tk.stall_job(json!({}))]));
+            for (text, message) in [
+                ("{", invalid.clone()),
+                (r#"{"version": 1, "adapter": ["x"], "bogus": 1}"#, invalid.clone()),
+                (r#"{"version": 1, "adapter": ["x"], "takeover_minutes": 0}"#, invalid.clone()),
+                (r#"{"version": 1, "adapter": ["x"], "takeover_minutes": 1441}"#, invalid.clone()),
+                (r#"{"version": 1, "adapter": ["no-such-stall-program"]}"#, format!("stall adapter no-such-stall-program in {} is not on PATH", stalls.display())),
+            ] {
+                fs::write(&stalls, text).unwrap();
+                for args in [&[][..], &["--dry-run"]] {
+                    assert_eq!(tk.pickup(args), out_err(2, "", &format!("factory.py: {message}\n")), "{text}");
+                }
+                assert!(tk.puts().is_empty());
+                assert!(tk.recorded().is_empty());
+            }
+        }
+
+        #[test]
+        fn test_takeover_counts_against_limit() {
+            let tk = Tk::new();
+            tk.set_adapter(vec![tk.stall(json!({}))], 0, 0);
+            tk.set_stalls(json!({}));
+            tk.jobs(json!([tk.stall_job(json!({})), idea("001-alpha", "alpha", json!({}))]));
+            let (code, out, err) = tk.pickup(&["--limit", "1"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(tk.launched().len(), 1);
+            assert!(out.contains("took over 010-run alpha from agent-1 on fallback"));
+            assert!(!out.contains("launched 001-alpha"));
+            tk.set_adapter(vec![tk.stall(json!({}))], 0, 0);
+            tk.clear_launched();
+            tk.jobs(json!([tk.stall_job(json!({})), idea("002-alpha", "alpha", json!({}))]));
+            let (code, out, err) = tk.pickup(&["--limit", "2", "--max-inflight", "2"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(tk.launched().len(), 2);
+            assert!(out.contains("took over 010-run alpha from agent-1 on fallback"));
+            assert!(out.contains("launched 002-alpha alpha on fallback"));
+        }
+    }
+
+    mod halt_pickup_test {
+        use super::*;
+
+        const LINE: &str = "factory stopped by wsl at 2026-11-22T10:00:00Z: Runaway launches on wsl";
+
+        fn halted() -> Tk {
+            let tk = Tk::new();
+            tk.state.borrow_mut().halt = Some(json!({"halted": true, "reason": "Runaway launches on wsl", "by_kind": "host", "by": "wsl", "at": "2026-11-22T10:00:00Z"}).to_string());
+            tk.set_adapter(vec![tk.stall(json!({}))], 0, 0);
+            tk.set_stalls(json!({}));
+            tk.jobs(json!([tk.stall_job(json!({})), idea("001-alpha", "alpha", json!({}))]));
+            tk
+        }
+
+        #[test]
+        fn test_a_hidden_person_reads_as_a_person() {
+            let tk = halted();
+            tk.state.borrow_mut().halt = Some(json!({"halted": true, "reason": "Runaway launches on wsl", "by_kind": "person", "at": "2026-11-22T10:00:00Z"}).to_string());
+            assert!(tk.pickup(&[]).2.contains("factory stopped by a person at"));
+            assert!(LINE.starts_with("factory stopped by wsl"));
+        }
+
+        #[test]
+        fn test_not_halted_launches_as_before() {
+            let tk = halted();
+            tk.state.borrow_mut().halt = Some(json!({"halted": false}).to_string());
+            let (code, _, err) = tk.pickup(&["--limit", "2", "--max-inflight", "2"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(tk.launched().len(), 2);
+        }
+
+        #[test]
+        fn test_an_unreadable_reply_launches_nothing() {
+            let tk = halted();
+            tk.state.borrow_mut().halt = Some("not json".into());
+            let (code, _, err) = tk.pickup(&[]);
+            assert_eq!(code, 0);
+            assert!(err.contains("pickup launches nothing; factory stopped by an unknown source at an unknown time"));
+            assert!(tk.puts().is_empty());
+            assert!(tk.launched().is_empty());
         }
     }
 }
