@@ -19,6 +19,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cli"))
 from support import ROOT, SKILL, IsolatedTestCase, snapshot
 
 
+def fake_rustc(folder):
+    (folder / "rustc").write_text("#!/bin/sh\nprintf 'rustc 1.100.0\\nhost: x86_64-unknown-linux-gnu\\n'\n")
+    (folder / "rustc").chmod(0o755)
+
+
 class InstallTest(IsolatedTestCase):
     def setUp(self):
         spec = importlib.util.spec_from_file_location("install", ROOT / "tools/install.py")
@@ -344,8 +349,8 @@ class InstallTest(IsolatedTestCase):
         self.assertFalse(distribution.exists())
 
     def checkout(self, cargo):
-        """A git checkout holding the skill and a rust/Cargo.toml, and a fake cargo on PATH running
-        the shell body cargo, or no cargo when it is None."""
+        """A git checkout holding the skill and a rust/Cargo.toml, and a fake cargo and rustc on PATH,
+        cargo running the shell body cargo, or neither when it is None."""
         checkout = self.root / "checkout"
         shutil.copytree(SKILL, checkout / "skills/factory", ignore=shutil.ignore_patterns("__pycache__", ".*"))
         (checkout / "rust").mkdir()
@@ -357,6 +362,7 @@ class InstallTest(IsolatedTestCase):
             bin_dir.mkdir()
             (bin_dir / "cargo").write_text("#!/bin/sh\n" + cargo)
             (bin_dir / "cargo").chmod(0o755)
+            fake_rustc(bin_dir)
             os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ["PATH"]
         return checkout / "skills/factory"
 
@@ -373,7 +379,7 @@ class InstallTest(IsolatedTestCase):
                                'printf "%s\\n" "$PWD" "$@" > "$CARGO_TARGET_DIR/args"\n')
         os.environ["STUB"] = "stub"
         target, err, bundle = self.install_rust(source)
-        self.assertEqual(err, "")
+        self.assertEqual(err, "install: Rust binary built in 0 s\n")
         binary = target / "runtime/factory"
         self.assertEqual(binary.read_bytes(), b"stub")
         self.assertEqual(stat.S_IMODE(binary.stat().st_mode), 0o755)
@@ -398,10 +404,45 @@ class InstallTest(IsolatedTestCase):
         self.assertEqual(runtime.bundle_stamp(), {"commit": bundle["commit"], "tree": bundle["tree"]})
         self.assertEqual(runtime.catch_up_entry(target), [str(binary)])
         os.environ.update(CARGO_TARGET_DIR=str(self.root / "own-target"), STUB="stub2")
+        (source.parents[1] / "rust/lib.rs").write_text("// changed\n")
         with contextlib.redirect_stderr(io.StringIO()):
             target, _ = self.install(replace=True, source=source)
         self.assertEqual((target / "runtime/factory").read_bytes(), b"stub2")
         self.assertTrue((self.root / "own-target/args").is_file())
+
+    @unittest.skipIf(os.name == "nt", "the fake cargo is a shell script")
+    def test_unchanged_inputs_reuse_the_cached_binary_and_three_are_kept(self):
+        del os.environ["FACTORY_RUNTIME"]
+        os.environ.pop("CARGO_TARGET_DIR", None)
+        source = self.checkout('echo >> "$HOME/runs" && mkdir -p "$CARGO_TARGET_DIR/host" && printf "$STUB" > "$CARGO_TARGET_DIR/host/factory"\n')
+        lib = source.parents[1] / "rust/lib.rs"
+        bins = self.root / ".cache/huss-skills/factory/bin"
+        runs = lambda: len((self.root / "runs").read_text().splitlines())
+        def rust(stub, text):
+            os.environ["STUB"] = stub
+            lib.write_text(text)
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                binary = self.installer.rust_binary(source.parents[1])
+            return binary, err.getvalue()
+        self.assertEqual(rust("one", "1")[0], b"one")
+        binary, err = rust("other", "1")
+        self.assertEqual((binary, runs()), (b"one", 1))
+        key = [path.name for path in bins.iterdir()]
+        self.assertEqual(err, "install: Rust binary from cache " + key[0][:8] + "\n")
+        self.assertEqual(stat.S_IMODE(bins.stat().st_mode), 0o700)
+        os.utime(bins / key[0], ns=(1, 1))
+        for n in ("2", "3", "4"):
+            self.assertEqual(rust(n, n), (n.encode(), "install: Rust binary built in 0 s\n"))
+        self.assertEqual((runs(), len(list(bins.iterdir()))), (4, 3))
+        self.assertFalse((bins / key[0]).exists())
+        # The rustc version and host triple are part of the key.
+        (self.root / "bin/rustc").write_text("#!/bin/sh\nprintf 'rustc 9.9.9\\nhost: aarch64-apple-darwin\\n'\n")
+        self.assertEqual(rust("5", "4")[0], b"5")
+        # A stored binary whose hash no longer matches is rebuilt, not installed.
+        stored = max(bins.iterdir(), key=lambda path: path.stat().st_mtime_ns)
+        (stored / "factory").write_bytes(b"tampered")
+        self.assertEqual(rust("6", "4")[0], b"6")
+        self.assertEqual(runs(), 6)
 
     def test_sync_rewrites_only_changed_files_and_drops_vanished_ones(self):
         root = self.root / "src"
@@ -454,15 +495,16 @@ class InstallTest(IsolatedTestCase):
         source = self.checkout('touch "$HOME/ran" && mkdir -p "$CARGO_TARGET_DIR/host" && printf lock > "$CARGO_TARGET_DIR/host/factory"\n')
         src = self.installer.private_dir(self.root / ".cache/huss-skills/factory/build-src")
         results = []
-        with open(src / self.installer.LOCK, "a") as lock:
-            self.installer.hold(lock)
-            thread = threading.Thread(target=lambda: results.append(self.installer.rust_binary(source.parents[1])))
-            thread.start()
-            thread.join(0.5)
-            self.assertTrue(thread.is_alive())
-            self.assertFalse((self.root / "ran").exists())
-        thread.join()
-        self.assertEqual(results, [b"lock"])
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            with open(src / self.installer.LOCK, "a") as lock:
+                self.installer.hold(lock)
+                thread = threading.Thread(target=lambda: results.append(self.installer.rust_binary(source.parents[1])))
+                thread.start()
+                thread.join(0.5)
+                self.assertTrue(thread.is_alive())
+                self.assertFalse((self.root / "ran").exists())
+            thread.join()
+        self.assertEqual((results, err.getvalue()), ([b"lock"], "install: Rust binary built in 0 s\n"))
 
     @unittest.skipIf(os.name == "nt", "the fake cargo is a shell script")
     def test_failed_build_keeps_the_python_runtime(self):
@@ -493,12 +535,13 @@ class InstallTest(IsolatedTestCase):
         home_cargo.parent.mkdir(parents=True)
         home_cargo.write_text('#!/bin/sh\nmkdir -p "$CARGO_TARGET_DIR/host" && printf home > "$CARGO_TARGET_DIR/host/factory"\n')
         home_cargo.chmod(0o755)
+        fake_rustc(home_cargo.parent)
         os.environ.pop("CARGO_TARGET_DIR", None)
         with patch.object(self.installer.shutil, "which", return_value=None):
             self.assertIsNone(self.installer.rust_binary(source.parents[1]))
             del os.environ["FACTORY_RUNTIME"]
             target, err, bundle = self.install_rust(source)
-        self.assertEqual(err, "")
+        self.assertEqual(err, "install: Rust binary built in 0 s\n")
         self.assertEqual((target / "runtime/factory").read_bytes(), b"home")
         self.assertEqual(bundle["entry"], ["runtime/factory"])
 

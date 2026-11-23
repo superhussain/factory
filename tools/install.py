@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -29,6 +30,8 @@ REQUIRED = (
 LEGACY = "huss-factory"
 BINARY = "runtime/factory.exe" if os.name == "nt" else "runtime/factory"
 LOCK = ".build.lock"
+PROFILE = "host"
+KEEP = 3  # binaries kept in the cache, newest first
 # A literal include_str! or include_bytes! path, relative to the .rs file that holds it.
 EMBED = re.compile(r'include_(?:str|bytes)!\(\s*"([^"]+)"\s*\)')
 
@@ -39,8 +42,9 @@ def fail(message):
 
 
 def rust_binary(checkout):
-    """The host-profile binary cargo builds from checkout's rust/ folder, or None when cargo is missing,
-    the build fails, FACTORY_RUNTIME is python or the checkout has no Rust workspace."""
+    """The host-profile binary cargo builds from checkout's rust/ folder, or the cached one built from the
+    same inputs, or None when cargo is missing, the build fails, FACTORY_RUNTIME is python or the
+    checkout has no Rust workspace."""
     manifest = checkout / "rust" / "Cargo.toml"
     if os.environ.get("FACTORY_RUNTIME") == "python" or not manifest.is_file():
         return None
@@ -57,18 +61,41 @@ def rust_binary(checkout):
              else Path.home() / ".cache" / "huss-skills" / "factory")
     # A per-user target folder keeps dependencies compiled across catch-up's fresh source worktrees.
     target = Path(os.environ.get("CARGO_TARGET_DIR") or cache / "cargo-target")
+    name = Path(BINARY).name
     try:
         files = build_inputs(checkout)
+        key = hashlib.sha256()
+        for rel in sorted(files):
+            key.update(rel.encode() + b"\0" + hashlib.sha256(files[rel]).digest())
+        # rustc -vV prints the pinned toolchain's version and its host target triple; cwd picks the pin.
+        rustc = Path(cargo).with_name("rustc.exe" if os.name == "nt" else "rustc")
+        key.update(run([str(rustc), "-vV"], checkout / "rust").encode() + b"\0" + PROFILE.encode())
+        key = key.hexdigest()
+        stored = private_dir(cache / "bin") / key
+        if (stored / name).is_file() and (stored / (name + ".sha256")).is_file():
+            binary = (stored / name).read_bytes()
+            if hashlib.sha256(binary).hexdigest() == (stored / (name + ".sha256")).read_text().strip():
+                print("install: Rust binary from cache " + key[:8], file=sys.stderr)
+                return binary
         os.makedirs(target, mode=0o700, exist_ok=True)
         # One stable source path keeps cargo's incremental artifacts valid from one checkout to the next.
         src = private_dir(cache / "build-src")
         with open(src / LOCK, "a") as lock:
             hold(lock)
             sync(files, src)
+            start = time.monotonic()
             # cwd is the workspace so rustup reads its rust-toolchain.toml.
-            run([cargo, "build", "--profile", "host", "--locked", "--manifest-path", str(src / "rust" / "Cargo.toml")],
+            run([cargo, "build", "--profile", PROFILE, "--locked", "--manifest-path", str(src / "rust" / "Cargo.toml")],
                 src / "rust", dict(os.environ, CARGO_TARGET_DIR=str(target)))
-            return (target / "host" / Path(BINARY).name).read_bytes()
+            binary = (target / PROFILE / name).read_bytes()
+            stored.mkdir(exist_ok=True)
+            (stored / name).write_bytes(binary)
+            (stored / (name + ".sha256")).write_text(hashlib.sha256(binary).hexdigest() + "\n")
+            os.utime(stored)
+            for old in sorted(stored.parent.iterdir(), key=lambda path: path.stat().st_mtime_ns, reverse=True)[KEEP:]:
+                shutil.rmtree(old)
+        print("install: Rust binary built in " + str(round(time.monotonic() - start)) + " s", file=sys.stderr)
+        return binary
     except (OSError, ValueError) as e:
         print("install: Rust build failed, keeping the Python runtime (" + str(e) + ")", file=sys.stderr)
         return None
