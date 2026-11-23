@@ -660,20 +660,34 @@ fn worktree_pids(wt: &str, proc_root: &Path, lsof: Option<&Path>) -> Vec<u32> {
     found
 }
 
+/// pid as a positive i32, or None for 0 or a value that does not fit, which kill would read as a process group
+/// or every process this account owns.
+fn single_pid(pid: u32) -> Option<i32> {
+    i32::try_from(pid).ok().filter(|&p| p > 0)
+}
+
+/// Send SIGTERM to pid. False when pid is not a single process, so nothing was sent.
 #[cfg(unix)]
-fn terminate(pid: u32) {
+fn terminate(pid: u32) -> bool {
     extern "C" {
         fn kill(pid: i32, sig: i32) -> i32;
     }
     const SIGTERM: i32 = 15;
+    let Some(pid) = single_pid(pid) else {
+        return false;
+    };
     // SAFETY: kill takes two integers and reads or writes no memory of this process.
     unsafe {
-        kill(pid as i32, SIGTERM);
+        kill(pid, SIGTERM);
     }
+    true
 }
 
 #[cfg(windows)]
-fn terminate(pid: u32) {
+fn terminate(pid: u32) -> bool {
+    if single_pid(pid).is_none() {
+        return false;
+    }
     #[link(name = "kernel32")]
     extern "system" {
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
@@ -689,6 +703,7 @@ fn terminate(pid: u32) {
             CloseHandle(handle);
         }
     }
+    true
 }
 
 /// `proc_name(pid) != ""`.
@@ -724,13 +739,18 @@ fn stop_pids_with(wt: &Path, proc_root: &Path, lsof: Option<PathBuf>) -> Option<
     pids.sort_unstable();
     pids.dedup();
     pids.retain(|p| !skip.contains(p));
-    for &pid in &pids {
-        terminate(pid);
-    }
+    // A pid that cannot be signalled counts as still running, so cleanup keeps the worktree.
+    let (signalled, unsent): (Vec<u32>, Vec<u32>) = pids.into_iter().partition(|&p| terminate(p));
     let deadline = Instant::now() + STOP_WAIT;
     loop {
-        let alive: Vec<u32> = pids.iter().copied().filter(|&p| proc_alive(p)).collect();
-        if alive.is_empty() || Instant::now() > deadline {
+        let running: Vec<u32> = signalled
+            .iter()
+            .copied()
+            .filter(|&p| proc_alive(p))
+            .collect();
+        if running.is_empty() || Instant::now() > deadline {
+            let mut alive = [unsent, running].concat();
+            alive.sort_unstable();
             return Some(alive);
         }
         thread::sleep(STOP_POLL);
@@ -2065,6 +2085,27 @@ mod tests {
     fn stop_pids_without_lsof_is_unchecked() {
         let dir = temp_dir("wt-no-lsof");
         assert_eq!(stop_pids_with(&dir, &dir.join("no-proc"), None), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_pids_never_signals_a_group() {
+        assert_eq!(
+            (single_pid(0), single_pid(u32::MAX), single_pid(7)),
+            (None, None, Some(7))
+        );
+        let dir = temp_dir("wt-bad-lsof");
+        let lsof = dir.join("lsof");
+        let wt = dir.display();
+        fs::write(
+            &lsof,
+            format!("#!/bin/sh\nprintf 'p4294967295\\nn{wt}\\np0\\nn{wt}\\n'\n"),
+        )
+        .unwrap();
+        chmod(&lsof, 0o755);
+        let alive = stop_pids_with(&dir, &dir.join("no-proc"), Some(lsof));
+        assert_eq!(alive, Some(vec![0, 4294967295]));
         fs::remove_dir_all(dir).unwrap();
     }
 
