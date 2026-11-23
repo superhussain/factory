@@ -44,6 +44,16 @@ installers, not arbitrary external filesystem writers. An existing lock fails
 closed; inspect its owner and resolve it manually, never auto-break a stale lock.
 The installer touches no device state, native roles or schedules. It leaves other skills alone, except that it removes a `huss-factory` link beside `factory`, the retired runtime that skips the job id check. A real `huss-factory` folder stays, with a warning to remove it by hand.
 
+### Staying current
+
+Once a skill is installed, run `python3 <installed-skill>/runtime/factory.py catch-up`
+on each host instead of rerunning the installer by hand. It backs up first, installs
+origin's skill with origin's `tools/install.py`, and has the new bundle rewrite the
+pickup timer. The timer command comes from the installed `bundle.json`: its optional
+`entry` key, a list whose first item is a path relative to the skill, names the
+program to run; without it catch-up runs the bundle's `runtime/factory.py` with this
+Python. See [upgrade.md](upgrade.md) for the backup folder and how to restore it.
+
 ## Offline initialization and credentials
 
 `init` seeds only absent `config.md` and `.env`, prints `factory home: <home>` and
