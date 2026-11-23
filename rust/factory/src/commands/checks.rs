@@ -10,11 +10,11 @@ use serde_json::{json, Map, Value};
 use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use ureq::Agent;
 
-use crate::cli::{not_ported, Call};
+use crate::cli::Call;
 use crate::shared::board::{dump_board, escalated, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::SLUG;
-use crate::shared::exit::{fail, Res};
+use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{is_link, read_text};
 use crate::shared::http::{cas, urlopen_error};
 use crate::shared::proc::{capture, which};
@@ -41,6 +41,12 @@ const BUILDKITE_TAIL_LINES: usize = 80;
 const BUILDKITE_TAIL_CHARS: usize = 8000;
 const BUILDKITE_MAX_BYTES: usize = 16 * 1024 * 1024;
 const ENV_SECRET_MIN: usize = 12;
+const PR_ENQUEUE_MUTATION: &str = "query=mutation($id:ID!,$sha:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$sha}){mergeQueueEntry{state position}}}";
+// factory.py keeps it beside the others; the arity gate prints the usage.
+#[allow(dead_code)]
+const PR_QUEUE_USAGE: &str = "usage: pr-queue <project-slug>/<job-id>";
+const PR_QUEUE_INTERVAL: f64 = 10.0;
+const PR_QUEUE_TIMEOUT: f64 = 120.0;
 const AUTONOMY_DAYS: i64 = 90;
 const AUTONOMY_CLASSES: &[&str] = &["internal", "visible"];
 const AUTONOMY_HOLD_NOTE: &str = "earned autonomy hold: a person reviews and merges";
@@ -57,6 +63,7 @@ static BUILDKITE_BUILD: Pattern = Pattern::new(
 );
 static BUILDKITE_JOB: Pattern = Pattern::new(r"[0-9a-f-]{36}", Flags::NONE);
 static BUILDKITE_STRIP: Pattern = Pattern::new(r"\x1b_bk;t=[0-9]+\x07|\x1b\[[0-9;?]*[A-Za-z]", Flags::NONE);
+static MERGE_ASYNC_ID: Pattern = Pattern::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", Flags::NONE);
 
 #[derive(Clone)]
 pub(crate) enum GhCode {
@@ -961,8 +968,71 @@ pub fn pr_state_cmd(call: &Call) -> Res<()> {
     pr_state_loop(&mut host, &home, &pr, &base, org, &handled, wait, &mut io::stdout())
 }
 
-pub fn pr_queue_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("pr-queue"))
+/// Queue the PR with the enqueuePullRequest mutation, else through merge-async, and print one JSON line once
+/// GitHub says enqueued or failed.
+fn pr_queue_run(h: &mut dyn Host, pr: &str, base: &str, number: &str, out: &mut dyn Write) -> Res<()> {
+    let view = loads(&gh_pr_view(h, pr, &["--json", "headRefOid,baseRefName,id"])?).unwrap_or(Value::Null);
+    let Some(sha) = view.get("headRefOid").and_then(Value::as_str).filter(|s| COMMIT.is_full(s)).map(String::from) else {
+        return Err(fail("gh pr view printed no usable headRefOid", 5));
+    };
+    if view.get("baseRefName").and_then(Value::as_str) != Some(base) {
+        let target = printable_line(&py_str(view.get("baseRefName").unwrap_or(&Value::Null)), 255);
+        return Err(fail(format!("PR #{number} targets {target}, not {base}: it waits for its parent"), 4));
+    }
+    let parts: Vec<&str> = pr.split('/').collect();
+    let path = format!("repos/{}/{}/pulls/{number}/merge-async", parts[3], parts[4]);
+    let done = |out: &mut dyn Write, status: &str, detail: String, code: i32| -> Res<()> {
+        writeln!(out, "{}", dumps(&json!({"pr": py_int(number), "status": status, "detail": detail}), DEFAULT)).ok();
+        if code == 0 { Ok(()) } else { Err(exit(code)) }
+    };
+
+    let (id, sha_arg) = (format!("id={}", py_str(view.get("id").unwrap_or(&Value::Null))), format!("sha={sha}"));
+    if let Some(GhOut { code: GhCode::Exit(0), stdout, .. }) = h.gh(&["api", "graphql", "-f", PR_ENQUEUE_MUTATION, "-f", &id, "-f", &sha_arg]) {
+        let entry = loads(&stdout).ok().and_then(|v| v.get("data")?.get("enqueuePullRequest")?.get("mergeQueueEntry").cloned());
+        if let Some(entry) = entry.filter(Value::is_object) {
+            let detail = entry.get("position").filter(|p| !p.is_null()).map_or(String::new(), |p| format!("position {}", py_str(p)));
+            return done(out, "enqueued", detail, 0);
+        }
+    }
+
+    let result = h.gh(&["api", "-X", "PUT", &path, "-f", &sha_arg, "-f", "merge_action=merge_queue"]);
+    let Some(GhOut { code: GhCode::Exit(code), stdout, stderr }) = result else {
+        return Err(gh_answer(result, "gh api merge-async").unwrap_err());
+    };
+    if code != 0 {
+        return done(out, "refused", printable_line(if stderr.is_empty() { &stdout } else { &stderr }, 500), 1);
+    }
+    let uuid = match loads(&stdout) {
+        Ok(Value::Object(reply)) => reply.values().filter_map(Value::as_str).find(|v| MERGE_ASYNC_ID.is_full(v)).map(String::from),
+        _ => None,
+    };
+    let Some(uuid) = uuid else { return Err(fail("gh api merge-async printed no request id", 5)) };
+    let poll = format!("{path}/{uuid}");
+    let start = h.monotonic();
+    loop {
+        let data = loads(&gh_answer(h.gh(&["api", &poll]), "gh api merge-async")?).ok().filter(Value::is_object);
+        let Some(data) = data else { return Err(fail("gh api merge-async printed no JSON object", 5)) };
+        let status = str_or_empty(data.get("status")).to_lowercase();
+        if status == "enqueued" {
+            return done(out, &status, String::new(), 0);
+        }
+        if status == "failed" {
+            return done(out, &status, printable_line(&dumps(&data, DEFAULT), 500), 1);
+        }
+        if h.monotonic() - start >= PR_QUEUE_TIMEOUT {
+            return done(out, &status, printable_line(&dumps(&data, DEFAULT), 500), 3);
+        }
+        h.sleep(PR_QUEUE_INTERVAL);
+    }
+}
+
+pub fn pr_queue_cmd(call: &Call) -> Res<()> {
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    let pr = board_pr(&home, &slug, &job_id, false)?;
+    let meta = project_meta(&home, &slug)?;
+    let base = fm_get(&meta, "base").filter(|b| !b.is_empty()).unwrap_or("main");
+    let number = pr.split('/').nth(6).unwrap();
+    pr_queue_run(&mut System::new(), &pr, base, number, &mut io::stdout())
 }
 
 #[cfg(test)]
@@ -1577,5 +1647,81 @@ mod tests {
         let got = buildkite_log(&home, &bk_check(&format!("{LINK}#{JOB_ID}")), "example-org", &format!("{origin}/v2"), 64);
         assert_eq!((got["problem"].as_str(), got["tail"].as_str()), (Some("Buildkite sent no usable log"), Some("")));
         assert_eq!(seen.lock().unwrap().len(), 2);
+    }
+
+    const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+    const UUID: &str = "0190a1b2-0000-4000-8000-0000000000aa";
+    const MERGE_ASYNC: &str = "repos/example/sample/pulls/44/merge-async";
+
+    fn queue_fake(graphql: Option<GhOut>, put: Option<GhOut>, polls: Vec<Option<GhOut>>) -> Fake {
+        let view = json!({"headRefOid": SHA, "baseRefName": "main", "id": "PR_node44"}).to_string();
+        let poll = format!("{MERGE_ASYNC}/{UUID}");
+        Fake::default()
+            .on(&["pr", "view"], vec![ok(&view)])
+            .on(&["api", "graphql"], vec![graphql])
+            .on(&["api", "-X", "PUT"], vec![put])
+            .on(&["api", &poll], polls)
+    }
+
+    fn queue_status(status: &str) -> Option<GhOut> {
+        ok(&json!({"status": status}).to_string())
+    }
+
+    fn pending_put() -> Option<GhOut> {
+        ok(&json!({"id": UUID, "status": "pending"}).to_string())
+    }
+
+    /// (exit code, stdout, stderr) of pr_queue_run.
+    fn run_queue(fake: &mut Fake) -> (i32, String, String) {
+        let mut out = Vec::new();
+        let (code, err) = match pr_queue_run(fake, SPR, "main", "44", &mut out) {
+            Ok(()) => (0, String::new()),
+            Err(e) => (e.code, e.stderr),
+        };
+        (code, String::from_utf8(out).unwrap(), err)
+    }
+
+    // PrQueueTest.test_enqueued_after_one_pending_poll
+    #[test]
+    fn queue_enqueued_after_pending_poll() {
+        let mut fake = queue_fake(reply(1, "", "mutation refused\n"), pending_put(), vec![queue_status("pending"), queue_status("ENQUEUED")]);
+        assert_eq!(run_queue(&mut fake), got(0, "{\"pr\": 44, \"status\": \"enqueued\", \"detail\": \"\"}\n", ""));
+        let sha = format!("sha={SHA}");
+        assert_eq!(fake.calls[0], ["pr", "view", SPR, "--json", "headRefOid,baseRefName,id"]);
+        assert_eq!(fake.calls[1], ["api", "graphql", "-f", PR_ENQUEUE_MUTATION, "-f", "id=PR_node44", "-f", &sha]);
+        assert_eq!(fake.calls[2], ["api", "-X", "PUT", MERGE_ASYNC, "-f", &sha, "-f", "merge_action=merge_queue"]);
+        let poll = format!("{MERGE_ASYNC}/{UUID}");
+        assert_eq!(fake.calls[3..], [["api", poll.as_str()], ["api", poll.as_str()]]);
+        assert_eq!(fake.now, 10.0);
+    }
+
+    // PrQueueTest.test_pending_at_the_deadline_exits_3
+    #[test]
+    fn queue_pending_at_deadline() {
+        let mut fake = queue_fake(miss(), pending_put(), vec![queue_status("pending")]);
+        let (code, out, _) = run_queue(&mut fake);
+        let reading = loads(&out).unwrap();
+        assert_eq!((code, reading["status"].as_str(), fake.now), (3, Some("pending"), 120.0));
+        assert!(reading["detail"].as_str().unwrap().contains("\"status\": \"pending\""));
+        let poll = format!("{MERGE_ASYNC}/{UUID}");
+        assert_eq!(fake.calls.iter().filter(|c| **c == ["api", poll.as_str()]).count(), 13);
+    }
+
+    // PrQueueTest.test_gh_problem_on_the_put_exits_5
+    #[test]
+    fn queue_put_timeout_or_missing_gh() {
+        for (put, why) in [(None, "gh is not installed"), (timeout(), "gh api merge-async timed out after 60 seconds")] {
+            let mut fake = queue_fake(miss(), put, vec![queue_status("enqueued")]);
+            assert_eq!(run_queue(&mut fake), got(5, "", &format!("factory.py: {why}\n")));
+        }
+    }
+
+    // PrQueueTest.test_a_refused_mutation_falls_back_to_merge_async, the missing gh subtest
+    #[test]
+    fn queue_mutation_missing_gh() {
+        let mut fake = queue_fake(None, pending_put(), vec![queue_status("enqueued")]);
+        assert_eq!(run_queue(&mut fake), got(0, "{\"pr\": 44, \"status\": \"enqueued\", \"detail\": \"\"}\n", ""));
+        assert_eq!(fake.count("graphql"), 1);
+        assert_eq!(fake.calls[2][..3], ["api", "-X", "PUT"]);
     }
 }
