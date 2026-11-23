@@ -369,8 +369,10 @@ headers other than the upgrade ones are still dropped.
   rows per project and stage, under the stored `ETag`. Finished column headers then say
   `showing 10 of N`. Once a view needs older rows (show all, the jumper, a link to an older
   job, another route, the starred-only view) it reads `/api/board` once and keeps those rows.
-  `/board.json` without the query still returns the stored bytes. Concurrent slim misses in
-  one isolate share one read, `slimPending`, keyed by board `ETag`.
+  `/board.json` without the query still returns the stored bytes. Each slim miss does its own
+  read, since a promise one request starts cannot settle in another; the isolate keeps only
+  the last slim body as a string, `slimMemo`, keyed by board `ETag`. `node --expose-gc
+  tools/board-cpu.mjs` times each board write and slim step on a synthetic board.
 
 | Request to `/events/board` | Result |
 | --- | --- |

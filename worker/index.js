@@ -326,11 +326,10 @@ async function getFile(env, key, type, headers = {}) {
 }
 
 // The last slim body and the board ETag it came from, so this isolate slices each board version once.
+// It holds plain strings only. Each request does its own read, since a promise one request
+// starts cannot settle in another.
 let slimMemo = { etag: "", body: "" };
-// The read in flight for one board ETag, so concurrent misses in this isolate parse the board once.
-let slimPending = { etag: "", read: null };
 
-// Resolves to plain strings only, so no R2 object crosses requests.
 async function readSlim(env) {
   const obj = await env.BUCKET.get("board.json");
   if (!obj) return null;
@@ -345,23 +344,13 @@ async function readSlim(env) {
 }
 
 // The dashboard's first read. A board that is not JSON with a jobs array goes out as stored.
-async function slimBoardGet(env, ctx) {
+async function slimBoardGet(env) {
   const head = await env.BUCKET.head("board.json");
   if (!head) return notFound();
   const send = (body, etag) =>
     reply(body, 200, "application/json", { ETag: etag, "X-Factory-Version": DASHBOARD_VERSION });
   if (slimMemo.etag === head.httpEtag) return send(slimMemo.body, head.httpEtag);
-  if (slimPending.etag !== head.httpEtag) {
-    const read = readSlim(env);
-    const clear = () => {
-      if (slimPending.read === read) slimPending = { etag: "", read: null };
-    };
-    // Keeps the read alive for the waiters if the request that started it is cancelled.
-    const settled = read.then(clear, clear);
-    if (ctx) ctx.waitUntil(settled);
-    slimPending = { etag: head.httpEtag, read };
-  }
-  const out = await slimPending.read;
+  const out = await readSlim(env);
   return out ? send(out.body, out.etag) : notFound();
 }
 
@@ -520,6 +509,20 @@ async function boardCommitted(env, storedJobs, jobs, ctx) {
   else await send;
 }
 
+// Whether two values parsed from JSON stringify alike, keys in the same order, without
+// stringifying either, so an unchanged row costs a walk and no new strings.
+function sameJson(a, b) {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a),
+    kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (let i = 0; i < ka.length; i++)
+    if (ka[i] !== kb[i] || !sameJson(a[ka[i]], b[kb[i]])) return false;
+  return true;
+}
+
 const MAX_FRAME_ROWS = 100;
 const MAX_FRAME_BYTES = 262144;
 
@@ -550,7 +553,7 @@ function rowsFrame(stored, data, etag) {
     removed = [];
   for (const [id, row] of after) {
     const old = before.get(id);
-    if (old === row || (old && JSON.stringify(old) === JSON.stringify(row))) continue;
+    if (sameJson(old, row)) continue;
     if (terminal(old) || terminal(row)) return "";
     rows.push(row);
   }
@@ -731,10 +734,9 @@ async function boardPatch(request, env, principal, ctx) {
     const data = { ...doc, jobs, updated };
     const bad = await boardRefusal(env, stored, data, true, principal);
     if (bad) return reply(bad, 400);
-    const text = JSON.stringify(data);
-    if (new TextEncoder().encode(text).length > MAX_BOARD)
-      return reply("board over 16 MiB. Nothing was written.", 413);
-    const obj = await env.BUCKET.put("board.json", text, {
+    const bytes = new TextEncoder().encode(JSON.stringify(data));
+    if (bytes.length > MAX_BOARD) return reply("board over 16 MiB. Nothing was written.", 413);
+    const obj = await env.BUCKET.put("board.json", bytes, {
       onlyIf: new Headers(stored.etag ? { "If-Match": stored.etag } : { "If-None-Match": "*" }),
       httpMetadata: { contentType: "application/json" },
     });
@@ -3640,7 +3642,7 @@ export async function serveFactory(request, env, principal, ctx) {
   if (path.startsWith("/assets/") || path === "/sw.js") return serveAsset(request, env.config);
   if (path === "/board.json")
     return new URL(request.url).searchParams.get("view") === "slim"
-      ? slimBoardGet(env, ctx)
+      ? slimBoardGet(env)
       : getFile(env, "board.json", "application/json", {
           "X-Factory-Version": DASHBOARD_VERSION,
         });

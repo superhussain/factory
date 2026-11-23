@@ -2,7 +2,8 @@
 registration, job write grammar, weak ETags, idea-image idempotence and two-device
 job/project exit-6 reconciliation. The cancelled slim read with a waiter runs against
 direct Miniflare on 8222, because wrangler dev never passes a client reset on to the
-worker; its reader asks for a delayed R2 get so the cancel has a timer to kill.
+worker; its reader asks for a delayed R2 get so the cancel has a timer to kill, and a
+second reader running beside it does its own read and still answers.
 Installed into temporary HOME, checkout imports unavailable, synthetic Git checkouts,
 owned loopback target only."""
 import concurrent.futures
@@ -318,7 +319,7 @@ class CancelDrillTest(unittest.TestCase):
             time.sleep(delay)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
 
-    def test_cancelled_slim_read_still_answers_waiter(self):
+    def test_cancelled_slim_read_leaves_second_reader_answered(self):
         status, headers, original = self.request("/api/board")
         if status == 404:
             original = b'{"jobs": []}'
@@ -339,14 +340,11 @@ class CancelDrillTest(unittest.TestCase):
             aborter = threading.Thread(target=self.abort_slim, args=(0.1,))
             aborter.start()
             time.sleep(0.05)
-            started = time.monotonic()
             try:
                 status, headers, body = self.request("/board.json?view=slim", timeout=10)
             except (socket.timeout, urllib.error.URLError):
-                self.fail(f"round {n}: waiter got no answer in 10 s")
-            elapsed = time.monotonic() - started
+                self.fail(f"round {n}: second reader got no answer in 10 s")
             aborter.join()
-            self.assertGreaterEqual(elapsed, 0.2, f"round {n}: A started the delayed read")
             self.assertEqual(status, 200, f"round {n}")
             self.assertEqual(strong(headers["ETag"]), strong(etag[0]))
             slim = json.loads(body)
