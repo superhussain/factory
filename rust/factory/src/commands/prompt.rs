@@ -15,12 +15,12 @@ use crate::shared::consts::{
 };
 use crate::shared::exit::{fail, Exit, Res};
 use crate::shared::fs::{
-    contained, io_fail, is_link, make_job_temp, mkdir_private, normpath, resolve, write_atomic,
+    contained, io_fail, is_link, make_job_temp, mkdir_private, normpath, write_atomic,
 };
-use crate::shared::home::skill_root;
+use crate::shared::home::{runtime_py, skill_root};
 use crate::shared::http::api;
 use crate::shared::project::{project_files, r2_target};
-use crate::shared::py::{os_error, repr};
+use crate::shared::py::repr;
 use crate::shared::pyjson::loads;
 use crate::shared::pyre::{Flags as ReFlags, Pattern};
 use crate::shared::pyval::{py_str, truthy};
@@ -603,9 +603,7 @@ pub fn prompt_cmd(call: &Call) -> Res<()> {
         _ => job_id.clone(),
     };
     let references = skill_root()?.join("references");
-    let runtime = std::env::current_exe()
-        .and_then(|p| resolve(&p))
-        .map_err(|e| fail(os_error(&e, None), 1))?;
+    let runtime = runtime_py()?;
     let temp = make_job_temp(&slug, &job_id)?;
     let mut lines = vec![
         format!("Job id: {job_id}"),

@@ -10,7 +10,7 @@ use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::IN_FLIGHT;
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::{resolve, same_path};
-use crate::shared::home::{factory_home, holder};
+use crate::shared::home::{factory_home, holder, runtime_py};
 use crate::shared::http::{api, api_url, quote};
 use crate::shared::proc::git;
 use crate::shared::project::{project_files, pull_project, r2_target, read_paths};
@@ -146,9 +146,7 @@ pub fn where_cmd(call: &Call) -> Res<()> {
             1,
         ));
     }
-    let runtime = std::env::current_exe()
-        .and_then(|p| resolve(&p))
-        .map_err(|e| fail(os_error(&e, None), 1))?;
+    let runtime = runtime_py()?;
     let text = |p: PathBuf| p.display().to_string();
     let out = json!({
         "factory": text(home.clone()),
