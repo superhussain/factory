@@ -371,7 +371,7 @@ pub(crate) fn orphan_scan(home: &Path) -> Res<(Vec<Value>, Vec<String>)> {
 }
 
 /// The board's jobs, refusing anything but a list of objects, where Python would raise.
-fn board_jobs(board: &Value) -> Res<&[Value]> {
+pub(crate) fn board_jobs(board: &Value) -> Res<&[Value]> {
     match board.get("jobs") {
         Some(Value::Array(jobs)) if jobs.iter().all(Value::is_object) => Ok(jobs),
         _ => Err(fail("the board's jobs is not a list of objects", 1)),

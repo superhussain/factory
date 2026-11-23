@@ -2,6 +2,7 @@
 //! board passes.
 
 use crate::commands::claims::{self, mine};
+use crate::commands::ops;
 use crate::commands::tracer::SPEC_APPROVED_NOTES;
 use crate::shared::pyval::truthy;
 #[cfg(test)]
@@ -15,16 +16,16 @@ use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Map, Value};
+use serde_json::{json, Map, Number, Value};
 
 use crate::cli::{not_ported, Call};
 use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, riders_of};
 use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::{
     tag_lookalike, ADAPTER_ID, BACKLOG_LINE, BACKLOG_NOTES_TAG, BACKPRESSURE_NEEDS_YOU,
-    HOLD_MAX_HOURS, HOLD_MIN_IDEAS, IDEA, IN_FLIGHT, JOB_ID, MAX_RIDERS, NOTE_INVISIBLE, NOTE_LINK,
-    NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, PASEO_ID, REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL,
-    SLUG, TERMINAL, UNATTENDED, WINDOWS,
+    HOLD_MAX_HOURS, HOLD_MIN_IDEAS, IDEA, IN_FLIGHT, JOB_ID, MAX_RIDERS, NEW_JOB_ID,
+    NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, PASEO_ID, REVIEW_ROUTE_KEYS,
+    ROUTE_EFFORTS, ROUTE_MODEL, SLUG, TERMINAL, UNATTENDED, WINDOWS,
 };
 use crate::shared::exit::{exit, fail, Exit, Res};
 use crate::shared::fs::{is_link, read_text, regular_metadata, resolve, write_atomic};
@@ -66,6 +67,7 @@ const PICKUP_SCHEDULER: &str = if cfg!(target_os = "macos") {
 const ORPHAN_SCAN_FILE: &str = "orphan-scan.json";
 const OUTCOMES_RECORD_FILE: &str = "outcomes-record.json";
 const RETRO_PUSH_FILE: &str = "retro-push.json";
+const AUDIT_PUSH_FILE: &str = "audit-push.json";
 const ORPHAN_KINDS: &[&str] = &["branch", "pr", "worktree", "workspace"];
 const ORPHAN_NOUNS: &[(&str, &str)] = &[
     ("branch", "branches"),
@@ -137,6 +139,10 @@ struct Fakes {
     usage_totals: Option<Rc<dyn Fn(&Path, &str, &str) -> Result<Value, String>>>,
     auto_babysit_pass: Option<Rc<dyn Fn(&mut Io, &Path) -> Res<()>>>,
     auto_babysit_limit: Option<usize>,
+    retro_push: Option<Rc<dyn Fn() -> Res<()>>>,
+    audit_stamp: Option<Rc<dyn Fn(&str) -> Option<i128>>>,
+    audit_push: Option<Rc<dyn Fn(&str) -> Res<()>>>,
+    usage_record: Option<Rc<dyn Fn(&Path, &str, &str, &str, &Value) -> Res<()>>>,
     pickup_scheduler: Option<&'static str>,
     launch_wait_seconds: Option<f64>,
     exe: Option<String>,
@@ -993,8 +999,8 @@ fn run_passes(
                 }
             }
         }
-        retro_pickup_push(home)?;
-        audit_pickup_push(home)?;
+        retro_pickup_push(io, home)?;
+        audit_pickup_push(io, home, data.as_ref())?;
         orphan_pickup_scan(io, home)?;
         outcomes_pickup_record(home)?;
     }
@@ -2674,19 +2680,185 @@ fn retro_pushed_today(home: &Path) -> bool {
     ran_today(&home.join(RETRO_PUSH_FILE), &local_date(utc, offset))
 }
 
-fn retro_pickup_push(home: &Path) -> Res<()> {
+fn retro_push() -> Res<()> {
+    #[cfg(test)]
+    if let Some(f) = fake!(retro_push) {
+        return f();
+    }
+    crate::commands::retro::retro_push()
+}
+
+/// Push this host's digest on pickup's first run of a local date with no recorded push. Best
+/// effort: a failed push costs one warning, and the next pickup run retries it.
+fn retro_pickup_push(io: &mut Io, home: &Path) -> Res<()> {
     if retro_pushed_today(home) || !retro_transcripts().is_dir() {
         return Ok(());
     }
-    Err(deferred("retro push"))
+    if let Err(e) = retro_push() {
+        let _ = io.err.write_all(e.stderr.as_bytes());
+        errln!(
+            io,
+            "factory.py: retro push stopped (exit {}); the next pickup run retries it",
+            e.code
+        );
+    }
+    Ok(())
 }
 
-fn audit_pickup_push(home: &Path) -> Res<()> {
-    let _ = home;
+fn audit_stamp(job_id: &str) -> Option<i128> {
+    #[cfg(test)]
+    if let Some(f) = fake!(audit_stamp) {
+        return f(job_id);
+    }
+    crate::commands::audit::audit_stamp(job_id)
+}
+
+fn audit_push(job_id: &str) -> Res<()> {
+    #[cfg(test)]
+    if let Some(f) = fake!(audit_push) {
+        return f(job_id);
+    }
+    crate::commands::audit::audit_push(job_id)
+}
+
+fn usage_record(home: &Path, slug: &str, job_id: &str, device: &str, totals: &Value) -> Res<()> {
+    #[cfg(test)]
+    if let Some(f) = fake!(usage_record) {
+        return f(home, slug, job_id, device, totals);
+    }
+    crate::commands::audit::usage_record(home, slug, job_id, device, totals)
+}
+
+/// {job id: stamp} from <home>/audit-push.json, or {} for a missing or malformed record.
+fn audit_pushed(home: &Path) -> Map<String, Value> {
+    let record = read_json(&home.join(AUDIT_PUSH_FILE)).unwrap_or_default();
+    let jobs = if eq_int(record.get("version"), 1) {
+        record.get("jobs").and_then(Value::as_object)
+    } else {
+        None
+    };
+    match jobs {
+        Some(jobs)
+            if jobs
+                .values()
+                .all(|v| v.as_number().and_then(Number::as_i128).is_some()) =>
+        {
+            jobs.clone()
+        }
+        _ => Map::new(),
+    }
+}
+
+fn audit_push_stopped(io: &mut Io, e: Exit) -> Res<()> {
+    let _ = io.err.write_all(e.stderr.as_bytes());
+    errln!(
+        io,
+        "factory.py: audit push stopped (exit {}); the next pickup run retries it",
+        e.code
+    );
+    Ok(())
+}
+
+/// Push this host's audit rows for each in-flight or pr-open job whose transcripts changed since
+/// the last recorded push, and refresh this host's token share. Best effort: a failed push costs one
+/// warning, and the next pickup run retries it.
+fn audit_pickup_push(io: &mut Io, home: &Path, data: Option<&Value>) -> Res<()> {
     if !retro_transcripts().is_dir() {
         return Ok(());
     }
-    Err(deferred("audit push"))
+    let (record, mut kept) = (audit_pushed(home), Map::new());
+    let read;
+    let board = match data {
+        Some(board) => board,
+        None => match read_board(home) {
+            Ok(board) => {
+                read = board;
+                &read
+            }
+            Err(e) => return audit_push_stopped(io, e),
+        },
+    };
+    let jobs = ops::board_jobs(board)?;
+    let pushed = (|| -> Res<()> {
+        for job in jobs {
+            let stage = get_str(job, "stage");
+            if !stage.is_some_and(|s| IN_FLIGHT.contains(&s) || s == "pr-open") {
+                continue;
+            }
+            let Some(job_id) = get_str(job, "id").filter(|id| NEW_JOB_ID.is_full(id)) else {
+                continue;
+            };
+            let Some(stamp) = audit_stamp(job_id) else {
+                continue;
+            };
+            if record
+                .get(job_id)
+                .and_then(Value::as_number)
+                .and_then(Number::as_i128)
+                != Some(stamp)
+            {
+                audit_push(job_id)?;
+                usage_pickup_record(io, home, job)?;
+            }
+            kept.insert(job_id.to_string(), Value::from(stamp));
+        }
+        Ok(())
+    })();
+    if let Err(e) = pushed {
+        return audit_push_stopped(io, e);
+    }
+    if kept != record {
+        write_file(
+            &home.join(AUDIT_PUSH_FILE),
+            &(dumps(&json!({"version": 1, "jobs": kept}), DEFAULT) + "\n"),
+        )?;
+    }
+    Ok(())
+}
+
+/// Refresh this host's token share on a board job from pickup. Skips a job without a valid
+/// project, a host without a valid device:, a scan with no tokens and an unchanged share.
+fn usage_pickup_record(io: &mut Io, home: &Path, job: &Value) -> Res<()> {
+    let job_id = get_str(job, "id").unwrap_or_default();
+    let config = home.join("config.md");
+    let meta = if config.is_file() {
+        meta(&config)?
+    } else {
+        Vec::new()
+    };
+    let device = lookup(&meta, "device").unwrap_or("");
+    let Some(slug) = get_str(job, "project").filter(|s| SLUG.is_full(s)) else {
+        return Ok(());
+    };
+    if !HOST_NAME.is_full(device) {
+        return Ok(());
+    }
+    let totals = match usage_totals(io, home, slug, job_id) {
+        Ok(totals) => totals,
+        Err(why) => {
+            errln!(
+                io,
+                "factory.py: usage: scan failed on {job_id} ({why}); nothing recorded"
+            );
+            return Ok(());
+        }
+    };
+    let old: Map<String, Value> = job
+        .get("tokens")
+        .and_then(Value::as_object)
+        .and_then(|t| t.get(device))
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(k, _)| *k != "at")
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    if !truthy(&totals["models"]) || Value::Object(old) == totals {
+        return Ok(());
+    }
+    usage_record(home, slug, job_id, device, &totals)?;
+    outln!(io, "recorded {device} tokens on {job_id}");
+    Ok(())
 }
 
 fn tracer_follow_pass(home: &Path) -> Res<()> {
@@ -8457,31 +8629,6 @@ exit "$code"
         }
 
         #[test]
-        fn retro_push() {
-            let fx = Fx::new();
-            fs::create_dir_all(fx.root.join("claude/projects")).unwrap();
-            fs::write(
-                fx.home.join(RETRO_PUSH_FILE),
-                r#"{"version": 1, "date": "2026-01-01"}"#,
-            )
-            .unwrap();
-            assert_deferred(fx.pickup(&[]), "retro push");
-        }
-
-        #[test]
-        fn audit_push() {
-            let fx = Fx::new();
-            fs::create_dir_all(fx.root.join("claude/projects")).unwrap();
-            let (utc, offset) = local_now();
-            fs::write(
-                fx.home.join(RETRO_PUSH_FILE),
-                json!({"version": 1, "date": local_date(utc, offset)}).to_string(),
-            )
-            .unwrap();
-            assert_deferred(fx.pickup(&[]), "audit push");
-        }
-
-        #[test]
         fn outcomes_record() {
             let fx = Fx::new();
             fx.set_fakes(|f| {
@@ -12005,18 +12152,6 @@ exit "$archive_code"
         }
     }
 
-    /// The retro and audit pushes wait on their slices: past the transcripts gate pickup exits 2.
-    fn assert_push_deferred(result: (i32, String, String), what: &str) {
-        assert_eq!(
-            result,
-            out_err(
-                2,
-                "",
-                &format!("factory.py: pickup {what} is not ported to the Rust binary yet\n")
-            )
-        );
-    }
-
     mod retro_pickup_test {
         use super::*;
 
@@ -12033,45 +12168,73 @@ exit "$archive_code"
             local_date(utc, offset)
         }
 
+        /// Fake retro_push: counts calls, and on success writes today's record as retro_push does.
+        fn push_fake(fx: &Fx, failure: Option<(&'static str, i32)>) -> Rc<RefCell<usize>> {
+            let calls = Rc::new(RefCell::new(0));
+            let (n, home) = (calls.clone(), fx.home.clone());
+            fx.set_fakes(|f| {
+                f.retro_push = Some(Rc::new(move || {
+                    *n.borrow_mut() += 1;
+                    if let Some((msg, code)) = failure {
+                        return Err(fail(msg, code));
+                    }
+                    let record = json!({"version": 1, "date": today()}).to_string() + "\n";
+                    fs::write(home.join(RETRO_PUSH_FILE), record).unwrap();
+                    Ok(())
+                }))
+            });
+            calls
+        }
+
+        fn record(fx: &Fx) -> Value {
+            loads(&read_text(&fx.home.join(RETRO_PUSH_FILE)).unwrap()).unwrap()
+        }
+
         #[test]
         fn test_first_run_of_a_day_pushes_once() {
             let fx = setup();
-            assert_push_deferred(fx.pickup(&[]), "retro push");
-            fs::write(
-                fx.home.join(RETRO_PUSH_FILE),
-                json!({"version": 1, "date": today()}).to_string(),
-            )
-            .unwrap();
-            assert_push_deferred(fx.pickup(&[]), "audit push");
+            let calls = push_fake(&fx, None);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(record(&fx), json!({"version": 1, "date": today()}));
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*calls.borrow(), 1);
         }
 
         #[test]
         fn test_an_earlier_date_pushes_again() {
             let fx = setup();
+            let calls = push_fake(&fx, None);
             fs::write(
                 fx.home.join(RETRO_PUSH_FILE),
                 r#"{"version": 1, "date": "2026-01-01"}"#,
             )
             .unwrap();
-            assert_push_deferred(fx.pickup(&[]), "retro push");
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*calls.borrow(), 1);
         }
 
         #[test]
         fn test_a_malformed_record_pushes_again() {
             let fx = setup();
+            let calls = push_fake(&fx, None);
             fs::write(fx.home.join(RETRO_PUSH_FILE), "{not json").unwrap();
-            assert_push_deferred(fx.pickup(&[]), "retro push");
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*calls.borrow(), 1);
+            assert_eq!(record(&fx), json!({"version": 1, "date": today()}));
         }
 
         #[test]
         fn test_an_unknown_version_pushes_again() {
             let fx = setup();
+            let calls = push_fake(&fx, None);
             fs::write(
                 fx.home.join(RETRO_PUSH_FILE),
                 json!({"version": 2, "date": today()}).to_string(),
             )
             .unwrap();
-            assert_push_deferred(fx.pickup(&[]), "retro push");
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*calls.borrow(), 1);
+            assert_eq!(record(&fx), json!({"version": 1, "date": today()}));
         }
 
         #[test]
@@ -12079,25 +12242,67 @@ exit "$archive_code"
             let fx = setup();
             alpha_on(&fx);
             fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
-            assert_push_deferred(fx.pickup(&[]), "retro push");
-            assert!(fx.launched().is_empty());
+            push_fake(&fx, Some(("Access rejected the service token", 5)));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert!(
+                matches(
+                    "launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n",
+                    &out
+                ),
+                "{out}"
+            );
+            assert!(err.contains("Access rejected the service token"), "{err}");
+            assert!(
+                err.ends_with(
+                    "factory.py: retro push stopped (exit 5); the next pickup run retries it\n"
+                ),
+                "{err}"
+            );
             assert!(!fx.home.join(RETRO_PUSH_FILE).exists());
+        }
+
+        #[test]
+        fn test_a_failing_retro_push_still_claims() {
+            let fx = setup();
+            let calls = push_fake(&fx, Some(("made-up push failure", 1)));
+            let ran = Rc::new(RefCell::new(0));
+            let n = ran.clone();
+            fx.set_fakes(|f| {
+                f.pickup_pass = Some(Rc::new(move |_, _| {
+                    *n.borrow_mut() += 1;
+                    Ok(())
+                }))
+            });
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: made-up push failure\nfactory.py: retro push stopped (exit 1); the next pickup run retries it\n"
+                )
+            );
+            assert_eq!((*calls.borrow(), *ran.borrow()), (1, 1));
         }
 
         #[test]
         fn test_no_transcripts_dir_sends_nothing() {
             let fx = setup();
+            let calls = push_fake(&fx, None);
             fx.set_env("CLAUDE_CONFIG_DIR", fx.root.join("gone"));
             fx.assert_silent(fx.pickup(&[]));
+            assert_eq!(*calls.borrow(), 0);
         }
 
         #[test]
         fn test_dry_run_never_pushes() {
             let fx = setup();
+            let calls = push_fake(&fx, None);
             assert_eq!(
                 fx.pickup(&["--dry-run"]),
                 out_err(0, &format!("host {DEVICE}: would launch 0\n"), "")
             );
+            assert_eq!(*calls.borrow(), 0);
         }
     }
 
@@ -12507,56 +12712,224 @@ exit "$archive_code"
             fx
         }
 
+        const SESSION: &str = "claude/projects/-home-u--paseo-worktrees-ab12-factory-1017-add-x/3f2a9c1d-0000-4000-8000-000000000001.jsonl";
+        const AT: &str = "2026-01-02T00:00:00Z";
+
+        /// Fake audit_push and usage_record: they log their job ids, the push fails as given, and
+        /// the record writes this host's share onto the board job as usage_record does.
+        fn push_fakes(fx: &Fx, failure: Option<(&'static str, i32)>) -> Rc<RefCell<Vec<String>>> {
+            let log = Rc::new(RefCell::new(Vec::new()));
+            let (pushes, records, state) = (log.clone(), log.clone(), fx.state.clone());
+            fx.set_fakes(|f| {
+                f.audit_push = Some(Rc::new(move |job_id| {
+                    pushes.borrow_mut().push(format!("push {job_id}"));
+                    match failure {
+                        Some((msg, code)) => Err(fail(msg, code)),
+                        None => Ok(()),
+                    }
+                }));
+                f.usage_record = Some(Rc::new(move |_, _, job_id, device, totals| {
+                    records.borrow_mut().push(format!("record {job_id}"));
+                    let mut share = json!({"at": AT});
+                    for (k, v) in totals.as_object().unwrap() {
+                        share[k] = v.clone();
+                    }
+                    let mut st = state.borrow_mut();
+                    let job = st.board["jobs"]
+                        .as_array_mut()
+                        .unwrap()
+                        .iter_mut()
+                        .find(|j| j["id"] == job_id)
+                        .unwrap();
+                    if !job["tokens"].is_object() {
+                        job["tokens"] = json!({});
+                    }
+                    job["tokens"][device] = share;
+                    Ok(())
+                }));
+            });
+            log
+        }
+
+        fn record(fx: &Fx) -> Value {
+            loads(&read_text(&fx.home.join(AUDIT_PUSH_FILE)).unwrap()).unwrap()
+        }
+
+        fn stamp_now() -> Value {
+            Value::from(crate::commands::audit::audit_stamp("1017-add-x").unwrap())
+        }
+
+        /// Move the session's mtime a second later and return it in nanoseconds.
+        fn touch_later(fx: &Fx) -> i128 {
+            let session = fx.root.join(SESSION);
+            let mtime = fs::metadata(&session).unwrap().modified().unwrap();
+            let later = mtime + Duration::from_secs(1);
+            fs::File::options()
+                .write(true)
+                .open(&session)
+                .unwrap()
+                .set_modified(later)
+                .unwrap();
+            later
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as i128
+        }
+
         #[test]
         fn test_pushes_once_until_a_transcript_changes() {
             let fx = setup();
-            assert_push_deferred(fx.pickup(&[]), "audit push");
-            assert!(!fx.home.join("audit-push.json").exists());
+            let log = push_fakes(&fx, None);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(
+                record(&fx),
+                json!({"version": 1, "jobs": {"1017-add-x": stamp_now()}})
+            );
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*log.borrow(), ["push 1017-add-x"]);
+            let later = touch_later(&fx);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*log.borrow(), ["push 1017-add-x", "push 1017-add-x"]);
+            assert_eq!(
+                record(&fx),
+                json!({"version": 1, "jobs": {"1017-add-x": Value::from(later)}})
+            );
         }
 
         #[test]
         fn test_skips_other_jobs() {
             let fx = setup();
+            let log = push_fakes(&fx, None);
+            fx.view("alpha", 200, effective("alpha", None, None));
             for jobs in [
                 json!([{"id": "1017-add-x", "project": "alpha", "stage": "merged"}]),
                 json!([idea("1017-add-x", "alpha", json!({}))]),
                 json!([{"id": "1018-other", "project": "alpha", "stage": "build"}]),
             ] {
                 fx.jobs(jobs);
-                assert_push_deferred(fx.pickup(&[]), "audit push");
-                assert!(!fx.home.join("audit-push.json").exists());
+                assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+                assert!(log.borrow().is_empty());
+                assert!(!fx.home.join(AUDIT_PUSH_FILE).exists());
             }
         }
 
         #[test]
         fn test_dry_run_never_pushes() {
             let fx = setup();
+            let log = push_fakes(&fx, None);
             assert_eq!(
                 fx.pickup(&["--dry-run"]),
                 out_err(0, &format!("host {DEVICE}: would launch 0\n"), "")
             );
+            assert!(log.borrow().is_empty());
         }
 
         #[test]
         fn test_a_failed_push_warns_and_still_launches() {
             let fx = setup();
             alpha_on(&fx);
-            assert_push_deferred(fx.pickup(&[]), "audit push");
-            assert!(fx.launched().is_empty());
+            let mut jobs = fx.state.borrow().board["jobs"].clone();
+            jobs.as_array_mut()
+                .unwrap()
+                .push(idea("120-sample-digest", "alpha", json!({})));
+            fx.jobs(jobs);
+            push_fakes(&fx, Some(("Access rejected the service token", 5)));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert!(
+                matches(
+                    "launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n",
+                    &out
+                ),
+                "{out}"
+            );
+            assert!(err.contains("Access rejected the service token"), "{err}");
+            assert!(
+                err.ends_with(
+                    "factory.py: audit push stopped (exit 5); the next pickup run retries it\n"
+                ),
+                "{err}"
+            );
+            assert!(!fx.home.join(AUDIT_PUSH_FILE).exists());
+        }
+
+        #[test]
+        fn test_a_failing_audit_push_still_claims() {
+            let fx = setup();
+            let log = push_fakes(&fx, Some(("made-up push failure", 1)));
+            let ran = Rc::new(RefCell::new(0));
+            let n = ran.clone();
+            fx.set_fakes(|f| {
+                f.pickup_pass = Some(Rc::new(move |_, _| {
+                    *n.borrow_mut() += 1;
+                    Ok(())
+                }))
+            });
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: made-up push failure\nfactory.py: audit push stopped (exit 1); the next pickup run retries it\n"
+                )
+            );
+            assert_eq!(*log.borrow(), ["push 1017-add-x"]);
+            assert_eq!(*ran.borrow(), 1);
+            assert!(!fx.home.join(AUDIT_PUSH_FILE).exists());
         }
 
         #[test]
         fn test_refreshes_token_share() {
             let fx = setup();
-            assert_push_deferred(fx.pickup(&[]), "audit push");
-            assert!(fx.puts().is_empty());
+            let log = push_fakes(&fx, None);
+            let host_b = json!({"at": "2026-01-02T12:00:00Z", "transcripts": 1,
+                "models": {"claude-opus-5-5": {"input": 300, "output": 9100, "cache_write": 52000, "cache_read": 610000}}});
+            let models = json!({"claude-opus-5-5": {"input": 1200, "output": 48000, "cache_write": 210000, "cache_read": 3400000}});
+            fx.state.borrow_mut().board["jobs"][0]["tokens"] = json!({"host-b": host_b});
+            let session = fx.root.join(SESSION);
+            let mut text = read_text(&session).unwrap();
+            text += &(json!({"type": "assistant", "message": {"id": "u1", "model": "claude-opus-5-5", "usage": {
+                "input_tokens": 1200, "output_tokens": 48000, "cache_creation_input_tokens": 210000,
+                "cache_read_input_tokens": 3400000}}}).to_string() + "\n");
+            fs::write(&session, text).unwrap();
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(0, &format!("recorded {DEVICE} tokens on 1017-add-x\n"), "")
+            );
+            assert_eq!(*log.borrow(), ["push 1017-add-x", "record 1017-add-x"]);
+            assert_eq!(
+                fx.job("1017-add-x")["tokens"],
+                json!({"host-b": host_b, DEVICE: {"at": AT, "transcripts": 2, "models": models}})
+            );
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            touch_later(&fx);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(
+                *log.borrow(),
+                ["push 1017-add-x", "record 1017-add-x", "push 1017-add-x"]
+            );
         }
 
         #[test]
         fn test_token_scan_error_warns() {
             let fx = setup();
-            fx.set_fakes(|f| f.usage_totals = Some(Rc::new(|_, _, _| Err("ValueError".into()))));
-            assert_push_deferred(fx.pickup(&[]), "audit push");
+            let log = push_fakes(&fx, None);
+            fx.set_fakes(|f| {
+                f.usage_totals = Some(Rc::new(|_, _, _| Err("ValueError: boom".into())))
+            });
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: usage: scan failed on 1017-add-x (ValueError: boom); nothing recorded\n"
+                )
+            );
+            assert_eq!(*log.borrow(), ["push 1017-add-x"]);
+            assert_eq!(
+                record(&fx),
+                json!({"version": 1, "jobs": {"1017-add-x": stamp_now()}})
+            );
         }
     }
 
