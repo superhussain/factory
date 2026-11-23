@@ -9,6 +9,7 @@
   "stage": "idea | spec | build | review | approve | needs-human | pr-open | merged | closed",
   "idea": "the feature as typed, set only on dashboard-added jobs",
   "goal": "the spec Goal paragraph, at most 300 characters; set and cleared only by factory push",
+  "decision": { "verdict": "APPROVE | ESCALATE | CHANGES | CLOSED", "decider": "person | model", "at": "..." },
   "round": 2,
   "rounds": [{ "security": "CHANGES", "ux": "PASS", "ui": "PASS", "code": "PASS" },
              { "security": "pending", "ux": "PASS", "ui": "pending", "code": "PASS" }],
@@ -58,6 +59,7 @@ A `board` patch that would change only `updated` stamps, or only this session's 
 Approving a backlog line turns each `Depends on: <slug>: <feature>` context line into this ref, and is refused while that line is unchecked. The dashboard's refusal links to that prerequisite's backlog item. `next` and `batch` skip such a line while its prerequisite is unchecked or still open, and add this ref to the job they make. `batch` allows a prerequisite that is the lead or one of its riders.
 `done` is when the job entered `merged` or `closed`, and only `factory` writes it.
 `started` is when the job first got a claim, and only `factory` writes it.
+`decision` copies decision.md's verdict. `factory push` writes it when it uploads decision.md, and the pickup close pass writes it for a person's close. `board` refuses a `decision` patch with exit 2. `factory job` infers it for older rows from the local decision.md and marks it `inferred`.
 `token_cap` holds the job token cap state, and only `factory pickup` writes it. `base` is the token total at the last park, so a resumed session gets a full cap again, and `warned` is when pickup last warned at 80%. `board` refuses a `token_cap` patch with exit 2.
 `launch_failure` records failed pickup launches in a row, and only `factory pickup` writes it. `count` sets the next `not_before` delay, `reason` is the exit code or a path-free start error, and `at` is the last failure. A successful launch removes it. The fifth failure in a row moves the job to `needs-human` with a `needs` ask naming the host and last reason, and keeps the record. `board` refuses a `launch_failure` patch with exit 2.
 `repeated` holds the newest 20 review findings `factory repeats` saw again, and only it writes them. `board` refuses a `repeated` patch with exit 2.

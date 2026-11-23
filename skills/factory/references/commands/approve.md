@@ -4,7 +4,8 @@ For jobs stuck at `needs-human` for reasons other than ESCALATE, such as the rev
 round cap or a failed agent. The job must be at `needs-human`. Otherwise report its
 stage and stop. A human has decided, so ship and merge the PR as an APPROVE without
 re-running reviews. Before shipping, write the job's `decision.md` with `APPROVE` on
-line 1 and `A person approved this job with /factory approve.` on line 2, then run
+line 1 and `A person approved this job with /factory approve.` on line 2. Keep line 2
+exact: factory reads it to record `decider` `person`. Then run
 `push "$SLUG/<id>"`, since `board` refuses `automerge` true without an APPROVE
 decision.md. If the PR can't be opened, leave the job at `needs-human` with the
 reason. A job held at the spec-approval gate (note `gate: spec-approval`, no

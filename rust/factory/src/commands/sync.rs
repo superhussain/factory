@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::cli::Call;
+use crate::commands::pipeline::decision_verdict;
 use crate::shared::board::{dump_board, load_board, read_board};
 use crate::shared::consts::{IDEA, JOB_REL, TERMINAL};
 use crate::shared::exit::{fail, Exit, Res};
@@ -386,6 +387,67 @@ fn record_goal(home: &Path, slug: &str, job_id: &str, goal: Option<String>) -> R
     Ok(())
 }
 
+/// The board with decision.md's verdict and decider stamped on the job's row, or the row's decision
+/// dropped when the file has no verdict line, and whether anything changed. Leaves job.updated alone.
+fn decision_change(
+    text: Option<&str>,
+    slug: &str,
+    job_id: &str,
+    decision: Option<&Value>,
+) -> Res<(Option<String>, bool)> {
+    let mut data = load_board(text)?;
+    let job = data["jobs"]
+        .as_array_mut()
+        .and_then(|jobs| {
+            jobs.iter_mut()
+                .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
+        })
+        .and_then(Value::as_object_mut);
+    let Some(job) = job else {
+        return Ok((None, false));
+    };
+    if job.get("project").and_then(Value::as_str) != Some(slug) {
+        return Ok((None, false));
+    }
+    let stored = job.get("decision").filter(|s| s.is_object());
+    match decision {
+        None if job.get("decision").is_none() => return Ok((None, false)),
+        None => {
+            job.shift_remove("decision");
+        }
+        Some(d)
+            if stored.is_some_and(|s| {
+                s.get("verdict") == d.get("verdict") && s.get("decider") == d.get("decider")
+            }) =>
+        {
+            return Ok((None, false))
+        }
+        Some(d) => {
+            let mut stamped = d.clone();
+            stamped["at"] = Value::from(now());
+            job.insert("decision".into(), stamped);
+        }
+    }
+    data["updated"] = Value::from(now());
+    Ok((Some(dump_board(&data)), true))
+}
+
+fn record_decision(home: &Path, slug: &str, job_id: &str, decision: Option<Value>) -> Res<()> {
+    if cas(home, "/api/board", |text| {
+        decision_change(text, slug, job_id, decision.as_ref())
+    })? {
+        match &decision {
+            Some(d) => println!(
+                "recorded the decision.md verdict on the board: {}, decided by {}",
+                py_str(d.get("verdict")),
+                py_str(d.get("decider"))
+            ),
+            None => println!("cleared the board decision: decision.md has no verdict line"),
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn push_target(target: &str) -> Res<()> {
     let (home, slug, job_id) = r2_target(target, false)?;
     if job_id.is_empty() {
@@ -401,8 +463,8 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
         .filter(|(rel, p)| {
             fs::symlink_metadata(p).is_ok_and(|m| m.is_file()) && JOB_REL.is_full(rel)
         });
-    let (mut pushed, mut conflicts, mut spec_pushed, mut spec_stale) =
-        (0, Vec::new(), false, false);
+    let (mut pushed, mut conflicts, mut spec_pushed, mut spec_stale, mut decision_pushed) =
+        (0, Vec::new(), false, false, false);
     for (rel, path) in rels {
         let data = fs::read(&path).map_err(|e| os_fail(e, &path))?;
         let entry = manifest.get(&rel).filter(|e| truthy(Some(*e))).cloned();
@@ -483,6 +545,7 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
         );
         pushed += 1;
         spec_pushed = spec_pushed || rel == "spec.md";
+        decision_pushed = decision_pushed || rel == "decision.md";
     }
     let pending = folder.join(".goal-pending");
     if spec_pushed {
@@ -499,6 +562,11 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
             Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(os_fail(e, &pending)),
             _ => {}
         }
+    }
+    if decision_pushed && !conflicts.iter().any(|c| c == "decision.md") {
+        let path = folder.join("decision.md");
+        let text = read_text(&path).map_err(|e| os_fail(e, &path))?;
+        record_decision(&home, &slug, &job_id, decision_verdict(&text))?;
     }
     if !conflicts.is_empty() {
         return Err(conflict_exit(&conflicts));
@@ -809,6 +877,83 @@ mod tests {
             "factory.py: cannot push local project: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte\n"
         );
         fs::remove_dir_all(home).unwrap();
+    }
+
+    const PERSON_APPROVE: &str = r#"{"verdict": "APPROVE", "decider": "person"}"#;
+
+    #[test]
+    fn push_records_decision() {
+        use crate::shared::http::tests::serve;
+        let board = r#"{"updated":"2026-11-23T14:00:00Z","jobs":[{"id":"042-sample-export","project":"alpha","stage":"needs-human","updated":"2026-11-23T14:00:00Z"}]}"#;
+        let (origin, seen) = serve(vec![
+            (200, board, vec![("ETag", "\"b1\"")]),
+            (200, "{}", vec![("ETag", "\"b2\"")]),
+        ]);
+        let home = home_for("sync-decision", &origin);
+        record_decision(
+            &home,
+            "alpha",
+            "042-sample-export",
+            Some(loads(PERSON_APPROVE).unwrap()),
+        )
+        .unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            (seen[1].method.as_str(), seen[1].header("If-Match")),
+            ("PUT", Some("\"b1\""))
+        );
+        let put = loads(std::str::from_utf8(&seen[1].body).unwrap()).unwrap();
+        let job = &put["jobs"][0];
+        assert_eq!(
+            (&job["decision"]["verdict"], &job["decision"]["decider"]),
+            (&json!("APPROVE"), &json!("person"))
+        );
+        assert_eq!(job["decision"]["at"], put["updated"]);
+        assert_eq!(job["updated"], json!("2026-11-23T14:00:00Z"));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn push_skips_unchanged_decision() {
+        use crate::shared::http::tests::serve;
+        let board = r#"{"updated":"","jobs":[{"id":"042-sample-export","project":"alpha","decision":{"verdict":"APPROVE","decider":"person","at":"2026-11-23T15:00:00Z"}}]}"#;
+        let (origin, seen) = serve(vec![(200, board, vec![("ETag", "\"b1\"")])]);
+        let home = home_for("sync-decision-same", &origin);
+        record_decision(
+            &home,
+            "alpha",
+            "042-sample-export",
+            Some(loads(PERSON_APPROVE).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn push_clears_decision_without_a_verdict() {
+        let stored = r#"{"updated":"","jobs":[{"id":"042-sample-export","project":"alpha","decision":{"verdict":"APPROVE","decider":"model","at":"x"},"stage":"build"}]}"#;
+        let (text, changed) =
+            decision_change(Some(stored), "alpha", "042-sample-export", None).unwrap();
+        assert!(changed);
+        let job = &loads(&text.unwrap()).unwrap()["jobs"][0];
+        assert!(job.get("decision").is_none() && job["stage"] == "build");
+        let none = r#"{"updated":"","jobs":[{"id":"042-sample-export","project":"alpha"}]}"#;
+        assert_eq!(
+            decision_change(Some(none), "alpha", "042-sample-export", None).unwrap(),
+            (None, false)
+        );
+        let decision = loads(PERSON_APPROVE).unwrap();
+        assert_eq!(
+            decision_change(Some(none), "beta", "042-sample-export", Some(&decision)).unwrap(),
+            (None, false)
+        );
+        let (text, _) =
+            decision_change(Some(stored), "alpha", "042-sample-export", Some(&decision)).unwrap();
+        assert_eq!(
+            loads(&text.unwrap()).unwrap()["jobs"][0]["decision"]["decider"],
+            "person"
+        );
     }
 
     #[test]

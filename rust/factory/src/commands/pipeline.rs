@@ -949,6 +949,34 @@ const REVIEW_PAST_STAGES: [&str; 4] = ["approve", "pr-open", "merged", "closed"]
 const WINDOW_SECONDS: i64 = 7 * 86400;
 const MIN_ARM_FINISHED: usize = 5;
 const DECISION_VERDICTS: [&str; 3] = ["APPROVE", "ESCALATE", "CLOSED:"];
+/// decision.md line 2 when a person decided: /factory approve, or close_decision's two summaries.
+const PERSON_APPROVE: &str = "A person approved this job with /factory approve.";
+const PERSON_CLOSES: [&str; 2] = [
+    "**Summary.** Closed from the dashboard at ",
+    "**Summary.** GitHub reported pull request ",
+];
+static DECISION_WORD: Pattern = Pattern::new(r"(APPROVE|ESCALATE|CHANGES)\b", Flags::NONE);
+
+/// {verdict, decider} from decision.md's first two non-empty lines, or None without a verdict line.
+pub(crate) fn decision_verdict(text: &str) -> Option<Value> {
+    let mut lines = splitlines(text, false)
+        .into_iter()
+        .map(strip)
+        .filter(|l| !l.is_empty());
+    let first = lines.next().unwrap_or("");
+    let second = lines.next().unwrap_or("");
+    let (verdict, person) = if first.starts_with("CLOSED:") {
+        (
+            "CLOSED",
+            PERSON_CLOSES.iter().any(|p| second.starts_with(p)),
+        )
+    } else {
+        let word = DECISION_WORD.match_start(first)?.get(1)?.as_str();
+        (word, word == "APPROVE" && second == PERSON_APPROVE)
+    };
+    Some(json!({"verdict": verdict, "decider": if person { "person" } else { "model" }}))
+}
+
 const TRACER_REVIEWERS: [&str; 4] = ["security", "ux", "ui", "code"];
 const USAGE_TOKENS: [&str; 4] = ["input", "output", "cache_write", "cache_read"];
 
@@ -5321,6 +5349,49 @@ mod tests {
     fn median_matches_statistics() {
         assert_eq!(median(&mut vec![3.0, 1.0, 2.0]), 2.0);
         assert_eq!(median(&mut vec![4.0, 1.0, 2.0, 3.0]), 2.5);
+    }
+
+    #[test]
+    fn decision_verdict_names_the_decider() {
+        let person = |v: &str| json!({"verdict": v, "decider": "person"});
+        let model = |v: &str| json!({"verdict": v, "decider": "model"});
+        for (text, want) in [
+            (
+                "APPROVE\n\nA person approved this job with /factory approve.\n",
+                Some(person("APPROVE")),
+            ),
+            (
+                "  APPROVE  \r\n  A person approved this job with /factory approve.  \n",
+                Some(person("APPROVE")),
+            ),
+            (
+                "APPROVE\nThe approver read every review.\n",
+                Some(model("APPROVE")),
+            ),
+            ("APPROVE\n", Some(model("APPROVE"))),
+            (
+                "ESCALATE: needs a person\nA person approved this job with /factory approve.\n",
+                Some(model("ESCALATE")),
+            ),
+            ("CHANGES\nfix the export\n", Some(model("CHANGES"))),
+            (
+                "CLOSED: duplicate\n\n**Summary.** Closed from the dashboard at 2026-11-23T15:00:00Z.\n",
+                Some(person("CLOSED")),
+            ),
+            (
+                "CLOSED: merged elsewhere\n**Summary.** GitHub reported pull request #7 closed.\n",
+                Some(person("CLOSED")),
+            ),
+            (
+                "CLOSED: superseded\nThe orchestrator closed it.\n",
+                Some(model("CLOSED")),
+            ),
+            ("APPROVED\nx\n", None),
+            ("# Decision\nAPPROVE\n", None),
+            ("", None),
+        ] {
+            assert_eq!(decision_verdict(text), want, "{text:?}");
+        }
     }
 
     /// The exit code and stderr of a failed result.
