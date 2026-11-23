@@ -48,8 +48,9 @@ def factory_command() -> list:
     return [FACTORY_BIN] if FACTORY_BIN else [sys.executable, "-B", str(SKILL / "runtime/factory.py")]
 
 
-def invoke_process(args, env, command=None):
-    result = subprocess.run((command or factory_command()) + list(args), env=env, stdin=subprocess.DEVNULL,
+def invoke_process(args, env, command=None, input=None):
+    stdin = {"input": input} if input is not None else {"stdin": subprocess.DEVNULL}
+    result = subprocess.run((command or factory_command()) + list(args), env=env, **stdin,
                             capture_output=True, encoding="utf-8", errors="surrogateescape", timeout=120)
     return result.returncode, result.stdout, result.stderr
 
