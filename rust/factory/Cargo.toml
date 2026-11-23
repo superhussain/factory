@@ -9,4 +9,4 @@ license = "MIT"
 fancy-regex = "0.20"
 serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
 sha2 = "0.10"
-ureq = { version = "3", default-features = false, features = ["native-tls"] }
+ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }

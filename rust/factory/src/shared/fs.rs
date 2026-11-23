@@ -10,7 +10,8 @@ use super::py::universal_newlines;
 
 /// `open(p, encoding="utf-8").read()`: strict UTF-8 with universal newlines.
 pub fn read_text(p: &Path) -> io::Result<String> {
-    let text = String::from_utf8(fs::read(p)?).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let text = String::from_utf8(fs::read(p)?)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     Ok(universal_newlines(text))
 }
 
@@ -27,7 +28,12 @@ pub fn write_atomic(p: &Path, data: &[u8]) -> io::Result<()> {
     let folder = p.parent().unwrap_or(Path::new("."));
     let (tmp, mut file) = loop {
         let mut h = RandomState::new().build_hasher();
-        h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+        h.write_u128(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        );
         let tmp = folder.join(format!(".tmp-{:016x}", h.finish()));
         match private_options().open(&tmp) {
             Ok(file) => break (tmp, file),
@@ -108,10 +114,16 @@ pub fn listable(p: &Path) -> bool {
 
 /// `Path.resolve()`: the longest existing ancestor canonicalized, then the rest appended.
 pub fn resolve(p: &Path) -> io::Result<PathBuf> {
-    let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir()?.join(p) };
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(p)
+    };
     let parts: Vec<Component> = abs.components().collect();
     for i in (1..=parts.len()).rev() {
-        let Ok(mut base) = fs::canonicalize(parts[..i].iter().collect::<PathBuf>()) else { continue };
+        let Ok(mut base) = fs::canonicalize(parts[..i].iter().collect::<PathBuf>()) else {
+            continue;
+        };
         for part in &parts[i..] {
             match part {
                 Component::ParentDir => {
@@ -146,7 +158,10 @@ fn verbatim_free(p: PathBuf) -> PathBuf {
 /// `same_path`: both sides resolved, compared case-insensitively on Windows.
 pub fn same_path(a: &Path, b: &Path) -> bool {
     let norm = |p: &Path| {
-        let text = resolve(p).unwrap_or_else(|_| p.to_path_buf()).to_string_lossy().into_owned();
+        let text = resolve(p)
+            .unwrap_or_else(|_| p.to_path_buf())
+            .to_string_lossy()
+            .into_owned();
         if cfg!(windows) {
             text.to_lowercase().replace('/', "\\")
         } else {
@@ -177,7 +192,10 @@ mod tests {
         write_atomic(&target, b"one").unwrap();
         write_atomic(&target, b"two").unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"two");
-        assert_eq!(fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
         assert_eq!(fs::read_dir(&dir).unwrap().count(), 1);
         assert!(seed(&dir.join("seeded"), b"x", 0o644).unwrap());
         assert!(!seed(&dir.join("seeded"), b"y", 0o644).unwrap());

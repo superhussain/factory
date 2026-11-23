@@ -67,7 +67,10 @@ pub fn frontmatter(p: &Path) -> io::Result<(Vec<(String, String)>, String)> {
 
 /// A frontmatter value; the last one wins, as a dict does.
 pub fn fm_get<'a>(meta: &'a [(String, String)], key: &str) -> Option<&'a str> {
-    meta.iter().rev().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    meta.iter()
+        .rev()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.as_str())
 }
 
 /// `closed_frontmatter`: a strict frontmatter block that must close, with unique keys.
@@ -105,16 +108,26 @@ mod tests {
     fn frontmatter_reads_crlf() {
         let dir = temp_dir("conf");
         let p = dir.join("config.md");
-        fs::write(&p, "---\r\napi_url: 'http://x'\r\n# note\r\ndevice: a\r\ndevice: b\r\n---\r\nbody\r\n").unwrap();
+        fs::write(
+            &p,
+            "---\r\napi_url: 'http://x'\r\n# note\r\ndevice: a\r\ndevice: b\r\n---\r\nbody\r\n",
+        )
+        .unwrap();
         let (meta, body) = frontmatter(&p).unwrap();
         assert_eq!(fm_get(&meta, "api_url"), Some("http://x"));
         assert_eq!(fm_get(&meta, "device"), Some("b"));
         assert_eq!(body, "body\n");
         assert!(closed_frontmatter(&p).is_err());
         fs::write(&p, "---\nsample: /srv/sample\n\n---\n").unwrap();
-        assert_eq!(closed_frontmatter(&p).unwrap(), vec![("sample".to_string(), "/srv/sample".to_string())]);
+        assert_eq!(
+            closed_frontmatter(&p).unwrap(),
+            vec![("sample".to_string(), "/srv/sample".to_string())]
+        );
         fs::write(&p, "---\nopen: yes\n").unwrap();
-        assert_eq!(frontmatter(&p).unwrap(), (Vec::new(), "---\nopen: yes\n".to_string()));
+        assert_eq!(
+            frontmatter(&p).unwrap(),
+            (Vec::new(), "---\nopen: yes\n".to_string())
+        );
         assert!(closed_frontmatter(&p).is_err());
         fs::remove_dir_all(dir).unwrap();
     }
@@ -129,7 +142,13 @@ mod tests {
         assert_eq!(conf.get("B").map(String::as_str), Some("x=y"));
         assert_eq!(conf.len(), 2);
         fs::write(&p, "Z=1\nA=2\nZ=3\n").unwrap();
-        assert_eq!(read_env_ordered(&p).unwrap(), vec![("Z".to_string(), "3".to_string()), ("A".to_string(), "2".to_string())]);
+        assert_eq!(
+            read_env_ordered(&p).unwrap(),
+            vec![
+                ("Z".to_string(), "3".to_string()),
+                ("A".to_string(), "2".to_string())
+            ]
+        );
         assert_eq!(unquote("'"), "'");
         fs::remove_dir_all(dir).unwrap();
     }

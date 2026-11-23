@@ -5,7 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::pyre::{Flags, Pattern};
 
 pub fn unix_now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 fn civil(days: i64) -> (i64, i64, i64) {
@@ -33,7 +36,12 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 pub fn format_stamp(secs: i64) -> String {
     let (y, m, d) = civil(secs.div_euclid(86_400));
     let t = secs.rem_euclid(86_400);
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", t / 3600, t / 60 % 60, t % 60)
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        t / 3600,
+        t / 60 % 60,
+        t % 60
+    )
 }
 
 /// Python's `now()`.
@@ -53,11 +61,26 @@ pub fn parse_stamp(s: &str) -> Option<i64> {
     let mut f = [0i64; 6];
     for (i, v) in f.iter_mut().enumerate() {
         let text = caps.get(i + 1)?.as_str().trim_start();
-        *v = text.chars().try_fold(0i64, |n, c| Some(n * 10 + c.to_digit(10)? as i64))?;
+        *v = text
+            .chars()
+            .try_fold(0i64, |n, c| Some(n * 10 + c.to_digit(10)? as i64))?;
     }
     let [y, m, d, hh, mm, ss] = f;
     let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     if y < 1 || d > month_days[(m - 1) as usize] || ss > 59 {
         return None;
     }
@@ -78,18 +101,39 @@ mod tests {
         assert_eq!(format_stamp(0), "1970-01-01T00:00:00Z");
         assert_eq!(format_stamp(1_793_404_800), "2026-10-31T00:00:00Z");
         assert_eq!(parse_stamp("2026-10-31T00:00:00Z"), Some(1_793_404_800));
-        assert_eq!(parse_stamp("2026-11-01T00:00:00Z").map(format_stamp).as_deref(), Some("2026-11-01T00:00:00Z"));
+        assert_eq!(
+            parse_stamp("2026-11-01T00:00:00Z")
+                .map(format_stamp)
+                .as_deref(),
+            Some("2026-11-01T00:00:00Z")
+        );
     }
 
     #[test]
     fn parse_accepts_what_strptime_accepts() {
-        assert_eq!(parse_stamp("2026-1-5T1:2:3Z"), parse_stamp("2026-01-05T01:02:03Z"));
+        assert_eq!(
+            parse_stamp("2026-1-5T1:2:3Z"),
+            parse_stamp("2026-01-05T01:02:03Z")
+        );
         assert!(parse_stamp("2026-01-05T01:02:03Z").is_some());
-        assert_eq!(parse_stamp("2026-01-05t01:02:03z"), parse_stamp("2026-01-05T01:02:03Z"));
-        assert_eq!(parse_stamp("2026-01- 5T00:00:00Z"), parse_stamp("2026-01-05T00:00:00Z"));
+        assert_eq!(
+            parse_stamp("2026-01-05t01:02:03z"),
+            parse_stamp("2026-01-05T01:02:03Z")
+        );
+        assert_eq!(
+            parse_stamp("2026-01- 5T00:00:00Z"),
+            parse_stamp("2026-01-05T00:00:00Z")
+        );
         assert!(parse_stamp("2024-02-29T00:00:00Z").is_some());
-        for bad in ["2023-02-29T00:00:00Z", "2026-01-05T01:02:60Z", "0000-01-01T00:00:00Z", "2026-01-05T01:02:03Z ",
-            "2026-13-01T00:00:00Z", "soon", ""] {
+        for bad in [
+            "2023-02-29T00:00:00Z",
+            "2026-01-05T01:02:60Z",
+            "0000-01-01T00:00:00Z",
+            "2026-01-05T01:02:03Z ",
+            "2026-13-01T00:00:00Z",
+            "soon",
+            "",
+        ] {
             assert_eq!(parse_stamp(bad), None, "{bad}");
         }
         assert_eq!(elapsed_seconds("2999-01-01T00:00:00Z"), Some(0));
