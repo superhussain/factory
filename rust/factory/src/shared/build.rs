@@ -85,6 +85,16 @@ pub fn rust_binary(checkout: &Path, host: &Host, err: &mut dyn Write) -> Result<
     build(checkout, host, &cargo, err).map_err(|e| format!("Rust build failed ({e})"))
 }
 
+/// The lock file, opened for writing without append: Windows LockFileEx needs read or write data
+/// access, and an append-only handle has neither, so locking it fails with Access is denied.
+fn open_lock(path: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+}
+
 fn build(
     checkout: &Path,
     host: &Host,
@@ -157,11 +167,7 @@ fn build(
     // One stable source path keeps cargo's incremental artifacts valid from one checkout to the next.
     let src = private_dir(&cache.join("build-src"))?;
     let lock_path = src.join(LOCK);
-    let lock = fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(&lock_path)
-        .map_err(|e| os_error(&e, Some(&lock_path)))?;
+    let lock = open_lock(&lock_path).map_err(|e| os_error(&e, Some(&lock_path)))?;
     lock.lock().map_err(|e| os_error(&e, Some(&lock_path)))?;
     sync(&files, &src).map_err(|e| os_error(&e, None))?;
     let start = Instant::now();
@@ -590,11 +596,7 @@ pub(crate) mod tests {
             ),
         );
         let src = private_dir(&root.join(".cache/huss-skills/factory/build-src")).unwrap();
-        let lock = fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(src.join(LOCK))
-            .unwrap();
+        let lock = open_lock(&src.join(LOCK)).unwrap();
         lock.lock().unwrap();
         let (r, c) = (root.clone(), checkout.clone());
         let thread = std::thread::spawn(move || {
@@ -613,6 +615,9 @@ pub(crate) mod tests {
                 "install: Rust binary built in 0 s\n".into()
             )
         );
+        // The finished build holds no lock, so an installer started next can take it.
+        let after = open_lock(&src.join(LOCK)).unwrap();
+        after.try_lock().unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
