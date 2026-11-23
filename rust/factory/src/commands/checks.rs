@@ -694,6 +694,26 @@ fn checks_loop(
     }
 }
 
+/// Exit 7 when the job is escalated, or 8 under an earned-autonomy hold, before any gh call.
+fn merge_hold(home: &Path, slug: &str, job_id: &str, pr: &str) -> Res<()> {
+    if let Some(why) = escalation_hold(home, slug, job_id)? {
+        return Err(fail(
+            format!("{job_id} {why}, so a person reviews and merges {pr}. Nothing merges."),
+            7,
+        ));
+    }
+    let data = read_board(home)?;
+    let empty = json!({});
+    if let Some(why) = autonomy_hold(&data, find_job(&data, job_id).unwrap_or(&empty)) {
+        autonomy_hold_write(home, job_id)?;
+        return Err(fail(
+            format!("{job_id} is held: {why}. A person reviews and merges {pr}. Nothing merges."),
+            8,
+        ));
+    }
+    Ok(())
+}
+
 pub fn checks_cmd(call: &Call) -> Res<()> {
     let args = &call.args[1..];
     let (home, slug, job_id) = r2_target(&call.args[0], true)?;
@@ -710,21 +730,7 @@ pub fn checks_cmd(call: &Call) -> Res<()> {
         }
     };
     let pr = board_pr(&home, &slug, &job_id, false)?;
-    if let Some(why) = escalation_hold(&home, &slug, &job_id)? {
-        return Err(fail(
-            format!("{job_id} {why}, so a person reviews and merges {pr}. Nothing merges."),
-            7,
-        ));
-    }
-    let data = read_board(&home)?;
-    let empty = json!({});
-    if let Some(why) = autonomy_hold(&data, find_job(&data, &job_id).unwrap_or(&empty)) {
-        autonomy_hold_write(&home, &job_id)?;
-        return Err(fail(
-            format!("{job_id} is held: {why}. A person reviews and merges {pr}. Nothing merges."),
-            8,
-        ));
-    }
+    merge_hold(&home, &slug, &job_id, &pr)?;
     let mut host = System::new();
     let state = gh_pr_view(&mut host, &pr, &["--json", "state", "--jq", ".state"])?;
     let state = strip(&state);
