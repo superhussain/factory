@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -147,10 +147,18 @@ fn normpath(p: &str) -> String {
     }
 }
 
+/// An absolute path strictly below prompts. A `..` left over after normpath, as a backslash path
+/// keeps on Windows, is refused because `ancestors` does not collapse it.
+fn under_prompts(prompts: &Path, out: &Path) -> bool {
+    out.is_absolute()
+        && !out.components().any(|c| c == Component::ParentDir)
+        && out.ancestors().skip(1).any(|a| a == prompts)
+}
+
 fn out_path(home: &Path, out: &str) -> Res<PathBuf> {
     let out = PathBuf::from(normpath(out));
     let prompts = home.join("prompts");
-    if !(out.is_absolute() && out.ancestors().skip(1).any(|a| a == prompts)) {
+    if !under_prompts(&prompts, &out) {
         return Err(fail(
             format!("--out must be an absolute path under {}", prompts.display()),
             2,
@@ -918,6 +926,7 @@ pub fn prompt_cmd(call: &Call) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::shared::fs::temp_dir;
     use serde_json::json;
 
@@ -934,6 +943,20 @@ mod tests {
         for (given, want) in rows {
             assert_eq!(normpath(given), want, "{given}");
         }
+    }
+
+    #[test]
+    fn out_refuses_parent_components() {
+        let prompts = Path::new("/h/prompts");
+        assert!(under_prompts(prompts, Path::new("/h/prompts/sample/x.txt")));
+        assert!(!under_prompts(prompts, Path::new("/h/prompts/../../x.txt")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn out_refuses_windows_dotdot() {
+        let e = out_path(Path::new(r"C:\h"), r"C:\h\prompts\..\..\x").unwrap_err();
+        assert_eq!(e.code, 2);
     }
 
     #[test]
