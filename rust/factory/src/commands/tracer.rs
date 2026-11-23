@@ -11,6 +11,7 @@ use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use ureq::Agent;
 
 use crate::cli::Call;
+use crate::commands::intake::spec_approval_record;
 use crate::shared::board::{dump_board, load_board, read_board};
 use crate::shared::consts::{IDEA, IN_FLIGHT, JOB_ID, NOTE_INVISIBLE, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
@@ -1068,6 +1069,7 @@ fn tracer_record(
                 found["stage"] = json!("build");
                 found["note"] = json!(TRACER_APPROVED_NOTE);
                 found.as_object_mut().unwrap().shift_remove("needs");
+                found["spec_approval"] = spec_approval_record("tracer", &json!(stamp));
                 sent.push(id);
             } else {
                 found["note"] = json!("gate: spec-approval");
@@ -3220,6 +3222,10 @@ Nothing.
             )
         );
         assert!(job.get("needs").is_none());
+        assert_eq!(
+            job["spec_approval"],
+            json!({"decider": "person", "via": "tracer", "at": job["updated"]})
+        );
         assert_eq!(job["updated"], fake.state().board["updated"]);
         let calls = fake.requests().len();
         follow(&t);
@@ -3243,6 +3249,7 @@ Nothing.
             )
         );
         assert!(job["tracer"].get("receipt").is_none());
+        assert!(job.get("spec_approval").is_none());
     }
 
     #[test]
@@ -3333,6 +3340,89 @@ Nothing.
         fake.state().refuse_receipt = true;
         assert_eq!(follow(&t), "");
         assert_unsigned_hold(&fake);
+    }
+
+    /// The board command's write of patch through claims::board_write.
+    fn board_write(t: &TempHome, patch: Value) -> Res<Value> {
+        let opts = crate::commands::claims::WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: None,
+        };
+        crate::commands::claims::board_write(
+            &t.path,
+            "001-sample",
+            patch.as_object().unwrap().clone(),
+            &opts,
+        )
+    }
+
+    #[test]
+    fn gate_patch_after_approval_starts_build() {
+        let (fake, t) = gather_home();
+        gather(&fake, &t);
+        let signed = receipt("factory-1", "FACTORY-1", "001-sample");
+        fake.state().board["jobs"][0]["tracer"]["scope"] = json!("approved");
+        fake.state().board["jobs"][0]["tracer"]["receipt"] = signed;
+        board_write(
+            &t,
+            json!({"stage": "needs-human", "note": "gate: spec-approval"}),
+        )
+        .unwrap();
+        let job = fake.job();
+        assert_eq!(
+            (&job["stage"], &job["note"]),
+            (&json!("build"), &json!("spec approved in Tracer"))
+        );
+        assert_eq!(
+            job["spec_approval"],
+            json!({"decider": "person", "via": "tracer", "at": job["updated"]})
+        );
+    }
+
+    #[test]
+    fn approve_spec_patch_records_command() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        set_job(&fake, "stage", json!("needs-human"));
+        set_job(&fake, "note", json!("gate: spec-approval"));
+        set_job(&fake, "needs", json!("Approve the spec"));
+        board_write(
+            &t,
+            json!({"stage": "build", "needs": null, "note": "spec approved"}),
+        )
+        .unwrap();
+        let job = fake.job();
+        assert_eq!(
+            job["spec_approval"],
+            json!({"decider": "person", "via": "command", "at": job["updated"]})
+        );
+    }
+
+    #[test]
+    fn spec_approved_patch_off_the_gate_records_nothing() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        set_job(&fake, "stage", json!("needs-human"));
+        set_job(&fake, "note", json!("gate: tracer-scope"));
+        board_write(&t, json!({"stage": "build", "note": "spec approved"})).unwrap();
+        let job = fake.job();
+        assert_eq!(job["note"], "spec approved");
+        assert!(job.get("spec_approval").is_none());
+    }
+
+    #[test]
+    fn board_refuses_spec_approval() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        let before = fake.state().board.clone();
+        let patch = json!({"spec_approval": {"decider": "person", "via": "command", "at": "2026-11-23T15:00:00Z"}});
+        let e = board_write(&t, patch).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (2, "factory.py: only factory.py and the dashboard set spec_approval. Nothing was written.\n")
+        );
+        assert_eq!(fake.state().board, before);
     }
 
     #[test]

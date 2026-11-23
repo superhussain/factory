@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::cli::Call;
+use crate::commands::intake::inferred_spec_approval;
 use crate::shared::board::{escalated, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::IN_FLIGHT;
@@ -172,7 +173,7 @@ pub fn job(call: &Call) -> Res<()> {
         jobs.iter()
             .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
     });
-    let found = match found {
+    let mut found = match found {
         Some(j) => j.clone(),
         None => {
             let r = api(
@@ -196,6 +197,9 @@ pub fn job(call: &Call) -> Res<()> {
                 .ok_or_else(|| fail(format!("the archive answered with no job for {job_id}"), 1))?
         }
     };
+    if let Some(inferred) = inferred_spec_approval(&found) {
+        found["spec_approval"] = inferred;
+    }
     println!("{}", dumps(&found, INDENT2));
     Ok(())
 }
