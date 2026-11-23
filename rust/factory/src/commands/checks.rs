@@ -1631,8 +1631,9 @@ fn pr_merge_run(h: &mut dyn Host, pr: &str, base: &str, out: &mut dyn Write) -> 
         let unknown = ["mergeable", "mergeStateStatus"]
             .iter()
             .any(|k| view.get(*k).and_then(Value::as_str) == Some("UNKNOWN"));
+        let open = view.get("state").and_then(Value::as_str) == Some("OPEN");
         let elapsed = h.monotonic() - start;
-        if !unknown || elapsed >= PR_MERGE_SETTLE {
+        if !unknown || !open || elapsed >= PR_MERGE_SETTLE {
             break (view, unknown);
         }
         h.sleep(PR_MERGE_INTERVAL.min(PR_MERGE_SETTLE - elapsed));
@@ -1704,9 +1705,18 @@ fn pr_merge_run(h: &mut dyn Host, pr: &str, base: &str, out: &mut dyn Write) -> 
             code: GhCode::Exit(0),
             ..
         }) => done(out, "merged", format!("head {}", &sha[..12]), 0),
-        Some(GhOut { stderr, .. }) => {
-            let first = stderr.lines().next().unwrap_or("");
-            done(out, "refused", printable_line(first, 500), 1)
+        Some(GhOut {
+            code: GhCode::Exit(code),
+            stderr,
+            ..
+        }) => {
+            let first = printable_line(stderr.lines().next().unwrap_or(""), 500);
+            let detail = if first.is_empty() {
+                format!("gh pr merge exited {code}")
+            } else {
+                first
+            };
+            done(out, "refused", detail, 1)
         }
     }
 }
@@ -3665,6 +3675,13 @@ mod tests {
     }
 
     #[test]
+    fn merge_refused_without_stderr_names_exit_code() {
+        let mut fake = merge_fake(vec![mergeability("MERGEABLE", "CLEAN")], reply(1, "", ""));
+        let detail = "gh pr merge exited 1";
+        assert_eq!(run_merge(&mut fake), got(1, &line("refused", detail), ""));
+    }
+
+    #[test]
     fn merge_queue_delegates() {
         let read = with(
             mergeability("MERGEABLE", "BLOCKED"),
@@ -3689,11 +3706,14 @@ mod tests {
 
     #[test]
     fn merge_not_open_exits_4() {
-        let read = with(mergeability("MERGEABLE", "CLEAN"), "state", "MERGED".into());
+        let read = with(mergeability("UNKNOWN", "UNKNOWN"), "state", "MERGED".into());
         let mut fake = merge_fake(vec![read], ok(""));
         let err = format!("factory.py: {PR} is MERGED, not OPEN\n");
         assert_eq!(run_merge(&mut fake), got(4, "", &err));
-        assert_eq!(merges(&fake), 0);
+        assert_eq!(
+            (fake.count("graphql"), fake.now, merges(&fake)),
+            (1, 0.0, 0)
+        );
     }
 
     #[test]
