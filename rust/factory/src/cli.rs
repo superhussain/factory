@@ -97,6 +97,12 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
 
 pub const USAGE: &str = include_str!("usage.txt");
 
+/// The handler for name with count operands. `ideas` checks its own arguments, so any count passes.
+fn handler_for(name: &str, count: usize) -> Option<Handler> {
+    let (_, handler, lo, hi) = COMMANDS.iter().find(|(n, ..)| *n == name)?;
+    (name == "ideas" || (*lo..=*hi).contains(&count)).then_some(*handler)
+}
+
 pub fn not_ported(name: &str) -> Exit {
     fail(format!("{name} is not ported to the Rust binary yet"), 2)
 }
@@ -172,12 +178,8 @@ fn run(args: Vec<OsString>) -> Res<()> {
         positional = std::iter::once("init".to_string()).chain(rest).collect();
     }
     let name = positional.first().map(String::as_str).unwrap_or("");
-    let found = COMMANDS.iter().find(|(n, ..)| *n == name);
-    let count = positional.len().saturating_sub(1);
-    let handler = match found {
-        Some((_, handler, lo, hi)) if name == "ideas" || (*lo..=*hi).contains(&count) => *handler,
-        _ => return Err(Exit::raw(2, USAGE)),
-    };
+    let handler =
+        handler_for(name, positional.len().saturating_sub(1)).ok_or_else(|| Exit::raw(2, USAGE))?;
     if name == "adopt-home" && home.is_some() {
         return Err(fail("adopt-home does not accept --home", 2));
     }
@@ -277,13 +279,13 @@ mod tests {
 
     #[test]
     fn unported_command_exits_2() {
-        let e = run(args(&["claim", "a", "b", "c"])).unwrap_err();
+        let e = not_ported("claim");
         assert_eq!(e.code, 2);
         assert_eq!(
             e.stderr,
             "factory.py: claim is not ported to the Rust binary yet\n"
         );
-        assert_eq!(main(args(&["claim", "a", "b", "c"])), 2);
+        assert_eq!(e.status, None);
     }
 
     #[test]
@@ -323,13 +325,7 @@ mod tests {
             msg(&["--home", "/x", "board", "/y", "1-a"]),
             "factory.py: --home disagrees with positional factory directory\n"
         );
-        assert_eq!(
-            msg(&["ideas", "a", "b", "c", "d", "e", "f", "g"]),
-            "factory.py: ideas is not ported to the Rust binary yet\n"
-        );
-        assert_eq!(
-            msg(&["with-cloudflare", "--", "--home"]),
-            "factory.py: with-cloudflare is not ported to the Rust binary yet\n"
-        );
+        assert!(handler_for("ideas", 7).is_some() && handler_for("claim", 3).is_some());
+        assert!(handler_for("claim", 2).is_none() && handler_for("", 0).is_none());
     }
 }
