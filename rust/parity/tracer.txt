@@ -26,3 +26,5 @@ tracer/config-query-url
 tracer/config-port-zero
 tracer/config-relative-token
 tracer/config-missing-token
+tracer/mirror-*
+tracer/sync-*
