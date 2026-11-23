@@ -18,7 +18,7 @@ const NEXT_LINE = "- Run pnpm test:protocol for Worker changes.";
 const NOTES = `# Notes\n\n${NOTE_LINE}\n`;
 const RUNNING = { paused: false, projects: ["factory"], self: [] };
 
-async function setup({ autonomy = RUNNING } = {}) {
+async function setup({ autonomy = RUNNING, notes = NOTES } = {}) {
   const bucket = memoryBucket();
   const get = bucket.get;
   // R2 objects from get() expose arrayBuffer() and uploaded; the shared memory bucket does not.
@@ -65,7 +65,7 @@ async function setup({ autonomy = RUNNING } = {}) {
   let etag;
   for (let version = 1; version <= 4; version++) {
     const saved = await send("PUT", "/api/project-documents/factory/notes.md", {
-      body: version === 4 ? NOTES : `# Notes\n\nold ${version}\n`,
+      body: version === 4 ? notes : `# Notes\n\nold ${version}\n`,
       headers: { ...markdown, ...(etag ? { "If-Match": etag } : { "If-None-Match": "*" }) },
     });
     assert.equal(saved.status, 200);
@@ -268,20 +268,41 @@ test("each gate refuses with its exact status and text and stores nothing", asyn
       400,
       "replace: reads like an instruction to override factory rules (override)",
     ],
+    [
+      "joined floor phrase in notes",
+      { find: "- Run pnpm ", replace: "- Skip " },
+      {},
+      400,
+      "replace: reads like an instruction to override factory rules (floor)",
+    ],
+    [
+      "joined link in notes",
+      { find: "at ", replace: "at wiki.example" },
+      { notes: "# Notes\n\n- Docs live at /runbook on the wiki.\n" },
+      400,
+      "replace: links are not allowed",
+    ],
   ];
-  for (const [name, fields, { principal, autonomy, slug, name: file }, status, text] of cases) {
-    const s = await setup(autonomy === undefined ? {} : { autonomy });
+  for (const [name, fields, options, status, text] of cases) {
+    const { principal, autonomy, notes = NOTES, slug, name: file } = options;
+    const s = await setup({ autonomy, notes });
     const before = s.puts();
     const r = await s.edit(fields, { principal, slug, name: file });
     assert.deepEqual([r.status, r.text], [status, text], name);
     assert.equal(s.puts(), before, name);
-    assert.equal(s.storedText(), NOTES, name);
+    assert.equal(s.storedText(), notes, name);
     assert.equal(
       [...s.bucket.objects.keys()].some((k) => k.includes("sample/")),
       false,
       name,
     );
   }
+});
+
+test("a stored link on an untouched notes line does not block an edit", async () => {
+  const s = await setup({ notes: `# Notes\n\nSee https://example.test/guide.\n\n${NOTE_LINE}\n` });
+  const r = await s.edit();
+  assert.equal(r.status, 200);
 });
 
 test("exactly 600 changed characters passes", async () => {
