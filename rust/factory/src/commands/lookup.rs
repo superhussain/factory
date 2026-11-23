@@ -5,11 +5,12 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::cli::Call;
+use crate::commands::pipeline::decision_verdict;
 use crate::shared::board::{escalated, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
-use crate::shared::consts::IN_FLIGHT;
+use crate::shared::consts::{IN_FLIGHT, JOB_ID, SLUG};
 use crate::shared::exit::{fail, Res};
-use crate::shared::fs::{resolve, same_path};
+use crate::shared::fs::{is_link, read_text, resolve, same_path};
 use crate::shared::home::{factory_home, holder, runtime_py};
 use crate::shared::http::{api, api_url, quote};
 use crate::shared::proc::git;
@@ -164,6 +165,25 @@ pub fn where_cmd(call: &Call) -> Res<()> {
     Ok(())
 }
 
+/// An older row's decision, read from this host's decision.md and marked inferred, or None.
+fn inferred_decision(home: &Path, j: &Value) -> Option<Value> {
+    if j.get("decision").is_some() {
+        return None;
+    }
+    let project = j.get("project")?.as_str().filter(|p| SLUG.is_full(p))?;
+    let id = j
+        .get("id")?
+        .as_str()
+        .filter(|id| JOB_ID.is_full(id) && !id.contains(".."))?;
+    let path = home.join("jobs").join(project).join(id).join("decision.md");
+    if !path.is_file() || is_link(&path).unwrap_or(true) {
+        return None;
+    }
+    let mut verdict = decision_verdict(&read_text(&path).ok()?)?;
+    verdict["inferred"] = Value::Bool(true);
+    Some(verdict)
+}
+
 pub fn job(call: &Call) -> Res<()> {
     let job_id = &call.args[0];
     let home = factory_home()?;
@@ -172,7 +192,7 @@ pub fn job(call: &Call) -> Res<()> {
         jobs.iter()
             .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
     });
-    let found = match found {
+    let mut found = match found {
         Some(j) => j.clone(),
         None => {
             let r = api(
@@ -196,6 +216,9 @@ pub fn job(call: &Call) -> Res<()> {
                 .ok_or_else(|| fail(format!("the archive answered with no job for {job_id}"), 1))?
         }
     };
+    if let Some(decision) = inferred_decision(&home, &found) {
+        found["decision"] = decision;
+    }
     println!("{}", dumps(&found, INDENT2));
     Ok(())
 }
@@ -255,4 +278,43 @@ pub fn builds(call: &Call) -> Res<()> {
     let out = json!({"queued": queued, "in_flight": flight, "stale": stale, "running": running, "due": due});
     println!("{}", dumps(&out, INDENT2));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::fs::temp_dir;
+
+    #[test]
+    fn inferred_decision_reads_only_old_rows() {
+        let home = temp_dir("lookup-decision");
+        let folder = home.join("jobs/alpha/042-sample-export");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("decision.md"),
+            "APPROVE\nA person approved this job with /factory approve.\n",
+        )
+        .unwrap();
+        let old = json!({"id": "042-sample-export", "project": "alpha"});
+        assert_eq!(
+            inferred_decision(&home, &old),
+            Some(json!({"verdict": "APPROVE", "decider": "person", "inferred": true}))
+        );
+        let stored = json!({"id": "042-sample-export", "project": "alpha",
+            "decision": {"verdict": "APPROVE", "decider": "model", "at": "2026-11-23T15:00:00Z"}});
+        assert_eq!(inferred_decision(&home, &stored), None);
+        for row in [
+            json!({"id": "043-no-file", "project": "alpha"}),
+            json!({"id": "042-sample-export", "project": "../alpha"}),
+            json!({"id": "..", "project": "alpha"}),
+            json!({"id": "042-sample-export"}),
+        ] {
+            assert_eq!(inferred_decision(&home, &row), None, "{row}");
+        }
+        std::fs::write(folder.join("decision.md"), "Pending\n").unwrap();
+        assert_eq!(inferred_decision(&home, &old), None);
+        std::fs::write(folder.join("decision.md"), b"\xff").unwrap();
+        assert_eq!(inferred_decision(&home, &old), None);
+        std::fs::remove_dir_all(home).unwrap();
+    }
 }
