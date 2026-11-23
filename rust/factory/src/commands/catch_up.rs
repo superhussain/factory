@@ -623,7 +623,11 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
         };
         let mut ok = backup.is_some();
         if ok && !current {
-            let tmp = temp_root()?.join(format!("factory-catch-up-{}", random_hex(4)));
+            // The installer refuses a source path with a symlinked parent, and macOS's temp
+            // root is under /var -> private/var, so build the path from the canonical root.
+            let root = temp_root()?;
+            let root = fs::canonicalize(&root).map_err(|e| fail(os_error(&e, Some(&root)), 1))?;
+            let tmp = root.join(format!("factory-catch-up-{}", random_hex(4)));
             #[cfg_attr(not(unix), allow(unused_mut))]
             let mut builder = fs::DirBuilder::new();
             #[cfg(unix)]
@@ -1379,6 +1383,28 @@ mod tests {
         assert_eq!(t.backups(), backups);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn source_folder_avoids_a_symlinked_temp_root() {
+        let t = T::new("linked-temp");
+        let real = t.root.join("real-tmp");
+        fs::create_dir(&real).unwrap();
+        let link = t.root.join("linked-tmp");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        TEMP_ROOT.with(|r| *r.borrow_mut() = Some(link.clone()));
+        fs::write(t.src.join("notes.txt"), "Commit C.\n").unwrap();
+        t.commit("C");
+        sh_git(&t.checkout, &["checkout", "-q", "--detach"]);
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0, "{out}");
+        let built = t.builds.borrow().clone();
+        let src = PathBuf::from(&built[0][0]);
+        let tmp = src.parent().unwrap();
+        assert_eq!(tmp.parent().unwrap(), fs::canonicalize(&real).unwrap());
+        assert!(!src.starts_with(&link), "{}", src.display());
+        assert!(!tmp.exists());
+    }
+
     #[test]
     fn builds_and_runs_the_origin_binary() {
         let t = T::new("origin-installer");
@@ -1398,7 +1424,10 @@ mod tests {
             .to_str()
             .unwrap()
             .starts_with("factory-catch-up-"));
-        assert_eq!(tmp.parent().unwrap(), temp_root().unwrap());
+        assert_eq!(
+            tmp.parent().unwrap(),
+            fs::canonicalize(temp_root().unwrap()).unwrap()
+        );
         assert!(!tmp.exists());
         assert_eq!(
             *t.installs.borrow(),
