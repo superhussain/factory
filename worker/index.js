@@ -1088,6 +1088,13 @@ function changedChars(a, b) {
   return x.length - start - end + (y.length - start - end);
 }
 
+// The whole lines of text that hold [start, end). No note check pattern crosses a newline.
+function touchedLines(text, start, end) {
+  const from = text.slice(0, start).lastIndexOf("\n") + 1;
+  const to = text.indexOf("\n", end);
+  return text.slice(from, to < 0 ? text.length : to);
+}
+
 // factory.py's MAX_EXPLORER_PROJECTS: a longer allowlist makes the autonomy record malformed.
 const MAX_EXPLORER_PROJECTS = 1;
 const RETRO_EDIT_CHANGE = 600;
@@ -1273,7 +1280,9 @@ async function projectRetroPut(request, env, principal, slug, name) {
   const error =
     (name === "project.md" ? validateProjectDocument(next) : validateProjectMarkdown(next)) ??
     checkOperatorText(next, "project document", "document") ??
-    (name === "notes.md" ? checkOperatorText(body.replace, "replace", "note") : null) ??
+    (name === "notes.md"
+      ? checkOperatorText(touchedLines(next, start, start + body.replace.length), "replace", "note")
+      : null) ??
     checkSummary(body.summary);
   if (error) return reply(error, 400);
   const cond = new Headers(current ? { "If-Match": current.httpEtag } : { "If-None-Match": "*" });
