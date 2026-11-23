@@ -55,7 +55,7 @@ const AUTONOMY_MIN_JOBS: usize = 20;
 const AUTONOMY_PROMOTE_DAYS: i64 = 7;
 const BACKLOG_CONTEXT_EXAMPLE: &str = "a context file looks like this:\nRecommend: approve\n\nWhy this line is worth building, in one or more lines.\n\n## Question: Which option?\nWhat the person decides.\nPick: one\n- Option A (recommended): what it does\n- Option B: what it does";
 const BACKLOG_DECIDE_USAGE: &str = "usage: backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes-file <file>] --chat-file <file>";
-static BACKLOG_SUFFIX: Pattern = Pattern::new(
+pub(crate) static BACKLOG_SUFFIX: Pattern = Pattern::new(
     r" \((rework-of|follow-up-of|sub-job-of|depends-on) (\w[\w.-]*)\)$",
     Flags::ASCII,
 );
@@ -99,8 +99,8 @@ static LESSON_MARK: Pattern = Pattern::new(
     ASCII_M,
 );
 const MAX_EXPLORER_PROJECTS: usize = 1;
-const MAX_OPEN_PER_PROJECT: usize = 5;
-const MAX_PER_DAY: usize = 10;
+pub(crate) const MAX_OPEN_PER_PROJECT: usize = 5;
+pub(crate) const MAX_PER_DAY: usize = 10;
 const MAX_PER_RUN: usize = 5;
 const MAX_SUGGESTION_BYTES: usize = 65536;
 const NEEDS_ANSWER_USAGE: &str = "usage: needs answer <job-id> --answers <file> --chat-file <file>";
@@ -108,7 +108,7 @@ const NEEDS_SKIPPED: &str = "answer every question; needs answer takes one line 
 static NOT_BEFORE: Pattern = Pattern::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", Flags::NONE);
 const PRIORITY_STAGES: &[&str] = &[IDEA, "spec", "build", "review", "approve"];
 static REPO_PATH: Pattern = Pattern::new("[A-Za-z0-9_./-]{1,200}", Flags::ASCII);
-static RETRO_MARK: Pattern = Pattern::new(
+pub(crate) static RETRO_MARK: Pattern = Pattern::new(
     r"^Retro: run [A-Za-z0-9_-]{1,64}, fingerprint [0-9a-f]{16}, created \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$",
     Flags::M,
 );
@@ -165,7 +165,7 @@ const SENSITIVE_PATHS: &[&str] = &[
 ];
 const SPEC_APPROVED_NOTES: &[&str] = &["spec approved in Tracer", "spec approved on the dashboard"];
 const STOP_CHECKS_FILE: &str = "stop-checks.json";
-const SUGGESTION_SCHEMA: &str = "factory.suggestions/1";
+pub(crate) const SUGGESTION_SCHEMA: &str = "factory.suggestions/1";
 const SUGGEST_APPROVE_USAGE: &str = "usage: suggest approve <job-id> <A|B|C> [--chat-file <file>]";
 const SUGGEST_KINDS: &[&str] = &[
     "bug-fix",
@@ -339,7 +339,7 @@ fn check_untrusted(text: &str) -> Option<String> {
 }
 
 /// The set of registered project slugs.
-fn registered(home: &Path) -> Res<BTreeSet<String>> {
+pub(crate) fn registered(home: &Path) -> Res<BTreeSet<String>> {
     let listed = parse(&api(home, "GET", "/projects.json", None, &[200], &[])?.text()?)?;
     Ok(listed
         .as_array()
@@ -850,7 +850,7 @@ static RECOMMENDED_TAIL: Pattern = Pattern::new(r" \(recommended\)$", Flags::I);
 
 /// Why a normalized backlog context does not fit: a Recommend line, the reasons, then up to three
 /// needs.md questions. None when it fits.
-fn backlog_context_error(text: &str) -> Option<String> {
+pub(crate) fn backlog_context_error(text: &str) -> Option<String> {
     let lines: Vec<&str> = text.split('\n').collect();
     if text.chars().count() > 6000 {
         return Some("longer than 6000 characters".into());
@@ -3040,7 +3040,7 @@ fn render_card(job_id: &str, doc: &Value, s: &Value, reasons: &[String]) -> Stri
     lines.join("\n") + "\n"
 }
 
-fn created_since(j: &Value, cutoff: i64) -> bool {
+pub(crate) fn created_since(j: &Value, cutoff: i64) -> bool {
     stamp_of(j.get("origin").and_then(|o| o.get("created")))
         .is_some_and(|stamp| cutoff < stamp && stamp <= unix_now())
 }

@@ -10,14 +10,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Map, Value};
 
-use crate::cli::{not_ported, Call};
+use crate::cli::Call;
+use crate::commands::intake::{
+    backlog_add, backlog_context_error, check_suggestions, created_since, fingerprint,
+    BACKLOG_SUFFIX, MAX_OPEN_PER_PROJECT, MAX_PER_DAY, RETRO_MARK, SUGGESTION_SCHEMA,
+};
 use crate::shared::board::{dump_board, load_board};
 use crate::shared::conf::{fm_get, frontmatter, read_env_ordered};
 use crate::shared::consts::{
-    tag_lookalike, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG,
+    tag_lookalike, IDEA, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG,
     PIPELINE_STAGES, RETRO_STAGES, SLUG,
 };
-use crate::shared::exit::{fail, Res};
+use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{is_link, read_text, write_atomic};
 use crate::shared::home::factory_home;
 use crate::shared::http::{access_message, api, cas, Response};
@@ -62,6 +66,8 @@ static RETRO_POLLS: [(&str, Pattern); 3] = [
     ),
 ];
 static RETRO_JOB: Pattern = Pattern::new(r"factory-(\d{2,5})-", Flags::NONE);
+static RED_FLAG_TITLE: Pattern = Pattern::new(r"Red flag: (\S+) via (\S+)", Flags::NONE);
+static BACKLOG_ITEM: Pattern = Pattern::new(r"- \[([ x])\] ([\w-]+): \S", Flags::NONE);
 const RETRO_PUSH_FILE: &str = "retro-push.json";
 static RETRO_PATH: Pattern = Pattern::new(r#"(?:~|\.{1,2})?/[^\s:'"()]+"#, Flags::NONE);
 static RETRO_ASSIGN: Pattern = Pattern::new(
@@ -1699,7 +1705,7 @@ fn check_retro(doc: &Value) -> Option<String> {
     if let Some(err) = check_keys(
         doc,
         &["schema", "run", "findings", "suggestions"],
-        &["edits"],
+        &["edits", "lesson_cards"],
     ) {
         return Some(format!("reply: {err}"));
     }
@@ -1723,6 +1729,10 @@ fn check_retro(doc: &Value) -> Option<String> {
         (
             "edits",
             check_list(doc.get("edits").unwrap_or(&none), 0, MAX_RETRO_EDITS),
+        ),
+        (
+            "lesson_cards",
+            check_list(doc.get("lesson_cards").unwrap_or(&none), 0, 1),
         ),
     ];
     checks
@@ -2181,6 +2191,7 @@ fn render_findings(
     rejected: &[Rejected],
     edits: &[Value],
     fixed: &[Fixed],
+    cards: &[(usize, String)],
 ) -> String {
     let mut ranked = findings.to_vec();
     ranked.sort_by(by_score);
@@ -2321,6 +2332,21 @@ fn render_findings(
             ));
         }
     }
+    if !cards.is_empty() {
+        lines.extend([
+            String::new(),
+            "## Rejected cards".into(),
+            String::new(),
+            "Admission dropped these cards. Their text is not shown; read reply.json to see it."
+                .into(),
+            String::new(),
+            "| Card | Problem |".into(),
+            "| --- | --- |".into(),
+        ]);
+        for (i, problem) in cards {
+            lines.push(format!("| {i} | {} |", cell(problem)));
+        }
+    }
     if !edits.is_empty() {
         lines.extend([
             String::new(),
@@ -2457,27 +2483,36 @@ fn env_secret(home: &Path, text: &str) -> Res<Option<String>> {
         .map(|(k, _)| k))
 }
 
-/// PUT the run's checked findings as a factory.retro-run/1 record. kept holds each reply finding in order,
-/// None where admission rejected it or a merged job fixed it; rejected counts the findings that failed
-/// checks. Errors print to stderr and never change the exit code.
+/// PUT the run's checked findings and logged cards as a factory.retro-run/1 record. kept holds each reply
+/// finding in order, None where admission rejected it or a merged job fixed it; rejected counts the
+/// findings that failed checks; links holds each card's finding number or list of numbers. Errors print to
+/// stderr and never change the exit code.
+#[allow(clippy::too_many_arguments)]
 fn upload(
     home: &Path,
     run: &str,
     agg: &Value,
     kept: &[Option<&Value>],
     rejected: usize,
+    cards: &[&Value],
+    links: &[&Value],
+    outcomes: &[(String, String)],
 ) -> Res<()> {
     let device = config_device(home)?;
     if !HOST_NAME.is_full(&device) {
         eprintln!("retro upload skipped: set device: in config.md");
         return Ok(());
     }
-    let mut ranked: Vec<&Value> = kept.iter().flatten().copied().collect();
-    ranked.sort_by(by_score);
-    let findings: Vec<Value> = ranked
+    let mut ranked: Vec<(usize, &Value)> = kept
         .iter()
         .enumerate()
-        .map(|(n, f)| {
+        .filter_map(|(n, f)| f.map(|f| (n + 1, f)))
+        .collect();
+    ranked.sort_by(|a, b| by_score(&a.1, &b.1));
+    let mut findings: Vec<Value> = ranked
+        .iter()
+        .enumerate()
+        .map(|(n, (_, f))| {
             let mut row = Map::new();
             row.insert("rank".into(), json!(n + 1));
             for k in [
@@ -2495,8 +2530,42 @@ fn upload(
             Value::Object(row)
         })
         .collect();
+    let rank_of = |n: i64| {
+        ranked
+            .iter()
+            .position(|(k, _)| *k as i64 == n)
+            .map(|r| r + 1)
+    };
+    let mut loose = Vec::new();
+    for (s, link) in cards.iter().zip(links) {
+        let fp = fingerprint(&py_str(&s["project"]), s);
+        let result = outcomes
+            .iter()
+            .find(|(f, _)| *f == fp)
+            .map_or("not admitted", |(_, r)| r.as_str());
+        let row = json!({"title": s["title"], "project": s["project"], "fingerprint": fp,
+                         "result": result.chars().take(120).collect::<String>()});
+        let nums: Vec<&Value> = match link {
+            Value::Array(items) => items.iter().collect(),
+            other if is_int(other) => vec![*other],
+            _ => Vec::new(),
+        };
+        let ranks: BTreeSet<usize> = nums
+            .iter()
+            .filter_map(|n| n.as_i64().and_then(rank_of))
+            .collect();
+        for rank in &ranks {
+            findings[rank - 1]["cards"]
+                .as_array_mut()
+                .unwrap()
+                .push(row.clone());
+        }
+        if ranks.is_empty() {
+            loose.push(row);
+        }
+    }
     let record = json!({"schema": RETRO_RUN_SCHEMA, "run": run, "host": device, "from": agg["from"], "to": agg["to"],
-                        "sessions": host_sessions(agg), "rejected": rejected, "findings": findings, "cards": []});
+                        "sessions": host_sessions(agg), "rejected": rejected, "findings": findings, "cards": loose});
     let sent = api(
         home,
         "PUT",
@@ -2583,9 +2652,6 @@ fn admit(home: &Path, run: &str) -> Res<()> {
             2,
         ));
     }
-    if !doc["suggestions"].as_array().unwrap().is_empty() {
-        return Err(not_ported("retro admit with suggestions"));
-    }
     let merged = agg.get("merged").cloned().unwrap_or(json!([]));
     let (mut passed, mut rejected) = (Vec::new(), Vec::new());
     for (i, f) in doc["findings"].as_array().unwrap().iter().enumerate() {
@@ -2621,11 +2687,60 @@ fn admit(home: &Path, run: &str) -> Res<()> {
         .iter()
         .filter_map(|(i, f, fix)| fix.clone().map(|(job, at)| (*i, *f, job, at)))
         .collect();
+    let (mut cards_in, mut links) = (Vec::new(), Vec::new());
+    for s in doc["suggestions"].as_array().unwrap() {
+        let mut s = s.clone();
+        let link = s
+            .as_object_mut()
+            .and_then(|m| m.shift_remove("finding"))
+            .unwrap_or(Value::Null);
+        cards_in.push(s);
+        links.push(link);
+    }
+    let total = doc["findings"].as_array().unwrap().len();
+    let (mut clean, mut bad_cards) = (Vec::new(), Vec::new());
+    for (i, (s, link)) in cards_in.iter().zip(&links).enumerate() {
+        let err = check_retro_card(s, run, i).or_else(|| {
+            check_finding_link(link, total).map(|bad| format!("suggestions[{i}].finding: {bad}"))
+        });
+        match err {
+            Some(err) => bad_cards.push((i, err)),
+            None => clean.push((i, s, link)),
+        }
+    }
+    let fixed_by: Vec<(i64, &Value)> = fixed
+        .iter()
+        .map(|(i, _, job, _)| (*i as i64 + 1, job))
+        .collect();
+    let fixer = |n: &Value| {
+        fixed_by
+            .iter()
+            .find(|(k, _)| Some(*k) == n.as_i64())
+            .map(|(_, j)| *j)
+    };
+    let mut skipped: Vec<(usize, Value)> = Vec::new();
+    for (i, _, link) in &clean {
+        let nums: Vec<&Value> = match link {
+            Value::Array(items) => items.iter().collect(),
+            other => vec![other],
+        };
+        if nums.iter().all(|n| fixer(n).is_some()) {
+            skipped.push((*i, fixer(nums[0]).unwrap().clone()));
+        }
+    }
     let write = |text: String| {
         write_atomic(&findings_path, text.as_bytes())
             .map_err(|e| fail(os_error(&e, Some(&findings_path)), 1))
     };
-    write(render_findings(&agg, run, &kept, &rejected, &[], &fixed))?;
+    write(render_findings(
+        &agg,
+        run,
+        &kept,
+        &rejected,
+        &[],
+        &fixed,
+        &bad_cards,
+    ))?;
     println!("wrote {}", findings_path.display());
     for line in &lines {
         println!("rejected {line}");
@@ -2633,12 +2748,20 @@ fn admit(home: &Path, run: &str) -> Res<()> {
     for (i, _, job, at) in &fixed {
         println!("fixed findings[{i}]: {} merged {}", py_str(job), py_str(at));
     }
+    for (_, err) in &bad_cards {
+        println!("rejected {err}");
+    }
+    for (i, job) in &skipped {
+        println!("skipped suggestions[{i}]: finding fixed by {}", py_str(job));
+    }
     if truthy(doc.get("edits")) {
         let results = apply_edits(home, run, doc["edits"].as_array().unwrap(), &mut agg)?;
         write(render_findings(
-            &agg, run, &kept, &rejected, &results, &fixed,
+            &agg, run, &kept, &rejected, &results, &fixed, &bad_cards,
         ))?;
     }
+    let none = json!([]);
+    queue_lessons(home, &agg, doc.get("lesson_cards").unwrap_or(&none))?;
     let reply_findings: Vec<Option<&Value>> = doc["findings"]
         .as_array()
         .unwrap()
@@ -2651,8 +2774,441 @@ fn admit(home: &Path, run: &str) -> Res<()> {
                 .then_some(f)
         })
         .collect();
-    println!("no suggestions");
-    upload(home, run, &agg, &reply_findings, rejected.len())
+    let mut outcomes: Vec<(String, String)> = Vec::new();
+    let (mut up_cards, mut up_links): (Vec<&Value>, Vec<&Value>) = (Vec::new(), Vec::new());
+    let result = (|| -> Res<()> {
+        if cards_in.is_empty() {
+            println!("no suggestions");
+            return Ok(());
+        }
+        if clean.is_empty() {
+            return Err(fail(
+                format!(
+                    "{}: {}; findings.md written, no cards admitted",
+                    path.display(),
+                    bad_cards[0].1
+                ),
+                2,
+            ));
+        }
+        up_cards = clean.iter().map(|(_, s, _)| *s).collect();
+        up_links = clean.iter().map(|(_, _, l)| *l).collect();
+        for (i, s, _) in &clean {
+            if let Some((_, job)) = skipped.iter().find(|(k, _)| k == i) {
+                outcomes.push((
+                    fingerprint(&py_str(&s["project"]), s),
+                    format!("finding fixed by {}", py_str(job)),
+                ));
+            }
+        }
+        let admit: Vec<Value> = clean
+            .iter()
+            .filter(|(i, ..)| !skipped.iter().any(|(k, _)| k == i))
+            .map(|(_, s, _)| (*s).clone())
+            .collect();
+        if admit.is_empty() {
+            return Err(fail(
+                "every clean card's finding is already fixed; findings.md written, no cards admitted",
+                3,
+            ));
+        }
+        let cards =
+            json!({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": admit});
+        write_atomic(
+            &suggestions_path,
+            (dumps(&cards, INDENT2) + "\n").as_bytes(),
+        )
+        .map_err(|e| fail(os_error(&e, Some(&suggestions_path)), 1))?;
+        backlog_admit(&cards, &mut outcomes)
+    })();
+    link_red_flags(home, &agg, &up_cards, &outcomes);
+    upload(
+        home,
+        run,
+        &agg,
+        &reply_findings,
+        rejected.len(),
+        &up_cards,
+        &up_links,
+        &outcomes,
+    )?;
+    result
+}
+
+/// The first violation of retro card i as "suggestions[i]...: <problem>", or None.
+fn check_retro_card(s: &Value, run: &str, i: usize) -> Option<String> {
+    let doc = json!({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": run, "suggestions": [s]});
+    check_suggestions(&doc, "retro")
+        .map(|e| e.replacen("suggestions[0]", &format!("suggestions[{i}]"), 1))
+}
+
+/// The error in a retro card's finding link, or None. A link is one finding number from 1 to total, or a
+/// list of 1 to total distinct ones.
+fn check_finding_link(link: &Value, total: usize) -> Option<String> {
+    let number =
+        |n: &Value| is_int(n) && n.as_i64().is_some_and(|n| (1..=total as i64).contains(&n));
+    let ok = match link {
+        Value::Array(items) => {
+            let distinct: BTreeSet<i64> = items.iter().filter_map(Value::as_i64).collect();
+            (1..=total).contains(&items.len())
+                && items.iter().all(number)
+                && distinct.len() == items.len()
+        }
+        other => number(other),
+    };
+    (!ok).then(|| {
+        "must be a finding number from 1 to total, or a list of distinct finding numbers"
+            .replace("total", &total.to_string())
+    })
+}
+
+/// The first violation of one retro lesson card as (field, problem), or None.
+fn check_lesson_card(c: &Value, agg: &Value) -> Option<(Option<&'static str>, String)> {
+    if let Some(err) = check_keys(c, &["job", "fact", "why"], &[]) {
+        return Some((None, err));
+    }
+    let jobs: Vec<&Value> = agg["lessons"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|r| &r["job"])
+        .collect();
+    if !jobs.contains(&&c["job"]) {
+        return Some((
+            Some("job"),
+            "must be a job in aggregate.json lessons".into(),
+        ));
+    }
+    check_text(&c["fact"], 1, 200, false)
+        .map(|e| (Some("fact"), e))
+        .or_else(|| check_text(&c["why"], 1, 300, false).map(|e| (Some("why"), e)))
+}
+
+/// Queue each checked lesson card as a held backlog line while autonomy runs. A bad card is rejected and a
+/// fact already in its project's notes.md is skipped; neither stops admit.
+fn queue_lessons(home: &Path, agg: &Value, cards: &Value) -> Res<()> {
+    let mut autonomy: Option<Value> = None;
+    for (i, c) in cards.as_array().into_iter().flatten().enumerate() {
+        if let Some((field, problem)) = check_lesson_card(c, agg) {
+            let at = field.map(|f| format!(".{f}")).unwrap_or_default();
+            println!("rejected lesson_cards[{i}]{at}: {problem}");
+            continue;
+        }
+        let row = agg["lessons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["job"] == c["job"])
+            .unwrap();
+        let project = py_str(&row["project"]);
+        let file = format!("{project}/notes.md");
+        let fact = py_str(&c["fact"]);
+        let text = agg
+            .get("documents")
+            .and_then(|d| d.get(&file))
+            .and_then(|d| d.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if text
+            .split('\n')
+            .any(|l| l == format!("- {fact}") || l.starts_with(&format!("- {fact} (")))
+        {
+            println!("skipped lesson_cards[{i}]: already in {file}");
+            continue;
+        }
+        if autonomy.is_none() {
+            let board = load_board(Some(
+                &api(home, "GET", "/api/board", None, &[200], &[])?.text()?,
+            ))?;
+            autonomy = Some(load_autonomy(&board));
+        }
+        if autonomy.as_ref().unwrap()["paused"] != false {
+            println!("skipped lesson_cards[{i}]: autonomy is paused");
+            continue;
+        }
+        crate::commands::pipeline::queue_lesson_line(
+            &project,
+            &py_str(&c["job"]),
+            &fact,
+            &py_str(&c["why"]),
+        )?;
+    }
+    Ok(())
+}
+
+/// The backlog context for a schema-checked retro card: a Recommend line, the summary, why the recommended
+/// option, the evidence, the Retro provenance line and one needs.md question.
+fn backlog_context(s: &Value, run: &str, fp: &str, created: &str) -> String {
+    let one_line = |t: &Value| py_str(t).split_whitespace().collect::<Vec<_>>().join(" ");
+    let sentence = |t: String| {
+        if t.ends_with(['.', '!', '?']) {
+            t
+        } else {
+            t + "."
+        }
+    };
+    let options = s["options"].as_array().unwrap();
+    let rec = options.iter().find(|o| o["key"] == s["recommend"]).unwrap();
+    let title = py_str(&s["title"]);
+    let header = if title.chars().count() <= 60 {
+        title
+    } else {
+        title.chars().take(57).collect::<String>() + "..."
+    };
+    let mut lines = vec![
+        "Recommend: approve".to_string(),
+        String::new(),
+        one_line(&s["summary"]),
+        String::new(),
+        format!("Why {}: {}", py_str(&rec["label"]), one_line(&s["reason"])),
+        String::new(),
+        "Evidence:".into(),
+    ];
+    for e in s["evidence"].as_array().unwrap() {
+        let n = e["sessions"].as_array().map_or(0, Vec::len);
+        let plural = if n == 1 { "" } else { "s" };
+        lines.push(format!(
+            "- {}x {} ({n} session{plural})",
+            py_str(&e["count"]),
+            py_str(&e["note"])
+        ));
+    }
+    lines.extend([
+        String::new(),
+        format!("Retro: run {run}, fingerprint {fp}, created {created}"),
+        String::new(),
+        format!("## Question: {header}"),
+        py_str(&s["question"]),
+        "Pick: one".into(),
+    ]);
+    let ordered = std::iter::once(rec).chain(options.iter().filter(|o| !std::ptr::eq(*o, rec)));
+    for o in ordered {
+        let mark = if std::ptr::eq(o, rec) {
+            " (recommended)"
+        } else {
+            ""
+        };
+        let mut row = format!(
+            "- {}{mark}: {}",
+            py_str(&o["label"]),
+            sentence(py_str(&o["detail"]))
+        );
+        let joined = |k: &str| {
+            o[k].as_array()
+                .map(|a| a.iter().map(|x| py_str(x)).collect::<Vec<_>>().join("; "))
+        };
+        if let Some(pros) = joined("pros").filter(|p| !p.is_empty() || truthy(&o["pros"])) {
+            row += &format!(" Pros: {pros}.");
+        }
+        if let Some(cons) = joined("cons").filter(|c| !c.is_empty() || truthy(&o["cons"])) {
+            row += &format!(" Cons: {cons}.");
+        }
+        lines.push(row);
+    }
+    lines.join("\n")
+}
+
+/// {"fingerprint", "created", "project", "open"} for each Retro provenance line indented under a backlog
+/// line, checked or not.
+fn retro_marks(text: &str) -> Vec<Value> {
+    let mut marks = Vec::new();
+    let mut under: Option<(String, bool)> = None;
+    for line in text.split('\n') {
+        let line = line.trim_end_matches('\r');
+        if let Some(m) = BACKLOG_ITEM.match_start(line) {
+            under = Some((m[2].to_string(), &m[1] == " "));
+        } else if under.is_some() && line.starts_with("  ") && RETRO_MARK.is_full(&line[2..]) {
+            let parts: Vec<&str> = line[2..]
+                .split(", ")
+                .map(|p| p.rsplit_once(' ').map_or(p, |(_, v)| v))
+                .collect();
+            let (project, open) = under.clone().unwrap();
+            marks.push(json!({"fingerprint": parts[1], "created": parts[2], "project": project, "open": open}));
+        } else if !line.is_empty() && !line.starts_with("  ") {
+            under = None;
+        }
+    }
+    marks
+}
+
+/// Add each checked retro card as a held backlog line with a decision form. Skips duplicates and cards over a
+/// cap, and exits 3 when autonomy is paused or nothing was added. Appends (fingerprint, result) per card.
+fn backlog_admit(cards: &Value, outcomes: &mut Vec<(String, String)>) -> Res<()> {
+    let home = factory_home()?;
+    let projects = crate::commands::intake::registered(&home)?;
+    let suggestions = cards["suggestions"].as_array().unwrap();
+    for (i, s) in suggestions.iter().enumerate() {
+        let slug = py_str(&s["project"]);
+        if !projects.contains(&slug) {
+            return Err(fail(
+                format!("suggestions[{i}].project: {slug} is not a registered factory project; nothing admitted"),
+                2,
+            ));
+        }
+    }
+    let data = load_board(Some(
+        &api(&home, "GET", "/api/board", None, &[200], &[])?.text()?,
+    ))?;
+    if load_autonomy(&data)["paused"] != false {
+        return Err(fail("autonomy is paused; nothing admitted", 3));
+    }
+    let r = api(&home, "GET", "/api/backlog", None, &[200, 404], &[])?;
+    let marks = retro_marks(&if r.status == 200 {
+        r.text()?
+    } else {
+        String::new()
+    });
+    let jobs = data["jobs"].as_array().cloned().unwrap_or_default();
+    let origins: Vec<(&Value, &Value)> = jobs
+        .iter()
+        .filter_map(|j| j.get("origin").filter(|o| o.is_object()).map(|o| (j, o)))
+        .collect();
+    let archived = data
+        .get("archived")
+        .filter(|a| a.is_object())
+        .and_then(|a| a.get("fingerprints"))
+        .filter(|f| f.is_object())
+        .cloned()
+        .unwrap_or(json!({}));
+    let cutoff = unix_now() - 86_400;
+    let daily = origins
+        .iter()
+        .filter(|(j, _)| created_since(j, cutoff))
+        .count()
+        + marks
+            .iter()
+            .filter(|m| created_since(&json!({"origin": m}), cutoff))
+            .count();
+    let (mut admitted, mut added, mut skipped): (Vec<String>, Vec<String>, Vec<Value>) =
+        (Vec::new(), Vec::new(), Vec::new());
+    for s in suggestions {
+        let slug = py_str(&s["project"]);
+        let title = py_str(&s["title"]);
+        let fp = fingerprint(&slug, s);
+        let dup = origins
+            .iter()
+            .find(|(_, o)| o.get("fingerprint").and_then(Value::as_str) == Some(fp.as_str()))
+            .map(|(j, _)| j.get("id").cloned().unwrap_or(Value::Null))
+            .filter(|d| truthy(d))
+            .or_else(|| archived.get(&fp).cloned())
+            .filter(|d| truthy(d));
+        let context = backlog_context(s, run_of(cards), &fp, &now());
+        let why = backlog_context_error(&context).or_else(|| {
+            (RETRO_MARK.find_iter(&context).count() != 1)
+                .then(|| "more than one Retro line".to_string())
+        });
+        let open = origins
+            .iter()
+            .filter(|(j, o)| {
+                j.get("stage").and_then(Value::as_str) == Some(IDEA)
+                    && py_str(&o["project"]) == slug
+            })
+            .count()
+            + marks
+                .iter()
+                .filter(|m| m["open"] == true && py_str(&m["project"]) == slug)
+                .count()
+            + added.iter().filter(|a| **a == slug).count();
+        let reason = if let Some(dup) = dup {
+            format!("duplicate {}", py_str(&dup))
+        } else if marks.iter().any(|m| m["fingerprint"] == fp.as_str()) {
+            "duplicate in backlog".into()
+        } else if daily + added.len() >= MAX_PER_DAY {
+            "daily cap".into()
+        } else if open >= MAX_OPEN_PER_PROJECT {
+            "open cap".into()
+        } else if BACKLOG_SUFFIX.search(&title).is_some() {
+            "title ends in a backlog ref".into()
+        } else if let Some(why) = why {
+            format!("context: {why}")
+        } else if !backlog_add(&home, &format!("{slug}: {title}"), Some(&context))? {
+            "already in backlog".into()
+        } else {
+            admitted.push(format!("{slug}: {title}"));
+            added.push(slug);
+            outcomes.push((fp, "admitted".into()));
+            continue;
+        };
+        skipped.push(json!({"title": s["title"], "reason": reason}));
+        outcomes.push((fp, reason));
+    }
+    println!(
+        "{}",
+        dumps(&json!({"admitted": admitted, "skipped": skipped}), INDENT2)
+    );
+    if admitted.is_empty() {
+        return Err(exit(3));
+    }
+    Ok(())
+}
+
+fn run_of(cards: &Value) -> &str {
+    cards["run"].as_str().unwrap_or("")
+}
+
+/// POST each admitted red-flag card's backlog line onto the aggregate red_flags rows it groups. Errors print
+/// to stderr and never change the exit code.
+fn link_red_flags(home: &Path, agg: &Value, cards: &[&Value], outcomes: &[(String, String)]) {
+    for s in cards {
+        let Some(m) = RED_FLAG_TITLE.fullmatch(s["title"].as_str().unwrap_or("")) else {
+            continue;
+        };
+        let fp = fingerprint(&py_str(&s["project"]), s);
+        if !outcomes.iter().any(|(f, r)| *f == fp && r == "admitted") {
+            continue;
+        }
+        let (flag, tool) = (m[1].to_string(), m[2].to_string());
+        let rows: Vec<Value> = agg["red_flags"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|r| {
+                r.get("tool").and_then(Value::as_str) == Some(tool.as_str())
+                    && r.get("flags")
+                        .and_then(Value::as_array)
+                        .is_some_and(|f| f.iter().any(|x| x == flag.as_str()))
+            })
+            .take(500)
+            .map(|r| {
+                let mut row = Map::new();
+                for k in ["time", "job", "host", "agent", "tool", "target"] {
+                    row.insert(k.into(), r[k].clone());
+                }
+                Value::Object(row)
+            })
+            .collect();
+        if rows.is_empty() {
+            continue;
+        }
+        let item = format!("{}: {}", py_str(&s["project"]), py_str(&s["title"]));
+        let body = dumps(
+            &json!({"backlog": format!("- [ ] {item}"), "rows": rows}),
+            DEFAULT,
+        );
+        let sent = api(
+            home,
+            "POST",
+            "/api/audit-flags/backlog",
+            Some(body.as_bytes()),
+            &[200, 400, 403, 404, 413, 503],
+            &[("Content-Type", "application/json")],
+        )
+        .and_then(|r| Ok((r.status, r.text()?)));
+        match sent {
+            Ok((200, text)) => {
+                let n = loads(&text)
+                    .ok()
+                    .map_or(Value::Null, |v| v["linked"].clone());
+                let plural = if n == 1 { "" } else { "s" };
+                println!("linked {} red-flag row{plural} to {item}", py_str(&n));
+            }
+            Ok((status, text)) => eprintln!(
+                "red-flag link failed: {status} {}",
+                printable_line(&text, 200)
+            ),
+            Err(e) => eprint!("{}", e.stderr),
+        }
+    }
 }
 
 fn check_text(value: &Value, lo: usize, hi: usize, multiline: bool) -> Option<String> {
@@ -4766,7 +5322,7 @@ mod tests {
     }
 
     #[test]
-    fn admit_with_suggestions_not_ported() {
+    fn admit_rejects_a_bad_card_after_writing_findings() {
         let (home, folder) = admit_home("suggestions");
         let card = json!({"kind": "tooling", "title": "Guard the ls alias", "finding": 1});
         fs::write(
@@ -4776,11 +5332,15 @@ mod tests {
         .unwrap();
         let e = admit(&home, RUN_A).unwrap_err();
         assert_eq!(e.code, 2);
-        assert_eq!(
-            e.stderr,
-            "factory.py: retro admit with suggestions is not ported to the Rust binary yet\n"
+        assert!(
+            e.stderr
+                .ends_with("; findings.md written, no cards admitted\n"),
+            "{}",
+            e.stderr
         );
-        assert_eq!(names(&folder), ["aggregate.json", "reply.json"]);
+        assert!(fs::read_to_string(folder.join("findings.md"))
+            .unwrap()
+            .contains("## Rejected cards"));
     }
 
     #[test]
@@ -4794,7 +5354,7 @@ mod tests {
             json!("1700|legacy"),
             json!("2026-11-15T12:30:00Z"),
         )];
-        let text = render_findings(&agg, "r1", &[], &[], &[], &fixed);
+        let text = render_findings(&agg, "r1", &[], &[], &[], &fixed, &[]);
         assert!(
             text.contains("| 0 | t | 1700\\|legacy | 2026-11-15T12:30:00Z |"),
             "{text}"
@@ -4812,6 +5372,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
         );
         let section = [
             "## Reviewer accept rate",
@@ -4825,9 +5386,8 @@ mod tests {
         ]
         .join("\n");
         assert!(text.contains(&section), "{text}");
-        assert!(
-            !render_findings(&agg, "r1", &[], &[], &[], &[]).contains("## Reviewer accept rate")
-        );
+        assert!(!render_findings(&agg, "r1", &[], &[], &[], &[], &[])
+            .contains("## Reviewer accept rate"));
     }
 
     #[test]
