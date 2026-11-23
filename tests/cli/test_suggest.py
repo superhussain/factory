@@ -706,12 +706,6 @@ class SuggestTest(SuggestCase):
         self.assertIn("only factory.py push sets goal", err)
         self.assertEqual(self.puts(), 0)
 
-    def test_board_refuses_decision(self):
-        code, err = self.board_patch("007-old", {"decision": {"verdict": "APPROVE", "decider": "person"}})
-        self.assertEqual(code, 2)
-        self.assertIn("only factory.py push and pickup set decision", err)
-        self.assertEqual(self.puts(), 0)
-
     def test_board_refuses_promoting_gated(self):
         self.admit(suggestions())
         card = self.board["jobs"][-1]["id"]

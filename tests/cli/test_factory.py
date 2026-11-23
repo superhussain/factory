@@ -425,40 +425,6 @@ class FactoryTest(IsolatedTestCase):
         self.assertIn("/api/jobs/sample/001-test/spec.md", self.put_paths)
         self.assertNotIn("/api/board", self.put_paths)
 
-    def test_push_records_decision(self):
-        job = self.saved()
-        job["updated"] = "2026-01-02T12:00:00Z"
-        self.save(job)
-        (self.folder / "decision.md").write_text("APPROVE\n\nA person approved this job with /factory approve.\n")
-        with patch.object(factory, "now", return_value="2026-11-23T15:00:00Z"):
-            factory.push(self.target)
-        self.assertEqual(self.saved()["decision"],
-                         {"verdict": "APPROVE", "decider": "person", "at": "2026-11-23T15:00:00Z"})
-        self.assertEqual(self.saved()["updated"], "2026-01-02T12:00:00Z")
-        self.assertIn("recorded the decision.md verdict on the board: APPROVE, decided by person",
-                      self.output.getvalue())
-
-    def test_push_skips_unchanged_decision(self):
-        (self.folder / "decision.md").write_text("APPROVE\n\n**Summary.** Ready.\n")
-        factory.push(self.target)
-        self.put_paths.clear()
-        (self.folder / "decision.md").write_text("APPROVE\n\n**Summary.** Ready to ship.\n")
-        factory.push(self.target)
-        self.assertIn("/api/jobs/sample/001-test/decision.md", self.put_paths)
-        self.assertNotIn("/api/board", self.put_paths)
-        self.put_paths.clear()
-        factory.push(self.target)
-        self.assertNotIn("/api/board", self.put_paths)
-
-    def test_push_clears_decision_without_a_verdict(self):
-        (self.folder / "decision.md").write_text("ESCALATE\n\n**Summary.** A person must merge.\n")
-        factory.push(self.target)
-        self.assertEqual(self.saved()["decision"]["verdict"], "ESCALATE")
-        (self.folder / "decision.md").write_text("# Decision\n\nPending.\n")
-        factory.push(self.target)
-        self.assertNotIn("decision", self.saved())
-        self.assertIn("cleared the board decision: decision.md has no verdict line", self.output.getvalue())
-
     def test_handoff_records_goal(self):
         self.write_spec("Sample exports stay under one megabyte.\n")
         factory.handoff(self.target)

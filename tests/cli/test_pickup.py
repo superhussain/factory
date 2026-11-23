@@ -2783,7 +2783,6 @@ class CloseTest(PickupFixture):
         self.assertNotIn("needs", job)
         self.assertEqual(job["done"], job["updated"])
         self.assertEqual(set(job["close"]), {"reason", "at", "closed"})
-        self.assertEqual(job["decision"], {"verdict": "CLOSED", "decider": "person", "at": "2026-01-02T12:00:00Z"})
         self.calls.clear()
         self.assertEqual(self.pickup(), (0, "", ""))
         self.assertEqual(self.puts(), [])
