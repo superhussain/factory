@@ -2022,6 +2022,16 @@ fn crontab_lines() -> Res<Vec<String>> {
 }
 
 /// Write and load a unit; one line saying what changed. A unit that already matches is left alone.
+/// How many times install polls `launchctl print` after a bootout, 250 ms apart: about 10 s.
+const BOOTOUT_POLLS: u32 = 40;
+
+/// A wait between launchctl steps; tests run their stubs without it.
+fn pause(d: Duration) {
+    if !cfg!(test) {
+        std::thread::sleep(d);
+    }
+}
+
 fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -> Res<String> {
     let values = timer_values(home, unit);
     check_unit_paths(scheduler, &values)?;
@@ -2040,13 +2050,24 @@ fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -> Res<Strin
         mkdirs(plist.parent().unwrap())?;
         write_file(&plist, &text)?;
         setup_run(&["launchctl", "bootout", &target], None);
-        // A disabled label makes bootstrap fail with "5: Input/output error".
+        // bootout returns before launchd lets go of the job; bootstrapping a label that is still
+        // loaded fails with "5: Input/output error", so wait for print to stop finding it.
+        for _ in 0..BOOTOUT_POLLS {
+            if setup_run(&["launchctl", "print", &target], None).0 != 0 {
+                break;
+            }
+            pause(Duration::from_millis(250));
+        }
+        // A disabled label makes bootstrap fail with "5: Input/output error" too.
         setup_run(&["launchctl", "enable", &target], None);
         let shown = plist.to_string_lossy();
-        (code, out) = setup_run(
-            &["launchctl", "bootstrap", &format!("gui/{uid}"), &shown],
-            None,
-        );
+        let bootstrap = ["launchctl", "bootstrap", &format!("gui/{uid}"), &shown];
+        let mut result = setup_run(&bootstrap, None);
+        if result.0 != 0 && result.1.contains("Input/output error") {
+            pause(Duration::from_secs(2));
+            result = setup_run(&bootstrap, None);
+        }
+        (code, out) = result;
         done = format!("installed launchd {noun}: {}", plist.display());
     } else if scheduler == "systemd" {
         let file = timer_path(scheduler, unit);
@@ -2128,7 +2149,7 @@ fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -> Res<Strin
 }
 
 /// Stop and remove a unit; one line saying what changed.
-fn uninstall_timer(home: &Path, scheduler: &str, unit: &Unit) -> Res<String> {
+pub(crate) fn uninstall_timer(home: &Path, scheduler: &str, unit: &Unit) -> Res<String> {
     let noun = unit.noun;
     let fail_with = |out: &str| {
         fail(
@@ -2262,7 +2283,13 @@ struct Check {
     note: Option<String>,
 }
 
-fn setup_checks(home: &Path, device: &str, overridden: bool) -> Res<Vec<Check>> {
+/// The checks; daemon is the installed daemon service's detail, or None when it is not installed.
+fn setup_checks(
+    home: &Path,
+    device: &str,
+    overridden: bool,
+    daemon: Option<&str>,
+) -> Res<Vec<Check>> {
     let mut argv = vec![exe()];
     if overridden {
         argv.extend(["--home".to_string(), home.to_string_lossy().into_owned()]);
@@ -2459,6 +2486,16 @@ fn setup_checks(home: &Path, device: &str, overridden: bool) -> Res<Vec<Check>> 
         },
     ));
 
+    // An installed daemon service is this host's scheduler, and no pickup timer is needed.
+    if let Some(detail) = daemon {
+        checks.push(check(
+            "timer",
+            Some(true),
+            format!("scheduler: daemon ({detail})"),
+            Vec::new(),
+        ));
+        return Ok(checks);
+    }
     let scheduler = pickup_scheduler();
     let (installed, detail) = timer_installed(scheduler, &PICKUP);
     let note = if installed {
@@ -2475,11 +2512,37 @@ fn setup_checks(home: &Path, device: &str, overridden: bool) -> Res<Vec<Check>> 
 }
 
 /// Check every piece pickup needs on this host and print the fix for each missing one; with
-/// install, write and load the timer first. Exits 3 until all 7 pass.
+/// install, write and load the timer first, unless the daemon service runs pickup on this host.
+/// Exits 3 until all 7 pass.
 fn pickup_setup(io: &mut Io, home: &Path, install: bool, overridden: bool) -> Res<()> {
     let device = holder(home)?.0;
-    let scheduler = pickup_scheduler();
-    if install {
+    let (has_daemon, daemon_detail) = timer_installed(daemon_scheduler(), &DAEMON);
+    let daemon = has_daemon.then_some(daemon_detail);
+    let scheduler = if daemon.is_some() {
+        "daemon"
+    } else {
+        pickup_scheduler()
+    };
+    if install && daemon.is_some() {
+        // A timer left beside the daemon goes, as `daemon setup --install` removes it.
+        let timer = pickup_scheduler();
+        if timer_installed(timer, &PICKUP).0 {
+            let mut files = timer_backup(timer, &PICKUP);
+            if timer == "cron" {
+                files.push((
+                    "crontab.txt".into(),
+                    setup_run(&["crontab", "-l"], None).1.into_bytes(),
+                ));
+            }
+            backup_files(io, home, files)?;
+            outln!(io, "{}", uninstall_timer(home, timer, &PICKUP)?);
+        } else {
+            outln!(
+                io,
+                "no pickup timer installed: the daemon service runs pickup"
+            );
+        }
+    } else if install {
         outln!(io, "{}", install_timer(home, scheduler, &PICKUP)?);
     }
     outln!(
@@ -2495,7 +2558,7 @@ fn pickup_setup(io: &mut Io, home: &Path, install: bool, overridden: bool) -> Re
         values.exe,
         home.display()
     );
-    let checks = setup_checks(home, &device, overridden)?;
+    let checks = setup_checks(home, &device, overridden, daemon.as_deref())?;
     for (n, c) in checks.iter().enumerate() {
         let label = if c.ok == Some(true) { "ok" } else { "missing" };
         outln!(io, "{}. {label:<8} {}: {}", n + 1, c.name, c.detail);
@@ -2515,7 +2578,12 @@ fn pickup_setup(io: &mut Io, home: &Path, install: bool, overridden: bool) -> Re
         " Pickup does nothing on this host until every check is ok."
     };
     outln!(io, "{passed} of 7 ok.{rest}");
-    outln!(io, "A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.");
+    let runner = if daemon.is_some() {
+        "daemon service"
+    } else {
+        "host timer"
+    };
+    outln!(io, "A stored Paseo or Claude schedule prompt does not pick up ideas. Only the {runner} runs pickup.");
     Err(exit(if passed == 7 { 0 } else { 3 }))
 }
 
@@ -2552,10 +2620,16 @@ fn service_state(installed: bool, running: Option<bool>) -> &'static str {
     }
 }
 
-/// The daemon's state for the doctor line.
-pub(crate) fn daemon_state(home: &Path) -> &'static str {
+/// The daemon's state for the doctor line. An installed daemon is the pickup scheduler, so the line
+/// says so and when its last pass started.
+pub(crate) fn daemon_state(home: &Path) -> String {
     let installed = timer_installed(daemon_scheduler(), &DAEMON).0;
-    service_state(installed, daemon::running(home))
+    let state = service_state(installed, daemon::running(home));
+    if !installed {
+        return state.to_string();
+    }
+    let last = daemon::last_pass(home).unwrap_or_else(|| "none yet".into());
+    format!("{state}; scheduler for pickup; last pass {last}")
 }
 
 #[cfg(test)]
@@ -2690,14 +2764,68 @@ pub(crate) fn daemon_setup_cmd(args: &[String]) -> Res<()> {
     daemon_setup(&mut io, &factory_home()?, action, overridden)
 }
 
+/// The files that hold a launchd or schtasks unit, for a backup before it is removed.
+fn timer_backup(scheduler: &str, unit: &Unit) -> Vec<(String, Vec<u8>)> {
+    if scheduler == "launchd" {
+        let plist = timer_path(scheduler, unit);
+        return fs::read(&plist)
+            .map(|bytes| vec![(format!("{}.plist", unit.label), bytes)])
+            .unwrap_or_default();
+    }
+    if scheduler == "schtasks" {
+        let (code, xml) = setup_run(&["schtasks", "/Query", "/TN", unit.task, "/XML"], None);
+        if code == 0 {
+            return vec![(format!("{}.xml", unit.task), xml.into_bytes())];
+        }
+    }
+    Vec::new()
+}
+
+/// Saves files into a new `<home>/backups/daemon-setup-<stamp>` folder and prints each path.
+fn backup_files(io: &mut Io, home: &Path, files: Vec<(String, Vec<u8>)>) -> Res<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let folder =
+        crate::commands::catch_up::backup_folder(home, "daemon-setup").map_err(|e| fail(e, 1))?;
+    for (name, bytes) in files {
+        let path = folder.join(name);
+        fs::write(&path, bytes).map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
+        outln!(io, "backup: {}", path.display());
+    }
+    Ok(())
+}
+
 /// Print the daemon service's state and how to set it up; with install or uninstall, change it
 /// first. Exits 0 when the service is current (or, after uninstall, gone), else 3.
 fn daemon_setup(io: &mut Io, home: &Path, action: ServiceAction, overridden: bool) -> Res<()> {
     let scheduler = daemon_scheduler();
     check_unit_paths(scheduler, &timer_values(home, &DAEMON))?;
+    // The daemon runs pickup, so the pickup timer goes when it is installed and comes back when it
+    // is removed: the host always has exactly one scheduler. Each change happens after the other
+    // scheduler is in place. A crontab is backed up before either change rewrites it.
+    let mut files = Vec::new();
+    if action != ServiceAction::Show && (scheduler == "cron" || pickup_scheduler() == "cron") {
+        let (code, text) = setup_run(&["crontab", "-l"], None);
+        if code == 0 {
+            files.push(("crontab.txt".to_string(), text.into_bytes()));
+        }
+    }
+    if action == ServiceAction::Install && pickup_scheduler() != "cron" {
+        files.extend(timer_backup(pickup_scheduler(), &PICKUP));
+    }
+    backup_files(io, home, files)?;
     match action {
-        ServiceAction::Install => outln!(io, "{}", install_timer(home, scheduler, &DAEMON)?),
+        ServiceAction::Install => {
+            outln!(io, "{}", install_timer(home, scheduler, &DAEMON)?);
+            outln!(
+                io,
+                "{}",
+                uninstall_timer(home, pickup_scheduler(), &PICKUP)?
+            );
+        }
         ServiceAction::Uninstall => {
+            outln!(io, "{}", install_timer(home, pickup_scheduler(), &PICKUP)?);
             outln!(io, "{}", uninstall_timer(home, scheduler, &DAEMON)?);
             if scheduler == "cron" || scheduler == "schtasks" {
                 if let Some(line) = stop_daemon(home) {
@@ -2711,6 +2839,9 @@ fn daemon_setup(io: &mut Io, home: &Path, action: ServiceAction, overridden: boo
     let state = service_state(installed, settled_running(home, action, installed));
     outln!(io, "daemon setup ({}, {scheduler}): {state}", host_os());
     outln!(io, "    {detail}");
+    if let Some(stamp) = daemon::last_pass(home) {
+        outln!(io, "    last pass: {stamp}");
+    }
     let mut argv = vec![exe()];
     if overridden {
         argv.extend(["--home".to_string(), home.to_string_lossy().into_owned()]);
@@ -18654,25 +18785,109 @@ exit "$archive_code"
                 .any(|a| a[..2] == ["launchctl", "bootstrap"]));
         }
 
+        /// Puts `f` in front of the fixture's setup_run, which still records every call.
+        fn front(st: &St, f: impl Fn(&[&str]) -> Option<(i32, String)> + 'static) {
+            st.fx.set_fakes(move |fakes| {
+                let prev = fakes.setup_run.clone().unwrap();
+                fakes.setup_run = Some(Rc::new(move |argv, stdin| {
+                    let answer = prev(argv, stdin);
+                    f(argv).unwrap_or(answer)
+                }));
+            });
+        }
+
+        fn launchctl_verbs(st: &St) -> Vec<String> {
+            st.runs
+                .borrow()
+                .iter()
+                .filter(|a| a[0] == "launchctl")
+                .map(|a| a[1].clone())
+                .collect()
+        }
+
         #[cfg(unix)]
         #[test]
         fn test_install_launchd_bootstrap_failure_fails() {
             let st = St::new();
             st.launchd();
-            st.fx.set_fakes(|f| {
-                f.setup_run = Some(Rc::new(|argv, _| match argv[..2] {
-                    ["launchctl", "bootstrap"] => {
-                        (5, "Bootstrap failed: 5: Input/output error\n".into())
-                    }
-                    ["launchctl", "print"] => (113, String::new()),
-                    _ => (0, String::new()),
-                }))
+            front(&st, |argv| match argv[..2] {
+                ["launchctl", "bootstrap"] => {
+                    Some((5, "Bootstrap failed: 5: Input/output error\n".into()))
+                }
+                _ => None,
             });
             let (code, out, err) = st.setup(&["--install"]);
             assert_eq!((code, out.as_str()), (1, ""));
             assert!(err.contains(
                 "could not install the launchd timer factory.pickup: Bootstrap failed: 5: Input/output error\n"
             ));
+            // One retry after error 5, then the failure stands.
+            let verbs = launchctl_verbs(&st);
+            assert_eq!(
+                verbs.iter().filter(|v| *v == "bootstrap").count(),
+                2,
+                "{verbs:?}"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_install_launchd_waits_for_bootout() {
+            let st = St::new();
+            let plist = st.launchd();
+            *st.loaded.borrow_mut() = true;
+            // launchd still lists the job for three prints after bootout, then lets it go.
+            let (left, loaded) = (Rc::new(RefCell::new(None::<u32>)), st.loaded.clone());
+            front(&st, move |argv| {
+                match argv[..2] {
+                    ["launchctl", "bootout"] => *left.borrow_mut() = Some(3),
+                    ["launchctl", "print"] => {
+                        let mut l = left.borrow_mut();
+                        match *l {
+                            Some(0) => *loaded.borrow_mut() = false,
+                            Some(n) => *l = Some(n - 1),
+                            None => {}
+                        }
+                    }
+                    ["launchctl", "bootstrap"] => *loaded.borrow_mut() = true,
+                    _ => {}
+                }
+                None
+            });
+            // The plist differs from what install writes, so install reloads the loaded job.
+            fs::write(&plist, "old").unwrap();
+            let (code, out, err) = st.setup(&["--install"]);
+            assert_ne!(code, 1, "{err}");
+            assert!(out.contains("installed launchd timer"), "{out}");
+            let verbs = launchctl_verbs(&st);
+            let bootout = verbs.iter().position(|v| v == "bootout").unwrap();
+            let bootstrap = verbs.iter().position(|v| v == "bootstrap").unwrap();
+            let prints = verbs[bootout..bootstrap]
+                .iter()
+                .filter(|v| *v == "print")
+                .count();
+            assert!(prints >= 4, "{verbs:?}");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_install_launchd_retries_bootstrap_once() {
+            let st = St::new();
+            st.launchd();
+            let tries = Rc::new(RefCell::new(0));
+            let t = tries.clone();
+            front(&st, move |argv| match argv[..2] {
+                ["launchctl", "bootstrap"] => {
+                    *t.borrow_mut() += 1;
+                    (*t.borrow() == 1)
+                        .then(|| (5, "Bootstrap failed: 5: Input/output error\n".into()))
+                }
+                _ => None,
+            });
+            let (code, out, err) = st.setup(&["--install"]);
+            assert_ne!(code, 1, "{err}");
+            assert!(out.contains("installed launchd timer"), "{out}");
+            assert_eq!(*tries.borrow(), 2);
         }
 
         #[test]
@@ -18698,6 +18913,28 @@ exit "$archive_code"
                 ]
             );
             assert_eq!(create[4..8], ["/SC", "MINUTE", "/MO", "5"]);
+        }
+
+        /// With the daemon service installed, it is the scheduler: check 7 passes with no pickup
+        /// timer, and --install writes none.
+        #[test]
+        fn test_setup_reports_the_daemon_as_scheduler() {
+            let st = St::new();
+            st.fx.set_fakes(|f| f.daemon_scheduler = Some("cron"));
+            *st.crontab.borrow_mut() = timer_text("cron", &timer_values(&st.fx.home, &DAEMON));
+            let (code, out, err) = st.setup(&["--install"]);
+            assert_eq!(code, 0, "{out}{err}");
+            assert!(
+                out.starts_with("no pickup timer installed: the daemon service runs pickup\n"),
+                "{out}"
+            );
+            assert!(out.contains(", daemon)\n"), "{out}");
+            assert!(out.contains("\n7. ok       timer: scheduler: daemon (crontab starts the daemon at reboot and every 5 minutes)\n"), "{out}");
+            assert!(
+                out.ends_with("Only the daemon service runs pickup.\n"),
+                "{out}"
+            );
+            assert!(!st.runs.borrow().iter().any(|a| a[..] == ["crontab", "-"]));
         }
 
         #[test]
@@ -18768,6 +19005,8 @@ exit "$archive_code"
         enabled: bool,
         active: bool,
         task: bool,
+        /// Whether the launchd pickup timer is loaded, or its scheduled task exists.
+        pickup: bool,
         runs: Vec<Vec<String>>,
     }
 
@@ -18775,6 +19014,25 @@ exit "$archive_code"
         fn answer(&mut self, argv: &[&str], stdin: Option<&str>) -> (i32, String) {
             self.runs.push(argv.iter().map(|a| a.to_string()).collect());
             let fail = |text: &str| (1, text.to_string());
+            let pickup = argv.iter().any(|a| {
+                a.ends_with("/factory.pickup")
+                    || a.ends_with("factory.pickup.plist")
+                    || *a == "factory-pickup"
+            });
+            if pickup {
+                return match argv[1] {
+                    "print" | "/Query" if !self.pickup => fail("not found"),
+                    "bootstrap" | "/Create" => {
+                        self.pickup = true;
+                        (0, String::new())
+                    }
+                    "bootout" | "/Delete" => {
+                        self.pickup = false;
+                        (0, String::new())
+                    }
+                    _ => (0, String::new()),
+                };
+            }
             match argv {
                 ["crontab", "-l"] if self.crontab.is_empty() => fail("no crontab for user"),
                 ["crontab", "-l"] => (0, self.crontab.clone()),
@@ -18853,6 +19111,10 @@ exit "$archive_code"
             fx.set_fakes(|f| {
                 f.exe = Some("/opt/my skill/runtime/factory".into());
                 f.daemon_scheduler = Some(scheduler);
+                f.pickup_scheduler = Some(match scheduler {
+                    "launchd" | "schtasks" => scheduler,
+                    _ => "cron",
+                });
                 f.setup_run = Some(Rc::new(move |argv, stdin| {
                     fake.borrow_mut().answer(argv, stdin)
                 }));
@@ -18920,6 +19182,69 @@ exit "$archive_code"
             assert_eq!(timer_values(&ds.fx.home, &DAEMON).log, ds.log());
         }
 
+        /// What catch-up asks on a daemon host: the old pickup line is seen, then removed.
+        #[test]
+        fn old_pickup_line_is_found_and_removed_beside_the_cron_daemon() {
+            let ds = Ds::new("cron");
+            let line = timer_text("cron", &timer_values(&ds.fx.home, &PICKUP));
+            ds.sched.borrow_mut().crontab = line;
+            assert!(timer_installed("cron", &PICKUP).0);
+            let out = uninstall_timer(&ds.fx.home, "cron", &PICKUP).unwrap();
+            assert_eq!(out, "removed cron timer: crontab");
+            assert!(!timer_installed("cron", &PICKUP).0);
+        }
+
+        #[test]
+        fn schtasks_install_backs_up_the_pickup_task_xml() {
+            let ds = Ds::new("schtasks");
+            ds.sched.borrow_mut().pickup = true;
+            let (code, out, err) = ds.run(Install);
+            assert_eq!(code, 0, "{out}{err}");
+            assert!(
+                out.lines()
+                    .next()
+                    .is_some_and(|l| l.starts_with("backup: ") && l.ends_with("factory-pickup.xml")),
+                "{out}"
+            );
+            assert!(ds.ran(&["schtasks", "/Query", "/TN", "factory-pickup", "/XML"]));
+        }
+
+        /// `pickup setup --install` beside the daemon removes a leftover timer, with a backup.
+        #[test]
+        fn pickup_setup_install_removes_a_leftover_cron_timer_beside_the_daemon() {
+            let ds = Ds::new("cron");
+            let both = timer_text("cron", &timer_values(&ds.fx.home, &DAEMON))
+                + "\n"
+                + &timer_text("cron", &timer_values(&ds.fx.home, &PICKUP));
+            ds.sched.borrow_mut().crontab = both;
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            let mut io = Io {
+                out: &mut out,
+                err: &mut err,
+            };
+            let _ = pickup_setup(&mut io, &ds.fx.home, true, false);
+            let out = String::from_utf8(out).unwrap();
+            assert!(out.starts_with("backup: "), "{out}");
+            assert!(out.contains("removed cron timer: crontab\n"), "{out}");
+            assert!(!timer_installed("cron", &PICKUP).0);
+            assert!(timer_installed("cron", &DAEMON).0);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn old_pickup_plist_is_found_and_removed_beside_the_launchd_daemon() {
+            let ds = Ds::new("launchd");
+            let timer = ds.fx.root.join("Library/LaunchAgents/factory.pickup.plist");
+            fs::create_dir_all(timer.parent().unwrap()).unwrap();
+            fs::write(&timer, "synthetic").unwrap();
+            ds.sched.borrow_mut().pickup = true;
+            assert!(timer_installed("launchd", &PICKUP).0);
+            let out = uninstall_timer(&ds.fx.home, "launchd", &PICKUP).unwrap();
+            assert_eq!(out, format!("removed launchd timer: {}", timer.display()));
+            assert!(!timer.exists());
+        }
+
         #[cfg(unix)]
         #[test]
         fn launchd_install_is_idempotent_and_uninstall_removes() {
@@ -18934,9 +19259,25 @@ exit "$archive_code"
                 .contains("    Or run: '/opt/my skill/runtime/factory' daemon setup --install\n"));
 
             let plist = ds.fx.root.join("Library/LaunchAgents/factory.daemon.plist");
+            let timer = ds.fx.root.join("Library/LaunchAgents/factory.pickup.plist");
+            fs::create_dir_all(timer.parent().unwrap()).unwrap();
+            fs::write(&timer, "synthetic").unwrap();
+            ds.sched.borrow_mut().pickup = true;
             let (code, out, err) = ds.run(Install);
             assert_eq!(code, 0, "{out}{err}");
-            assert!(out.starts_with(&format!("installed launchd service: {}\n", plist.display())));
+            let saved = out
+                .lines()
+                .next()
+                .and_then(|l| l.strip_prefix("backup: "))
+                .unwrap();
+            assert!(saved.ends_with("/factory.pickup.plist"), "{out}");
+            assert_eq!(fs::read_to_string(saved).unwrap(), "synthetic");
+            assert!(out.contains(&format!(
+                "\ninstalled launchd service: {}\nremoved launchd timer: {}\n",
+                plist.display(),
+                timer.display()
+            )));
+            assert!(!timer.exists() && !ds.sched.borrow().pickup);
             assert!(
                 out.contains("launchd): stopped\n    launchd job factory.daemon is loaded\n"),
                 "{out}"
@@ -18969,14 +19310,37 @@ exit "$archive_code"
 
             let (code, out, _) = ds.run(Uninstall);
             assert_eq!(code, 0, "{out}");
-            assert!(out.starts_with(&format!("removed launchd service: {}\n", plist.display())));
+            assert!(out.starts_with(&format!(
+                "installed launchd timer: {}\nremoved launchd service: {}\n",
+                timer.display(),
+                plist.display()
+            )));
+            let domain = format!("gui/{}", getuid());
+            let timer_target = format!("gui/{}/factory.pickup", getuid());
+            assert!(
+                ds.at(&[
+                    "launchctl",
+                    "bootstrap",
+                    &domain,
+                    &timer.display().to_string()
+                ]) < ds.at(&["launchctl", "bootout", &target]),
+                "the timer loads before the service goes"
+            );
+            assert!(ds.ran(&["launchctl", "print", &timer_target]));
             assert!(ds.ran(&["launchctl", "bootout", &target]));
             assert!(!plist.exists());
+            assert!(
+                timer.exists() && ds.sched.borrow().pickup,
+                "the timer is back"
+            );
             assert!(out.contains("launchd): not installed\n"));
             assert!(!out.contains("log:"), "{out}");
             let (code, out, _) = ds.run(Uninstall);
             assert_eq!(code, 0);
-            assert!(out.starts_with("no launchd service factory.daemon to remove\n"));
+            assert!(
+                out.contains("\nno launchd service factory.daemon to remove\n"),
+                "{out}"
+            );
         }
 
         #[cfg(unix)]
@@ -19072,20 +19436,28 @@ exit "$archive_code"
                 "0 1 * * * true\n*/5 * * * * /opt/skill/runtime/factory --home /h pickup\n".into();
             let (code, out, err) = ds.run(Install);
             assert_eq!((code, err.as_str()), (0, ""), "{out}");
-            assert!(out.starts_with("installed cron service: crontab\n"));
+            let saved = out
+                .strip_prefix("backup: ")
+                .and_then(|rest| rest.split('\n').next())
+                .map(PathBuf::from)
+                .expect(&out);
+            assert_eq!(
+                fs::read_to_string(&saved).unwrap(),
+                "0 1 * * * true\n*/5 * * * * /opt/skill/runtime/factory --home /h pickup\n",
+                "the crontab is saved before it is rewritten"
+            );
+            assert!(saved.starts_with(ds.fx.home.join("backups")));
+            assert!(
+                out.contains("\ninstalled cron service: crontab\nremoved cron timer: crontab\n"),
+                "{out}"
+            );
             let crontab = ds.sched.borrow().crontab.clone();
             let lines: Vec<&str> = crontab.lines().collect();
-            assert_eq!(lines.len(), 4, "{crontab}");
-            assert_eq!(
-                lines[..2],
-                [
-                    "0 1 * * * true",
-                    "*/5 * * * * /opt/skill/runtime/factory --home /h pickup"
-                ]
-            );
-            assert!(lines[2].starts_with("@reboot PATH="));
-            assert!(lines[3].starts_with("*/5 * * * * PATH="));
-            for line in &lines[2..] {
+            assert_eq!(lines.len(), 3, "the pickup line is gone: {crontab}");
+            assert_eq!(lines[0], "0 1 * * * true");
+            assert!(lines[1].starts_with("@reboot PATH="));
+            assert!(lines[2].starts_with("*/5 * * * * PATH="));
+            for line in &lines[1..] {
                 assert_eq!(cron_argv(line).unwrap(), ds.argv());
                 assert!(unit_line(line, &DAEMON) && !unit_line(line, &PICKUP));
                 assert!(line.ends_with(&format!(" >> {} 2>&1", shlex_quote(&ds.log()))));
@@ -19099,7 +19471,10 @@ exit "$archive_code"
 
             let (code, out, _) = ds.run(Install);
             assert_eq!(code, 0);
-            assert!(out.starts_with("service current: crontab\n"));
+            assert!(
+                out.contains("\nservice current: crontab\nno cron timer to remove\n"),
+                "{out}"
+            );
             assert_eq!(ds.sched.borrow().crontab, crontab);
 
             let _lock = daemon::take_lock(&ds.fx.home).unwrap().unwrap();
@@ -19107,17 +19482,18 @@ exit "$archive_code"
             let (code, out, _) = ds.run(Uninstall);
             assert_eq!(code, 0, "{out}");
             assert!(
-                out.starts_with(&format!(
-                    "removed cron service: crontab\nstopped the running daemon (pid {})\n",
+                out.contains(&format!(
+                    "\ninstalled cron timer: crontab\nremoved cron service: crontab\nstopped the running daemon (pid {})\n",
                     std::process::id()
                 )),
                 "{out}"
             );
             assert!(ds.ran(&["kill", &std::process::id().to_string()]));
-            assert_eq!(
-                ds.sched.borrow().crontab,
-                format!("{}\n", lines[..2].join("\n"))
-            );
+            let crontab = ds.sched.borrow().crontab.clone();
+            let lines: Vec<&str> = crontab.lines().collect();
+            assert_eq!(lines.len(), 2, "{crontab}");
+            assert_eq!(lines[0], "0 1 * * * true");
+            assert!(unit_line(lines[1], &PICKUP) && !unit_line(lines[1], &DAEMON));
         }
 
         #[test]
@@ -19140,6 +19516,7 @@ exit "$archive_code"
                 "/F"
             ]));
             assert!(ds.ran(&["schtasks", "/Run", "/TN", "factory-daemon"]));
+            assert!(ds.ran(&["schtasks", "/Query", "/TN", "factory-pickup"]));
             let text = fs::read_to_string(&cmd).unwrap();
             let stop = daemon::stop_marker(&ds.fx.home);
             let check = format!("if exist \"{}\" exit /b 0", stop.display());
@@ -19175,6 +19552,8 @@ exit "$archive_code"
             );
             assert!(ds.ran(&["kill", &std::process::id().to_string()]));
             assert!(!cmd.exists());
+            assert!(ds.sched.borrow().pickup, "the pickup task is back");
+            assert!(ds.fx.root.join(".config/factory-pickup.cmd").exists());
             assert!(!out.contains("log:"), "{out}");
             ds.run(Install);
             assert!(!stop.exists(), "install clears the stop marker");
@@ -19288,9 +19667,24 @@ exit "$archive_code"
             let ds = Ds::new("cron");
             assert_eq!(daemon_state(&ds.fx.home), "not installed");
             ds.run(Install);
-            assert_eq!(daemon_state(&ds.fx.home), "stopped");
+            assert_eq!(
+                daemon_state(&ds.fx.home),
+                "stopped; scheduler for pickup; last pass none yet"
+            );
             let _lock = daemon::take_lock(&ds.fx.home).unwrap().unwrap();
-            assert_eq!(daemon_state(&ds.fx.home), "running");
+            fs::write(
+                ds.fx.home.join("logs/daemon/last-pass"),
+                "2026-11-23T10:00:00Z\n",
+            )
+            .unwrap();
+            assert_eq!(
+                daemon_state(&ds.fx.home),
+                "running; scheduler for pickup; last pass 2026-11-23T10:00:00Z"
+            );
+            assert!(ds
+                .run(Show)
+                .1
+                .contains("\n    last pass: 2026-11-23T10:00:00Z\n"));
             assert_eq!(service_state(true, None), "installed");
         }
 

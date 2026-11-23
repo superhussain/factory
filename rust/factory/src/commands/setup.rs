@@ -802,10 +802,11 @@ pub fn doctor_cmd(_call: &Call) -> Res<()> {
     Ok(())
 }
 
-/// `daemon: <running|stopped|installed|not installed>` for a person at a terminal. factory.py has
-/// no daemon and its doctor prints only the JSON report, so the line stays out of the report and
-/// off pipes, where agents and the parity runs read doctor's output.
-fn daemon_line(err: &mut dyn Write, terminal: bool, state: impl FnOnce() -> &'static str) {
+/// `daemon: <running|stopped|installed|not installed>`, and for an installed daemon that it is the
+/// pickup scheduler and when its last pass ran, for a person at a terminal. factory.py has no
+/// daemon and its doctor prints only the JSON report, so the line stays out of the report and off
+/// pipes, where agents and the parity runs read doctor's output.
+fn daemon_line(err: &mut dyn Write, terminal: bool, state: impl FnOnce() -> String) {
     if terminal {
         let _ = writeln!(err, "daemon: {}", state());
     }
@@ -1517,7 +1518,7 @@ mod tests {
             unreachable!("piped doctor checks no daemon")
         });
         assert!(err.is_empty());
-        daemon_line(&mut err, true, || "running");
+        daemon_line(&mut err, true, || "running".into());
         assert_eq!(String::from_utf8(err).unwrap(), "daemon: running\n");
     }
 

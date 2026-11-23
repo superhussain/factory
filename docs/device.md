@@ -58,6 +58,14 @@ program to run. Without it, as in a bundle installed where cargo was missing, ca
 the bundle's `runtime/factory.py` with Python. See [upgrade.md](upgrade.md) for the backup
 folder and how to restore it.
 
+Where the daemon service is installed (`<installed-skill>/runtime/factory daemon setup --install`),
+the daemon is the pickup scheduler and the host has no pickup timer: catch-up removes a
+leftover timer and prints `pickup timer: replaced by the daemon`, and never installs the
+daemon on its own. To go back to the timer, run `daemon setup --uninstall`: it
+reinstalls the pickup timer, then removes the service. Elsewhere the 5-minute pickup
+timer runs pickup. See
+[the pickup reference](../skills/factory/references/pickup.md#the-daemon-as-scheduler).
+
 ## Offline initialization and credentials
 
 `init` seeds only absent `config.md` and `.env`, prints `factory home: <home>` and

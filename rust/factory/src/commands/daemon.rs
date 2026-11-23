@@ -1,5 +1,7 @@
-//! `factory daemon`: one socket on the Worker's `/events/host` route, and one pickup pass per
-//! burst of board or backlog writes. The 5-minute pickup timer stays the fallback.
+//! `factory daemon`: one socket on the Worker's `/events/host` route, and the host's only pickup
+//! scheduler where it is installed. A pass runs per burst of board or backlog writes, when a local
+//! factory agent stops running, right after a pass that launched a job, and after 5 minutes with
+//! no pass.
 
 use std::collections::hash_map::RandomState;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -23,6 +25,7 @@ use crate::shared::conf::read_conf;
 use crate::shared::exit::{fail, Res};
 use crate::shared::home::factory_home;
 use crate::shared::http::{access_message, api_url, token_message};
+use crate::shared::proc::{capture, which};
 use crate::shared::py::os_error;
 use crate::shared::time::now;
 
@@ -36,6 +39,12 @@ struct Timing {
     silence: Duration,
     max_backoff: Duration,
     connect_timeout: Duration,
+    /// How often the local Paseo agent list is read while it holds a factory agent, at first.
+    agent_poll: Duration,
+    /// The longest gap between reads of an agent list that has not changed.
+    agent_poll_max: Duration,
+    /// How long after the last pass began a fallback pass is queued.
+    fallback: Duration,
 }
 
 const LIVE: Timing = Timing {
@@ -45,6 +54,9 @@ const LIVE: Timing = Timing {
     silence: Duration::from_secs(60),
     max_backoff: Duration::from_secs(30),
     connect_timeout: Duration::from_secs(10),
+    agent_poll: Duration::from_secs(15),
+    agent_poll_max: Duration::from_secs(60),
+    fallback: Duration::from_secs(300),
 };
 
 /// What the reader thread reports. `Ignored` carries a frame's length, never its body.
@@ -155,8 +167,10 @@ fn run(home: &Path) -> Res<()> {
                 eprintln!("factory daemon: {msg}");
             }
         },
+        &running_agents,
         &mut |_| {
-            let (code, stopped) = run_pickup(&exe, &home, signal_stop);
+            let _ = std::fs::write(lock_dir(&home).join(LAST_PASS_FILE), now() + "\n");
+            let (code, stopped, launched) = run_pickup(&exe, &home, signal_stop);
             log_line(&home, &format!("pickup exited {code}"));
             if !terminal {
                 eprintln!("{} pickup exited {code}", now());
@@ -164,11 +178,58 @@ fn run(home: &Path) -> Res<()> {
             if stopped {
                 ControlFlow::Break(())
             } else {
-                ControlFlow::Continue(())
+                ControlFlow::Continue(launched > 0)
             }
         },
     );
     Ok(())
+}
+
+/// The file beside the lock that holds when the daemon's last pass began.
+const LAST_PASS_FILE: &str = "last-pass";
+
+/// When the daemon's last pickup pass began, as a UTC stamp.
+pub(crate) fn last_pass(home: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(lock_dir(home).join(LAST_PASS_FILE)).ok()?;
+    Some(text.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// The ids of this host's running factory agents: Paseo agents titled `factory <id>` or
+/// `babysit <id>`, as pickup's launches name them, since `paseo ls` shows no labels. None when
+/// paseo can't answer.
+fn running_agents() -> Option<Vec<String>> {
+    // Tests that run the whole daemon never read this host's real agents.
+    if cfg!(test) {
+        return None;
+    }
+    let exe = which("paseo")?.to_string_lossy().into_owned();
+    let home = std::env::var("PASEO_HOME").unwrap_or_default();
+    let mut argv = vec![exe.as_str(), "ls", "-g", "--json"];
+    if !home.is_empty() {
+        argv.extend(["--home", home.as_str()]);
+    }
+    let r = capture(&argv, None, &[], Some(Duration::from_secs(20))).ok()?;
+    let agents: serde_json::Value = serde_json::from_str(&r.stdout)
+        .ok()
+        .filter(|_| r.code == 0)?;
+    Some(factory_running(&agents))
+}
+
+/// The ids of the running agents in a `paseo ls --json` list titled `factory <id>` or
+/// `babysit <id>`.
+fn factory_running(agents: &serde_json::Value) -> Vec<String> {
+    agents
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|a| {
+            a["status"] == "running"
+                && a["name"]
+                    .as_str()
+                    .is_some_and(|n| n.starts_with("factory ") || n.starts_with("babysit "))
+        })
+        .filter_map(|a| a["id"].as_str().map(String::from))
+        .collect()
 }
 
 fn host_url(origin: &str) -> String {
@@ -363,9 +424,14 @@ fn read_loop(mut socket: Socket, t: &Timing, stop: Stop, tx: Sender<Event>) {
 }
 
 /// Keeps one socket open, reconnecting with backoff, and calls `pass` once per burst.
-/// Each connect queues a `connect` pass. Returns when `pass` breaks, or when `stop` reports a
+/// Each connect queues a `connect` pass. While connected it also queues a pass when an agent id
+/// `agents` listed at its last read is gone from the next read, when
+/// `pass` continues with true (it launched a job, so the host may have room for another), and
+/// when no pass has begun for `fallback`. While it cannot connect, it runs a fallback pass at
+/// start and then every `fallback`. Returns when `pass` breaks, or when `stop` reports a
 /// signal: then it logs `daemon: stopped (<signal>)` unless `pass` saw the signal first, and waits
 /// for the reader's close frame.
+#[allow(clippy::too_many_arguments)]
 fn serve(
     url: &str,
     headers: &[(String, String)],
@@ -373,10 +439,18 @@ fn serve(
     env_file: &Path,
     stop: Stop,
     log: &dyn Fn(&str),
-    pass: &mut dyn FnMut(&str) -> ControlFlow<()>,
+    agents: &dyn Fn() -> Option<Vec<String>>,
+    pass: &mut dyn FnMut(&str) -> ControlFlow<(), bool>,
 ) {
     let mut attempt = 0;
-    let mut last_start = None;
+    let mut last_start: Option<Instant> = None;
+    // The factory agents the last read saw running. The list is read at start and after a pass
+    // that launched (watch), and again while it holds an agent: every agent_poll, doubling up to
+    // agent_poll_max while it stays the same. A read that finds none stops the reads.
+    let mut running: Vec<String> = Vec::new();
+    let mut watch = true;
+    let mut polled: Option<Instant> = None;
+    let mut gap = t.agent_poll;
     loop {
         if let Some(signal) = stop() {
             log(&format!("daemon: stopped ({signal})"));
@@ -391,6 +465,15 @@ fn serve(
                     "connect failed: {reason}; retry in {:.1}s",
                     wait.as_secs_f64()
                 ));
+                // Without the socket, pickup still runs every fallback, and once at start, so
+                // takeover, schedules and the heartbeat keep going through an events outage.
+                if last_start.is_none_or(|at| at.elapsed() >= t.fallback) {
+                    last_start = Some(Instant::now());
+                    log("pickup pass (fallback)");
+                    if pass("fallback").is_break() {
+                        return;
+                    }
+                }
                 nap(wait, stop);
                 continue;
             }
@@ -406,6 +489,28 @@ fn serve(
                 log(&format!("daemon: stopped ({signal})"));
                 wait_closed(&rx, t);
                 return;
+            }
+            if (watch || !running.is_empty()) && polled.is_none_or(|at| at.elapsed() >= gap) {
+                polled = Some(Instant::now());
+                if let Some(now_running) = agents() {
+                    watch = false;
+                    let gone = running.iter().find(|id| !now_running.contains(id)).cloned();
+                    if let Some(id) = gone {
+                        log(&format!("agent finished {id}"));
+                        pending.get_or_insert_with(|| {
+                            (Instant::now(), format!("agent finished {id}"))
+                        });
+                    }
+                    gap = if now_running == running {
+                        (gap * 2).min(t.agent_poll_max)
+                    } else {
+                        t.agent_poll
+                    };
+                    running = now_running;
+                }
+            }
+            if pending.is_none() && last_start.is_some_and(|at| at.elapsed() >= t.fallback) {
+                pending = Some((Instant::now(), "fallback".to_string()));
             }
             let wait = pending.as_ref().map_or(POLL, |(first, _)| {
                 due(*first, last_start, t).saturating_duration_since(Instant::now())
@@ -429,11 +534,18 @@ fn serve(
                     let (_, reason) = pending.take().unwrap();
                     last_start = Some(Instant::now());
                     log(&format!("pickup pass ({reason})"));
-                    if pass(&reason).is_break() {
-                        if stop().is_some() {
-                            wait_closed(&rx, t);
+                    match pass(&reason) {
+                        ControlFlow::Break(()) => {
+                            if stop().is_some() {
+                                wait_closed(&rx, t);
+                            }
+                            return;
                         }
-                        return;
+                        ControlFlow::Continue(true) => {
+                            pending = Some((Instant::now(), "room left".to_string()));
+                            (watch, polled, gap) = (true, None, t.agent_poll);
+                        }
+                        ControlFlow::Continue(false) => {}
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) => {
@@ -476,52 +588,75 @@ fn wait_closed(rx: &Receiver<Event>, t: &Timing) {
     }
 }
 
-/// Today's log, `<home>/logs/daemon/<UTC date>.log`, opened for append and created 0600.
-fn day_log(home: &Path) -> io::Result<File> {
+/// Today's log, `<home>/logs/daemon/<UTC date>.log`, opened for append and created 0600, and its
+/// path.
+fn day_log(home: &Path) -> io::Result<(File, std::path::PathBuf)> {
     let dir = home.join("logs").join("daemon");
     std::fs::create_dir_all(&dir)?;
     let mut options = OpenOptions::new();
     options.create(true).append(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    options.open(dir.join(format!("{}.log", &now()[..10])))
+    let path = dir.join(format!("{}.log", &now()[..10]));
+    Ok((options.open(&path)?, path))
+}
+
+/// How many `launched ` lines path holds past byte start: the jobs one pickup run launched.
+fn launches_since(path: &Path, start: u64) -> usize {
+    let mut text = Vec::new();
+    let read = File::open(path).and_then(|mut file| {
+        io::Seek::seek(&mut file, io::SeekFrom::Start(start))?;
+        io::Read::read_to_end(&mut file, &mut text)
+    });
+    if read.is_err() {
+        return 0;
+    }
+    String::from_utf8_lossy(&text)
+        .lines()
+        .filter(|line| line.starts_with("launched "))
+        .count()
 }
 
 fn log_line(home: &Path, msg: &str) {
-    if let Ok(mut file) = day_log(home) {
+    if let Ok((mut file, _)) = day_log(home) {
         let _ = io::Write::write_all(&mut file, format!("{} {msg}\n", now()).as_bytes());
     }
 }
 
 /// Runs `exe --home <home> pickup` with its output appended to the day log, and returns (exit
-/// code, whether a stop signal came while it ran). On a stop signal it logs `daemon: stopped
-/// (<signal>)`, gives the child CHILD_GRACE to finish, then kills it.
-fn run_pickup(exe: &Path, home: &Path, stop: Stop) -> (i32, bool) {
-    let child = day_log(home).and_then(|log| {
-        Command::new(exe)
+/// code, whether a stop signal came while it ran, how many jobs it launched). On a stop signal it
+/// logs `daemon: stopped (<signal>)`, gives the child CHILD_GRACE to finish, then kills it.
+fn run_pickup(exe: &Path, home: &Path, stop: Stop) -> (i32, bool, usize) {
+    let child = day_log(home).and_then(|(log, path)| {
+        let start = log.metadata()?.len();
+        let child = Command::new(exe)
             .arg("--home")
             .arg(home)
             .arg("pickup")
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
-            .spawn()
+            .spawn()?;
+        Ok((child, path, start))
     });
-    let mut child = match child {
+    let (mut child, path, start) = match child {
         Ok(child) => child,
         Err(e) => {
             log_line(home, &os_error(&e, Some(exe)));
-            return (1, false);
+            return (1, false, 0);
         }
     };
     let mut deadline: Option<Instant> = None;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => return (status.code().unwrap_or(1), deadline.is_some()),
+            Ok(Some(status)) => {
+                let launched = launches_since(&path, start);
+                return (status.code().unwrap_or(1), deadline.is_some(), launched);
+            }
             Ok(None) => {}
             Err(e) => {
                 log_line(home, &os_error(&e, Some(exe)));
-                return (1, deadline.is_some());
+                return (1, deadline.is_some(), 0);
             }
         }
         match (deadline, stop()) {
@@ -629,6 +764,9 @@ mod tests {
         silence: Duration::from_millis(300),
         max_backoff: Duration::from_millis(100),
         connect_timeout: Duration::from_secs(1),
+        agent_poll: Duration::from_millis(50),
+        agent_poll_max: Duration::from_millis(200),
+        fallback: Duration::from_secs(60),
     };
 
     type Seen = Arc<Mutex<Vec<Vec<(String, String)>>>>;
@@ -769,25 +907,194 @@ mod tests {
 
     /// Runs `serve` against origin until `passes` passes have started, and returns their reasons.
     fn run(home: &Path, origin: &str, passes: usize) -> Vec<String> {
+        run_with(home, origin, passes, &TEST, &|| None, &[])
+    }
+
+    /// `run` with timing t, a fake Paseo agent list, and the passes (counted from 1) that report
+    /// a launch.
+    fn run_with(
+        home: &Path,
+        origin: &str,
+        passes: usize,
+        t: &Timing,
+        agents: &dyn Fn() -> Option<Vec<String>>,
+        launching: &[usize],
+    ) -> Vec<String> {
         let headers = access_headers(home, origin).unwrap();
         let mut seen = Vec::new();
         serve(
             &host_url(origin),
             &headers,
-            &TEST,
+            t,
             &home.join(".env"),
             no_stop,
             &|msg| log_line(home, msg),
+            agents,
             &mut |reason| {
                 seen.push(reason.to_string());
                 if seen.len() == passes {
                     ControlFlow::Break(())
                 } else {
-                    ControlFlow::Continue(())
+                    ControlFlow::Continue(launching.contains(&seen.len()))
                 }
             },
         );
         seen
+    }
+
+    /// A socket that answers pings for 3 s and sends nothing else.
+    fn quiet() -> String {
+        fake(None, |mut socket| {
+            answer_pings(&mut socket, Duration::from_secs(3));
+        })
+        .0
+    }
+
+    /// A factory agent that stops running starts a pass; one that keeps running, an agent that
+    /// starts, and a failed read do not.
+    #[test]
+    fn agent_finish_runs_a_pass() {
+        let origin = quiet();
+        let home = home("agent", &origin);
+        let reads = std::cell::Cell::new(0);
+        let agents = || {
+            reads.set(reads.get() + 1);
+            match reads.get() {
+                1 => Some(vec!["a1".to_string(), "a2".to_string()]),
+                2 => None,
+                3..=6 => Some(vec!["a1".into(), "a2".into(), "a3".into()]),
+                _ => Some(vec!["a2".into(), "a3".into()]),
+            }
+        };
+        let start = Instant::now();
+        let seen = run_with(&home, &origin, 2, &TEST, &agents, &[]);
+        assert_eq!(seen, ["connect", "agent finished a1"]);
+        assert!(start.elapsed() >= TEST.min_gap);
+        assert!(log_text(&home).contains(" agent finished a1\n"));
+    }
+
+    /// The list is read at start and after a pass that launched; a read that finds no factory
+    /// agent stops the reads until the next launch.
+    #[test]
+    fn agent_reads_stop_when_none_run() {
+        let origin = quiet();
+        let home = home("agent-idle", &origin);
+        let t = Timing {
+            fallback: Duration::from_millis(600),
+            ..TEST
+        };
+        let reads = std::cell::Cell::new(0);
+        let agents = || {
+            reads.set(reads.get() + 1);
+            Some(Vec::new())
+        };
+        let seen = run_with(&home, &origin, 3, &t, &agents, &[1]);
+        assert_eq!(seen, ["connect", "room left", "fallback"]);
+        assert_eq!(reads.get(), 2);
+    }
+
+    /// While the same agents keep running, the gap between reads doubles up to agent_poll_max.
+    #[test]
+    fn agent_reads_back_off_while_nothing_changes() {
+        let origin = quiet();
+        let home = home("agent-backoff", &origin);
+        let t = Timing {
+            fallback: Duration::from_millis(1000),
+            ..TEST
+        };
+        let reads = std::cell::Cell::new(0);
+        let agents = || {
+            reads.set(reads.get() + 1);
+            Some(vec!["a1".to_string()])
+        };
+        let seen = run_with(&home, &origin, 2, &t, &agents, &[]);
+        assert_eq!(seen, ["connect", "fallback"]);
+        // Reads at 0, 50, 150, 350 ms, then every 200 ms: about 8 in 1 s, not 20.
+        assert!((5..=10).contains(&reads.get()), "{}", reads.get());
+    }
+
+    /// With no socket, a fallback pass runs at start and then every fallback.
+    #[test]
+    fn fallback_runs_while_the_socket_is_down() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        drop(listener);
+        let home = home("down", &origin);
+        let t = Timing {
+            fallback: Duration::from_millis(300),
+            ..TEST
+        };
+        let start = Instant::now();
+        assert_eq!(
+            run_with(&home, &origin, 2, &t, &|| None, &[]),
+            ["fallback", "fallback"]
+        );
+        assert!(start.elapsed() >= t.fallback);
+        assert!(log_text(&home).contains(" pickup pass (fallback)\n"));
+    }
+
+    #[test]
+    fn factory_running_keeps_running_factory_agents() {
+        let list = serde_json::json!([
+            {"id": "a1", "name": "factory 2224-daemon-owns-pickup", "status": "running"},
+            {"id": "a2", "name": "factory 2181-run-the-notes", "status": "idle"},
+            {"id": "a3", "name": "explore the codebase", "status": "running"},
+            {"id": "a4", "name": "factory 2230-board", "status": "closed"},
+            {"id": "a5", "name": "babysit 2224", "status": "running"},
+        ]);
+        assert_eq!(factory_running(&list), ["a1", "a5"]);
+        assert!(factory_running(&serde_json::json!({})).is_empty());
+    }
+
+    /// With no other trigger, a pass starts once `fallback` has passed since the last one began.
+    #[test]
+    fn fallback_runs_after_a_quiet_spell() {
+        let origin = quiet();
+        let home = home("fallback", &origin);
+        let t = Timing {
+            fallback: Duration::from_millis(500),
+            ..TEST
+        };
+        let start = Instant::now();
+        let seen = run_with(&home, &origin, 3, &t, &|| None, &[]);
+        assert_eq!(seen, ["connect", "fallback", "fallback"]);
+        let took = start.elapsed();
+        assert!(
+            took >= t.fallback * 2 && took < Duration::from_secs(2),
+            "{took:?}"
+        );
+    }
+
+    /// A pass that launched a job queues another at once, held only by the minimum gap; a pass
+    /// that launched nothing queues none.
+    #[test]
+    fn launch_runs_a_room_left_pass() {
+        let origin = quiet();
+        let home = home("room", &origin);
+        let t = Timing {
+            fallback: Duration::from_millis(1500),
+            ..TEST
+        };
+        let start = Instant::now();
+        let seen = run_with(&home, &origin, 3, &t, &|| None, &[1]);
+        assert_eq!(seen, ["connect", "room left", "fallback"]);
+        assert!(
+            start.elapsed() >= t.fallback,
+            "the second pass queued no third"
+        );
+    }
+
+    #[test]
+    fn last_pass_reads_the_stamp() {
+        let home = temp_dir("daemon-last-pass");
+        assert_eq!(last_pass(&home), None);
+        std::fs::create_dir_all(lock_dir(&home)).unwrap();
+        std::fs::write(
+            lock_dir(&home).join(LAST_PASS_FILE),
+            "2026-11-23T10:00:00Z\n",
+        )
+        .unwrap();
+        assert_eq!(last_pass(&home).as_deref(), Some("2026-11-23T10:00:00Z"));
     }
 
     #[test]
@@ -913,7 +1220,7 @@ mod tests {
     fn handshake_403_logs_access_message() {
         let (origin, _) = fake(Some(403), |_| sleep(Duration::from_secs(1)));
         let home = home("403", &origin);
-        assert_eq!(run(&home, &origin, 1), ["connect"]);
+        assert_eq!(run(&home, &origin, 2), ["fallback", "connect"]);
         let message = access_message(&home.join(".env"));
         assert!(log_text(&home).contains(&format!("connect failed: {message}; retry in ")));
     }
@@ -980,7 +1287,7 @@ mod tests {
         let exe = home.join("fake-factory");
         std::fs::write(&exe, "#!/bin/sh\necho \"args: $*\"\nexit 7\n").unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(run_pickup(&exe, &home, no_stop), (7, false));
+        assert_eq!(run_pickup(&exe, &home, no_stop), (7, false, 0));
         assert!(log_text(&home).contains(&format!("args: --home {} pickup\n", home.display())));
         let dir = home.join("logs").join("daemon");
         for entry in std::fs::read_dir(dir).unwrap() {
@@ -990,6 +1297,14 @@ mod tests {
                 assert_eq!(mode & 0o777, 0o600);
             }
         }
+        // Only this run's launched lines count, not an earlier run's in the same day log.
+        std::fs::write(
+            &exe,
+            "#!/bin/sh\necho 'launched 1 alpha on primary session abc'\necho 'skip 2 alpha: paused'\n",
+        )
+        .unwrap();
+        assert_eq!(run_pickup(&exe, &home, no_stop), (0, false, 1));
+        assert_eq!(run_pickup(&exe, &home, no_stop), (0, false, 1));
     }
 
     #[test]
@@ -1004,10 +1319,9 @@ mod tests {
             sleep(Duration::from_millis(200));
         });
         let home = home("secret", &origin);
-        assert_eq!(
-            run(&home, &origin, 3),
-            ["connect", "changed board.json", "connect"]
-        );
+        // The fallback pass at the failed first connect holds the connect pass to the minimum
+        // gap, so the board frame may join it: only the first two passes are fixed.
+        assert_eq!(run(&home, &origin, 3)[..2], ["fallback", "connect"]);
         let log = log_text(&home);
         assert!(log.contains("connect failed: ") && log.contains("frame ignored ("));
         assert!(!log.contains("test-secret"), "{log}");

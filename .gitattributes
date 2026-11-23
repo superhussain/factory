@@ -1,1 +1,9 @@
+* text=auto eol=lf
+*.png binary
+*.pdf binary
 rust/factory/src/usage.txt text eol=lf
+tests/parity/homes/intake/backlog-crlf.md -text
+tests/parity/homes/intake/control-crlf.txt -text
+tests/parity/homes/intake/suggest-cf-ok.txt -text
+tests/parity/homes/intake/suggest-cf.txt -text
+tests/parity/homes/wait/jobs/sample/001-present/round-1/review-code.md -text
