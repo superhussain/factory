@@ -1,0 +1,594 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "pickup/limit-six",
+      "argv": ["--home", "{home}", "pickup", "--limit", "6"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_pickup.py::PickupTest.test_usage"
+    },
+    {
+      "id": "pickup/limit-zero",
+      "argv": ["--home", "{home}", "pickup", "--limit", "0"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_pickup.py::PickupTest.test_usage"
+    },
+    {
+      "id": "pickup/limit-twice",
+      "argv": ["--home", "{home}", "pickup", "--limit", "2", "--limit", "3"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_pickup.py::PickupTest.test_usage"
+    },
+    {
+      "id": "pickup/max-inflight-bare",
+      "argv": ["--home", "{home}", "pickup", "--max-inflight"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_pickup.py::PickupTest.test_usage"
+    },
+    {
+      "id": "pickup/unknown-flag",
+      "argv": ["--home", "{home}", "pickup", "--bogus"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_pickup.py::PickupTest.test_usage"
+    },
+    {
+      "id": "pickup/dry-twice",
+      "argv": ["--home", "{home}", "pickup", "--dry-run", "--dry-run"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_pickup.py::PickupTest.test_usage"
+    },
+    {
+      "id": "pickup/dry-triage-now",
+      "argv": ["--home", "{home}", "pickup", "--dry-run", "--triage-now"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_pickup.py::PickupTest.test_usage"
+    },
+    {
+      "id": "pickup/setup-bad-flag",
+      "argv": ["--home", "{home}", "pickup", "setup", "--bogus"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_pickup.py::PickupSetupTest.test_bad_argument_exits_2"
+    },
+    {
+      "id": "pickup/halt-dry",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup",
+      "stubs": {},
+      "routes": {
+        "GET /api/halt": [
+          200,
+          "{\"halted\": true, \"by\": \"Sam\", \"by_kind\": \"person\", \"at\": \"2026-11-01T09:00:00Z\", \"reason\": \"made-up pause\"}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_halt.py::HaltPickupTest.test_dry_run_skips_all"
+    },
+    {
+      "id": "pickup/halt",
+      "argv": ["--home", "{home}", "pickup"],
+      "home": "pickup-bare",
+      "stubs": {},
+      "routes": {
+        "GET /api/halt": [
+          200,
+          "{\"halted\": true, \"by\": \"Sam\", \"by_kind\": \"person\", \"at\": \"2026-11-01T09:00:00Z\", \"reason\": \"made-up pause\"}"
+        ],
+        "GET /projects.json": [200, "[]"],
+        "GET /api/board": [200, "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": []}"],
+        "PUT /api/hosts/parity/status": [200, "{}"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_halt.py::HaltPickupTest.test_pickup_launches_and_takes_over_nothing"
+    },
+    {
+      "id": "pickup/dry-empty",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [200, "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": []}"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PickupTest.test_nothing_runnable_is_silent"
+    },
+    {
+      "id": "pickup/dry-would-launch",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "/",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "a1\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": true, \"hosts\": [\"parity\"]}, \"stage_notes\": {}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PickupTest.test_dry_run_reports_and_writes_nothing"
+    },
+    {
+      "id": "pickup/dry-skips",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "/",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "a1\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}, {\"id\": \"002-noproj\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\"}, {\"id\": \"003-missing\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"missing\"}, {\"id\": \"004-gated\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\", \"needs\": \"Pick a color\"}, {\"id\": \"005-paused\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\", \"paused\": {\"at\": \"2026-01-01T00:00:00Z\"}}, {\"id\": \"006-closing\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\", \"close\": {\"at\": \"2026-01-01T00:00:00Z\"}}, {\"id\": \"007-later\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\", \"not_before\": \"2999-01-01T00:00:00Z\"}, {\"id\": \"008-waits\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\", \"refs\": [{\"kind\": \"depends-on\", \"id\": \"009-open\"}]}, {\"id\": \"009-open\", \"stage\": \"build\", \"project\": \"beta\", \"updated\": \"2026-01-01T00:00:00Z\"}, {\"id\": \"010-claimed\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\", \"claim\": {\"device\": \"other\", \"session\": \"s1\", \"since\": \"2999-01-01T00:00:00Z\", \"seen\": \"2999-01-01T00:00:00Z\"}}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": true, \"hosts\": [\"parity\"]}, \"stage_notes\": {}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PickupTest.test_skips_gated_unclaimable_and_no_checkout"
+    },
+    {
+      "id": "pickup/dry-pickup-off",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": false, \"hosts\": [\"parity\"]}, \"stage_notes\": {}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PickupTest.test_off_absent_or_other_host_is_silent"
+    },
+    {
+      "id": "pickup/dry-other-host",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": true, \"hosts\": [\"other\"]}, \"stage_notes\": {}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PickupTest.test_off_absent_or_other_host_is_silent"
+    },
+    {
+      "id": "pickup/dry-no-view",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}]}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PickupTest.test_off_absent_or_other_host_is_silent"
+    },
+    {
+      "id": "pickup/dry-unsafe-checkout",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": true, \"hosts\": [\"parity\"]}, \"stage_notes\": {}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::TakeoverTest.test_unsafe_checkout_skips_project"
+    },
+    {
+      "id": "pickup/dry-cap-full",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "/",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "a1\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}, {\"id\": \"011-busy\", \"stage\": \"build\", \"project\": \"alpha\", \"updated\": \"2999-01-01T00:00:00Z\"}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": true, \"hosts\": [\"parity\"]}, \"stage_notes\": {}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PickupTest.test_cap_and_limit"
+    },
+    {
+      "id": "pickup/dry-host-paused",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "/",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "a1\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": true, \"hosts\": [\"parity\"]}, \"stage_notes\": {}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"parity\", \"label\": \"Parity\", \"state\": \"active\", \"max_inflight\": 0}]"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PickupTest.test_host_cap_zero_dry_run_line"
+    },
+    {
+      "id": "pickup/dry-max-inflight-two",
+      "argv": ["--home", "{home}", "pickup", "--dry-run", "--max-inflight", "2"],
+      "home": "pickup",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "/",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "a1\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}, {\"id\": \"012-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}, {\"id\": \"013-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": true, \"hosts\": [\"parity\"]}, \"stage_notes\": {}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PickupTest.test_host_cap_dry_run_line"
+    },
+    {
+      "id": "pickup/dry-no-route",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup-limited",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "/",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "a1\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}, {\"id\": \"012-alpha\", \"stage\": \"idea\", \"title\": \"Made-up idea\", \"idea\": \"made-up idea\", \"updated\": \"2026-01-01T00:00:00Z\", \"project\": \"alpha\"}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": true, \"hosts\": [\"parity\"]}, \"stage_notes\": {}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PickupTest.test_no_route_claims_nothing"
+    },
+    {
+      "id": "pickup/dry-stall-adapter-fails",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup-stalls",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [200, "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": []}"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::TakeoverTest.test_adapter_failure_still_picks_ideas"
+    },
+    {
+      "id": "pickup/dry-stall-takeover",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup-stalls",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "/",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "a1\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "paseo": [
+          {
+            "argv": ["stalls", "list"],
+            "stdout": "{\"version\": 1, \"stalls\": [{\"session\": \"agent-1\", \"reset\": \"2999-01-01T00:00:00Z\", \"provider\": \"provider-a\", \"model\": \"model-a\"}]}",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"014-stalled\", \"stage\": \"build\", \"project\": \"alpha\", \"updated\": \"2026-01-01T00:00:00Z\", \"claim\": {\"device\": \"parity\", \"session\": \"s1\", \"since\": \"2026-01-01T00:00:00Z\", \"seen\": \"2026-01-01T00:00:00Z\"}, \"paseo\": {\"agent\": \"agent-1\"}}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": true, \"hosts\": [\"parity\"]}, \"stage_notes\": {}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::TakeoverTest.test_skip_rules"
+    },
+    {
+      "id": "pickup/dry-close",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"015-dupe\", \"stage\": \"build\", \"project\": \"alpha\", \"updated\": \"2026-01-01T00:00:00Z\", \"close\": {\"at\": \"2026-01-01T00:00:00Z\", \"reason\": \"Made-up duplicate of 001\"}}]}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::CloseTest"
+    },
+    {
+      "id": "pickup/empty-board",
+      "argv": ["--home", "{home}", "pickup"],
+      "home": "pickup-bare",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "stdout": "[]",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [200, "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": []}"],
+        "GET /projects.json": [200, "[]"],
+        "PUT /api/hosts/parity/status": [200, "{}"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PickupTest.test_pickup_runs_the_backlog_triage_pass"
+    }
+  ]
+}

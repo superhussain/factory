@@ -1,0 +1,10 @@
+pickup/limit-six
+pickup/limit-zero
+pickup/limit-twice
+pickup/max-inflight-bare
+pickup/unknown-flag
+pickup/dry-twice
+pickup/dry-triage-now
+pickup/setup-bad-flag
+pickup/halt-dry
+pickup/halt
