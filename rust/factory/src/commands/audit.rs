@@ -1,25 +1,29 @@
 //! The transcript commands: audit, usage, outcomes and bench.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::hash_map::RandomState;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, File};
+use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+#[cfg(test)]
+use std::{cell::RefCell, rc::Rc};
 
 use serde_json::{json, Map, Value};
 
-use crate::cli::{not_ported, Call};
+use crate::cli::Call;
 use crate::commands::checks::{pr_merge_commits, pr_states};
 use crate::commands::pipeline::fetch_base;
 use crate::shared::board::{dump_board, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{JOB_ID, NEW_JOB_ID, PASEO_ID, ROUTE_MODEL, SLUG};
-use crate::shared::exit::{fail, Res};
-use crate::shared::fs::{read_text, resolve};
+use crate::shared::exit::{exit, fail, Res};
+use crate::shared::fs::{read_text, resolve, temp_root};
 use crate::shared::home::{device_name, factory_home};
 use crate::shared::http::{access_message, api, cas};
 use crate::shared::paseo::paseo_server;
-use crate::shared::proc::{git, hostname, which};
+use crate::shared::proc::{capture, git, hostname, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
 use crate::shared::py::{
     is_space, os_error, round_half_even, round_int, rstrip, splitlines, strip, universal_newlines,
@@ -1781,8 +1785,7 @@ fn bench_arm(folder: &str, cases: &[Value]) -> Res<Value> {
 
 /// Each case's job folder, project and checkout, failing on the first case that cannot run. The
 /// merge commits come from GitHub, which the checks slice reads.
-/// Check that each case can run, failing on the first that cannot.
-fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<()> {
+fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<Vec<ReplayRow>> {
     let (paths, device) = (read_paths(home)?, device_name(home));
     let mut rows = Vec::new();
     let mut prs: Vec<(String, Vec<u64>)> = Vec::new();
@@ -1844,34 +1847,430 @@ fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<()> {
             Some((_, numbers)) => numbers.push(number as u64),
             None => prs.push((repo.to_string(), vec![number as u64])),
         }
-        rows.push((id.to_string(), repo.to_string(), number as u64));
+        rows.push((
+            ReplayRow {
+                id: id.to_string(),
+                head: py_str(c.get("head")),
+                job: jobs[0].clone(),
+                project,
+                checkout: PathBuf::from(fm_get(&paths, &slug).unwrap_or("")),
+                merge: String::new(),
+            },
+            repo.to_string(),
+            number as u64,
+        ));
     }
     let mut merges = Vec::new();
     for (repo, mut numbers) in prs {
         numbers.sort();
         numbers.dedup();
-        let oids = pr_merge_commits(&repo, &numbers, &device)
+        let oids = bench_merge_commits(&repo, &numbers, &device)
             .map_err(|why| fail(format!("bench: {why}"), 5))?;
         merges.push((repo, oids));
     }
-    for (id, repo, number) in rows {
-        let merged = merges
+    let mut out = Vec::new();
+    for (mut row, repo, number) in rows {
+        let merge = merges
             .iter()
             .find(|(r, _)| *r == repo)
-            .is_some_and(|(_, o)| o.get(&number).is_some_and(Option::is_some));
-        if !merged {
+            .and_then(|(_, o)| o.get(&number).cloned().flatten())
+            .filter(|m| !m.is_empty());
+        let Some(merge) = merge else {
+            let pr = format!("https://github.com/{repo}/pull/{number}");
             let pr = cases
                 .iter()
-                .find(|c| py_str(c.get("id")) == id)
-                .map(|c| py_str(c.get("pr")))
-                .unwrap_or_default();
+                .find(|c| py_str(c.get("id")) == row.id)
+                .map_or(pr, |c| py_str(c.get("pr")));
             return Err(fail(
-                format!("bench: {id}: GitHub reports no merge commit for {pr}"),
+                format!("bench: {}: GitHub reports no merge commit for {pr}", row.id),
                 4,
+            ));
+        };
+        row.merge = merge;
+        out.push(row);
+    }
+    Ok(out)
+}
+
+/// One case bench replay runs, with its job folder, project file, checkout and merge commit.
+struct ReplayRow {
+    id: String,
+    head: String,
+    job: PathBuf,
+    project: PathBuf,
+    checkout: PathBuf,
+    merge: String,
+}
+
+const BENCH_REPLAY_SECONDS: u64 = 3600;
+
+#[cfg(test)]
+#[derive(Default)]
+struct BenchFakes {
+    merge_commits:
+        Option<Rc<dyn Fn(&str, &[u64], &str) -> Result<BTreeMap<u64, Option<String>>, String>>>,
+    replay_seconds: Option<u64>,
+    elapsed: Option<u64>,
+    /// What bench replay prints, stdout then stderr, which the test harness would swallow.
+    out: Vec<u8>,
+    err: Vec<u8>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static BENCH_FAKES: RefCell<BenchFakes> = RefCell::new(BenchFakes::default());
+}
+
+fn bench_merge_commits(
+    repo: &str,
+    numbers: &[u64],
+    device: &str,
+) -> Result<BTreeMap<u64, Option<String>>, String> {
+    #[cfg(test)]
+    if let Some(f) = BENCH_FAKES.with(|b| b.borrow().merge_commits.clone()) {
+        return f(repo, numbers, device);
+    }
+    pr_merge_commits(repo, numbers, device)
+}
+
+fn bench_replay_seconds() -> u64 {
+    #[cfg(test)]
+    if let Some(s) = BENCH_FAKES.with(|b| b.borrow().replay_seconds) {
+        return s;
+    }
+    BENCH_REPLAY_SECONDS
+}
+
+/// Seconds since start, rounded as Python's round() does.
+fn bench_elapsed(start: Instant) -> i64 {
+    #[cfg(test)]
+    if let Some(s) = BENCH_FAKES.with(|b| b.borrow().elapsed) {
+        return s as i64;
+    }
+    round_half_even(start.elapsed().as_secs_f64(), 0) as i64
+}
+
+/// One line of bench replay's stdout.
+fn bench_say(line: &str) {
+    #[cfg(test)]
+    BENCH_FAKES.with(|b| b.borrow_mut().out.extend(format!("{line}\n").bytes()));
+    #[cfg(not(test))]
+    println!("{line}");
+}
+
+/// One line of bench replay's stderr.
+fn bench_warn(line: &str) {
+    #[cfg(test)]
+    BENCH_FAKES.with(|b| b.borrow_mut().err.extend(format!("{line}\n").bytes()));
+    #[cfg(not(test))]
+    eprintln!("{line}");
+}
+const BENCH_REPLAY_TOOLS: [&str; 5] = ["Read", "Grep", "Glob", "Write", "Bash(git:*)"];
+
+/// True when checkout holds commit oid, fetching it from origin once when it does not.
+fn bench_have_commit(checkout: &Path, oid: &str) -> bool {
+    let dir = checkout.to_string_lossy();
+    let object = format!("{oid}^{{commit}}");
+    let have = || {
+        capture(
+            &["git", "-C", &dir, "cat-file", "-e", &object],
+            None,
+            &[],
+            None,
+        )
+        .is_ok_and(|r| r.code == 0)
+    };
+    if have() {
+        return true;
+    }
+    let _ = capture(
+        &["git", "-C", &dir, "fetch", "-q", "origin", oid],
+        None,
+        &[("GIT_TERMINAL_PROMPT", "0")],
+        Some(std::time::Duration::from_secs(60)),
+    );
+    have()
+}
+
+/// The reviewer prompt for one replayed case.
+fn bench_replay_prompt(row: &ReplayRow, tmp: &Path, base: &str, role: &str) -> String {
+    let (job, wt) = (tmp.join("job"), tmp.join("wt"));
+    let stem = row
+        .project
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let documents = row.project.with_file_name(format!("{stem}.documents.md"));
+    let mut lines = vec![
+        format!("Job id: {}", row.id),
+        format!("Job folder: {}", job.display()),
+        format!(
+            "Worktree: {} (detached at {}, base commit {base})",
+            wt.display(),
+            row.head
+        ),
+        format!("Project file: {}", row.project.display()),
+    ];
+    if documents.is_file() {
+        lines.push(format!("Project documents: {}", documents.display()));
+    }
+    lines.extend([
+        format!("Round folder: {}", job.join("round-1").display()),
+        format!("Your file: {}", job.join("round-1").join(format!("{role}.md")).display()),
+        String::new(),
+        format!("This is a reviewer benchmark replay. The pull request already merged; review it as if it were open. There is no branch factory/{}: run git diff {base}...{} wherever your instructions name the branch diff. There is no pre-review.md, and Bash runs only git. Write only Your file.", row.id, row.head),
+    ]);
+    lines.join("\n") + "\n"
+}
+
+/// {model: {kind: tokens}} summed over one Claude Code session's main transcript and its subagents.
+fn bench_session_usage(session: &str) -> Value {
+    let root = retro_transcripts();
+    let mut files: Vec<(PathBuf, bool)> = Vec::new();
+    for project in glob(&root, "", "") {
+        let main = project.join(format!("{session}.jsonl"));
+        if main.is_file() {
+            files.push((main, true));
+        }
+    }
+    for project in glob(&root, "", "") {
+        for sub in glob(&project.join(session).join("subagents"), "", ".jsonl") {
+            files.push((sub, false));
+        }
+    }
+    let mut totals: Vec<(String, Counts)> = Vec::new();
+    for (path, main) in files {
+        if let Ok((models, _)) = usage_scan(&path, main, None) {
+            for (model, counts) in models {
+                add_counts(&mut totals, &model, &counts);
+            }
+        }
+    }
+    let mut out = Map::new();
+    for (model, counts) in totals {
+        let kinds: Map<String, Value> = USAGE_TOKENS
+            .iter()
+            .zip(counts)
+            .map(|((k, _), n)| (k.to_string(), json!(n)))
+            .collect();
+        out.insert(model, Value::Object(kinds));
+    }
+    Value::Object(out)
+}
+
+/// A random version 4 UUID.
+fn uuid4() -> String {
+    let word = || {
+        let mut h = RandomState::new().build_hasher();
+        h.write_u128(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+        );
+        h.finish()
+    };
+    let (a, b) = (word(), word());
+    let b = (b & 0x3fff_ffff_ffff_ffff) | 0x8000_0000_0000_0000;
+    format!(
+        "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
+        a >> 32,
+        (a >> 16) & 0xffff,
+        a & 0x0fff,
+        b >> 48,
+        b & 0xffff_ffff_ffff
+    )
+}
+
+/// Run argv in cwd with input on stdin and stdout and stderr in log, killing it past seconds. None on a timeout.
+fn run_logged(
+    argv: &[String],
+    input: &str,
+    cwd: &Path,
+    log: fs::File,
+    seconds: u64,
+) -> io::Result<Option<i32>> {
+    let mut child = std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .current_dir(cwd)
+        .env("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
+        .stdin(std::process::Stdio::piped())
+        .stdout(log.try_clone()?)
+        .stderr(log)
+        .spawn()?;
+    let mut stdin = child.stdin.take().unwrap();
+    let text = input.to_string();
+    let feeder = std::thread::spawn(move || {
+        let _ = io::Write::write_all(&mut stdin, text.as_bytes());
+    });
+    let deadline = Instant::now() + std::time::Duration::from_secs(seconds);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            let _ = feeder.join();
+            #[cfg(unix)]
+            let code = std::os::unix::process::ExitStatusExt::signal(&status).map(|s| -s);
+            #[cfg(not(unix))]
+            let code = None;
+            return Ok(Some(status.code().or(code).unwrap_or(1)));
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// (Some(true), line) when the reviewer wrote its review into arm/<id>, (None, line) when one is already there,
+/// (Some(false), line) when the case failed. run.json and replay.log stay once claude ran.
+fn bench_replay_case(
+    row: &ReplayRow,
+    arm: &Path,
+    role: &str,
+    model: Option<&str>,
+) -> Res<(Option<bool>, String)> {
+    let (out, name, checkout) = (arm.join(&row.id), format!("{role}.md"), &row.checkout);
+    if out.join(&name).exists() {
+        return Ok((None, format!("skipped, {name} already exists")));
+    }
+    for oid in [&row.head, &row.merge] {
+        if !bench_have_commit(checkout, oid) {
+            return Ok((
+                Some(false),
+                format!("commit {oid} is not in {} after fetch", checkout.display()),
             ));
         }
     }
-    Ok(())
+    let parent = format!("{}^1", row.merge);
+    let base = git(checkout, &["merge-base", &parent, &row.head]);
+    if base.is_empty() {
+        return Ok((
+            Some(false),
+            format!(
+                "no merge base of {parent} and {} in {}",
+                row.head,
+                checkout.display()
+            ),
+        ));
+    }
+    let tmp = temp_root()?.join(format!("factory-bench-{}-{}", row.id, &uuid4()[..8]));
+    fs::create_dir(&tmp).map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
+    let (dir, wt) = (checkout.to_string_lossy().into_owned(), tmp.join("wt"));
+    let wt_text = wt.to_string_lossy().into_owned();
+    let added = capture(
+        &[
+            "git", "-C", &dir, "worktree", "add", "--detach", &wt_text, &row.head,
+        ],
+        None,
+        &[],
+        None,
+    )
+    .map_or(1, |r| r.code);
+    if added != 0 {
+        let _ = fs::remove_dir_all(&tmp);
+        return Ok((Some(false), format!("git worktree add exited {added}")));
+    }
+    let result = (|| -> Res<(Option<bool>, String)> {
+        let io_fail = |e: io::Error, p: &Path| fail(os_error(&e, Some(p)), 1);
+        let round = tmp.join("job").join("round-1");
+        fs::create_dir_all(&round).map_err(|e| io_fail(e, &round))?;
+        for doc in ["spec.md", "build.md"] {
+            if row.job.join(doc).is_file() {
+                fs::copy(row.job.join(doc), tmp.join("job").join(doc))
+                    .map_err(|e| io_fail(e, &row.job))?;
+            }
+        }
+        let session = uuid4();
+        let claude = which("claude")
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let job_dir = tmp.join("job").to_string_lossy().into_owned();
+        let mut argv: Vec<String> = [
+            claude.as_str(),
+            "-p",
+            "--agent",
+            &format!("factory-{role}"),
+            "--session-id",
+            &session,
+            "--permission-mode",
+            "dontAsk",
+            "--allowedTools",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        argv.extend(BENCH_REPLAY_TOOLS.iter().map(|s| s.to_string()));
+        argv.extend(["--add-dir".to_string(), job_dir]);
+        if let Some(model) = model {
+            argv.extend(["--model".to_string(), model.to_string()]);
+        }
+        fs::create_dir_all(&out).map_err(|e| io_fail(e, &out))?;
+        let log_path = out.join("replay.log");
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let log = options.open(&log_path).map_err(|e| io_fail(e, &log_path))?;
+        let start = Instant::now();
+        let prompt = bench_replay_prompt(row, &tmp, &base, role);
+        let limit = bench_replay_seconds();
+        let code = run_logged(&argv, &prompt, &wt, log, limit)
+            .map_err(|e| fail(os_error(&e, Some(Path::new(&argv[0]))), 1))?;
+        let seconds = bench_elapsed(start);
+        let models = bench_session_usage(&session);
+        let run = json!({"role": role, "model": model, "head": row.head, "base": base, "exit": code,
+                         "seconds": seconds, "models": models});
+        let run_path = out.join("run.json");
+        fs::write(&run_path, dumps(&run, DEFAULT)).map_err(|e| io_fail(e, &run_path))?;
+        let review = round.join(&name);
+        let first = if review.is_file() {
+            let raw = fs::read(&review).map_err(|e| io_fail(e, &review))?;
+            splitlines(&String::from_utf8_lossy(&raw), false)
+                .first()
+                .map(|l| l.to_string())
+        } else {
+            None
+        };
+        Ok(match code {
+            None => (Some(false), format!("claude timed out after {limit} s")),
+            Some(code) if code != 0 => {
+                (Some(false), format!("claude exited {code}, see replay.log"))
+            }
+            _ => match first.filter(|l| l.starts_with("VERDICT: ")) {
+                None => (
+                    Some(false),
+                    format!("no {name} with a VERDICT line, see replay.log"),
+                ),
+                Some(first) => {
+                    fs::copy(&review, out.join(&name)).map_err(|e| io_fail(e, &review))?;
+                    (
+                        Some(true),
+                        format!(
+                            "wrote {name} ({first}), {seconds} s, {} tokens",
+                            token_count(&models)
+                        ),
+                    )
+                }
+            },
+        })
+    })();
+    let removed = capture(
+        &["git", "-C", &dir, "worktree", "remove", &wt_text],
+        None,
+        &[],
+        None,
+    )
+    .map_or(1, |r| r.code);
+    if removed != 0 {
+        bench_warn(&format!(
+            "factory.py: bench: left {}; remove it with git -C {dir} worktree remove {wt_text}",
+            tmp.display()
+        ));
+    } else {
+        let _ = fs::remove_dir_all(&tmp);
+    }
+    result
 }
 
 /// bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>].
@@ -1923,8 +2322,30 @@ fn bench_replay(args: &[String]) -> Res<()> {
     if which("claude").is_none() {
         return Err(fail("bench: replay needs claude on PATH", 4));
     }
-    bench_replay_plan(&factory_home()?, &cases)?;
-    Err(not_ported("bench replay"))
+    let rows = bench_replay_plan(&factory_home()?, &cases)?;
+    let (mut wrote, mut skipped, mut failed) = (0, 0, 0);
+    let model = get("--model");
+    for row in &rows {
+        if !arm.join(&row.id).join(format!("{role}.md")).exists() {
+            bench_say(&format!("{}: running {role} ...", row.id));
+        }
+        let (ok, line) = bench_replay_case(row, arm, role, model)?;
+        match ok {
+            Some(true) => wrote += 1,
+            None => skipped += 1,
+            Some(false) => failed += 1,
+        }
+        let tag = if ok == Some(false) { "failed: " } else { "" };
+        bench_say(&format!("{}: {tag}{line}", row.id));
+    }
+    bench_say(&format!(
+        "replayed {wrote}, skipped {skipped}, failed {failed} of {} cases into {name}",
+        rows.len()
+    ));
+    if failed > 0 {
+        return Err(exit(1));
+    }
+    Ok(())
 }
 
 /// bench cases <project-slug>: draft cases for the project's reverted or reworked jobs. The PR
@@ -2407,5 +2828,773 @@ mod tests {
             assert_eq!(seen.len(), 1);
             assert_eq!(seen[0].method, "GET");
         }
+    }
+}
+
+/// Python's BenchReplayCase: repo alpha with branch factory/1018-add-y merged into main, a home with
+/// its job folder, a cases file, and a fake claude on PATH.
+#[cfg(all(test, unix))]
+mod bench_replay_fixture {
+    use super::*;
+    use crate::shared::fs::temp_dir;
+    use std::ffi::OsString;
+    use std::sync::MutexGuard;
+
+    pub(super) const FAKE_CLAUDE: &str = r#"#!/bin/sh
+cat > "$FAKE_LOG.stdin"
+printf '%s\n' "$@" > "$FAKE_LOG.argv"
+pwd > "$FAKE_LOG.cwd"
+printf '%s' "$CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS" > "$FAKE_LOG.ceiling"
+sleep "${FAKE_SLEEP:-0}"
+[ -n "$FAKE_DIRTY" ] && : > dirty.txt
+your=$(sed -n 's/^Your file: //p' "$FAKE_LOG.stdin")
+[ -n "$FAKE_NO_REVIEW" ] || printf 'VERDICT: CHANGES\n\n- `worker/export.js:44` drops the header row.\n' > "$your"
+while [ $# -gt 0 ]; do [ "$1" = --session-id ] && session=$2; shift; done
+mkdir -p "$CLAUDE_CONFIG_DIR/projects/fake"
+printf '%s\n' '{"type": "assistant", "message": {"id": "m1", "model": "claude-opus-5-5", "usage": {"input_tokens": 200000, "output_tokens": 20000, "cache_creation_input_tokens": 30000, "cache_read_input_tokens": 999}}}' > "$CLAUDE_CONFIG_DIR/projects/fake/$session.jsonl"
+echo fake review done
+exit "${FAKE_EXIT:-0}"
+"#;
+    pub(super) const REVIEW: &str =
+        "VERDICT: CHANGES\n\n- `worker/export.js:44` drops the header row.\n";
+    pub(super) const RUNNING: &str = "1018-add-y: running review-code ...\n";
+
+    pub(super) fn summary(wrote: u32, skipped: u32, failed: u32) -> String {
+        format!(
+            "replayed {wrote}, skipped {skipped}, failed {failed} of 1 cases into opus-medium\n"
+        )
+    }
+
+    pub(super) fn models() -> Value {
+        json!({"claude-opus-5-5": {"input": 200000, "output": 20000, "cache_write": 30000, "cache_read": 999}})
+    }
+
+    /// What the fake claude recorded of its one call.
+    pub(super) struct Call {
+        pub argv: Vec<String>,
+        pub cwd: PathBuf,
+        pub stdin: String,
+        pub ceiling: String,
+    }
+
+    pub(super) struct Bench {
+        _env: MutexGuard<'static, ()>,
+        saved: Vec<(&'static str, Option<OsString>)>,
+        pub root: PathBuf,
+        pub repo: PathBuf,
+        pub home: PathBuf,
+        pub project: PathBuf,
+        pub job: PathBuf,
+        pub cases: PathBuf,
+        pub arm: PathBuf,
+        pub log: PathBuf,
+        pub base: String,
+        pub head: String,
+        pub merges: Rc<RefCell<Result<BTreeMap<u64, Option<String>>, String>>>,
+        pub gh_calls: Rc<RefCell<Vec<(String, Vec<u64>, String)>>>,
+    }
+
+    impl Bench {
+        pub fn new(name: &str) -> Bench {
+            let env = crate::shared::TEST_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let root = temp_dir(&format!("bench-{name}"));
+            let repo = root.join("alpha");
+            fs::create_dir(&repo).unwrap();
+            let git = |args: &[&str]| sh_git(&repo, args);
+            git(&["init", "-q"]);
+            git(&["symbolic-ref", "HEAD", "refs/heads/main"]);
+            fs::create_dir(repo.join("worker")).unwrap();
+            fs::write(repo.join("worker/export.js"), "export const rows = [];\n").unwrap();
+            git(&["add", "."]);
+            git(&["commit", "-qm", "start"]);
+            let base = git(&["rev-parse", "HEAD"]);
+            git(&["checkout", "-qb", "factory/1018-add-y"]);
+            fs::write(repo.join("worker/export.js"), "export const rows = [1];\n").unwrap();
+            git(&["commit", "-qam", "add y"]);
+            let head = git(&["rev-parse", "HEAD"]);
+            git(&["checkout", "-q", "main"]);
+            git(&[
+                "merge",
+                "-q",
+                "--no-ff",
+                "-m",
+                "Merge pull request #18",
+                "factory/1018-add-y",
+            ]);
+            let merge = git(&["rev-parse", "HEAD"]);
+
+            let home = root.join("home");
+            fs::create_dir_all(home.join("projects")).unwrap();
+            let project = home.join("projects/alpha.md");
+            fs::write(&project, "---\nrepo: example/alpha\n---\n").unwrap();
+            fs::write(home.join("config.md"), "---\ndevice: host-a\n---\n").unwrap();
+            fs::write(
+                home.join("paths.md"),
+                format!("---\nalpha: {}\n---\n", repo.display()),
+            )
+            .unwrap();
+            let job = home.join("jobs/alpha/1018-add-y");
+            fs::create_dir_all(&job).unwrap();
+            fs::write(job.join("spec.md"), "# Add y\n").unwrap();
+            fs::write(job.join("build.md"), "# Build\n").unwrap();
+
+            let bin = root.join("bin");
+            fs::create_dir(&bin).unwrap();
+            let claude = bin.join("claude");
+            fs::write(&claude, FAKE_CLAUDE).unwrap();
+            fs::set_permissions(&claude, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .unwrap();
+            let log = root.join("claude-call");
+            let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+            let mut saved = Vec::new();
+            for (key, value) in [
+                ("FACTORY_HOME", Some(home.display().to_string())),
+                (
+                    "CLAUDE_CONFIG_DIR",
+                    Some(root.join("claude").display().to_string()),
+                ),
+                ("FAKE_LOG", Some(log.display().to_string())),
+                ("PATH", Some(path)),
+                ("FAKE_SLEEP", None),
+                ("FAKE_EXIT", None),
+                ("FAKE_NO_REVIEW", None),
+                ("FAKE_DIRTY", None),
+            ] {
+                saved.push((key, std::env::var_os(key)));
+                match value {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
+            }
+            let cases = root.join("reviewer-cases.json");
+            fs::write(
+                &cases,
+                json!({"cases": [{"id": "1018-add-y", "pr": "https://github.com/example/alpha/pull/18",
+                    "head": head, "source": "reworked",
+                    "defects": [{"path": "worker/export.js", "lines": [40, 52], "severity": "high"}]}]})
+                .to_string(),
+            )
+            .unwrap();
+            let merges = Rc::new(RefCell::new(Ok(BTreeMap::from([(18, Some(merge))]))));
+            let gh_calls = Rc::new(RefCell::new(Vec::new()));
+            let (answer, calls) = (merges.clone(), gh_calls.clone());
+            BENCH_FAKES.with(|b| {
+                *b.borrow_mut() = BenchFakes {
+                    merge_commits: Some(Rc::new(move |repo, numbers, device| {
+                        calls.borrow_mut().push((
+                            repo.to_string(),
+                            numbers.to_vec(),
+                            device.to_string(),
+                        ));
+                        answer.borrow().clone()
+                    })),
+                    elapsed: Some(300),
+                    ..BenchFakes::default()
+                }
+            });
+            Bench {
+                _env: env,
+                saved,
+                arm: root.join("opus-medium"),
+                root,
+                repo,
+                home,
+                project,
+                job,
+                cases,
+                log,
+                base,
+                head,
+                merges,
+                gh_calls,
+            }
+        }
+
+        pub fn git(&self, args: &[&str]) -> String {
+            sh_git(&self.repo, args)
+        }
+
+        /// bench replay on the cases file and arm with flags: (code, stdout, stderr).
+        pub fn replay_to(&self, arm: &Path, flags: &[&str]) -> (i32, String, String) {
+            let mut args = vec![self.cases.display().to_string(), arm.display().to_string()];
+            args.extend(flags.iter().map(|f| f.to_string()));
+            self.run(&args)
+        }
+
+        pub fn replay(&self, flags: &[&str]) -> (i32, String, String) {
+            self.replay_to(&self.arm, flags)
+        }
+
+        pub fn run(&self, args: &[String]) -> (i32, String, String) {
+            let result = bench_replay(args);
+            let (out, mut err) = BENCH_FAKES.with(|b| {
+                let mut b = b.borrow_mut();
+                (std::mem::take(&mut b.out), std::mem::take(&mut b.err))
+            });
+            let code = match result {
+                Ok(()) => 0,
+                Err(e) => {
+                    err.extend(e.stderr.bytes());
+                    e.code
+                }
+            };
+            (
+                code,
+                String::from_utf8(out).unwrap(),
+                String::from_utf8(err).unwrap(),
+            )
+        }
+
+        pub fn call(&self) -> Option<Call> {
+            let read = |ext: &str| fs::read_to_string(format!("{}.{ext}", self.log.display())).ok();
+            let argv = read("argv")?;
+            Some(Call {
+                argv: argv.lines().map(String::from).collect(),
+                cwd: PathBuf::from(read("cwd").unwrap().trim_end()),
+                stdin: read("stdin").unwrap(),
+                ceiling: read("ceiling").unwrap(),
+            })
+        }
+
+        pub fn case_dir(&self) -> PathBuf {
+            self.arm.join("1018-add-y")
+        }
+
+        pub fn run_json(&self) -> Value {
+            loads(&fs::read_to_string(self.case_dir().join("run.json")).unwrap()).unwrap()
+        }
+
+        pub fn worktrees(&self) -> usize {
+            self.git(&["worktree", "list"]).lines().count()
+        }
+    }
+
+    impl Drop for Bench {
+        fn drop(&mut self) {
+            BENCH_FAKES.with(|b| *b.borrow_mut() = BenchFakes::default());
+            for (key, value) in &self.saved {
+                match value {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
+            }
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    pub(super) fn sh_git(repo: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-C",
+            ])
+            .arg(repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod bench_replay_test {
+    use super::bench_replay_fixture::*;
+    use super::*;
+
+    #[test]
+    fn test_running_example() {
+        let b = Bench::new("running-example");
+        assert_eq!(
+            b.replay(&["--role", "review-code", "--model", "claude-opus-5-5"]),
+            (
+                0,
+                format!("{RUNNING}1018-add-y: wrote review-code.md (VERDICT: CHANGES), 300 s, 250000 tokens\n{}", summary(1, 0, 0)),
+                String::new()
+            )
+        );
+        let dir = b.case_dir();
+        assert_eq!(
+            fs::read_to_string(dir.join("review-code.md")).unwrap(),
+            REVIEW
+        );
+        assert_eq!(
+            b.run_json(),
+            json!({"role": "review-code", "model": "claude-opus-5-5", "head": b.head, "base": b.base,
+                   "exit": 0, "seconds": 300, "models": models()})
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("run.json")).unwrap(),
+            dumps(&b.run_json(), DEFAULT)
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("replay.log")).unwrap(),
+            "fake review done\n"
+        );
+        let mode = std::os::unix::fs::PermissionsExt::mode(
+            &fs::metadata(dir.join("replay.log")).unwrap().permissions(),
+        );
+        assert_eq!(mode & 0o777, 0o600);
+        assert_eq!(
+            *b.gh_calls.borrow(),
+            [("example/alpha".to_string(), vec![18], "host-a".to_string())]
+        );
+        assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_claude_call() {
+        let b = Bench::new("claude-call");
+        let documents = b.home.join("projects/alpha.documents.md");
+        fs::write(&documents, "notes\n").unwrap();
+        assert_eq!(
+            b.replay(&["--role", "review-code", "--model", "claude-opus-5-5"])
+                .0,
+            0
+        );
+        let call = b.call().unwrap();
+        let tmp = call.cwd.parent().unwrap().to_path_buf();
+        assert!(file_name(&tmp).starts_with("factory-bench-1018-add-y-"));
+        assert_eq!(file_name(&call.cwd), "wt");
+        let at = call.argv.iter().position(|a| a == "--session-id").unwrap();
+        let session = call.argv[at + 1].clone();
+        let job = tmp.join("job").display().to_string();
+        assert_eq!(
+            call.argv,
+            [
+                "-p",
+                "--agent",
+                "factory-review-code",
+                "--session-id",
+                &session,
+                "--permission-mode",
+                "dontAsk",
+                "--allowedTools",
+                "Read",
+                "Grep",
+                "Glob",
+                "Write",
+                "Bash(git:*)",
+                "--add-dir",
+                &job,
+                "--model",
+                "claude-opus-5-5"
+            ]
+        );
+        assert_eq!(call.ceiling, "0");
+        assert_eq!(
+            call.stdin,
+            [
+                "Job id: 1018-add-y".to_string(),
+                format!("Job folder: {job}"),
+                format!(
+                    "Worktree: {} (detached at {}, base commit {})",
+                    tmp.join("wt").display(),
+                    b.head,
+                    b.base
+                ),
+                format!("Project file: {}", b.project.display()),
+                format!("Project documents: {}", documents.display()),
+                format!("Round folder: {}", tmp.join("job/round-1").display()),
+                format!("Your file: {}", tmp.join("job/round-1/review-code.md").display()),
+                String::new(),
+                format!("This is a reviewer benchmark replay. The pull request already merged; review it as if it were open. There is no branch factory/1018-add-y: run git diff {}...{} wherever your instructions name the branch diff. There is no pre-review.md, and Bash runs only git. Write only Your file.\n", b.base, b.head),
+            ]
+            .join("\n")
+        );
+        assert!(!tmp.exists());
+        assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_alias_without_model() {
+        let b = Bench::new("alias");
+        let (code, _, err) = b.replay(&["--role", "factory-review-code"]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        let call = b.call().unwrap();
+        assert!(!call.argv.iter().any(|a| a == "--model"));
+        assert!(!call.stdin.contains("Project documents"));
+        assert_eq!(b.run_json()["model"], Value::Null);
+        assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_score_reads_replay() {
+        let b = Bench::new("score");
+        assert_eq!(b.replay(&["--role", "review-code"]).0, 0);
+        let cases = bench_cases(&b.cases.display().to_string()).unwrap();
+        let arm = bench_arm(&b.arm.display().to_string(), &cases).unwrap();
+        assert_eq!(
+            (&arm["caught"], &arm["weighted_recall"], &arm["missed"]),
+            (&json!(1), &json!(1.0), &json!([]))
+        );
+        assert_eq!(
+            (&arm["tokens"], &arm["seconds"], &arm["runs"]),
+            (&json!(250000), &json!(300), &json!(1))
+        );
+        assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_rerun_skips() {
+        let b = Bench::new("rerun");
+        assert_eq!(b.replay(&["--role", "review-code"]).0, 0);
+        fs::remove_file(format!("{}.argv", b.log.display())).unwrap();
+        assert_eq!(
+            b.replay(&["--role", "review-code"]),
+            (
+                0,
+                format!(
+                    "1018-add-y: skipped, review-code.md already exists\n{}",
+                    summary(0, 1, 0)
+                ),
+                String::new()
+            )
+        );
+        assert!(b.call().is_none(), "claude ran again");
+        assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_claude_failure_keeps_run_json() {
+        let b = Bench::new("claude-failure");
+        std::env::set_var("FAKE_EXIT", "3");
+        assert_eq!(
+            b.replay(&["--role", "review-code"]),
+            (
+                1,
+                format!(
+                    "{RUNNING}1018-add-y: failed: claude exited 3, see replay.log\n{}",
+                    summary(0, 0, 1)
+                ),
+                String::new()
+            )
+        );
+        assert!(!b.case_dir().join("review-code.md").exists());
+        let run = b.run_json();
+        assert_eq!(
+            (&run["exit"], &run["seconds"], &run["models"]),
+            (&json!(3), &json!(300), &models())
+        );
+        assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_no_review_written() {
+        let b = Bench::new("no-review");
+        std::env::set_var("FAKE_NO_REVIEW", "1");
+        assert_eq!(
+            b.replay(&["--role", "review-code"]),
+            (
+                1,
+                format!("{RUNNING}1018-add-y: failed: no review-code.md with a VERDICT line, see replay.log\n{}", summary(0, 0, 1)),
+                String::new()
+            )
+        );
+        assert!(!b.case_dir().join("review-code.md").exists());
+        assert_eq!(b.run_json()["exit"], 0);
+        assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_timeout() {
+        let b = Bench::new("timeout");
+        std::env::set_var("FAKE_SLEEP", "5");
+        BENCH_FAKES.with(|f| f.borrow_mut().replay_seconds = Some(1));
+        assert_eq!(
+            b.replay(&["--role", "review-code"]),
+            (
+                1,
+                format!(
+                    "{RUNNING}1018-add-y: failed: claude timed out after 1 s\n{}",
+                    summary(0, 0, 1)
+                ),
+                String::new()
+            )
+        );
+        assert!(!b.case_dir().join("review-code.md").exists());
+        let run = b.run_json();
+        assert_eq!((&run["exit"], &run["models"]), (&Value::Null, &json!({})));
+        assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_commit_missing_after_fetch() {
+        let b = Bench::new("missing-commit");
+        let absent = "0".repeat(40);
+        let mut cases: Value = loads(&fs::read_to_string(&b.cases).unwrap()).unwrap();
+        cases["cases"][0]["head"] = json!(absent);
+        fs::write(&b.cases, cases.to_string()).unwrap();
+        assert_eq!(
+            b.replay(&["--role", "review-code"]),
+            (
+                1,
+                format!(
+                    "{RUNNING}1018-add-y: failed: commit {absent} is not in {} after fetch\n{}",
+                    b.repo.display(),
+                    summary(0, 0, 1)
+                ),
+                String::new()
+            )
+        );
+        assert!(b.call().is_none());
+        assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_no_merge_base() {
+        let b = Bench::new("no-merge-base");
+        let tree = b.git(&["rev-parse", "HEAD^{tree}"]);
+        let first = b.git(&["commit-tree", &tree, "-m", "unrelated"]);
+        let merge = b.git(&["commit-tree", &tree, "-p", &first, "-m", "unrelated merge"]);
+        *b.merges.borrow_mut() = Ok(BTreeMap::from([(18, Some(merge.clone()))]));
+        assert_eq!(
+            b.replay(&["--role", "review-code"]),
+            (
+                1,
+                format!(
+                    "{RUNNING}1018-add-y: failed: no merge base of {merge}^1 and {} in {}\n{}",
+                    b.head,
+                    b.repo.display(),
+                    summary(0, 0, 1)
+                ),
+                String::new()
+            )
+        );
+        assert!(b.call().is_none());
+        assert!(!b.case_dir().exists());
+        assert_eq!(b.worktrees(), 1);
+    }
+
+    /// A worktree git refuses to remove stays, with its tmp folder, and bench names both.
+    #[test]
+    fn test_failed_worktree_remove_leaves_tmp() {
+        let b = Bench::new("dirty-worktree");
+        std::env::set_var("FAKE_DIRTY", "1");
+        let (code, out, err) = b.replay(&["--role", "review-code"]);
+        assert_eq!(code, 0, "{out}");
+        let tmp = b.call().unwrap().cwd.parent().unwrap().to_path_buf();
+        let wt = tmp.join("wt");
+        assert_eq!(
+            err,
+            format!(
+                "factory.py: bench: left {}; remove it with git -C {} worktree remove {}\n",
+                tmp.display(),
+                b.repo.display(),
+                wt.display()
+            )
+        );
+        assert!(wt.join("dirty.txt").exists());
+        b.git(&["worktree", "remove", "--force", &wt.display().to_string()]);
+        fs::remove_dir_all(&tmp).unwrap();
+        assert_eq!(b.worktrees(), 1);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod bench_replay_error_test {
+    use super::bench_replay_fixture::*;
+    use super::*;
+
+    fn assert_fails(b: &Bench, arm: Option<&Path>, flags: &[&str], code: i32, message: &str) {
+        assert_eq!(
+            b.replay_to(arm.unwrap_or(&b.arm), flags),
+            (code, String::new(), format!("factory.py: {message}\n")),
+            "{flags:?}"
+        );
+        assert!(b.call().is_none());
+    }
+
+    #[test]
+    fn test_bad_args() {
+        let b = Bench::new("bad-args");
+        for flags in [
+            &[][..],
+            &["--role"],
+            &["--model", "claude-opus-5-5"],
+            &["--role", "review-code", "--role", "review-code"],
+            &["--role", "review-code", "--effort", "high"],
+            &["--role", "review-code", "extra"],
+        ] {
+            assert_fails(&b, None, flags, 2, BENCH_USAGE);
+        }
+        assert_eq!(
+            b.run(&[b.cases.display().to_string()]),
+            (2, String::new(), format!("factory.py: {BENCH_USAGE}\n"))
+        );
+    }
+
+    #[test]
+    fn test_role_not_a_reviewer() {
+        let b = Bench::new("bad-role");
+        assert_fails(
+            &b,
+            None,
+            &["--role", "build"],
+            2,
+            "bench: --role must be review-security, review-ux, review-ui or review-code",
+        );
+    }
+
+    #[test]
+    fn test_bad_model() {
+        let b = Bench::new("bad-model");
+        let long = "x".repeat(201);
+        for model in ["claude opus", "", &long] {
+            assert_fails(
+                &b,
+                None,
+                &["--role", "review-code", "--model", model],
+                2,
+                "bench: --model must be 1 to 200 letters, digits or _ . / : @ [ ] -",
+            );
+        }
+    }
+
+    #[test]
+    fn test_arm_name() {
+        let b = Bench::new("arm-name");
+        assert_fails(
+            &b,
+            Some(&b.root.join("odd name")),
+            &["--role", "review-code"],
+            2,
+            "bench: arm name odd name must be unique letters, digits, ., _ or -",
+        );
+    }
+
+    #[test]
+    fn test_arm_path_is_a_file() {
+        let b = Bench::new("arm-file");
+        fs::write(&b.arm, "not a folder\n").unwrap();
+        assert_fails(
+            &b,
+            None,
+            &["--role", "review-code"],
+            2,
+            &format!("bench: {} is not a folder", b.arm.display()),
+        );
+    }
+
+    #[test]
+    fn test_no_claude() {
+        let b = Bench::new("no-claude");
+        let empty = b.root.join("empty");
+        fs::create_dir(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        assert_fails(
+            &b,
+            None,
+            &["--role", "review-code"],
+            4,
+            "bench: replay needs claude on PATH",
+        );
+    }
+
+    #[test]
+    fn test_no_job_folder() {
+        let b = Bench::new("no-job-folder");
+        fs::remove_file(b.job.join("spec.md")).unwrap();
+        assert_fails(
+            &b,
+            None,
+            &["--role", "review-code"],
+            4,
+            &format!("bench: 1018-add-y: no job folder with spec.md under {}; pull it with factory.py pull <project>/1018-add-y", b.home.join("jobs").display()),
+        );
+    }
+
+    #[test]
+    fn test_two_job_folders() {
+        let b = Bench::new("two-job-folders");
+        let other = b.home.join("jobs/beta/1018-add-y");
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("spec.md"), "# Add y\n").unwrap();
+        assert_fails(
+            &b,
+            None,
+            &["--role", "review-code"],
+            2,
+            "bench: 1018-add-y: job folders in more than one project",
+        );
+    }
+
+    #[test]
+    fn test_repo_mismatch() {
+        let b = Bench::new("repo-mismatch");
+        fs::write(&b.project, "---\nrepo: example/other\n---\n").unwrap();
+        assert_fails(
+            &b,
+            None,
+            &["--role", "review-code"],
+            2,
+            "bench: 1018-add-y: pr is not in example/other, the repo of project alpha",
+        );
+    }
+
+    #[test]
+    fn test_project_without_repo() {
+        let b = Bench::new("no-repo");
+        for text in [Some("---\nbase: main\n---\n"), None] {
+            match text {
+                Some(text) => fs::write(&b.project, text).unwrap(),
+                None => fs::remove_file(&b.project).unwrap(),
+            }
+            assert_fails(
+                &b,
+                None,
+                &["--role", "review-code"],
+                4,
+                "bench: 1018-add-y: project alpha has no repo; pull it with factory.py pull alpha",
+            );
+        }
+    }
+
+    #[test]
+    fn test_no_checkout() {
+        let b = Bench::new("no-checkout");
+        fs::write(b.home.join("paths.md"), "---\nbeta: /tmp/beta\n---\n").unwrap();
+        assert_fails(
+            &b,
+            None,
+            &["--role", "review-code"],
+            4,
+            "bench: 1018-add-y: no checkout of alpha in paths.md on host-a",
+        );
+    }
+
+    #[test]
+    fn test_gh_failed() {
+        let b = Bench::new("gh-failed");
+        *b.merges.borrow_mut() = Err("gh is not installed on host-a".into());
+        assert_fails(
+            &b,
+            None,
+            &["--role", "review-code"],
+            5,
+            "bench: gh is not installed on host-a",
+        );
+    }
+
+    #[test]
+    fn test_no_merge_commit() {
+        let b = Bench::new("no-merge-commit");
+        *b.merges.borrow_mut() = Ok(BTreeMap::from([(18, None)]));
+        assert_fails(
+            &b,
+            None,
+            &["--role", "review-code"],
+            4,
+            "bench: 1018-add-y: GitHub reports no merge commit for https://github.com/example/alpha/pull/18",
+        );
     }
 }
