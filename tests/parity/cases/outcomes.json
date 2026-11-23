@@ -18,6 +18,396 @@
       "argv": ["outcomes", "bad/slug"],
       "home": null,
       "stubs": {}
+    },
+    {
+      "id": "outcomes/unknown",
+      "from": "tests/cli/test_outcomes.py OutcomesUnknownTest.test_missing_folder and test_foreign_pr",
+      "argv": ["--home", "{home}", "outcomes"],
+      "home": "audit-outcomes",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1017-add-x",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/7"
+              },
+              {
+                "id": "1018-add-y",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/8"
+              },
+              {
+                "id": "1019-add-z",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/9"
+              },
+              {
+                "id": "1021-fix-y",
+                "project": "alpha",
+                "stage": "pr-open",
+                "updated": "2026-01-09T12:00:00Z",
+                "refs": [
+                  {
+                    "kind": "rework-of",
+                    "id": "1018-add-y"
+                  }
+                ]
+              },
+              {
+                "id": "1016-old",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2001-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/6"
+              },
+              {
+                "id": "1031-no-project",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/31"
+              },
+              {
+                "id": "1030-beta-job",
+                "project": "beta",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/3"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0
+    },
+    {
+      "id": "outcomes/filter",
+      "from": "tests/cli/test_outcomes.py OutcomesOutputTest.test_running_example",
+      "argv": ["--home", "{home}", "outcomes", "alpha"],
+      "home": "audit-outcomes",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1017-add-x",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/7"
+              },
+              {
+                "id": "1018-add-y",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/8"
+              },
+              {
+                "id": "1019-add-z",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/9"
+              },
+              {
+                "id": "1021-fix-y",
+                "project": "alpha",
+                "stage": "pr-open",
+                "updated": "2026-01-09T12:00:00Z",
+                "refs": [
+                  {
+                    "kind": "rework-of",
+                    "id": "1018-add-y"
+                  }
+                ]
+              },
+              {
+                "id": "1016-old",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2001-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/6"
+              },
+              {
+                "id": "1031-no-project",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/31"
+              },
+              {
+                "id": "1030-beta-job",
+                "project": "beta",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/3"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0
+    },
+    {
+      "id": "outcomes/none",
+      "from": "tests/cli/test_outcomes.py OutcomesOutputTest.test_no_jobs",
+      "argv": ["--home", "{home}", "outcomes", "gamma"],
+      "home": "audit-outcomes",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1017-add-x",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/7"
+              },
+              {
+                "id": "1018-add-y",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/8"
+              },
+              {
+                "id": "1019-add-z",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/9"
+              },
+              {
+                "id": "1021-fix-y",
+                "project": "alpha",
+                "stage": "pr-open",
+                "updated": "2026-01-09T12:00:00Z",
+                "refs": [
+                  {
+                    "kind": "rework-of",
+                    "id": "1018-add-y"
+                  }
+                ]
+              },
+              {
+                "id": "1016-old",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2001-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/6"
+              },
+              {
+                "id": "1031-no-project",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/31"
+              },
+              {
+                "id": "1030-beta-job",
+                "project": "beta",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/3"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0
+    },
+    {
+      "id": "outcomes/record",
+      "from": "tests/cli/test_outcomes.py OutcomesUnknownTest.test_no_checkout",
+      "argv": ["--home", "{home}", "outcomes", "record"],
+      "home": "audit-outcomes",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1017-add-x",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/7"
+              },
+              {
+                "id": "1018-add-y",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/8"
+              },
+              {
+                "id": "1019-add-z",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/9"
+              },
+              {
+                "id": "1021-fix-y",
+                "project": "alpha",
+                "stage": "pr-open",
+                "updated": "2026-01-09T12:00:00Z",
+                "refs": [
+                  {
+                    "kind": "rework-of",
+                    "id": "1018-add-y"
+                  }
+                ]
+              },
+              {
+                "id": "1016-old",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2001-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/6"
+              },
+              {
+                "id": "1031-no-project",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/31"
+              },
+              {
+                "id": "1030-beta-job",
+                "project": "beta",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/3"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0
+    },
+    {
+      "id": "outcomes/record-filter",
+      "from": "tests/cli/test_outcomes.py OutcomesRecordTest.test_record",
+      "argv": ["--home", "{home}", "outcomes", "record", "alpha"],
+      "home": "audit-outcomes",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1017-add-x",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/7"
+              },
+              {
+                "id": "1018-add-y",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/8"
+              },
+              {
+                "id": "1019-add-z",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/9"
+              },
+              {
+                "id": "1021-fix-y",
+                "project": "alpha",
+                "stage": "pr-open",
+                "updated": "2026-01-09T12:00:00Z",
+                "refs": [
+                  {
+                    "kind": "rework-of",
+                    "id": "1018-add-y"
+                  }
+                ]
+              },
+              {
+                "id": "1016-old",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2001-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/6"
+              },
+              {
+                "id": "1031-no-project",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/31"
+              },
+              {
+                "id": "1030-beta-job",
+                "project": "beta",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/3"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0
     }
   ]
 }
