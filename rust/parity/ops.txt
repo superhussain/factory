@@ -1,0 +1,5 @@
+# Case ids the factory binary must pass for clean, orphans, archive-workspace and the pr-handled checks.
+ops/clean-*
+ops/orphans-*
+ops/archive-*
+ops/handled-bad-*
