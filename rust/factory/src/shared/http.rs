@@ -140,28 +140,60 @@ pub fn quote(s: &str) -> String {
     out
 }
 
-fn new_agent(roots: RootCerts) -> Agent {
+/// The proxy urllib would use for this origin: `<scheme>_proxy` (lowercase first), unless `no_proxy`
+/// names the host. `ALL_PROXY` and the other scheme's proxy are ignored, as urllib ignores them.
+fn proxy_url(origin: &str, var: impl Fn(&str) -> Option<String>) -> Option<String> {
+    let (scheme, host) = origin.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    let env = |name: &str| var(&name.to_lowercase()).or_else(|| var(&name.to_uppercase())).filter(|v| !v.is_empty());
+    let proxy = env(&format!("{scheme}_proxy"))?;
+    let no_proxy = env("no_proxy").unwrap_or_default();
+    if no_proxy == "*" {
+        return None;
+    }
+    let host_only = match host.rsplit_once(':') {
+        Some((h, port)) if port.bytes().all(|b| b.is_ascii_digit()) => h,
+        _ => host,
+    };
+    let names_host = |h: &str, name: &str| {
+        let (h, name) = (h.to_lowercase(), name.to_lowercase());
+        h == name || h.len() > name.len() + 1 && h.ends_with(&format!(".{name}"))
+    };
+    for name in no_proxy.split(',').map(str::trim).map(|n| n.trim_start_matches('.')) {
+        if !name.is_empty() && (names_host(host_only, name) || names_host(host, name)) {
+            return None;
+        }
+    }
+    Some(proxy)
+}
+
+fn new_agent(roots: RootCerts, origin: &str) -> Agent {
     let tls = TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(roots).build();
+    let proxy = proxy_url(origin, |name| std::env::var(name).ok()).and_then(|url| ureq::Proxy::new(&url).ok());
+    let limit = Some(Duration::from_secs(30));
     Agent::config_builder()
         .max_redirects(0)
         .max_redirects_will_error(false)
         .http_status_as_error(false)
         .user_agent("factory")
         .accept("")
-        .timeout_connect(Some(Duration::from_secs(30)))
-        .timeout_send_request(Some(Duration::from_secs(30)))
-        .timeout_recv_response(Some(Duration::from_secs(30)))
+        .proxy(proxy)
+        .timeout_connect(limit)
+        .timeout_send_request(limit)
+        .timeout_recv_response(limit)
+        .timeout_per_read(limit)
+        .timeout_per_write(limit)
         .tls_config(tls)
         .build()
         .new_agent()
 }
 
-fn platform_agent() -> &'static Agent {
+fn platform_agent(origin: &str) -> &'static Agent {
     static AGENT: OnceLock<Agent> = OnceLock::new();
-    AGENT.get_or_init(|| new_agent(RootCerts::PlatformVerifier))
+    AGENT.get_or_init(|| new_agent(RootCerts::PlatformVerifier, origin))
 }
 
-fn fallback_agent() -> Option<Agent> {
+fn fallback_agent(origin: &str) -> Option<Agent> {
     let pem = std::fs::read(FALLBACK_CA_FILE).ok()?;
     let certs: Vec<_> = ureq::tls::parse_pem(&pem)
         .filter_map(|item| match item {
@@ -169,7 +201,7 @@ fn fallback_agent() -> Option<Agent> {
             _ => None,
         })
         .collect();
-    Some(new_agent(RootCerts::new_with_certs(&certs)))
+    Some(new_agent(RootCerts::new_with_certs(&certs), origin))
 }
 
 type Cache = Mutex<HashMap<(String, String), (Instant, Response)>>;
@@ -276,23 +308,18 @@ pub fn api(home: &Path, method: &str, path: &str, body: Option<&[u8]>, ok: &[u16
             }
         }
     }
-    let mut result = send(platform_agent(), method, &url, &sent, body);
-    if let Err(e) = &result {
-        if !cert_error(e) {
-            return Err(fail(format!("can't reach {url}: {}", urlopen_error(e)), 5));
-        }
+    let mut result = send(platform_agent(&key.0), method, &url, &sent, body);
+    if result.as_ref().is_err_and(cert_error) {
         let ssl_env = std::env::var_os("SSL_CERT_FILE").is_some_and(|v| !v.is_empty())
             || std::env::var_os("SSL_CERT_DIR").is_some_and(|v| !v.is_empty());
-        let fallback = if Path::new(FALLBACK_CA_FILE).is_file() && !ssl_env { fallback_agent() } else { None };
+        let fallback = if Path::new(FALLBACK_CA_FILE).is_file() && !ssl_env { fallback_agent(&key.0) } else { None };
         if let Some(agent) = fallback {
             result = send(&agent, method, &url, &sent, body);
         }
-        if let Err(e) = &result {
-            return Err(fail(
-                format!("can't reach {url}: {}. Set SSL_CERT_FILE to your system CA bundle and retry.", urlopen_error(e)),
-                5,
-            ));
-        }
+    }
+    if let Err(e) = &result {
+        let hint = if cert_error(e) { ". Set SSL_CERT_FILE to your system CA bundle and retry." } else { "" };
+        return Err(fail(format!("can't reach {url}: {}{hint}", urlopen_error(e)), 5));
     }
     let response = result.unwrap();
     let status = response.status;
@@ -484,6 +511,24 @@ pub(crate) mod tests {
             format!("factory.py: can't reach {origin}/projects.json: <urlopen error [Errno 111] Connection refused>\n")
         );
         assert!(!e.stderr.contains("test-secret"));
+    }
+
+    #[test]
+    fn proxy_follows_the_origin_scheme_like_urllib() {
+        let pick = |origin: &str, env: &[(&str, &str)]| {
+            proxy_url(origin, |name| env.iter().find(|(k, _)| *k == name).map(|(_, v)| v.to_string()))
+        };
+        let p = "http://p:3128";
+        assert_eq!(pick("http://127.0.0.1:9", &[("HTTPS_PROXY", p)]), None);
+        assert_eq!(pick("http://127.0.0.1:9", &[("HTTP_PROXY", p), ("NO_PROXY", "localhost,127.0.0.1")]), None);
+        assert_eq!(pick("http://127.0.0.1:9", &[("HTTP_PROXY", p)]).as_deref(), Some(p));
+        assert_eq!(pick("https://f.example", &[("HTTPS_PROXY", p)]).as_deref(), Some(p));
+        assert_eq!(pick("https://f.example", &[("https_proxy", "http://low:1"), ("HTTPS_PROXY", "http://up:2")]).as_deref(), Some("http://low:1"));
+        assert_eq!(pick("https://f.example", &[("HTTPS_PROXY", p), ("no_proxy", ".example")]), None);
+        assert_eq!(pick("https://f.example:8443", &[("HTTPS_PROXY", p), ("NO_PROXY", "*")]), None);
+        assert_eq!(pick("https://f.example", &[("ALL_PROXY", p)]), None);
+        assert_eq!(pick("https://notexample", &[("HTTPS_PROXY", p), ("NO_PROXY", "example")]).as_deref(), Some(p));
+        assert_eq!(pick("https://f.example", &[("HTTPS_PROXY", "")]), None);
     }
 
     #[test]
