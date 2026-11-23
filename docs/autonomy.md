@@ -28,7 +28,9 @@ All of these run through `factory.py` on a device.
 Loosening (`resume`, `allow`, `approve`) needs an interactive terminal and a typed
 confirmation, or for `approve` a relayed chat message (`suggest approve --chat-file`), as
 [chat decisions](../skills/factory/references/chat-decisions.md) says. Tightening never does.
-The terminal check stops a script, not an agent, which can fake a terminal with a pseudo-terminal such as `script -qc`. So no agent runs `autonomy resume`, `allow`, `restore` or `promote`; the installed SKILL.md says so.
+The terminal check stops a script, not an agent, which can fake a terminal with a
+pseudo-terminal such as `script -qc`. So no agent runs `autonomy resume`, `allow`, `restore`
+or `promote`; the installed SKILL.md says so.
 A missing `autonomy` record means paused, with an empty allowlist.
 
 ## What admission checks

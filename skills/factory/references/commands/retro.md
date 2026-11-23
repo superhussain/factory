@@ -43,7 +43,8 @@ stage-note edits that retro admit saves as restorable pipeline versions.
    keep the old note until `trial settle` decides. A `skipped edits[i]: a trial is open for
    <scope> stage_notes.<stage>` line means that stage already has an open trial, and
    `skipped edits[i]: stage-note trials are paused after 2 reverts` means two trials reverted
-   and a person must run `trial resume <slug> <reason>` first, or ask an agent to run it with their words as the reason.
+   and a person must run `trial resume <slug> <reason>` first, or ask an agent to run it with
+   their words as the reason.
    An `uploaded retro run <run>` line means the findings and the cards' outcomes are on the
    `#/retros` page. A `retro upload failed` or `retro upload skipped` line on stderr means
    they are not; it never changes the exit code.
