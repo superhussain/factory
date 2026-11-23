@@ -5,12 +5,16 @@ use std::fs;
 use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde_json::{json, Value};
 
-use crate::cli::{not_ported, Call};
+use crate::cli::Call;
 use crate::commands::lookup::{main_checkout, remotes};
-use crate::shared::conf::{closed_frontmatter, fm_get, frontmatter, read_conf, unquote};
+use crate::shared::board::read_board;
+use crate::shared::conf::{
+    closed_frontmatter, fm_get, frontmatter, read_conf, read_env_ordered, unquote,
+};
 use crate::shared::consts::{REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL, SLUG};
 use crate::shared::exit::{exit, fail, Exit, Res};
 use crate::shared::fs::{
@@ -22,12 +26,12 @@ use crate::shared::home::{
 use crate::shared::http::{
     access_message, api, endpoint_message, normalized_origin, token_message,
 };
-use crate::shared::proc::git;
+use crate::shared::proc::{git, git_ok, origin_git};
 use crate::shared::project::{
     local_bytes, project_files, pull_project, read_paths, read_project_state, save_project_state,
 };
 use crate::shared::py::{is_space, os_error, repr, splitlines, strip};
-use crate::shared::pyjson::{dumps, loads, DEFAULT};
+use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::time::{format_stamp, now, parse_stamp};
 
@@ -1111,8 +1115,216 @@ fn device_line(text: &str, id: &str) -> Option<String> {
     Some(lines.concat())
 }
 
-pub fn explore(_call: &Call) -> Res<()> {
-    Err(not_ported("explore"))
+/// The board's autonomy record with defaults filled in. A malformed record counts as paused.
+fn load_autonomy(board: &Value) -> Value {
+    let default = json!({"paused": true, "projects": [], "self": []});
+    let stored = board.get("autonomy").cloned().unwrap_or_else(|| json!({}));
+    let mut record = default.clone();
+    if let (Some(record), Some(stored)) = (record.as_object_mut(), stored.as_object()) {
+        for (key, value) in stored {
+            record.insert(key.clone(), value.clone());
+        }
+    }
+    let strings = |key: &str| {
+        record[key]
+            .as_array()
+            .is_some_and(|a| a.iter().all(Value::is_string))
+    };
+    if !stored.is_object()
+        || !record["paused"].is_boolean()
+        || !strings("projects")
+        || !strings("self")
+        || record["projects"].as_array().map_or(0, Vec::len) > MAX_EXPLORER_PROJECTS
+    {
+        eprintln!("factory.py: the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it");
+        return default;
+    }
+    record
+}
+
+/// `%Y%m%dT%H%M%SZ` now, a dash, and six random hex digits.
+fn run_tag() -> String {
+    let stamp: String = now().chars().filter(|c| *c != '-' && *c != ':').collect();
+    let token = RandomState::new().build_hasher().finish() & 0xff_ffff;
+    format!("{stamp}-{token:06x}")
+}
+
+/// (name, data) for each regular file and folder in a tar stream, folders with None data.
+/// Links, other types and names `check_path` refuses are skipped.
+fn tar_members(data: &[u8]) -> Vec<(String, Option<Vec<u8>>)> {
+    let mut members = Vec::new();
+    let (mut pos, mut pax_path) = (0, None::<String>);
+    while pos + 512 <= data.len() {
+        let header = &data[pos..pos + 512];
+        if header.iter().all(|b| *b == 0) {
+            break;
+        }
+        let field = |a: usize, b: usize| {
+            let f = &header[a..b];
+            &f[..f.iter().position(|c| *c == 0).unwrap_or(f.len())]
+        };
+        let size = std::str::from_utf8(field(124, 136))
+            .ok()
+            .and_then(|s| usize::from_str_radix(s.trim(), 8).ok())
+            .unwrap_or(0);
+        let body = &data[(pos + 512).min(data.len())..(pos + 512 + size).min(data.len())];
+        pos += 512 + size.div_ceil(512) * 512;
+        let kind = header[156];
+        if kind == b'x' {
+            let mut records = body;
+            while let Some(space) = records.iter().position(|b| *b == b' ') {
+                let len = std::str::from_utf8(&records[..space])
+                    .ok()
+                    .and_then(|n| n.parse::<usize>().ok())
+                    .filter(|n| *n > space && *n <= records.len());
+                let Some(len) = len else { break };
+                let record = &records[space + 1..len];
+                let record = record.strip_suffix(b"\n").unwrap_or(record);
+                if let Some(value) = record.strip_prefix(b"path=") {
+                    pax_path = Some(String::from_utf8_lossy(value).into_owned());
+                }
+                records = &records[len..];
+            }
+            continue;
+        }
+        if kind == b'g' {
+            continue;
+        }
+        let mut name = String::from_utf8_lossy(field(0, 100)).into_owned();
+        let prefix = field(345, 500);
+        if &header[257..262] == b"ustar" && !prefix.is_empty() {
+            name = format!("{}/{name}", String::from_utf8_lossy(prefix));
+        }
+        let name = pax_path.take().unwrap_or(name);
+        let name = name.trim_end_matches('/').to_string();
+        let entry = match kind {
+            b'0' | 0 | b'7' => Some(body.to_vec()),
+            b'5' => None,
+            _ => continue,
+        };
+        if !check_path(&name) {
+            members.push((name, entry));
+        }
+    }
+    members
+}
+
+/// Write commit's regular files and folders into dest, with no .git and no links.
+fn snapshot(repo: &Path, commit: &str, dest: &Path) -> Res<()> {
+    let failed = || fail(format!("git archive failed in {}", repo.display()), 1);
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["archive", "--format=tar", commit])
+        .output()
+        .map_err(|_| failed())?;
+    if !out.status.success() {
+        return Err(failed());
+    }
+    let parent = dest.parent().unwrap_or(Path::new("/"));
+    fs::create_dir_all(parent)
+        .and_then(|()| fs::create_dir(dest))
+        .map_err(|e| os_fail(e, dest))?;
+    for (name, data) in tar_members(&out.stdout) {
+        let path = dest.join(&name);
+        match data {
+            None => fs::create_dir_all(&path),
+            Some(bytes) => fs::create_dir_all(path.parent().unwrap_or(dest))
+                .and_then(|()| fs::write(&path, bytes)),
+        }
+        .map_err(|e| os_fail(e, &path))?;
+    }
+    Ok(())
+}
+
+/// Snapshot an allowlisted project's base for a read-only explorer, or remove that snapshot.
+pub fn explore(call: &Call) -> Res<()> {
+    let (slug, rest) = (&call.args[0], &call.args[1..]);
+    if !SLUG.is_full(slug)
+        || !rest.is_empty() && !(rest.len() == 2 && rest[0] == "done" && RUN_TAG.is_full(&rest[1]))
+    {
+        return Err(fail("usage: explore <slug> | explore <slug> done <run>", 2));
+    }
+    let home = factory_home()?;
+    let folder = home.join("explore").join(slug);
+    if let [_, run] = rest {
+        let target = folder.join(run);
+        let linked = [&home.join("explore"), &folder, &target]
+            .iter()
+            .any(|p| is_link(p).unwrap_or(true));
+        if linked || !target.is_dir() {
+            return Err(fail(format!("no explorer checkout {slug}/{run}"), 4));
+        }
+        fs::remove_dir_all(&target).map_err(|e| os_fail(e, &target))?;
+        println!("removed {}", target.display());
+        return Ok(());
+    }
+    let autonomy = load_autonomy(&read_board(&home)?);
+    if autonomy["paused"] == true {
+        return Err(fail("autonomy is paused; no explorer run", 3));
+    }
+    if !autonomy["projects"]
+        .as_array()
+        .is_some_and(|p| p.iter().any(|s| s == slug.as_str()))
+    {
+        return Err(fail(
+            format!("{slug} is not on the autonomy allowlist; no explorer run"),
+            3,
+        ));
+    }
+    let paths = read_paths(&home);
+    let repo = fm_get(&paths, slug).unwrap_or("");
+    if repo.is_empty() {
+        return Err(fail(
+            format!(
+                "{} has no entry for {slug}: run /factory init in this device's checkout of it",
+                home.join("paths.md").display()
+            ),
+            4,
+        ));
+    }
+    if pull_project(&home, slug)? {
+        return Err(fail(
+            format!("Project has local edits. Push {slug} before continuing."),
+            6,
+        ));
+    }
+    let project = project_files(&home, slug)?.0;
+    let meta = frontmatter(&project).map_err(|e| os_fail(e, &project))?.0;
+    let base = fm_get(&meta, "base")
+        .filter(|b| !b.is_empty())
+        .unwrap_or("main");
+    if check_path(base) || base.starts_with('-') {
+        return Err(fail(
+            format!("{slug}'s base {base} is not a safe branch name"),
+            2,
+        ));
+    }
+    let repo = Path::new(repo);
+    origin_git(
+        repo,
+        &[
+            "fetch",
+            "origin",
+            &format!("+refs/heads/{base}:refs/remotes/origin/{base}"),
+        ],
+    )?;
+    let commit = git_ok(
+        repo,
+        &[
+            "rev-parse",
+            "--verify",
+            &format!("refs/remotes/origin/{base}^{{commit}}"),
+        ],
+    )?;
+    let run = run_tag();
+    let checkout = folder.join(&run);
+    let out = folder.join(format!("{run}.json"));
+    snapshot(repo, &commit, &checkout)?;
+    let printed = json!({"project": slug, "run": run, "commit": commit,
+        "checkout": checkout.display().to_string(), "out": out.display().to_string()});
+    println!("{}", dumps(&printed, INDENT2));
+    Ok(())
 }
 
 /// Pair this device with a host a person added in Settings. The code goes only into the POST body.
@@ -1172,8 +1384,69 @@ pub fn host_cmd(call: &Call) -> Res<()> {
     Ok(())
 }
 
-pub fn with_cloudflare_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("with-cloudflare"))
+/// The nonempty `CLOUDFLARE_*` keys of env_file, refusing a link, a folder, an unreadable file
+/// or one without `CLOUDFLARE_API_TOKEN`.
+fn cloudflare_env(env_file: &Path) -> Res<Vec<(String, String)>> {
+    let shown = env_file.display();
+    let not_regular = || {
+        fail(
+            format!("{shown} is a link or not a regular file, so it was not read. Replace it with a regular file."),
+            5,
+        )
+    };
+    let unreadable = || {
+        fail(
+            format!("cannot read {shown}: check its permissions and that it is UTF-8 text."),
+            5,
+        )
+    };
+    if is_link(env_file).map_err(|_| unreadable())? {
+        return Err(not_regular());
+    }
+    if fs::symlink_metadata(env_file).is_err() {
+        return Err(fail(format!("no {shown}. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there."), 5));
+    }
+    if !fs::metadata(env_file).map_err(|_| unreadable())?.is_file() {
+        return Err(not_regular());
+    }
+    let loaded: Vec<(String, String)> = read_env_ordered(env_file)
+        .map_err(|_| unreadable())?
+        .into_iter()
+        .filter(|(k, v)| k.starts_with("CLOUDFLARE_") && !v.is_empty())
+        .collect();
+    if !loaded.iter().any(|(k, _)| k == "CLOUDFLARE_API_TOKEN") {
+        return Err(fail(format!("CLOUDFLARE_API_TOKEN missing from {shown}. docs/cloudflare.md, Device token, shows how to store it."), 5));
+    }
+    Ok(loaded)
+}
+
+/// Run argv with env added, passing its exit code on; a signal s exits 128 + s.
+fn run_child(argv: &[String], env: &[(String, String)]) -> Res<()> {
+    let status = Command::new(&argv[0])
+        .args(&argv[1..])
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .status()
+        .map_err(|_| fail(format!("cannot run {}", argv[0]), 127))?;
+    #[cfg(unix)]
+    if let Some(signal) = std::os::unix::process::ExitStatusExt::signal(&status) {
+        return Err(exit(128 + signal));
+    }
+    match status.code().unwrap_or(1) {
+        0 => Ok(()),
+        code => Err(exit(code)),
+    }
+}
+
+pub fn with_cloudflare_cmd(call: &Call) -> Res<()> {
+    let argv = &call.args;
+    if argv.len() < 2 || argv[0] != "--" {
+        return Err(fail(
+            "usage: factory.py with-cloudflare -- <command> [<arg>...]",
+            2,
+        ));
+    }
+    let env = cloudflare_env(&factory_home()?.join(".env"))?;
+    run_child(&argv[1..], &env)
 }
 
 #[cfg(test)]
@@ -1410,5 +1683,159 @@ mod tests {
         assert_eq!(device_line("no frontmatter\n", "parity"), None);
         assert_eq!(device_line("---\nopen: yes\n", "parity"), None);
         assert_eq!(device_line("", "parity"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cloudflare_env_refusals() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("setup-cloudflare");
+        let env = dir.join(".env");
+        let refused = |message: String| {
+            let e = cloudflare_env(&env).unwrap_err();
+            assert_eq!((e.code, e.stderr), (5, format!("factory.py: {message}\n")));
+        };
+        let shown = env.display();
+        refused(format!("no {shown}. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there."));
+        let not_regular = format!("{shown} is a link or not a regular file, so it was not read. Replace it with a regular file.");
+        fs::write(dir.join("real"), "CLOUDFLARE_API_TOKEN=tok\n").unwrap();
+        std::os::unix::fs::symlink(dir.join("real"), &env).unwrap();
+        refused(not_regular.clone());
+        fs::remove_file(&env).unwrap();
+        fs::create_dir(&env).unwrap();
+        refused(not_regular);
+        fs::remove_dir(&env).unwrap();
+        fs::write(&env, "CLOUDFLARE_API_TOKEN=\nCLOUDFLARE_ACCOUNT_ID=acct\n").unwrap();
+        refused(format!("CLOUDFLARE_API_TOKEN missing from {shown}. docs/cloudflare.md, Device token, shows how to store it."));
+        fs::write(&env, "CLOUDFLARE_API_TOKEN=tok\n").unwrap();
+        fs::set_permissions(&env, fs::Permissions::from_mode(0)).unwrap();
+        if fs::File::open(&env).is_err() {
+            refused(format!(
+                "cannot read {shown}: check its permissions and that it is UTF-8 text."
+            ));
+        }
+        fs::set_permissions(&env, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(&env, b"CLOUDFLARE_API_TOKEN=\xff\n").unwrap();
+        refused(format!(
+            "cannot read {shown}: check its permissions and that it is UTF-8 text."
+        ));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_child_codes() {
+        let argv = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let code = |list: &[&str]| run_child(&argv(list), &[]).map_err(|e| (e.code, e.stderr));
+        assert_eq!(code(&["sh", "-c", "exit 7"]), Err((7, String::new())));
+        assert_eq!(
+            code(&["sh", "-c", "kill -TERM $$"]),
+            Err((143, String::new()))
+        );
+        assert_eq!(
+            code(&["/no/such/command"]),
+            Err((127, "factory.py: cannot run /no/such/command\n".to_string()))
+        );
+        let dir = temp_dir("setup-child");
+        let env_file = dir.join(".env");
+        fs::write(
+            &env_file,
+            "CLOUDFLARE_API_TOKEN=tok\nFACTORY_ACCESS_CLIENT_SECRET=secret\n",
+        )
+        .unwrap();
+        let env = cloudflare_env(&env_file).unwrap();
+        assert_eq!(
+            env,
+            vec![("CLOUDFLARE_API_TOKEN".to_string(), "tok".to_string())]
+        );
+        let check =
+            r#"test "$CLOUDFLARE_API_TOKEN" = tok && test -z "$FACTORY_ACCESS_CLIENT_SECRET""#;
+        assert!(run_child(&argv(&["sh", "-c", check]), &env).is_ok());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn load_autonomy_rules() {
+        let paused = json!({"paused": true, "projects": [], "self": []});
+        assert_eq!(load_autonomy(&json!({"jobs": []})), paused);
+        for bad in [
+            json!({"paused": "no"}),
+            json!({"paused": false, "projects": ["a", "b"]}),
+            json!({"paused": false, "self": "x"}),
+            json!({"paused": false, "projects": [1]}),
+            json!([]),
+        ] {
+            assert_eq!(load_autonomy(&json!({"autonomy": bad})), paused);
+        }
+        assert_eq!(
+            load_autonomy(
+                &json!({"autonomy": {"paused": false, "projects": ["sample"], "note": 1}})
+            ),
+            json!({"paused": false, "projects": ["sample"], "self": [], "note": 1})
+        );
+    }
+
+    #[test]
+    fn run_tag_shape() {
+        static SHAPE: Pattern = Pattern::new(r"\d{8}T\d{6}Z-[0-9a-f]{6}", Flags::ASCII);
+        let tag = run_tag();
+        assert!(SHAPE.is_full(&tag), "{tag}");
+        assert!(RUN_TAG.is_full(&tag));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tar_from_git_archive() {
+        let dir = temp_dir("setup-tar");
+        let repo = dir.join("repo");
+        let long = format!("deep/{}.txt", "x".repeat(111));
+        assert_eq!(long.len(), 120);
+        fs::create_dir_all(repo.join("deep")).unwrap();
+        fs::write(repo.join("a.txt"), "a\n").unwrap();
+        fs::write(repo.join(".env.example"), "KEY=\n").unwrap();
+        fs::write(repo.join("bad name.txt"), "b\n").unwrap();
+        fs::write(repo.join(&long), "long\n").unwrap();
+        std::os::unix::fs::symlink("a.txt", repo.join("link")).unwrap();
+        let git = |args: &[&str]| {
+            let ok = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args([
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                ])
+                .args(["-c", "commit.gpgsign=false"])
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "--no-verify", "-m", "snapshot"]);
+        let dest = dir.join("out/run");
+        snapshot(&repo, "HEAD", &dest).unwrap();
+        let mut found: Vec<String> = Vec::new();
+        let mut stack = vec![dest.clone()];
+        while let Some(folder) = stack.pop() {
+            for entry in fs::read_dir(folder).unwrap() {
+                let path = entry.unwrap().path();
+                let meta = fs::symlink_metadata(&path).unwrap();
+                assert!(!meta.file_type().is_symlink());
+                if meta.is_dir() {
+                    stack.push(path.clone());
+                }
+                found.push(path.strip_prefix(&dest).unwrap().display().to_string());
+            }
+        }
+        found.sort();
+        assert_eq!(found, vec![".env.example", "a.txt", "deep", long.as_str()]);
+        assert_eq!(fs::read_to_string(dest.join(&long)).unwrap(), "long\n");
+        assert!(snapshot(&repo, "no-such-commit", &dir.join("out/other")).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 }
