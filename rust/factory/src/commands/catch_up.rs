@@ -51,6 +51,8 @@ struct Fakes {
     scheduler: Option<&'static str>,
     timer_installed: Option<bool>,
     timer_drift: Option<Option<String>>,
+    daemon_service: Option<Option<&'static str>>,
+    daemon_drift: Option<bool>,
     gh: Option<Rc<dyn Fn(&str, &[&str]) -> (i32, String)>>,
     setup_run: Option<Rc<dyn Fn(&[&str]) -> (i32, String)>>,
     backup: Option<Rc<dyn Fn() -> Result<PathBuf, String>>>,
@@ -93,6 +95,28 @@ fn timer_drift(scheduler: &str, home: &Path) -> bool {
         return d.is_some_and(|s| !s.is_empty());
     }
     pickup::timer_drift(scheduler, &pickup::timer_values(home, &pickup::PICKUP))
+        .is_some_and(|s| !s.is_empty())
+}
+
+/// The daemon service's scheduler when the service is installed on this host.
+fn daemon_service() -> Option<&'static str> {
+    #[cfg(test)]
+    if let Some(s) = fake!(daemon_service) {
+        return s;
+    }
+    let scheduler = pickup::daemon_scheduler();
+    pickup::timer_installed(scheduler, &pickup::DAEMON)
+        .0
+        .then_some(scheduler)
+}
+
+/// True when the installed daemon service runs another command or binary than --install writes.
+fn daemon_drift(scheduler: &str, home: &Path) -> bool {
+    #[cfg(test)]
+    if let Some(d) = fake!(daemon_drift) {
+        return d;
+    }
+    pickup::timer_drift(scheduler, &pickup::timer_values(home, &pickup::DAEMON))
         .is_some_and(|s| !s.is_empty())
 }
 
@@ -357,6 +381,11 @@ fn catch_up_backup(home: &Path, skill: &Path) -> Result<PathBuf, String> {
             "LaunchAgents",
         ),
         (user.join(".config"), ("factory-", ".cmd"), "config"),
+        (
+            user.join(".config").join("systemd").join("user"),
+            ("factory-", ".service"),
+            "systemd",
+        ),
     ];
     for (source, (prefix, suffix), name) in sources {
         let mut found: Vec<PathBuf> = fs::read_dir(&source)
@@ -521,19 +550,26 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
     let installed = stamp.as_ref().map(|s| py_str(s.get("commit")));
     let current = installed.as_deref() == Some(head.as_str());
     let scheduler = scheduler();
-    let timer = timer_installed(scheduler);
+    // One crontab read serves both checks, so a host without a daemon reads it as before.
+    let (timer, daemon) =
+        pickup::with_crontab_memo(|| (timer_installed(scheduler), daemon_service()));
     let stale = timer && (!current || timer_drift(scheduler, home));
+    // Only drift reinstalls the daemon: a new skill keeps its binary path, so the unit still matches.
+    let daemon_stale = daemon.is_some_and(|s| daemon_drift(s, home));
     if current {
         outln!(out, "skill: current at {h7}");
     } else {
         let have = installed.map_or_else(|| "unknown".to_string(), |c| short(&c));
         outln!(out, "skill: {have} installed, {h7} on origin/{base}");
     }
-    if current && !stale {
+    if current && !stale && !daemon_stale {
         if timer {
             outln!(out, "pickup timer: current");
         } else {
             outln!(out, "pickup timer: none on this host, left alone");
+        }
+        if daemon.is_some() {
+            outln!(out, "daemon service: current");
         }
     } else {
         let backup = match catch_up_backup(home, skill) {
@@ -608,6 +644,8 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             outln!(out, "pickup timer: skipped, skill install failed");
         } else if ok && !timer {
             outln!(out, "pickup timer: none on this host, left alone");
+        } else if ok && current && !stale {
+            outln!(out, "pickup timer: current");
         } else if ok {
             let home_text = home.to_string_lossy();
             let mut argv = catch_up_entry(skill);
@@ -632,6 +670,39 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             } else {
                 failed += 1;
                 outln!(out, "pickup timer: {text}");
+            }
+        }
+        if daemon.is_some() {
+            if backup.is_some() && !ok {
+                outln!(out, "daemon service: skipped, skill install failed");
+            } else if ok && !daemon_stale {
+                outln!(out, "daemon service: current");
+            } else if ok {
+                let binary = here.join(if cfg!(windows) {
+                    "factory.exe"
+                } else {
+                    "factory"
+                });
+                let argv = [
+                    binary.to_string_lossy().into_owned(),
+                    "--home".into(),
+                    home.to_string_lossy().into_owned(),
+                    "daemon".into(),
+                    "setup".into(),
+                    "--install".into(),
+                ];
+                let r = run(&argv, Some(TIMER_TIMEOUT));
+                if r.code == 0 {
+                    let text = strip(&r.stdout);
+                    outln!(
+                        out,
+                        "daemon service: {}",
+                        text.split('\n').next().unwrap_or("")
+                    );
+                } else {
+                    failed += 1;
+                    outln!(out, "daemon service: {}", strip(&(r.stderr + &r.stdout)));
+                }
             }
         }
     }
@@ -880,6 +951,7 @@ mod tests {
                     scheduler: Some("cron"),
                     timer_installed: Some(false),
                     timer_drift: Some(Some("synthetic drift".into())),
+                    daemon_service: Some(None),
                     gh: Some(Rc::new(move |slug, args| {
                         let call = std::iter::once(slug)
                             .chain(args.iter().copied())
@@ -976,6 +1048,36 @@ mod tests {
                 }))
             });
             calls
+        }
+
+        /// Fakes the `daemon setup --install` child on top of any timer fake.
+        fn daemon_calls(&self, out: &str, code: i32) -> Calls {
+            let calls: Calls = Rc::default();
+            let prev = FAKES.with(|f| f.borrow().run.clone());
+            let (seen, out) = (calls.clone(), out.to_string());
+            FAKES.with(|f| {
+                f.borrow_mut().run = Some(Rc::new(move |argv, timeout| {
+                    if !argv.iter().any(|a| a == "daemon") {
+                        return prev.as_ref().and_then(|p| p(argv, timeout));
+                    }
+                    assert_eq!(timeout, Some(Duration::from_secs(120)));
+                    seen.borrow_mut().push(argv.to_vec());
+                    Some(Ok(Out {
+                        code,
+                        stdout: out.clone(),
+                        stderr: String::new(),
+                    }))
+                }))
+            });
+            calls
+        }
+
+        fn daemon(&self, scheduler: Option<&'static str>, drift: bool) {
+            FAKES.with(|f| {
+                let mut f = f.borrow_mut();
+                f.daemon_service = Some(scheduler);
+                f.daemon_drift = Some(drift);
+            });
         }
 
         fn timer(&self, installed: bool) {
@@ -1287,6 +1389,84 @@ mod tests {
         fs::write(skill.join("bundle.json"), unknown.to_string()).unwrap();
         assert_eq!(bundle_stamp(&skill), None);
         fs::remove_dir_all(skill).unwrap();
+    }
+
+    #[test]
+    fn daemon_service_reinstalled_only_when_it_drifted() {
+        let t = T::new("daemon-drift");
+        t.timer(true);
+        t.drift(None);
+        let (reply, reply_code) = default_timer_reply();
+        t.timer_calls(reply, reply_code);
+        let calls = t.daemon_calls(
+            "installed launchd service: /synthetic/factory.daemon.plist\n",
+            0,
+        );
+
+        t.daemon(Some("launchd"), false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0);
+        assert!(
+            lines.contains(&"daemon service: current".to_string()),
+            "{lines:?}"
+        );
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0);
+        assert_eq!(
+            lines[3..5],
+            ["pickup timer: current", "daemon service: current"]
+        );
+        assert!(calls.borrow().is_empty());
+        let backups = t.backups().len();
+
+        t.daemon(Some("launchd"), true);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0);
+        assert_eq!(t.backups().len(), backups + 1);
+        assert_eq!(
+            lines[4..6],
+            [
+                "pickup timer: current",
+                "daemon service: installed launchd service: /synthetic/factory.daemon.plist"
+            ]
+        );
+        let home = t.home.to_string_lossy().into_owned();
+        let binary = t
+            .skill
+            .join("runtime/factory")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            *calls.borrow(),
+            [[
+                binary.as_str(),
+                "--home",
+                &home,
+                "daemon",
+                "setup",
+                "--install"
+            ]
+            .map(String::from)]
+        );
+
+        let calls = t.daemon_calls(
+            "could not install the launchd service factory.daemon: synthetic\n",
+            1,
+        );
+        let (code, lines) = t.lines();
+        assert_eq!((code, calls.borrow().len()), (1, 1));
+        assert!(
+            lines.contains(
+                &"daemon service: could not install the launchd service factory.daemon: synthetic"
+                    .to_string()
+            ),
+            "{lines:?}"
+        );
+
+        t.daemon(None, true);
+        let (code, lines) = t.lines();
+        assert_eq!((code, calls.borrow().len()), (0, 1));
+        assert!(!lines.iter().any(|l| l.starts_with("daemon service:")));
     }
 
     #[test]

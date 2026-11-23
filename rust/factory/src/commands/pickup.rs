@@ -7,7 +7,6 @@ use crate::commands::daemon;
 use crate::commands::ops;
 use crate::commands::tracer::SPEC_APPROVED_NOTES;
 use crate::shared::pyval::truthy;
-#[cfg(test)]
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -1528,8 +1527,38 @@ fn report_status(
     sent().unwrap_or(false)
 }
 
+thread_local! {
+    /// While `with_crontab_memo` runs: None until the first `crontab -l`, then its result.
+    static CRONTAB_MEMO: RefCell<Option<Option<(i32, String)>>> = const { RefCell::new(None) };
+}
+
+/// Runs f with every `crontab -l` after the first answered from the first, so one check of two
+/// cron units reads the crontab once, as a check of the pickup timer alone does.
+pub(crate) fn with_crontab_memo<T>(f: impl FnOnce() -> T) -> T {
+    CRONTAB_MEMO.with(|m| *m.borrow_mut() = Some(None));
+    let result = f();
+    CRONTAB_MEMO.with(|m| *m.borrow_mut() = None);
+    result
+}
+
 /// (returncode, output) of a scheduler command; 127 when it is missing or times out.
 pub(crate) fn setup_run(argv: &[&str], stdin: Option<&str>) -> (i32, String) {
+    if argv == ["crontab", "-l"] {
+        if let Some(Some(read)) = CRONTAB_MEMO.with(|m| m.borrow().clone()) {
+            return read;
+        }
+        let read = setup_run_once(argv, stdin);
+        CRONTAB_MEMO.with(|m| {
+            if let Some(slot) = m.borrow_mut().as_mut() {
+                *slot = Some(read.clone());
+            }
+        });
+        return read;
+    }
+    setup_run_once(argv, stdin)
+}
+
+fn setup_run_once(argv: &[&str], stdin: Option<&str>) -> (i32, String) {
     #[cfg(test)]
     if let Some(f) = fake!(setup_run) {
         return f(argv, stdin);
@@ -18987,6 +19016,24 @@ exit "$archive_code"
             let out = ds.run(Show).1;
             let cmd = ds.fx.root.join(".config/factory-daemon.cmd");
             assert!(out.contains(&format!("    Then run: schtasks /Create /TN factory-daemon /SC ONLOGON /TR \"\\\"{}\\\"\" /F\n", cmd.display())), "{out}");
+        }
+
+        #[test]
+        fn crontab_memo_reads_once() {
+            let ds = Ds::new("cron");
+            with_crontab_memo(|| {
+                timer_installed("cron", &PICKUP);
+                timer_installed("cron", &DAEMON);
+            });
+            timer_installed("cron", &DAEMON);
+            let reads = ds
+                .sched
+                .borrow()
+                .runs
+                .iter()
+                .filter(|a| *a == &["crontab", "-l"])
+                .count();
+            assert_eq!(reads, 2);
         }
     }
 
