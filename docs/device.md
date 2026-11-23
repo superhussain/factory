@@ -584,14 +584,14 @@ For each case, one at a time, it:
    and `git` in Bash allowed, `--add-dir` on the scratch job folder, and
    `--model` when given. Its output goes to `<arm>/<case-id>/replay.log`, and it
    stops after an hour.
-4. Copies the review to `<arm>/<case-id>/review-<role>.md` when its first line
+4. Copies the review to `<arm>/<case-id>/<reviewer>.md` when its first line
    starts `VERDICT: `, and writes `run.json` with role, model, head, base, exit,
    wall seconds and the session's token totals. `run.json` and `replay.log` stay
    even when the case fails.
 5. Removes the scratch worktree without `--force`. When that fails it names the
    folder on stderr for you to remove.
 
-Before each case it runs, it prints `<case-id>: running review-<role> ...`. It
+Before each case it runs, it prints `<case-id>: running <reviewer> ...`. It
 then prints one line per case and a total, and exits 1 when any case failed:
 
 ```text

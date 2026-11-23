@@ -2318,6 +2318,14 @@ async function capture(outdir, referencePath) {
     };
     await view("idea-chips-390", 390, 844, "dark", openIdeaChips, true);
     await view("idea-chips-1280", 1280, 900, "light", openIdeaChips);
+    const openIdeaChipsLoading = async (page) => {
+      await page.evaluate(() => {
+        clearHoldConfigs();
+        renderBoard();
+      });
+      return openIdeaChips(page);
+    };
+    await view("idea-chips-loading-1280", 1280, 900, "light", openIdeaChipsLoading);
     const openAgentRuns = async (page) => {
       await page.evaluate(() => {
         location.hash = "#101-wrap-doc-line";
