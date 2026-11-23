@@ -1,0 +1,475 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "wait/present",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "round-1/review-ux.md", "spec.md", "round-1/review-code.md", "build.md", "decision.md"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_wait.py::WaitTest.test_present_prints_first_lines_in_argument_order"
+    },
+    {
+      "id": "wait/spec-evidence",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "spec-evidence.md"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_wait.py::WaitTest.test_spec_evidence_artifact"
+    },
+    {
+      "id": "wait/spec-evidence-blank",
+      "argv": ["--home", "{home}", "wait", "sample/002-malformed", "spec-evidence.md", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_wait.py::WaitTest.test_spec_evidence_artifact"
+    },
+    {
+      "id": "wait/malformed-security",
+      "argv": ["--home", "{home}", "wait", "sample/002-malformed", "round-1/review-security.md", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_wait.py::WaitTest.test_malformed_at_timeout_exits_5"
+    },
+    {
+      "id": "wait/malformed-decision",
+      "argv": ["--home", "{home}", "wait", "sample/002-malformed", "decision.md", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_wait.py::WaitTest.test_malformed_at_timeout_exits_5"
+    },
+    {
+      "id": "wait/malformed-spec",
+      "argv": ["--home", "{home}", "wait", "sample/002-malformed", "spec.md", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_wait.py::WaitTest.test_malformed_at_timeout_exits_5"
+    },
+    {
+      "id": "wait/malformed-build",
+      "argv": ["--home", "{home}", "wait", "sample/002-malformed", "build.md", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_wait.py::WaitTest.test_malformed_at_timeout_exits_5"
+    },
+    {
+      "id": "wait/malformed-long",
+      "argv": ["--home", "{home}", "wait", "sample/003-long", "decision.md", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_wait.py::WaitTest.test_malformed_at_timeout_exits_5"
+    },
+    {
+      "id": "wait/missing",
+      "argv": ["--home", "{home}", "wait", "sample/005-partial", "round-1/review-ux.md", "round-1/review-ui.md", "decision.md", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 3,
+      "from": "tests/cli/test_wait.py::WaitTest.test_missing_at_timeout_exits_3"
+    },
+    {
+      "id": "wait/skipped-ux",
+      "argv": ["--home", "{home}", "wait", "sample/004-skipped", "round-1/review-ux.md", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_wait.py::WaitTest.test_skipped_only_for_ux_and_ui"
+    },
+    {
+      "id": "wait/skipped-ui",
+      "argv": ["--home", "{home}", "wait", "sample/004-skipped", "round-1/review-ui.md", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_wait.py::WaitTest.test_skipped_only_for_ux_and_ui"
+    },
+    {
+      "id": "wait/skipped-security",
+      "argv": ["--home", "{home}", "wait", "sample/004-skipped", "round-1/review-security.md", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_wait.py::WaitTest.test_skipped_only_for_ux_and_ui"
+    },
+    {
+      "id": "wait/skipped-code",
+      "argv": ["--home", "{home}", "wait", "sample/004-skipped", "round-1/review-code.md", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_wait.py::WaitTest.test_skipped_only_for_ux_and_ui"
+    },
+    {
+      "id": "wait/usage-notes",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "notes.md"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_wait.py::WaitTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/usage-round-0",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "round-0/review-ux.md"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_wait.py::WaitTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/usage-review-pm",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "round-1/review-pm.md"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_wait.py::WaitTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/usage-parent",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "../spec.md"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_wait.py::WaitTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/usage-timeout-601",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "spec.md", "--timeout", "601"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_wait.py::WaitTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/usage-timeout-negative",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "spec.md", "--timeout", "-1"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_wait.py::WaitTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/usage-timeout-no-value",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "spec.md", "--timeout"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_wait.py::WaitTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/usage-timeout-twice",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "spec.md", "--timeout", "1", "--timeout", "1"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_wait.py::WaitTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/usage-no-artifact",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "--timeout", "1"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_wait.py::WaitTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/usage-hold-twice",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "spec.md", "--hold", "--hold"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_wait.py::WaitTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/usage-hold-only",
+      "argv": ["--home", "{home}", "wait", "sample/001-present", "--hold"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_wait.py::WaitTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/watch-files",
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "spec.md", "build.md"],
+      "home": "wait",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/44"
+              },
+              {
+                "id": "043-empty",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "build"
+              },
+              {
+                "id": "044-malformed",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "decide"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_watch.py::WatchTest.test_files_event"
+    },
+    {
+      "id": "wait/watch-spec-evidence",
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "spec.md", "spec-evidence.md"],
+      "home": "wait",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/44"
+              },
+              {
+                "id": "043-empty",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "build"
+              },
+              {
+                "id": "044-malformed",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "decide"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_watch.py::WatchTest.test_spec_evidence_artifact"
+    },
+    {
+      "id": "wait/watch-timeout",
+      "argv": ["--home", "{home}", "watch", "sample/043-empty", "spec.md", "build.md", "--timeout", "1"],
+      "home": "wait",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/44"
+              },
+              {
+                "id": "043-empty",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "build"
+              },
+              {
+                "id": "044-malformed",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "decide"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_watch.py::WatchTest.test_timeout_exits_0"
+    },
+    {
+      "id": "wait/watch-malformed",
+      "argv": ["--home", "{home}", "watch", "sample/044-malformed", "decision.md"],
+      "home": "wait",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/44"
+              },
+              {
+                "id": "043-empty",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "build"
+              },
+              {
+                "id": "044-malformed",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "decide"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_watch.py::WatchTest.test_malformed_returns_early"
+    },
+    {
+      "id": "wait/watch-missing-job",
+      "argv": ["--home", "{home}", "watch", "sample/099-missing", "spec.md"],
+      "home": "wait",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/44"
+              },
+              {
+                "id": "043-empty",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "build"
+              },
+              {
+                "id": "044-malformed",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "decide"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_watch.py::WatchTest.test_no_session_missing_job_exits_4"
+    },
+    {
+      "id": "wait/watch-other-project",
+      "argv": ["--home", "{home}", "watch", "other/042-sample-export", "spec.md"],
+      "home": "wait",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/44"
+              },
+              {
+                "id": "043-empty",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "build"
+              },
+              {
+                "id": "044-malformed",
+                "project": "sample",
+                "title": "Sample export",
+                "stage": "decide"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_watch.py::WatchTest.test_no_session_other_project_exits_2"
+    },
+    {
+      "id": "wait/watch-usage-timeout-0",
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "--timeout", "0"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_watch.py::WatchTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/watch-usage-timeout-541",
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "--timeout", "541"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_watch.py::WatchTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/watch-usage-pr-twice",
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "--pr", "--pr"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_watch.py::WatchTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/watch-usage-notes",
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "notes.md"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_watch.py::WatchTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/watch-usage-hold",
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "--hold"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_watch.py::WatchTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/watch-usage-timeout-no-value",
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "spec.md", "--timeout"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_watch.py::WatchTest.test_bad_usage_exits_2"
+    },
+    {
+      "id": "wait/watch-usage-timeout-twice",
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "spec.md", "--timeout", "1", "--timeout", "1"],
+      "home": "wait",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_watch.py::WatchTest.test_bad_usage_exits_2"
+    }
+  ]
+}
