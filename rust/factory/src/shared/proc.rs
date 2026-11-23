@@ -150,7 +150,7 @@ pub fn paseo_run(args: &[&str]) -> (i32, String) {
     }
 }
 
-fn executable(p: &Path) -> bool {
+pub(crate) fn executable(p: &Path) -> bool {
     let Ok(meta) = std::fs::metadata(p) else {
         return false;
     };
