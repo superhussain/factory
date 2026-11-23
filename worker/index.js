@@ -3053,6 +3053,7 @@ const STEER_AT = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
 // Only a signed-in person appends a steering note, one {note, at} per write, while the stored
 // row is at spec, build or review. A row whose steer is unchanged passes. A row that omits steer
 // passes only when no note is stored. An error message, or null.
+// A device cannot remove a row that holds notes until the job is merged or closed.
 function checkSteer(storedJobs, jobs, principal) {
   const stored = new Map();
   for (const j of storedJobs)
@@ -3089,6 +3090,18 @@ function checkSteer(storedJobs, jobs, principal) {
       return `steer on ${id} must keep its stored notes and add one {note, at} while the job is at spec, build or review, at most 10 notes. Nothing was written.`;
     const text = checkOperatorText(added.note, "note");
     if (text) return `steer on ${id} ${text}. Nothing was written.`;
+  }
+  if (principal?.kind !== "user") {
+    const written = new Set(jobs.map((j) => j?.id));
+    for (const [id, storedRow] of stored)
+      if (
+        !written.has(id) &&
+        storedRow.stage !== "merged" &&
+        storedRow.stage !== "closed" &&
+        Array.isArray(storedRow.steer) &&
+        storedRow.steer.length > 0
+      )
+        return `a board write from a device cannot remove ${quoteIdCut(id, QUOTED_ID_MAX)} while it is open and holds steering notes: close or merge the job first. Nothing was written.`;
   }
   return null;
 }
