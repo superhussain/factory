@@ -3681,6 +3681,4940 @@
       },
       "exit": 0,
       "from": "tests/cli/test_experiment.py::ReportNoiseTest.test_malformed_token_records_add_nothing"
+    },
+    {
+      "id": "pipeline/trial-b-higher-reverts-to-the-champion",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_b_higher_reverts_to_the_champion"
+    },
+    {
+      "id": "pipeline/trial-b-higher-on-tokens-alone-reverts",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 5000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 5000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 5000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 5000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 5000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_b_higher_on_tokens_alone_reverts"
+    },
+    {
+      "id": "pipeline/trial-no-difference-or-b-lower-keeps-the-edit",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_no_difference_or_b_lower_keeps_the_edit"
+    },
+    {
+      "id": "pipeline/trial-no-difference-or-b-lower-keeps-the-edit-2",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_no_difference_or_b_lower_keeps_the_edit"
+    },
+    {
+      "id": "pipeline/trial-changed-note-is-superseded",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "A person rewrote this note."
+            }
+          },
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_changed_note_is_superseded"
+    },
+    {
+      "id": "pipeline/trial-too-few-jobs-stays-open-then-inconclusive-after-28-days",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_too_few_jobs_stays_open_then_inconclusive_after_28_days"
+    },
+    {
+      "id": "pipeline/trial-too-few-jobs-stays-open-then-inconclusive-after-28-days-2",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2001-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_too_few_jobs_stays_open_then_inconclusive_after_28_days"
+    },
+    {
+      "id": "pipeline/trial-failed-revert-leaves-the-trial-open",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [429, "retro edit cap: 2 per scope per day"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_failed_revert_leaves_the_trial_open"
+    },
+    {
+      "id": "pipeline/trial-failed-revert-after-28-days-is-revert-failed",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2001-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [400, "note fails operator text check"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_failed_revert_after_28_days_is_revert_failed"
+    },
+    {
+      "id": "pipeline/trial-paused-autonomy-settles-nothing",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": true,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 3,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_paused_autonomy_settles_nothing"
+    },
+    {
+      "id": "pipeline/trial-revert-reads-the-champion-from-history-not-the-board",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Text a board writer put on the record.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_revert_reads_the_champion_from_history_not_the_board"
+    },
+    {
+      "id": "pipeline/trial-malformed-records-are-skipped",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "other-spec-v8"
+              },
+              {
+                "project": "../x",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "../x-spec-v8"
+              },
+              {
+                "project": "factory",
+                "stage": "nope",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-nope-v8"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": null,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_malformed_records_are_skipped"
+    },
+    {
+      "id": "pipeline/trial-malformed-records-do-not-crash-settle",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              "junk",
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 9,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": 5,
+                "status": "open",
+                "id": "factory-spec-v9"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 10,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "garbage",
+                "status": "open",
+                "id": "factory-spec-v10"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_malformed_records_do_not_crash_settle"
+    },
+    {
+      "id": "pipeline/trial-no-open-trials",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_no_open_trials"
+    },
+    {
+      "id": "pipeline/trial-board-keeps-open-records-and-the-newest-settled-ones",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 1,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-01T09:00:00Z",
+                "id": "factory-spec-v1"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 2,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-02T09:00:00Z",
+                "id": "factory-spec-v2"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 3,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-03T09:00:00Z",
+                "id": "factory-spec-v3"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 4,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-04T09:00:00Z",
+                "id": "factory-spec-v4"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 5,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-05T09:00:00Z",
+                "id": "factory-spec-v5"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 6,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-06T09:00:00Z",
+                "id": "factory-spec-v6"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 7,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-07T09:00:00Z",
+                "id": "factory-spec-v7"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-08T09:00:00Z",
+                "id": "factory-spec-v8"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 9,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-09T09:00:00Z",
+                "id": "factory-spec-v9"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 10,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-10T09:00:00Z",
+                "id": "factory-spec-v10"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 11,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-11T09:00:00Z",
+                "id": "factory-spec-v11"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 12,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-12T09:00:00Z",
+                "id": "factory-spec-v12"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 13,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-13T09:00:00Z",
+                "id": "factory-spec-v13"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 14,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-14T09:00:00Z",
+                "id": "factory-spec-v14"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 15,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-15T09:00:00Z",
+                "id": "factory-spec-v15"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 16,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-16T09:00:00Z",
+                "id": "factory-spec-v16"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 17,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-17T09:00:00Z",
+                "id": "factory-spec-v17"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 18,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-18T09:00:00Z",
+                "id": "factory-spec-v18"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 19,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-19T09:00:00Z",
+                "id": "factory-spec-v19"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 20,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-20T09:00:00Z",
+                "id": "factory-spec-v20"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 21,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-21T09:00:00Z",
+                "id": "factory-spec-v21"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_board_keeps_open_records_and_the_newest_settled_ones"
+    },
+    {
+      "id": "pipeline/trial-usage",
+      "argv": ["--home", "{home}", "trial", "resume"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "trials": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_usage"
+    },
+    {
+      "id": "pipeline/trial-board-keeps-unresumed-reverts",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 1,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "reverted",
+                "settled": "2026-09-01T09:00:00Z",
+                "id": "factory-spec-v1"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 0,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "reverted",
+                "settled": "2026-09-01T09:00:00Z",
+                "id": "factory-spec-v0",
+                "resumed": "2026-09-02T09:00:00Z"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 2,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-02T09:00:00Z",
+                "id": "factory-spec-v2"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 3,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-03T09:00:00Z",
+                "id": "factory-spec-v3"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 4,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-04T09:00:00Z",
+                "id": "factory-spec-v4"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 5,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-05T09:00:00Z",
+                "id": "factory-spec-v5"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 6,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-06T09:00:00Z",
+                "id": "factory-spec-v6"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 7,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-07T09:00:00Z",
+                "id": "factory-spec-v7"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-08T09:00:00Z",
+                "id": "factory-spec-v8"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 9,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-09T09:00:00Z",
+                "id": "factory-spec-v9"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 10,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-10T09:00:00Z",
+                "id": "factory-spec-v10"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 11,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-11T09:00:00Z",
+                "id": "factory-spec-v11"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 12,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-12T09:00:00Z",
+                "id": "factory-spec-v12"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 13,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-13T09:00:00Z",
+                "id": "factory-spec-v13"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 14,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-14T09:00:00Z",
+                "id": "factory-spec-v14"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 15,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-15T09:00:00Z",
+                "id": "factory-spec-v15"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 16,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-16T09:00:00Z",
+                "id": "factory-spec-v16"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 17,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-17T09:00:00Z",
+                "id": "factory-spec-v17"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 18,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-18T09:00:00Z",
+                "id": "factory-spec-v18"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 19,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-19T09:00:00Z",
+                "id": "factory-spec-v19"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 20,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-20T09:00:00Z",
+                "id": "factory-spec-v20"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 21,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-21T09:00:00Z",
+                "id": "factory-spec-v21"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 22,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "kept",
+                "settled": "2026-10-22T09:00:00Z",
+                "id": "factory-spec-v22"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_board_keeps_unresumed_reverts"
+    },
+    {
+      "id": "pipeline/trial-second-revert-prints-the-pause-line",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 5,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "reverted",
+                "settled": "2026-11-01T00:00:00Z",
+                "id": "factory-spec-v5"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialResumeTest.test_second_revert_prints_the_pause_line"
+    },
+    {
+      "id": "pipeline/trial-second-revert-prints-the-pause-line-2",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [
+              {
+                "id": "2105-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2106-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2108-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2109-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2110-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 1,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2100-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2101-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2102-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2103-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "id": "2104-job",
+                "project": "factory",
+                "stage": "merged",
+                "round": 3,
+                "started": "2999-01-02T00:00:00Z",
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 1000
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 5,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "reverted",
+                "settled": "2026-11-01T00:00:00Z",
+                "id": "factory-spec-v5",
+                "resumed": "2026-11-10T00:00:00Z"
+              },
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "factory-spec-v8"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialResumeTest.test_second_revert_prints_the_pause_line"
+    },
+    {
+      "id": "pipeline/trial-resume-posts-the-reason-to-the-worker",
+      "argv": [
+        "--home",
+        "{home}",
+        "trial",
+        "resume",
+        "factory",
+        "  Owner asked in chat to resume factory trials "
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "trials": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ],
+        "POST /api/trials/resume/factory": [
+          200,
+          {
+            "resumed": 2
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialResumeTest.test_resume_posts_the_reason_to_the_worker"
+    },
+    {
+      "id": "pipeline/trial-resume-with-nothing-to-clear",
+      "argv": [
+        "--home",
+        "{home}",
+        "trial",
+        "resume",
+        "factory",
+        "Owner asked in chat to resume factory trials"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "trials": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ],
+        "POST /api/trials/resume/factory": [
+          200,
+          {
+            "resumed": 0
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialResumeTest.test_resume_with_nothing_to_clear"
+    },
+    {
+      "id": "pipeline/trial-resume-needs-a-reason",
+      "argv": ["--home", "{home}", "trial", "resume", "factory"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "trials": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ],
+        "POST /api/trials/resume/factory": [
+          200,
+          {
+            "resumed": 2
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_trial.py::TrialResumeTest.test_resume_needs_a_reason"
+    },
+    {
+      "id": "pipeline/trial-worker-refusal-exits-5",
+      "argv": [
+        "--home",
+        "{home}",
+        "trial",
+        "resume",
+        "factory",
+        "Owner asked in chat to resume factory trials"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "trials": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ],
+        "POST /api/trials/resume/factory": [400, "instruction: links are not allowed"]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_trial.py::TrialResumeTest.test_worker_refusal_exits_5"
+    },
+    {
+      "id": "pipeline/trial-unbound-host-gets-the-worker-reason",
+      "argv": [
+        "--home",
+        "{home}",
+        "trial",
+        "resume",
+        "factory",
+        "Owner asked in chat to resume factory trials"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "trials": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ],
+        "POST /api/trials/resume/factory": [
+          403,
+          "only a signed-in person, or a paired host passing a person's instruction, resumes stage-note trials"
+        ]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_trial.py::TrialResumeTest.test_unbound_host_gets_the_worker_reason"
+    },
+    {
+      "id": "pipeline/trial-generic-403-is-access-rejected",
+      "argv": [
+        "--home",
+        "{home}",
+        "trial",
+        "resume",
+        "factory",
+        "Owner asked in chat to resume factory trials"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "trials": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ],
+        "POST /api/trials/resume/factory": [403, "<html><body>Forbidden</body></html>"]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_trial.py::TrialResumeTest.test_generic_403_is_access_rejected"
     }
   ]
 }

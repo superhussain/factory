@@ -8,7 +8,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::board::{escalated, read_board};
+use crate::shared::board::{dump_board, escalated, load_board, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{
     tag_lookalike, BABYSIT_SENTENCE, JOB_ID, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS,
@@ -18,9 +18,11 @@ use crate::shared::consts::{
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::{is_link, read_text, write_atomic};
 use crate::shared::home::factory_home;
-use crate::shared::http::api;
+use crate::shared::http::{access_message, api, cas};
 use crate::shared::project::project_files;
-use crate::shared::py::{is_space, os_error, repr, round_half_even, splitlines, strip};
+use crate::shared::py::{
+    is_space, os_error, printable_line, repr, round_half_even, splitlines, strip,
+};
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::time::{format_stamp, now, parse_stamp, unix_now};
@@ -214,6 +216,10 @@ fn truthy(v: Option<&Value>) -> bool {
         Some(Value::Object(o)) => !o.is_empty(),
         Some(Value::Number(n)) => n.as_f64() != Some(0.0),
     }
+}
+
+fn json_error(e: serde_json::Error) -> crate::shared::exit::Exit {
+    fail(format!("the Worker sent JSON that does not parse: {e}"), 1)
 }
 
 /// `type(v) is int`.
@@ -1312,11 +1318,406 @@ pub fn experiment_cmd(call: &Call) -> Res<()> {
     flushed(|o| experiment_report(&home, name, o))
 }
 
-// ---- not ported yet ----
+// ---- trial ----
 
-pub fn trial_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("trial"))
+const TRIAL_MAX_DAYS: i64 = 28;
+const TRIAL_PAUSE_REVERTS: usize = 2;
+const TRIAL_KEEP: usize = 20;
+const RETRO_EDIT_SCHEMA: &str = "factory.retro-edit/1";
+const TRIAL_RESUME_ONLY: &str = "only a signed-in person, or a paired host passing a person's instruction, resumes stage-note trials";
+
+/// A job's arm in one stage-note trial: "a" reads the champion note, "b" the challenger.
+fn trial_arm(trial_id: &str, job_id: &str) -> &'static str {
+    experiment_arm(&format!("{trial_id}/{job_id}"), 50)
 }
+
+/// True for a well-formed trial record.
+fn trial_valid(t: &Value) -> bool {
+    let Some(map) = t.as_object() else {
+        return false;
+    };
+    let (Some(project), Some(stage)) = (str_of(t, "project"), str_of(t, "stage")) else {
+        return false;
+    };
+    let Some(version) = py_int(map.get("version")) else {
+        return false;
+    };
+    SLUG.is_full(project)
+        && PIPELINE_STAGES.contains(&stage)
+        && py_int(map.get("champion_version")).is_some_and(|v| v >= 0)
+        && str_of(t, "id") == Some(&format!("{project}-{stage}-v{version}"))
+        && stamp_of(map.get("opened")).is_some()
+}
+
+/// The board's open, well-formed trial for slug's stage note, or None.
+#[allow(dead_code)]
+fn open_trial_for<'a>(data: &'a Value, slug: &str, stage: &str) -> Option<&'a Value> {
+    data.get("trials")?.as_array()?.iter().find(|t| {
+        trial_valid(t)
+            && str_of(t, "status") == Some("open")
+            && str_of(t, "project") == Some(slug)
+            && str_of(t, "stage") == Some(stage)
+    })
+}
+
+/// The trial stage's note in the pipeline version the edit replaced, or "" when absent.
+fn trial_champion(home: &Path, trial: &Value) -> Res<String> {
+    let version = py_int(trial.get("champion_version")).unwrap_or(0);
+    if version == 0 {
+        return Ok(String::new());
+    }
+    let r = api(
+        home,
+        "GET",
+        &format!(
+            "/api/pipeline/history/projects/{}/{version}",
+            str_of(trial, "project").unwrap_or("")
+        ),
+        None,
+        &[200, 404],
+        &[],
+    )?;
+    if r.status != 200 {
+        return Ok(String::new());
+    }
+    let body = loads(&r.text()?).map_err(json_error)?;
+    let stage = str_of(trial, "stage").unwrap_or("");
+    Ok(body
+        .get("stage_notes")
+        .and_then(Value::as_object)
+        .and_then(|n| n.get(stage))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string())
+}
+
+/// True when slug has TRIAL_PAUSE_REVERTS reverted trials no person resumed.
+fn trials_paused(data: &Value, slug: &str) -> bool {
+    data.get("trials")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|t| {
+            t.is_object()
+                && str_of(t, "project") == Some(slug)
+                && str_of(t, "status") == Some("reverted")
+                && !truthy(t.get("resumed"))
+        })
+        .count()
+        >= TRIAL_PAUSE_REVERTS
+}
+
+/// The trial project's jobs started at or after it opened, by arm.
+fn trial_jobs(data: &Value, trial: &Value) -> [Map<String, Value>; 2] {
+    let opened = stamp_of(trial.get("opened"));
+    let mut arms = [Map::new(), Map::new()];
+    for j in data["jobs"].as_array().into_iter().flatten() {
+        let Some(id) = str_of(j, "id") else {
+            continue;
+        };
+        if j.get("project") != trial.get("project") || j.get("project").is_none() {
+            continue;
+        }
+        let started = stamp_of(j.get("started"));
+        if let (Some(opened), Some(started)) = (opened, started) {
+            if started >= opened {
+                let arm = trial_arm(str_of(trial, "id").unwrap_or(""), id);
+                arms[usize::from(arm == "b")].insert(id.to_string(), j.clone());
+            }
+        }
+    }
+    arms
+}
+
+/// The board's autonomy record with defaults filled in. A malformed record counts as paused.
+fn load_autonomy(data: &Value, o: &mut Out) -> Value {
+    let default = json!({"paused": true, "projects": [], "self": []});
+    let stored = data.get("autonomy").cloned().unwrap_or(json!({}));
+    let mut record = default.clone();
+    if let Some(stored) = stored.as_object() {
+        for (k, v) in stored {
+            record[k] = v.clone();
+        }
+    }
+    let lists_ok = ["projects", "self"].iter().all(|k| {
+        record[*k]
+            .as_array()
+            .is_some_and(|l| l.iter().all(Value::is_string))
+    });
+    if !stored.is_object()
+        || !record["paused"].is_boolean()
+        || !lists_ok
+        || record["projects"].as_array().unwrap().len() > 1
+    {
+        o.err.push_str("factory.py: the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it\n");
+        return default;
+    }
+    record
+}
+
+fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
+    let data = read_board(home)?;
+    if load_autonomy(&data, o)["paused"] != Value::Bool(false) {
+        return Err(fail("autonomy is paused; no trial settled", 3));
+    }
+    let trials: Vec<Value> = data
+        .get("trials")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|t| trial_valid(t) && str_of(t, "status") == Some("open"))
+        .cloned()
+        .collect();
+    if trials.is_empty() {
+        o.out.push_str("no open trials\n");
+        return Ok(());
+    }
+    let mut updates: Vec<(String, Map<String, Value>)> = Vec::new();
+    for t in &trials {
+        let (tid, slug, stage) = (
+            str_of(t, "id").unwrap(),
+            str_of(t, "project").unwrap(),
+            str_of(t, "stage").unwrap(),
+        );
+        let r = api(
+            home,
+            "GET",
+            &format!("/api/pipeline/projects/{slug}"),
+            None,
+            &[200, 404],
+            &[],
+        )?;
+        let notes = if r.status == 200 {
+            loads(&r.text()?).map_err(json_error)?["stage_notes"].clone()
+        } else {
+            json!({})
+        };
+        let note = notes.get(stage).cloned().unwrap_or(json!(""));
+        if Some(&note) != t.get("challenger") {
+            let mut update = Map::new();
+            update.insert("status".into(), json!("superseded"));
+            update.insert("settled".into(), json!(now()));
+            updates.push((tid.to_string(), update));
+            writeln!(
+                o.out,
+                "trial {tid} superseded: the {stage} note changed after the edit"
+            )
+            .unwrap();
+            continue;
+        }
+        let arms = trial_jobs(&data, t);
+        let jobs_root = home.join("jobs");
+        let a = arm_metrics(&arms[0], json!({}), &jobs_root);
+        let b = arm_metrics(&arms[1], json!({}), &jobs_root);
+        let result = compare(&a, &b);
+        let reads =
+            json!({"rounds": result["rounds"]["reads"], "tokens": result["tokens"]["reads"]});
+        let said = format!(
+            "rounds {}, tokens {}",
+            reads["rounds"].as_str().unwrap(),
+            reads["tokens"].as_str().unwrap()
+        );
+        let expired = unix_now() - stamp_of(t.get("opened")).unwrap() >= TRIAL_MAX_DAYS * 86400;
+        let sorted_ids = |m: &Map<String, Value>| {
+            let mut ids: Vec<String> = m.keys().cloned().collect();
+            ids.sort();
+            ids
+        };
+        let mut update = Map::new();
+        update.insert(
+            "arms".into(),
+            json!({"a": sorted_ids(&arms[0]), "b": sorted_ids(&arms[1])}),
+        );
+        update.insert("reads".into(), reads.clone());
+        let compared = result["verdict"] == "compared";
+        if compared && (reads["rounds"] == "b higher" || reads["tokens"] == "b higher") {
+            let base: i64 = r
+                .header("X-Pipeline-Version")
+                .and_then(|v| v.trim().parse().ok())
+                .ok_or_else(|| fail("the Worker sent no X-Pipeline-Version", 1))?;
+            let body = json!({"schema": RETRO_EDIT_SCHEMA, "run": t.get("run").cloned().unwrap_or(Value::Null),
+                              "base_version": base, "stage": stage, "note": trial_champion(home, t)?,
+                              "summary": format!("Revert trial {tid}")});
+            let put = api(
+                home,
+                "PUT",
+                &format!("/api/pipeline/retro/projects/{slug}"),
+                Some(dumps(&body, DEFAULT).as_bytes()),
+                &[200, 400, 403, 404, 409, 412, 413, 429],
+                &[("Content-Type", "application/json")],
+            )?;
+            if put.status != 200 {
+                let text = String::from_utf8_lossy(&put.body);
+                let why =
+                    strip(&format!("{} {}", put.status, printable_line(&text, 200))).to_string();
+                if expired {
+                    update.insert("status".into(), json!("revert-failed"));
+                    update.insert("settled".into(), json!(now()));
+                    writeln!(
+                        o.out,
+                        "trial {tid} revert failed after {TRIAL_MAX_DAYS} days: kept the edit: {why}"
+                    )
+                    .unwrap();
+                } else {
+                    writeln!(o.out, "trial {tid} revert failed: {why}").unwrap();
+                }
+                updates.push((tid.to_string(), update));
+                continue;
+            }
+            let version: i64 = put
+                .header("X-Pipeline-Version")
+                .and_then(|v| v.trim().parse().ok())
+                .ok_or_else(|| fail("the Worker sent no X-Pipeline-Version", 1))?;
+            update.insert("status".into(), json!("reverted"));
+            update.insert("settled".into(), json!(now()));
+            update.insert("revert_version".into(), json!(version));
+            writeln!(o.out, "trial {tid} reverted to version {version}: {said}").unwrap();
+        } else if compared {
+            update.insert("status".into(), json!("kept"));
+            update.insert("settled".into(), json!(now()));
+            writeln!(o.out, "trial {tid} kept: {said}").unwrap();
+        } else if expired {
+            update.insert("status".into(), json!("inconclusive"));
+            update.insert("settled".into(), json!(now()));
+            writeln!(
+                o.out,
+                "trial {tid} inconclusive after {TRIAL_MAX_DAYS} days: kept the edit"
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                o.out,
+                "trial {tid} open: a {} finished, b {} finished",
+                a["finished"], b["finished"]
+            )
+            .unwrap();
+        }
+        updates.push((tid.to_string(), update));
+    }
+    let data = cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let mut records: Vec<Value> = data
+            .get("trials")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|t| t.is_object())
+            .cloned()
+            .collect();
+        for t in records.iter_mut() {
+            if str_of(t, "status") != Some("open") {
+                continue;
+            }
+            let id = str_of(t, "id").map(String::from);
+            if let Some((_, update)) = updates.iter().rev().find(|(k, _)| Some(k) == id.as_ref()) {
+                for (k, v) in update {
+                    t[k] = v.clone();
+                }
+            }
+        }
+        let locked =
+            |t: &Value| str_of(t, "status") == Some("reverted") && !truthy(t.get("resumed"));
+        let settled_key = |t: &Value| -> String {
+            match t.get("settled") {
+                Some(v) if truthy(Some(v)) => v.as_str().unwrap_or("").to_string(),
+                _ => String::new(),
+            }
+        };
+        let mut settled: Vec<usize> = (0..records.len())
+            .filter(|&i| str_of(&records[i], "status") != Some("open") && !locked(&records[i]))
+            .collect();
+        settled.sort_by(|&x, &y| settled_key(&records[y]).cmp(&settled_key(&records[x])));
+        settled.truncate(TRIAL_KEEP);
+        let kept: Vec<Value> = records
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| {
+                str_of(t, "status") == Some("open") || locked(t) || settled.contains(i)
+            })
+            .map(|(_, t)| t.clone())
+            .collect();
+        data["trials"] = Value::Array(kept);
+        data["updated"] = json!(now());
+        Ok((Some(dump_board(&data)), data))
+    })?;
+    let mut reverted: Vec<&str> = trials
+        .iter()
+        .filter(|t| {
+            let id = str_of(t, "id").unwrap();
+            updates
+                .iter()
+                .rev()
+                .find(|(k, _)| k == id)
+                .is_some_and(|(_, u)| u.get("status") == Some(&json!("reverted")))
+        })
+        .map(|t| str_of(t, "project").unwrap())
+        .collect();
+    reverted.sort();
+    reverted.dedup();
+    for slug in reverted {
+        if trials_paused(&data, slug) {
+            writeln!(
+                o.out,
+                "stage-note trials paused for {slug} after {TRIAL_PAUSE_REVERTS} reverts; a person runs trial resume {slug}"
+            )
+            .unwrap();
+        }
+    }
+    Ok(())
+}
+
+fn trial_resume(home: &Path, slug: &str, reason: &str, o: &mut Out) -> Res<()> {
+    let body = dumps(&json!({"instruction": strip(reason)}), DEFAULT);
+    let r = api(
+        home,
+        "POST",
+        &format!("/api/trials/resume/{slug}"),
+        Some(body.as_bytes()),
+        &[200, 403],
+        &[("Content-Type", "application/json")],
+    )?;
+    let text = String::from_utf8_lossy(&r.body).into_owned();
+    if r.status == 403 && strip(&text) == TRIAL_RESUME_ONLY {
+        return Err(fail(TRIAL_RESUME_ONLY, 5));
+    }
+    if r.status == 403 {
+        return Err(fail(access_message(&home.join(".env")), 5));
+    }
+    let n = loads(&r.text()?).map_err(json_error)?["resumed"].clone();
+    if truthy(Some(&n)) {
+        writeln!(
+            o.out,
+            "stage-note trials resumed for {slug}: {n} reverts cleared"
+        )
+        .unwrap();
+    } else {
+        writeln!(o.out, "no unresumed reverts for {slug}; nothing changed").unwrap();
+    }
+    Ok(())
+}
+
+/// Settle the board's open retro stage-note trials, or resume one project's paused trials.
+pub fn trial_cmd(call: &Call) -> Res<()> {
+    let sub = call.args[0].as_str();
+    let slug = call.args.get(1).map(String::as_str);
+    let reason = call.args.get(2).map(String::as_str);
+    let settle = sub == "settle" && slug.is_none() && reason.is_none();
+    let resume = sub == "resume" && slug.is_some_and(|s| SLUG.is_full(s)) && reason.is_some();
+    if !settle && !resume {
+        return Err(fail(
+            "usage: trial settle | trial resume <slug> <reason>",
+            2,
+        ));
+    }
+    let home = factory_home()?;
+    if settle {
+        flushed(|o| trial_settle(&home, o))
+    } else {
+        flushed(|o| trial_resume(&home, slug.unwrap(), reason.unwrap(), o))
+    }
+}
+
+// ---- not ported yet ----
 
 pub fn verdict_cmd(_call: &Call) -> Res<()> {
     Err(not_ported("verdict"))
@@ -1719,6 +2120,125 @@ mod tests {
             let follow = json!({"rework_of": [], "surfaced": [], "unknown_window": 0});
             let metrics = arm_metrics(&arm, follow, &home.join("jobs"));
             assert_eq!(metrics["coverage_unknown"], 2);
+        }
+    }
+
+    mod trial {
+        use super::super::*;
+
+        const TRIAL: &str = "factory-spec-v8";
+
+        fn trial(over: Value) -> Value {
+            let mut t = json!({"project": "factory", "stage": "spec", "version": 8, "run": "20261111T090000Z-a1b2c3",
+                               "summary": "Spec note", "champion_version": 7, "champion": "old", "challenger": "new",
+                               "opened": "2026-11-12T09:00:00Z", "status": "open"});
+            for (k, v) in over.as_object().unwrap() {
+                t[k] = v.clone();
+            }
+            if t.get("id").is_none() {
+                let id = format!(
+                    "{}-{}-v{}",
+                    t["project"].as_str().unwrap(),
+                    t["stage"].as_str().unwrap(),
+                    t["version"]
+                );
+                t["id"] = json!(id);
+            }
+            t
+        }
+
+        fn running(trials: Vec<Value>) -> Value {
+            json!({"updated": "2026-11-12T09:00:00Z", "jobs": [], "trials": trials,
+                   "autonomy": {"paused": false, "projects": ["factory"], "self": []}})
+        }
+
+        fn arm_ids(trial_id: &str, arm: &str, count: usize) -> Vec<String> {
+            (2100..)
+                .map(|n| format!("{n}-job"))
+                .filter(|id| trial_arm(trial_id, id) == arm)
+                .take(count)
+                .collect()
+        }
+
+        #[test]
+        fn arm_is_a_stable_half_split_per_trial() {
+            assert_eq!(
+                trial_arm(TRIAL, "2100-x"),
+                experiment_arm(&format!("{TRIAL}/2100-x"), 50)
+            );
+            let arms: Vec<&str> = (2100..2300)
+                .map(|n| trial_arm(TRIAL, &format!("{n}-x")))
+                .collect();
+            let a = arms.iter().filter(|x| **x == "a").count();
+            assert!(70 < a && a < 130);
+            assert!((2100..2300)
+                .zip(&arms)
+                .all(|(n, arm)| trial_arm(TRIAL, &format!("{n}-x")) == *arm));
+        }
+
+        #[test]
+        fn open_trial_for_and_pause() {
+            let data = running(vec![
+                trial(json!({"status": "kept"})),
+                trial(json!({"stage": "build"})),
+                trial(json!({"project": "sample", "version": 2})),
+            ]);
+            assert!(open_trial_for(&data, "factory", "spec").is_none());
+            assert_eq!(
+                open_trial_for(&data, "factory", "build").unwrap()["id"],
+                "factory-build-v8"
+            );
+            assert!(open_trial_for(&json!({"jobs": []}), "factory", "spec").is_none());
+            let mut reverted = vec![
+                trial(json!({"version": 5, "status": "reverted"})),
+                trial(json!({"version": 6, "status": "reverted"})),
+            ];
+            assert!(trials_paused(&running(reverted.clone()), "factory"));
+            assert!(!trials_paused(&running(reverted.clone()), "sample"));
+            assert!(!trials_paused(&running(reverted[..1].to_vec()), "factory"));
+            reverted[0]["resumed"] = json!(now());
+            assert!(!trials_paused(&running(reverted), "factory"));
+        }
+
+        #[test]
+        fn revert_failed_neither_blocks_nor_pauses() {
+            let failed = running(vec![
+                trial(json!({"version": 5, "status": "revert-failed"})),
+                trial(json!({"version": 6, "status": "revert-failed"})),
+            ]);
+            assert!(open_trial_for(&failed, "factory", "spec").is_none());
+            assert!(!trials_paused(&failed, "factory"));
+        }
+
+        #[test]
+        fn trial_jobs_need_the_project_and_a_start_at_or_after_opened() {
+            let t = trial(json!({"opened": "2026-11-12T09:00:00Z"}));
+            let (a, b) = (
+                arm_ids(TRIAL, "a", 1).remove(0),
+                arm_ids(TRIAL, "b", 1).remove(0),
+            );
+            let jobs = json!({"jobs": [
+                {"id": a, "project": "factory", "started": "2026-11-12T09:00:00Z"},
+                {"id": b, "project": "factory", "started": "2026-11-13T09:00:00Z"},
+                {"id": "2001-early", "project": "factory", "started": "2026-11-12T08:59:59Z"},
+                {"id": "2002-none", "project": "factory"},
+                {"id": "2003-other", "project": "sample", "started": "2026-11-13T09:00:00Z"}]});
+            let arms = trial_jobs(&jobs, &t);
+            assert_eq!(arms[0].keys().collect::<Vec<_>>(), [&a]);
+            assert_eq!(arms[1].keys().collect::<Vec<_>>(), [&b]);
+        }
+
+        #[test]
+        fn malformed_trial_record_is_ignored() {
+            let data = json!({"trials": [
+                trial(json!({"project": "sample", "id": "sample-spec-v9"})),
+                trial(json!({"project": "sample", "stage": "../x"})),
+                trial(json!({"project": "../sample"})),
+                trial(json!({"project": "sample", "champion_version": "7"})),
+            ]});
+            assert!(open_trial_for(&data, "sample", "spec").is_none());
+            let good = json!({"trials": [trial(json!({"project": "sample"}))]});
+            assert!(open_trial_for(&good, "sample", "spec").is_some());
         }
     }
 }
