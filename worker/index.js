@@ -1088,11 +1088,20 @@ function changedChars(a, b) {
   return x.length - start - end + (y.length - start - end);
 }
 
-// The whole lines of text that hold [start, end). No note check pattern crosses a newline.
+// The whole lines of text that hold [start, end), plus the nearest non-blank line on each side.
+// Only the shell pattern's `\|\s*` crosses a newline, and it reaches past blank lines alone.
 function touchedLines(text, start, end) {
-  const from = text.slice(0, start).lastIndexOf("\n") + 1;
-  const to = text.indexOf("\n", end);
-  return text.slice(from, to < 0 ? text.length : to);
+  const before = text.slice(0, start).split("\n");
+  const after = text.slice(end).split("\n");
+  let i = before.length - 2;
+  while (i > 0 && !before[i].trim()) i--;
+  let j = 1;
+  while (j < after.length - 1 && !after[j].trim()) j++;
+  return (
+    before.slice(Math.max(i, 0)).join("\n") +
+    text.slice(start, end) +
+    after.slice(0, j + 1).join("\n")
+  );
 }
 
 // factory.py's MAX_EXPLORER_PROJECTS: a longer allowlist makes the autonomy record malformed.
