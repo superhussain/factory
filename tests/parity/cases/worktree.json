@@ -1,0 +1,2084 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "worktree/bad-target",
+      "argv": ["--home", "{home}", "worktree", "bad/x/y"],
+      "home": "worktree",
+      "stubs": {},
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_bad_target_and_unknown_project"
+    },
+    {
+      "id": "worktree/unknown-project",
+      "argv": ["--home", "{home}", "worktree", "other/001-test"],
+      "home": "worktree",
+      "stubs": {},
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_bad_target_and_unknown_project"
+    },
+    {
+      "id": "worktree/fetch-fails",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {},
+      "from": "tests/cli/test_checkout_lineage.py::CheckoutLineageTest.test_failed_fetch_leaves_the_url_out"
+    },
+    {
+      "id": "worktree/no-root",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "from": "tests/cli/test_checkout_lineage.py::CheckoutLineageTest.test_clean_clone_is_safe"
+    },
+    {
+      "id": "worktree/no-local-base",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "from": "tests/cli/test_checkout_lineage.py::CheckoutLineageTest.test_missing_local_base"
+    },
+    {
+      "id": "worktree/foreign-job-branch",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-list",
+              "--max-parents=0",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "dddddddddddddddddddddddddddddddddddddddd\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "from": "tests/cli/test_checkout_lineage.py::CheckoutLineageTest.test_worktree_stops_on_a_foreign_job_branch"
+    },
+    {
+      "id": "worktree/ls-remote-fails",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "from": "tests/cli/test_checkout_lineage.py::CheckoutLineageTest.test_worktree_passes_a_clean_clone_to_the_branch_lookup"
+    },
+    {
+      "id": "worktree/no-branch",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "ls-remote", "origin", "refs/heads/factory/001-test"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "from": "tests/cli/test_checkout_lineage.py::CheckoutLineageTest.test_worktree_passes_a_clean_clone_to_the_branch_lookup"
+    },
+    {
+      "id": "worktree/add-local-branch",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-list",
+              "--max-parents=0",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "ls-remote", "origin", "refs/heads/factory/001-test"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "from": "tests/cli/test_checkout_lineage.py::CheckoutLineageTest.test_clean_clone_is_safe"
+    },
+    {
+      "id": "worktree/add-from-origin",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "ls-remote", "origin", "refs/heads/factory/001-test"],
+            "stdout": "1111111111111111111111111111111111111111\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "origin",
+              "+refs/heads/factory/001-test:refs/remotes/origin/factory/001-test"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/remotes/origin/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "from": "tests/cli/test_checkout_lineage.py::CheckoutLineageTest.test_clean_clone_is_safe"
+    },
+    {
+      "id": "worktree/existing",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree-existing",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-list",
+              "--max-parents=0",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "ls-remote", "origin", "refs/heads/factory/001-test"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "from": "tests/cli/test_prebuild.py::PrebuildTest.test_no_file_does_nothing"
+    },
+    {
+      "id": "worktree/existing-with-origin",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree-existing",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-list",
+              "--max-parents=0",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "ls-remote", "origin", "refs/heads/factory/001-test"],
+            "stdout": "1111111111111111111111111111111111111111\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "origin",
+              "+refs/heads/factory/001-test:refs/remotes/origin/factory/001-test"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/remotes/origin/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "from": "tests/cli/test_checkout_lineage.py::CheckoutLineageTest.test_clean_clone_is_safe"
+    },
+    {
+      "id": "worktree/prebuild-skips",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree-prebuild",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-list",
+              "--max-parents=0",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "ls-remote", "origin", "refs/heads/factory/001-test"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "from": "tests/cli/test_prebuild.py::PrebuildTest.test_uncommitted_lockfile_skips"
+    },
+    {
+      "id": "worktree/cleanup-bad-target",
+      "argv": ["--home", "{home}", "cleanup", "bad"],
+      "home": "worktree",
+      "stubs": {},
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_bad_target_and_unknown_project"
+    },
+    {
+      "id": "worktree/cleanup-unknown-project",
+      "argv": ["--home", "{home}", "cleanup", "other/001-test"],
+      "home": "worktree",
+      "stubs": {},
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_bad_target_and_unknown_project"
+    },
+    {
+      "id": "worktree/cleanup-merged",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "branch", "-d", "factory/001-test"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_missing_worktree_is_pruned"
+    },
+    {
+      "id": "worktree/cleanup-pushed-merged",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "config", "--get", "branch.factory/001-test.merge"],
+            "stdout": "refs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "branch", "--unset-upstream", "factory/001-test"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "branch", "-d", "factory/001-test"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_pushed_merged_branch_is_removed"
+    },
+    {
+      "id": "worktree/cleanup-unmerged",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_unmerged_branch_is_kept"
+    },
+    {
+      "id": "worktree/cleanup-no-branch",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_prompt_folder_is_removed"
+    },
+    {
+      "id": "worktree/cleanup-delete-fails",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "branch", "-d", "factory/001-test"],
+            "stdout": "",
+            "stderr": "error: cannot delete branch, use --force to override\nhint: x\n",
+            "code": 1
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_empty_stderr_still_prints_json"
+    },
+    {
+      "id": "worktree/cleanup-delete-silent-fail",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "branch", "-d", "factory/001-test"],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_empty_stderr_still_prints_json"
+    },
+    {
+      "id": "worktree/cleanup-board-head",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "refs/heads/factory/001-test"],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "1111111111111111111111111111111111111111",
+              "1111111111111111111111111111111111111111"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "worktree", "list", "--porcelain"],
+            "stdout": "worktree /srv/checkout\nHEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbranch refs/heads/main\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "update-ref",
+              "-d",
+              "refs/heads/factory/001-test",
+              "1111111111111111111111111111111111111111"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "merged",
+                "github": {
+                  "merged": "2026-11-18T00:00:00Z",
+                  "head": "1111111111111111111111111111111111111111"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_board_head_deletes_a_merged_branch"
+    },
+    {
+      "id": "worktree/cleanup-board-head-checked-out",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "refs/heads/factory/001-test"],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "1111111111111111111111111111111111111111",
+              "1111111111111111111111111111111111111111"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "worktree", "list", "--porcelain"],
+            "stdout": "worktree /srv/checkout\nHEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbranch refs/heads/main\n\nworktree /srv/elsewhere\nHEAD 1111111111111111111111111111111111111111\nbranch refs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "merged",
+                "github": {
+                  "merged": "2026-11-18T00:00:00Z",
+                  "head": "1111111111111111111111111111111111111111"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_board_head_deletes_a_merged_branch"
+    },
+    {
+      "id": "worktree/cleanup-board-head-behind",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "refs/heads/factory/001-test"],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "1111111111111111111111111111111111111111",
+              "ffffffffffffffffffffffffffffffffffffffff"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "merged",
+                "github": {
+                  "merged": "2026-11-18T00:00:00Z",
+                  "head": "ffffffffffffffffffffffffffffffffffffffff"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_board_head_behind_the_branch_keeps_it"
+    },
+    {
+      "id": "worktree/cleanup-closed-ignores-head",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "closed",
+                "github": {
+                  "merged": "2026-11-18T00:00:00Z",
+                  "head": "1111111111111111111111111111111111111111"
+                },
+                "close": {
+                  "closed": "2026-11-18T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_closed_job_ignores_board_head"
+    },
+    {
+      "id": "worktree/cleanup-pr-head",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "refs/heads/factory/001-test"],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "1111111111111111111111111111111111111111",
+              "1111111111111111111111111111111111111111"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "worktree", "list", "--porcelain"],
+            "stdout": "worktree /srv/checkout\nHEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbranch refs/heads/main\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "update-ref",
+              "-d",
+              "refs/heads/factory/001-test",
+              "1111111111111111111111111111111111111111"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"octo\", name: \"sample\") { p7: pullRequest(number: 7) { state headRefOid } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p7\": {\"state\": \"MERGED\", \"headRefOid\": \"1111111111111111111111111111111111111111\"}}}}",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "merged",
+                "pr": "https://github.com/octo/sample/pull/7"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_pr_head_deletes_a_merged_branch"
+    },
+    {
+      "id": "worktree/cleanup-pr-open",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"octo\", name: \"sample\") { p7: pullRequest(number: 7) { state headRefOid } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p7\": {\"state\": \"OPEN\", \"headRefOid\": \"1111111111111111111111111111111111111111\"}}}}",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "merged",
+                "pr": "https://github.com/octo/sample/pull/7"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_open_pr_keeps_the_branch"
+    },
+    {
+      "id": "worktree/cleanup-pr-lookup-fails",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "merged",
+                "pr": "https://github.com/octo/sample/pull/7"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_pr_lookup_failure_keeps_the_local_rule"
+    },
+    {
+      "id": "worktree/cleanup-foreign-pr",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "merged",
+                "pr": "https://github.com/other/beta/pull/7"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_foreign_repo_pr_skips_the_lookup"
+    },
+    {
+      "id": "worktree/cleanup-board-500",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [500, "boom"]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_unreadable_board_keeps_the_local_rule"
+    },
+    {
+      "id": "worktree/cleanup-board-malformed",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [200, "{"]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_unreadable_board_keeps_the_local_rule"
+    },
+    {
+      "id": "worktree/cleanup-worktree-kept",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree-existing",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_dirty_worktree_is_kept"
+    },
+    {
+      "id": "worktree/cleanup-board-head-skips-pr",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "refs/heads/factory/001-test"],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "1111111111111111111111111111111111111111",
+              "1111111111111111111111111111111111111111"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "worktree", "list", "--porcelain"],
+            "stdout": "worktree /srv/checkout\nHEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbranch refs/heads/main\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "update-ref",
+              "-d",
+              "refs/heads/factory/001-test",
+              "1111111111111111111111111111111111111111"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "merged",
+                "github": {
+                  "merged": "2026-11-18T00:00:00Z",
+                  "head": "1111111111111111111111111111111111111111"
+                },
+                "pr": "https://github.com/octo/sample/pull/7"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_board_head_skips_the_pr_lookup"
+    },
+    {
+      "id": "worktree/cleanup-pr-repo-case",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree-upper",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "refs/heads/factory/001-test"],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "1111111111111111111111111111111111111111",
+              "1111111111111111111111111111111111111111"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "worktree", "list", "--porcelain"],
+            "stdout": "worktree /srv/checkout\nHEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbranch refs/heads/main\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "update-ref",
+              "-d",
+              "refs/heads/factory/001-test",
+              "1111111111111111111111111111111111111111"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"octo\", name: \"sample\") { p7: pullRequest(number: 7) { state headRefOid } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p7\": {\"state\": \"MERGED\", \"headRefOid\": \"1111111111111111111111111111111111111111\"}}}}",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "merged",
+                "pr": "https://github.com/octo/sample/pull/7"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_repo_match_ignores_case"
+    },
+    {
+      "id": "worktree/cleanup-pr-no-project-file",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree-noproject",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "merged",
+                "pr": "https://github.com/octo/sample/pull/7"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_missing_project_file_skips_the_lookup"
+    },
+    {
+      "id": "worktree/cleanup-pr-no-repo",
+      "argv": ["--home", "{home}", "cleanup", "sample/001-test"],
+      "home": "worktree-norepo",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "checkout", "worktree", "prune"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "merge-base",
+              "--is-ancestor",
+              "refs/heads/factory/001-test",
+              "HEAD"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--abbrev-ref", "HEAD"],
+            "stdout": "main\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-test",
+                "project": "sample",
+                "stage": "merged",
+                "pr": "https://github.com/octo/sample/pull/7"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/cli/test_cleanup.py::CleanupTest.test_project_file_without_repo_skips_the_lookup"
+    }
+  ]
+}

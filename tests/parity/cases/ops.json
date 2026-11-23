@@ -1,0 +1,2087 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "ops/stop-empty",
+      "argv": ["stop", "{home}"],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "ops/stop-missing",
+      "argv": ["stop", "{home}/missing"],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "ops/clean-temp",
+      "argv": ["--home", "{home}", "clean", "sample/001-test", "temp"],
+      "home": "ops-clean",
+      "stubs": {},
+      "env": {
+        "TMPDIR": "home/tmp"
+      }
+    },
+    {
+      "id": "ops/clean-temp-absent",
+      "argv": ["--home", "{home}", "clean", "sample/002-absent", "temp"],
+      "home": "ops-clean",
+      "stubs": {},
+      "env": {
+        "TMPDIR": "home/tmp"
+      }
+    },
+    {
+      "id": "ops/clean-temp-file",
+      "argv": ["--home", "{home}", "clean", "sample/009-file", "temp"],
+      "home": "ops-clean",
+      "stubs": {},
+      "env": {
+        "TMPDIR": "home/tmp"
+      }
+    },
+    {
+      "id": "ops/clean-scratch-absent",
+      "argv": ["--home", "{home}", "clean", "sample/001-test", "scratch", "absent"],
+      "home": "ops-clean",
+      "stubs": {}
+    },
+    {
+      "id": "ops/clean-scratch-not-ignored",
+      "argv": ["--home", "{home}", "clean", "sample/001-test", "scratch", "capture-1"],
+      "home": "ops-clean",
+      "stubs": {}
+    },
+    {
+      "id": "ops/clean-node-modules-git-fails",
+      "argv": ["--home", "{home}", "clean", "sample/001-test", "node_modules"],
+      "home": "ops-clean",
+      "stubs": {}
+    },
+    {
+      "id": "ops/clean-no-worktree",
+      "argv": ["--home", "{home}", "clean", "sample/002-absent", "node_modules"],
+      "home": "ops-clean",
+      "stubs": {}
+    },
+    {
+      "id": "ops/clean-bad-target",
+      "argv": ["--home", "{home}", "clean", "sample/../x", "node_modules"],
+      "home": "ops-clean",
+      "stubs": {}
+    },
+    {
+      "id": "ops/clean-usage-dotdot",
+      "argv": ["--home", "{home}", "clean", "sample/001-test", "scratch", "../x"],
+      "home": "ops-clean",
+      "stubs": {}
+    },
+    {
+      "id": "ops/clean-usage-hidden",
+      "argv": ["--home", "{home}", "clean", "sample/001-test", "scratch", ".hidden"],
+      "home": "ops-clean",
+      "stubs": {}
+    },
+    {
+      "id": "ops/clean-usage-extra",
+      "argv": ["--home", "{home}", "clean", "sample/001-test", "node_modules", "extra"],
+      "home": "ops-clean",
+      "stubs": {}
+    },
+    {
+      "id": "ops/clean-usage-dist",
+      "argv": ["--home", "{home}", "clean", "sample/001-test", "dist"],
+      "home": "ops-clean",
+      "stubs": {}
+    },
+    {
+      "id": "ops/clean-usage-temp-extra",
+      "argv": ["--home", "{home}", "clean", "sample/001-test", "temp", "extra"],
+      "home": "ops-clean",
+      "stubs": {}
+    },
+    {
+      "id": "ops/clean-usage-scratch-bare",
+      "argv": ["--home", "{home}", "clean", "sample/001-test", "scratch"],
+      "home": "ops-clean",
+      "stubs": {}
+    },
+    {
+      "id": "ops/orphans-list",
+      "argv": ["--home", "{home}", "orphans"],
+      "home": "ops-orphans",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "home/checkout",
+              "ls-remote",
+              "--heads",
+              "origin",
+              "refs/heads/factory/*"
+            ],
+            "code": 0,
+            "stdout": "0000000000000000000000000000000000000000\trefs/heads/factory/2031-stale-banner\n0000000000000000000000000000000000000000\trefs/heads/factory/2050-orphan-scan\n",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/srv/example/paseo/factory-1998-lost", "rev-parse", "--git-common-dir"],
+            "code": 0,
+            "stdout": "/srv/example/checkout/.git\n",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "home/checkout", "rev-parse", "--git-common-dir"],
+            "code": 0,
+            "stdout": "/srv/example/checkout/.git\n",
+            "stderr": ""
+          }
+        ],
+        "gh": [
+          {
+            "argv": [
+              "pr",
+              "list",
+              "-R",
+              "example/factory",
+              "--state",
+              "open",
+              "--json",
+              "number,headRefName,url",
+              "--limit",
+              "500"
+            ],
+            "code": 0,
+            "stdout": "[{\"number\": 7, \"headRefName\": \"factory/1999-gone\", \"url\": \"https://github.com/example/factory/pull/7\"}, {\"number\": 8, \"headRefName\": \"factory/2050-orphan-scan\", \"url\": \"https://github.com/example/factory/pull/8\"}, {\"number\": 9, \"headRefName\": \"feature/not-factory\", \"url\": \"https://github.com/example/factory/pull/9\"}]",
+            "stderr": ""
+          }
+        ],
+        "paseo": [
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"cwd\": \"/srv/example/worktrees/factory-2044-old-idea-2\"}, {\"cwd\": \"/srv/example/worktrees/factory-2050-orphan-scan\"}, {\"cwd\": \"/srv/example/worktrees/other-workspace\"}, {\"cwd\": \"/srv/example/paseo/factory-1998-lost\"}, {\"cwd\": \"/srv/example/paseo/factory-1997-gone\"}]",
+            "stderr": ""
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "2050-orphan-scan",
+                "project": "factory",
+                "stage": "spec"
+              },
+              {
+                "id": "2031-stale-banner",
+                "project": "factory",
+                "stage": "merged"
+              },
+              {
+                "id": "2044-old-idea",
+                "project": "factory",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/orphans-skips",
+      "argv": ["--home", "{home}", "orphans"],
+      "home": "ops-orphans",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "home/checkout",
+              "ls-remote",
+              "--heads",
+              "origin",
+              "refs/heads/factory/*"
+            ],
+            "code": 128,
+            "stdout": "",
+            "stderr": "fatal: boom\n"
+          }
+        ],
+        "gh": [
+          {
+            "argv": [
+              "pr",
+              "list",
+              "-R",
+              "example/factory",
+              "--state",
+              "open",
+              "--json",
+              "number,headRefName,url",
+              "--limit",
+              "500"
+            ],
+            "code": 1,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "paseo": [
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 3,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "2050-orphan-scan",
+                "project": "factory",
+                "stage": "spec"
+              },
+              {
+                "id": "2031-stale-banner",
+                "project": "factory",
+                "stage": "merged"
+              },
+              {
+                "id": "2044-old-idea",
+                "project": "factory",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/orphans-board-500",
+      "argv": ["--home", "{home}", "orphans"],
+      "home": "ops-orphans",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [500, "boom"]
+      },
+      "exit": 5
+    },
+    {
+      "id": "ops/archive-not-session",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {}
+    },
+    {
+      "id": "ops/archive-dash-agent",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {},
+      "env": {
+        "PASEO_AGENT_ID": "-x"
+      }
+    },
+    {
+      "id": "ops/archive-bad-target",
+      "argv": ["--home", "{home}", "archive-workspace", "sample"],
+      "home": "ops-paseo",
+      "stubs": {},
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      }
+    },
+    {
+      "id": "ops/archive-missing-job",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/044-missing"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 4
+    },
+    {
+      "id": "ops/archive-not-merged",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/043-other"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 2
+    },
+    {
+      "id": "ops/archive-inspect-fails",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 1,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1
+    },
+    {
+      "id": "ops/archive-ls-fails",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\"}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 1,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1
+    },
+    {
+      "id": "ops/archive-no-workspace",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/elsewhere\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/archive-not-worktree",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"local\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/archive-null-wks",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": null, \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/archive-dash-wks",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"-rf\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/archive-check",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode", "--check"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "?? notes.txt\n",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "factory/042-dark-mode\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/042-dark-mode"
+            ],
+            "code": 0,
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa commit: local\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb branch: Created from HEAD\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--exclude=factory/042-dark-mode",
+              "--branches",
+              "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            ],
+            "code": 0,
+            "stdout": "abc1234 local\n",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/archive-archived",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "?? notes.txt\n",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "factory/042-dark-mode\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/042-dark-mode"
+            ],
+            "code": 0,
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa commit: local\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb branch: Created from HEAD\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--exclude=factory/042-dark-mode",
+              "--branches",
+              "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            ],
+            "code": 0,
+            "stdout": "abc1234 local\n",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/archive-closed",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/045-closed"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-045-closed-2\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-045-closed-2\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-045-closed-2", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "?? notes.txt\n",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-045-closed-2", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "factory/045-closed\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-045-closed-2",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/045-closed"
+            ],
+            "code": 0,
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa commit: local\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb branch: Created from HEAD\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-045-closed-2",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--exclude=factory/045-closed",
+              "--branches",
+              "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            ],
+            "code": 0,
+            "stdout": "abc1234 local\n",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/archive-agent-left",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\"}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": ["archive", "agent-1", "--force"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "?? notes.txt\n",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "factory/042-dark-mode\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/042-dark-mode"
+            ],
+            "code": 0,
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa commit: local\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb branch: Created from HEAD\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--exclude=factory/042-dark-mode",
+              "--branches",
+              "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            ],
+            "code": 0,
+            "stdout": "abc1234 local\n",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/archive-agent-archive-fails",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\"}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": ["archive", "agent-1", "--force"],
+            "code": 3,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "?? notes.txt\n",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "factory/042-dark-mode\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/042-dark-mode"
+            ],
+            "code": 0,
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa commit: local\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb branch: Created from HEAD\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--exclude=factory/042-dark-mode",
+              "--branches",
+              "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            ],
+            "code": 0,
+            "stdout": "abc1234 local\n",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1
+    },
+    {
+      "id": "ops/archive-fails",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 3,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "?? notes.txt\n",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "factory/042-dark-mode\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/042-dark-mode"
+            ],
+            "code": 0,
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa commit: local\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb branch: Created from HEAD\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--exclude=factory/042-dark-mode",
+              "--branches",
+              "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            ],
+            "code": 0,
+            "stdout": "abc1234 local\n",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 1
+    },
+    {
+      "id": "ops/archive-git-fails",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/archive-leftover-cap",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "?? f00.txt\n?? f01.txt\n?? f02.txt\n?? f03.txt\n?? f04.txt\n?? f05.txt\n?? f06.txt\n?? f07.txt\n?? f08.txt\n?? f09.txt\n?? f10.txt\n?? f11.txt\n?? f12.txt\n?? f13.txt\n?? f14.txt\n?? f15.txt\n?? f16.txt\n?? f17.txt\n?? f18.txt\n?? f19.txt\n?? f20.txt\n?? f21.txt\n?? f22.txt\n?? f23.txt\n?? f24.txt\n",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--branches"
+            ],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/handled-counts",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "check:da966368ea663ea5",
+        "thread:0123456789abcdef"
+      ],
+      "home": "ops-handled",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/7",
+                "claim": {
+                  "device": "parity",
+                  "session": "s1",
+                  "since": "2026-11-01T00:00:00Z",
+                  "seen": "2026-11-01T00:00:00Z"
+                },
+                "handled": {
+                  "check:da966368ea663ea5": {
+                    "count": 2,
+                    "at": "2026-01-02T12:00:00Z"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/handled-rearm",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "--rearm",
+        "check:da966368ea663ea5"
+      ],
+      "home": "ops-handled",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/7",
+                "claim": {
+                  "device": "parity",
+                  "session": "s1",
+                  "since": "2026-11-01T00:00:00Z",
+                  "seen": "2026-11-01T00:00:00Z"
+                },
+                "handled": {
+                  "check:da966368ea663ea5": {
+                    "count": 2,
+                    "at": "2026-01-02T12:00:00Z"
+                  },
+                  "thread:0123456789abcdef": {
+                    "count": 1,
+                    "at": "2026-01-02T12:00:00Z"
+                  },
+                  "conflict:fedcba9876543210": {
+                    "count": 1,
+                    "at": "2026-01-02T12:00:00Z"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/handled-keeps-32",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "check:da966368ea663ea5"
+      ],
+      "home": "ops-handled",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/7",
+                "claim": {
+                  "device": "parity",
+                  "session": "s1",
+                  "since": "2026-11-01T00:00:00Z",
+                  "seen": "2026-11-01T00:00:00Z"
+                },
+                "handled": {
+                  "check:0000000000000000": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:00Z"
+                  },
+                  "check:0000000000000001": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:01Z"
+                  },
+                  "check:0000000000000002": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:02Z"
+                  },
+                  "check:0000000000000003": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:03Z"
+                  },
+                  "check:0000000000000004": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:04Z"
+                  },
+                  "check:0000000000000005": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:05Z"
+                  },
+                  "check:0000000000000006": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:06Z"
+                  },
+                  "check:0000000000000007": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:07Z"
+                  },
+                  "check:0000000000000008": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:08Z"
+                  },
+                  "check:0000000000000009": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:09Z"
+                  },
+                  "check:000000000000000a": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:10Z"
+                  },
+                  "check:000000000000000b": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:11Z"
+                  },
+                  "check:000000000000000c": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:12Z"
+                  },
+                  "check:000000000000000d": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:13Z"
+                  },
+                  "check:000000000000000e": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:14Z"
+                  },
+                  "check:000000000000000f": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:15Z"
+                  },
+                  "check:0000000000000010": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:16Z"
+                  },
+                  "check:0000000000000011": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:17Z"
+                  },
+                  "check:0000000000000012": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:18Z"
+                  },
+                  "check:0000000000000013": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:19Z"
+                  },
+                  "check:0000000000000014": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:20Z"
+                  },
+                  "check:0000000000000015": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:21Z"
+                  },
+                  "check:0000000000000016": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:22Z"
+                  },
+                  "check:0000000000000017": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:23Z"
+                  },
+                  "check:0000000000000018": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:24Z"
+                  },
+                  "check:0000000000000019": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:25Z"
+                  },
+                  "check:000000000000001a": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:26Z"
+                  },
+                  "check:000000000000001b": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:27Z"
+                  },
+                  "check:000000000000001c": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:28Z"
+                  },
+                  "check:000000000000001d": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:29Z"
+                  },
+                  "check:000000000000001e": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:30Z"
+                  },
+                  "check:000000000000001f": {
+                    "count": 1,
+                    "at": "2026-01-01T00:00:31Z"
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/handled-invalid-entries",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "check:da966368ea663ea5"
+      ],
+      "home": "ops-handled",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/7",
+                "claim": {
+                  "device": "parity",
+                  "session": "s1",
+                  "since": "2026-11-01T00:00:00Z",
+                  "seen": "2026-11-01T00:00:00Z"
+                },
+                "handled": {
+                  "bogus": {
+                    "count": 1,
+                    "at": "2026-01-02T12:00:00Z"
+                  },
+                  "thread:0123456789abcdef": {
+                    "count": true,
+                    "at": "2026-01-02T12:00:00Z"
+                  },
+                  "conflict:fedcba9876543210": {
+                    "count": 0,
+                    "at": "2026-01-02T12:00:00Z"
+                  },
+                  "check:da966368ea663ea5": {
+                    "count": 1,
+                    "at": "2026-01-02T12:00:00Z",
+                    "x": 1
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/handled-other-claim",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "check:da966368ea663ea5"
+      ],
+      "home": "ops-handled",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/7",
+                "claim": {
+                  "device": "host-b",
+                  "session": "s9",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 6
+    },
+    {
+      "id": "ops/handled-stale-claim",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "check:da966368ea663ea5"
+      ],
+      "home": "ops-handled",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/7",
+                "claim": {
+                  "device": "host-b",
+                  "session": "s9",
+                  "since": "2001-01-01T00:00:00Z",
+                  "seen": "2001-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0
+    },
+    {
+      "id": "ops/handled-missing-job",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/044-missing",
+        "check:da966368ea663ea5"
+      ],
+      "home": "ops-handled",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/7",
+                "claim": {
+                  "device": "parity",
+                  "session": "s1",
+                  "since": "2026-11-01T00:00:00Z",
+                  "seen": "2026-11-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 4
+    },
+    {
+      "id": "ops/handled-wrong-project",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "check:da966368ea663ea5"
+      ],
+      "home": "ops-handled",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "other",
+                "stage": "pr-open",
+                "pr": "https://github.com/example/sample/pull/7",
+                "claim": {
+                  "device": "parity",
+                  "session": "s1",
+                  "since": "2026-11-01T00:00:00Z",
+                  "seen": "2026-11-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2
+    },
+    {
+      "id": "ops/handled-bad-word",
+      "argv": ["--home", "{home}", "--session", "s1", "pr-handled", "sample/042-dark-mode", "lint"],
+      "home": "ops-handled",
+      "stubs": {}
+    },
+    {
+      "id": "ops/handled-bad-upper",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "check:DA966368EA663EA5"
+      ],
+      "home": "ops-handled",
+      "stubs": {}
+    },
+    {
+      "id": "ops/handled-bad-kind",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "merge:da966368ea663ea5"
+      ],
+      "home": "ops-handled",
+      "stubs": {}
+    },
+    {
+      "id": "ops/handled-bad-short",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "check:da96636"
+      ],
+      "home": "ops-handled",
+      "stubs": {}
+    },
+    {
+      "id": "ops/handled-bad-rearm-only",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "--rearm"
+      ],
+      "home": "ops-handled",
+      "stubs": {}
+    },
+    {
+      "id": "ops/handled-bad-33",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "check:0000000000000000",
+        "check:0000000000000001",
+        "check:0000000000000002",
+        "check:0000000000000003",
+        "check:0000000000000004",
+        "check:0000000000000005",
+        "check:0000000000000006",
+        "check:0000000000000007",
+        "check:0000000000000008",
+        "check:0000000000000009",
+        "check:000000000000000a",
+        "check:000000000000000b",
+        "check:000000000000000c",
+        "check:000000000000000d",
+        "check:000000000000000e",
+        "check:000000000000000f",
+        "check:0000000000000010",
+        "check:0000000000000011",
+        "check:0000000000000012",
+        "check:0000000000000013",
+        "check:0000000000000014",
+        "check:0000000000000015",
+        "check:0000000000000016",
+        "check:0000000000000017",
+        "check:0000000000000018",
+        "check:0000000000000019",
+        "check:000000000000001a",
+        "check:000000000000001b",
+        "check:000000000000001c",
+        "check:000000000000001d",
+        "check:000000000000001e",
+        "check:000000000000001f",
+        "check:0000000000000020"
+      ],
+      "home": "ops-handled",
+      "stubs": {}
+    },
+    {
+      "id": "ops/handled-bad-rearm-twice",
+      "argv": [
+        "--home",
+        "{home}",
+        "--session",
+        "s1",
+        "pr-handled",
+        "sample/042-dark-mode",
+        "--rearm",
+        "--rearm"
+      ],
+      "home": "ops-handled",
+      "stubs": {}
+    }
+  ]
+}

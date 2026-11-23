@@ -1,0 +1,1 @@
+- Revoke scope: Yes, confirm cross-owner revokes, Log each revoke

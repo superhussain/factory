@@ -1,0 +1,1 @@
+{"schema": "factory.retro-aggregate/1", "run": "bad-start", "from": "2026-11-05", "to": "2026-11-11", "host": "host-a", "projects": ["factory", "sample-tools"], "hosts": {"host-a": {"sessions": 40, "jobs": 12, "ad_hoc": 3}}, "merged": [{"id": "1700-guard-the-ls", "project": "sample-tools", "title": "Guard the ls alias", "merged": "2026-11-15T12:30:00Z"}]}
