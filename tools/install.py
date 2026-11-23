@@ -36,7 +36,7 @@ def fail(message):
 
 
 def rust_binary(checkout):
-    """The release binary cargo builds from checkout's rust/ folder, or None when cargo is missing,
+    """The host-profile binary cargo builds from checkout's rust/ folder, or None when cargo is missing,
     the build fails, FACTORY_RUNTIME is python or the checkout has no Rust workspace."""
     manifest = checkout / "rust" / "Cargo.toml"
     if os.environ.get("FACTORY_RUNTIME") == "python" or not manifest.is_file():
@@ -57,11 +57,11 @@ def rust_binary(checkout):
     try:
         os.makedirs(target, mode=0o700, exist_ok=True)
         # cwd is the workspace so rustup reads its rust-toolchain.toml.
-        r = subprocess.run([cargo, "build", "--release", "--locked", "--manifest-path", str(manifest)],
+        r = subprocess.run([cargo, "build", "--profile", "host", "--locked", "--manifest-path", str(manifest)],
                            cwd=str(manifest.parent), env=dict(os.environ, CARGO_TARGET_DIR=str(target)),
                            stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace")
         if not r.returncode:
-            return (target / "release" / Path(BINARY).name).read_bytes()
+            return (target / "host" / Path(BINARY).name).read_bytes()
         lines = [line for line in r.stderr.splitlines() if line.strip()] or ["exit " + str(r.returncode)]
         reason = lines[-1].strip()
     except OSError as e:

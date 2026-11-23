@@ -368,7 +368,7 @@ class InstallTest(IsolatedTestCase):
     def test_rust_build_installs_the_binary_and_its_entry(self):
         del os.environ["FACTORY_RUNTIME"]
         os.environ.pop("CARGO_TARGET_DIR", None)
-        source = self.checkout('mkdir -p "$CARGO_TARGET_DIR/release" && printf "$STUB" > "$CARGO_TARGET_DIR/release/factory"\n'
+        source = self.checkout('mkdir -p "$CARGO_TARGET_DIR/host" && printf "$STUB" > "$CARGO_TARGET_DIR/host/factory"\n'
                                'printf "%s\\n" "$PWD" "$@" > "$CARGO_TARGET_DIR/args"\n')
         os.environ["STUB"] = "stub"
         target, err, bundle = self.install_rust(source)
@@ -380,7 +380,7 @@ class InstallTest(IsolatedTestCase):
         cache = self.root / ".cache/huss-skills/factory/cargo-target"
         self.assertEqual(stat.S_IMODE(cache.stat().st_mode), 0o700)
         self.assertEqual((cache / "args").read_text().splitlines(),
-                         [str(rust), "build", "--release", "--locked", "--manifest-path", str(rust / "Cargo.toml")])
+                         [str(rust), "build", "--profile", "host", "--locked", "--manifest-path", str(rust / "Cargo.toml")])
         self.assertFalse((rust / "target").exists())
         self.assertEqual(bundle["entry"], ["runtime/factory"])
         self.assertEqual(bundle["binary_sha256"], hashlib.sha256(b"stub").hexdigest())
@@ -426,7 +426,7 @@ class InstallTest(IsolatedTestCase):
         source = self.checkout(None)
         home_cargo = self.root / ".cargo/bin/cargo"
         home_cargo.parent.mkdir(parents=True)
-        home_cargo.write_text('#!/bin/sh\nmkdir -p "$CARGO_TARGET_DIR/release" && printf home > "$CARGO_TARGET_DIR/release/factory"\n')
+        home_cargo.write_text('#!/bin/sh\nmkdir -p "$CARGO_TARGET_DIR/host" && printf home > "$CARGO_TARGET_DIR/host/factory"\n')
         home_cargo.chmod(0o755)
         os.environ.pop("CARGO_TARGET_DIR", None)
         with patch.object(self.installer.shutil, "which", return_value=None):
