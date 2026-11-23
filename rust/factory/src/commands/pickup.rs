@@ -7994,6 +7994,10 @@ dir=$(dirname "$0")
     if [ "$set_" = x ]; then eval "printf 'E%s=%s\000' $k \"\$$k\""; fi
   done
 } >> "$dir/records"
+if [ -f "$dir/fail-model" ] && [ "$(cat "$dir/fail-model")" = "$FACTORY_MODEL" ]; then
+  echo "usage limit reached; resets in 45 minutes"
+  exit 1
+fi
 printf '%s\n' "$line"
 sleep "$sleep"
 exit "$code"
@@ -15553,6 +15557,422 @@ exit "$archive_code"
                 one(
                     json!({"handled": {"check:da966368ea663ea5": {"count": 1, "at": "2026-01-02T12:00:00Z"}}}),
                 ),
+            );
+        }
+    }
+
+    const EXPERIMENT_LINE: &str = "experiment: pilot provider-b model-b high 50\n";
+    const ROUTES: &str =
+        "---\nprimary: provider-a model-a high\nfallback: provider-b model-b\n---\n";
+
+    /// Python's experiment PickupFixture: both routes launch the recording fake with every placeholder.
+    fn experiment_fx(line: Option<&str>) -> Fx {
+        let fx = Fx::new();
+        alpha_on(&fx);
+        let fake = fx.fake.display().to_string();
+        let mut argv = vec!["/bin/sh".to_string(), fake];
+        argv.extend(PLACEHOLDERS.map(String::from));
+        fx.write_launchers(json!({"primary": argv, "fallback": argv}));
+        if let Some(line) = line {
+            fs::write(
+                &fx.routes,
+                format!("{}{line}{}", &ROUTES[..4], &ROUTES[4..]),
+            )
+            .unwrap();
+        }
+        fx
+    }
+
+    fn exp_idea(id: &str, extra: Value) -> Value {
+        with(
+            json!({"id": id, "stage": "idea", "project": "alpha", "title": "Feature", "idea": "Feature", "updated": "2026-01-01T00:00:00Z"}),
+            extra,
+        )
+    }
+
+    fn exp_argv(
+        fx: &Fx,
+        id: &str,
+        provider: &str,
+        model: &str,
+        verb: &str,
+        effort: &str,
+    ) -> String {
+        let repo = fx.repo_a.display().to_string();
+        let fake = fx.fake.display().to_string();
+        let prompt = format!("/factory {verb} {id} --session <session>\n\n{UNATTENDED}");
+        shlex_join(&[
+            "/bin/sh",
+            fake.as_str(),
+            id,
+            "alpha",
+            &repo,
+            "<session>",
+            provider,
+            model,
+            effort,
+            &prompt,
+            "{unknown}",
+            &format!("x-{id}-y"),
+        ])
+    }
+
+    fn env3(r: &Record) -> (String, String, String) {
+        (
+            r.env("FACTORY_PROVIDER").into(),
+            r.env("FACTORY_MODEL").into(),
+            r.env("FACTORY_EFFORT").into(),
+        )
+    }
+
+    fn triple(p: &str, m: &str, e: &str) -> (String, String, String) {
+        (p.into(), m.into(), e.into())
+    }
+
+    mod dry_run_test {
+        use super::*;
+
+        #[test]
+        fn test_dry_run_prints_the_arm_with_the_line() {
+            let fx = experiment_fx(Some(EXPERIMENT_LINE));
+            fx.jobs(json!([
+                exp_idea("014-inline-images", json!({})),
+                exp_idea("016-doc-lint", json!({}))
+            ]));
+            let want = format!("would launch 014-inline-images alpha on primary arm b model model-b: {}\nwould launch 016-doc-lint alpha on primary arm a model model-a: {}\nhost {DEVICE}: would launch 2\n", exp_argv(&fx, "014-inline-images", "provider-b", "model-b", "idea", "high"), exp_argv(&fx, "016-doc-lint", "provider-a", "model-a", "idea", "high"));
+            assert_eq!(
+                fx.pickup(&["--dry-run", "--max-inflight", "2"]),
+                out_err(0, &want, "")
+            );
+            assert!(fx.launched().is_empty());
+            assert!(fx.job("014-inline-images").get("experiment").is_none());
+        }
+
+        #[test]
+        fn test_dry_run_prints_the_recorded_arm_for_a_relaunch() {
+            let fx = experiment_fx(None);
+            fx.jobs(json!([{"id": "001-sample", "stage": "build", "project": "alpha", "note": "spec approved in Tracer", "updated": stamp(0), "experiment": {"name": "pilot", "arm": "b", "provider": "provider-x", "model": "model-x", "effort": "low"}}]));
+            let want = format!("would launch 001-sample alpha on primary arm b model model-x: {}\nhost {DEVICE}: would launch 1\n", exp_argv(&fx, "001-sample", "provider-x", "model-x", "recover", "low"));
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &want, ""));
+        }
+
+        #[test]
+        fn test_dry_run_without_the_line_is_byte_identical() {
+            let fx = experiment_fx(None);
+            fx.jobs(json!([
+                exp_idea("014-inline-images", json!({})),
+                exp_idea("016-doc-lint", json!({}))
+            ]));
+            let want = format!("would launch 014-inline-images alpha on primary: {}\nwould launch 016-doc-lint alpha on primary: {}\nhost {DEVICE}: would launch 2\n", exp_argv(&fx, "014-inline-images", "provider-a", "model-a", "idea", "high"), exp_argv(&fx, "016-doc-lint", "provider-a", "model-a", "idea", "high"));
+            assert_eq!(
+                fx.pickup(&["--dry-run", "--max-inflight", "2"]),
+                out_err(0, &want, "")
+            );
+        }
+    }
+
+    mod claim_test {
+        use super::*;
+
+        fn relaunch(record: Value) -> Value {
+            json!({"id": "001-sample", "stage": "build", "project": "alpha", "note": "spec approved in Tracer", "updated": stamp(0), "experiment": record})
+        }
+
+        #[test]
+        fn test_a_launch_stamps_arm_b_with_the_experiment_triple() {
+            let fx = experiment_fx(Some(EXPERIMENT_LINE));
+            fx.jobs(json!([exp_idea("014-inline-images", json!({}))]));
+            let (code, _, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(
+                env3(&fx.launched()[0]),
+                triple("provider-b", "model-b", "high")
+            );
+            assert_eq!(
+                fx.job("014-inline-images")["experiment"],
+                json!({"name": "pilot", "arm": "b", "provider": "provider-b", "model": "model-b", "effort": "high"})
+            );
+        }
+
+        #[test]
+        fn test_a_launch_stamps_arm_a_with_the_route_triple() {
+            let fx = experiment_fx(Some(EXPERIMENT_LINE));
+            fx.jobs(json!([exp_idea("016-doc-lint", json!({}))]));
+            let (code, _, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(
+                env3(&fx.launched()[0]),
+                triple("provider-a", "model-a", "high")
+            );
+            assert_eq!(
+                fx.job("016-doc-lint")["experiment"],
+                json!({"name": "pilot", "arm": "a", "provider": "provider-a", "model": "model-a", "effort": "high"})
+            );
+        }
+
+        #[test]
+        fn test_a_relaunch_uses_the_recorded_triple_when_the_line_changed() {
+            let fx = experiment_fx(Some(EXPERIMENT_LINE));
+            fx.jobs(json!([relaunch(json!({"name": "pilot", "arm": "b", "provider": "provider-x", "model": "model-x", "effort": "low"}))]));
+            let (code, _, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(
+                env3(&fx.launched()[0]),
+                triple("provider-x", "model-x", "low")
+            );
+            assert_eq!(fx.job("001-sample")["experiment"]["model"], "model-x");
+        }
+
+        #[test]
+        fn test_a_relaunch_uses_the_recorded_triple_when_the_line_is_removed() {
+            let fx = experiment_fx(None);
+            fx.jobs(json!([relaunch(json!({"name": "pilot", "arm": "b", "provider": "provider-x", "model": "model-x", "effort": "low"}))]));
+            let (code, _, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let r = &fx.launched()[0];
+            assert_eq!(
+                (r.env("FACTORY_PROVIDER"), r.env("FACTORY_MODEL")),
+                ("provider-x", "model-x")
+            );
+            assert_eq!(fx.job("001-sample")["experiment"]["model"], "model-x");
+        }
+
+        #[test]
+        fn test_a_fresh_claim_is_not_rewritten_by_a_second_run() {
+            let fx = experiment_fx(Some(EXPERIMENT_LINE));
+            fx.jobs(json!([exp_idea("016-doc-lint", json!({}))]));
+            fx.pickup(&[]);
+            let before = fx.job("016-doc-lint")["experiment"].clone();
+            fx.state.borrow_mut().board["jobs"][0]
+                .as_object_mut()
+                .unwrap()
+                .shift_remove("claim");
+            fx.pickup(&[]);
+            assert_eq!(fx.job("016-doc-lint")["experiment"], before);
+        }
+    }
+
+    mod limit_test {
+        use super::*;
+
+        fn limits(fx: &Fx) -> Value {
+            read_json(&fx.home.join("route-limits.json")).unwrap_or(json!({}))
+        }
+
+        #[test]
+        fn test_an_arm_b_limit_failure_limits_the_experiment_not_the_route() {
+            let fx = experiment_fx(Some(EXPERIMENT_LINE));
+            fs::write(fx.root.join("fail-model"), "model-b").unwrap();
+            fx.jobs(json!([exp_idea("014-inline-images", json!({}))]));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let limits = limits(&fx);
+            assert_eq!(
+                limits.as_object().unwrap().keys().collect::<Vec<_>>(),
+                ["pilot"]
+            );
+            assert!(fx.job("014-inline-images").get("claim").is_none());
+            assert_eq!(
+                out,
+                format!(
+                    "limited experiment pilot until {}\nreleased 014-inline-images\n",
+                    limits["pilot"].as_str().unwrap()
+                )
+            );
+            assert_eq!(fx.launched().len(), 1);
+        }
+
+        #[test]
+        fn test_an_arm_a_limit_failure_limits_the_route() {
+            let fx = experiment_fx(Some(EXPERIMENT_LINE));
+            fs::write(fx.root.join("fail-model"), "model-a").unwrap();
+            fx.jobs(json!([exp_idea("016-doc-lint", json!({}))]));
+            let (code, _, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let limits = limits(&fx);
+            assert!(limits.get("primary").is_some() && limits.get("pilot").is_none());
+        }
+
+        #[test]
+        fn test_limited_arm_b_jobs_are_skipped_while_arm_a_launches() {
+            let fx = experiment_fx(Some(EXPERIMENT_LINE));
+            fs::write(
+                fx.home.join("route-limits.json"),
+                json!({"pilot": stamp(45)}).to_string(),
+            )
+            .unwrap();
+            fx.jobs(json!([
+                exp_idea("014-inline-images", json!({})),
+                exp_idea("016-doc-lint", json!({}))
+            ]));
+            let (code, out, err) = fx.pickup(&["--limit", "2"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out.matches("launched ").count(), 1);
+            let records = fx.launched();
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].argv[0], "016-doc-lint");
+            let held = fx.job("014-inline-images");
+            assert_eq!((&held["stage"], held.get("claim")), (&json!("idea"), None));
+            assert_eq!(fx.job("016-doc-lint")["experiment"]["arm"], "a");
+        }
+
+        fn skip_line(fx: &Fx, until: &str) -> String {
+            format!("skip 014-inline-images alpha: experiment pilot limited until {until}\nwould launch 016-doc-lint alpha on primary arm a model model-a: {}\nhost {DEVICE}: would launch 1\n", exp_argv(fx, "016-doc-lint", "provider-a", "model-a", "idea", "high"))
+        }
+
+        #[test]
+        fn test_dry_run_prints_the_experiment_skip_line() {
+            let fx = experiment_fx(Some(EXPERIMENT_LINE));
+            let until = stamp(45);
+            fs::write(
+                fx.home.join("route-limits.json"),
+                json!({"pilot": until}).to_string(),
+            )
+            .unwrap();
+            fx.jobs(json!([
+                exp_idea("014-inline-images", json!({})),
+                exp_idea("016-doc-lint", json!({}))
+            ]));
+            assert_eq!(
+                fx.pickup(&["--dry-run", "--max-inflight", "2"]),
+                out_err(0, &skip_line(&fx, &until), "")
+            );
+        }
+
+        #[test]
+        fn test_a_limited_arm_b_lead_does_not_stall_the_batch() {
+            let fx = experiment_fx(Some(EXPERIMENT_LINE));
+            let until = stamp(45);
+            fs::write(
+                fx.home.join("route-limits.json"),
+                json!({"pilot": until}).to_string(),
+            )
+            .unwrap();
+            let follow = json!([{"id": "013-old", "kind": "follow-up-of"}]);
+            fx.jobs(json!([
+                exp_idea(
+                    "014-inline-images",
+                    json!({"refs": follow, "updated": stamp(-13 * 60)})
+                ),
+                exp_idea(
+                    "016-doc-lint",
+                    json!({"refs": follow, "updated": stamp(-13 * 60)})
+                )
+            ]));
+            assert_eq!(
+                fx.pickup(&["--dry-run", "--max-inflight", "2"]),
+                out_err(0, &skip_line(&fx, &until), "")
+            );
+        }
+    }
+
+    mod agent_pickup_test {
+        use super::*;
+
+        /// Python's agents PickupFixture: the primary launcher takes only the effort.
+        fn setup() -> Fx {
+            let fx = Fx::new();
+            fx.view(
+                "alpha",
+                200,
+                effective(
+                    "alpha",
+                    Some(json!({"pickup": {"enabled": true, "hosts": [DEVICE]}})),
+                    None,
+                ),
+            );
+            let fake = fx.fake.display().to_string();
+            fx.write_launchers(
+                json!({"primary": ["/bin/sh", fake, "{effort}"], "fallback": ["/bin/sh", fake]}),
+            );
+            fx
+        }
+
+        fn rows(fx: &Fx, id: &str) -> Vec<Value> {
+            fx.job(id)["agents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    let mut r = r.clone();
+                    assert!(is_stamp(
+                        &r.as_object_mut().unwrap().shift_remove("at").unwrap()
+                    ));
+                    r
+                })
+                .collect()
+        }
+
+        #[test]
+        fn test_launch_records_row() {
+            let fx = setup();
+            fx.jobs(json!([exp_idea("016-doc-lint", json!({}))]));
+            assert_eq!(fx.pickup(&[]).0, 0);
+            let tag = fx.launched()[0].env("FACTORY_SESSION").to_string();
+            assert_eq!(
+                rows(&fx, "016-doc-lint"),
+                [
+                    json!({"stage": "idea", "role": "orchestrator", "harness": "provider-a", "via": "launcher", "model": "model-a", "effort": "high", "session": tag})
+                ]
+            );
+        }
+
+        #[test]
+        fn test_launch_records_the_arm_b_triple() {
+            let fx = setup();
+            fs::write(
+                &fx.routes,
+                format!("{}{EXPERIMENT_LINE}{}", &ROUTES[..4], &ROUTES[4..]),
+            )
+            .unwrap();
+            fx.jobs(json!([exp_idea("014-inline-images", json!({}))]));
+            assert_eq!(fx.pickup(&[]).0, 0);
+            let row = &rows(&fx, "014-inline-images")[0];
+            assert_eq!(
+                (&row["harness"], &row["model"], &row["effort"]),
+                (&json!("provider-b"), &json!("model-b"), &json!("high"))
+            );
+        }
+
+        #[test]
+        fn test_paseo_launcher_records_paseo() {
+            let fx = setup();
+            let paseo = fx.root.join("paseo");
+            fs::write(&paseo, FAKE).unwrap();
+            Command::new("chmod")
+                .arg("755")
+                .arg(&paseo)
+                .status()
+                .unwrap();
+            fx.write_launchers(json!({"primary": [paseo, "{id}"], "fallback": [paseo, "{id}"]}));
+            fx.jobs(json!([exp_idea("016-doc-lint", json!({}))]));
+            assert_eq!(fx.pickup(&[]).0, 0);
+            assert_eq!(rows(&fx, "016-doc-lint")[0]["via"], "paseo");
+        }
+
+        #[test]
+        fn test_takeover_records_row() {
+            let fx = setup();
+            let tk = Tk {
+                adapter: fx.root.join("fake_adapter.sh"),
+                fx,
+            };
+            fs::write(&tk.adapter, FAKE_ADAPTER).unwrap();
+            let fake = tk.fake.display().to_string();
+            tk.write_launchers(
+                json!({"primary": ["/bin/sh", fake, "{effort}"], "fallback": ["/bin/sh", fake]}),
+            );
+            tk.set_adapter(vec![tk.stall(json!({}))], 0, 0);
+            tk.set_stalls(json!({}));
+            tk.jobs(json!([{"id": "501-retry-uploads", "stage": "build", "project": "alpha", "updated": stamp(-25 * 60), "claim": {"device": DEVICE, "session": "a1b2c3", "since": stamp(-40), "seen": stamp(-40)}, "paseo": {"server": "srv", "agent": "agent-1"}}]));
+            let (code, _, err) = tk.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let tag = tk.launched()[0].env("FACTORY_SESSION").to_string();
+            assert_eq!(
+                rows(&tk, "501-retry-uploads"),
+                [
+                    json!({"stage": "build", "role": "orchestrator", "harness": "provider-b", "via": "launcher", "model": "model-b", "session": tag})
+                ]
             );
         }
     }
