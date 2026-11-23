@@ -589,6 +589,158 @@
       },
       "exit": 0,
       "from": "tests/cli/test_pickup.py::PickupTest.test_pickup_runs_the_backlog_triage_pass"
+    },
+    {
+      "id": "pickup/dry-pr-sync",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup-pr",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "/",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "a1\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"sample\", name: \"alpha\") { p16: pullRequest(number: 16) { state headRefOid } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p16\": {\"state\": \"MERGED\", \"headRefOid\": \"0123456789abcdef0123456789abcdef01234567\"}}}}",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"sample\", name: \"alpha\") { p16: pullRequest(number: 16) { state mergeable headRefOid baseRefName author { login } reviewThreads(last: 50) { nodes { isResolved path comments(first: 20) { nodes { authorAssociation body author { __typename login } } } } } commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 50) { nodes { __typename ... on CheckRun { name conclusion isRequired(pullRequestNumber: 16) } ... on StatusContext { context state isRequired(pullRequestNumber: 16) } } } } } } } } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p16\": {\"state\": \"OPEN\", \"mergeable\": \"MERGEABLE\", \"headRefOid\": \"0123456789abcdef0123456789abcdef01234567\", \"baseRefName\": \"main\", \"author\": {\"login\": \"bot-author\"}, \"reviewThreads\": {\"nodes\": []}, \"commits\": {\"nodes\": [{\"commit\": {\"statusCheckRollup\": {\"contexts\": {\"nodes\": []}}}}]}}}}}",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"016-merged\", \"stage\": \"pr-open\", \"project\": \"alpha\", \"pr\": \"https://github.com/sample/alpha/pull/16\", \"title\": \"Made-up merged\", \"updated\": \"2026-01-01T00:00:00Z\"}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": true, \"hosts\": [\"parity\"]}, \"stage_notes\": {\"babysit\": [\"Fix the failing check.\"]}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::PrSyncTest.test_dry_run_prints_and_writes_nothing"
+    },
+    {
+      "id": "pickup/dry-auto-babysit",
+      "argv": ["--home", "{home}", "pickup", "--dry-run"],
+      "home": "pickup-pr",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "/",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "a1\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "r00t\n",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"sample\", name: \"alpha\") { p17: pullRequest(number: 17) { state headRefOid } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p17\": {\"state\": \"OPEN\", \"headRefOid\": \"0123456789abcdef0123456789abcdef01234567\"}}}}",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"sample\", name: \"alpha\") { p17: pullRequest(number: 17) { state mergeable headRefOid baseRefName author { login } reviewThreads(last: 50) { nodes { isResolved path comments(first: 20) { nodes { authorAssociation body author { __typename login } } } } } commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 50) { nodes { __typename ... on CheckRun { name conclusion isRequired(pullRequestNumber: 17) } ... on StatusContext { context state isRequired(pullRequestNumber: 17) } } } } } } } } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p17\": {\"state\": \"OPEN\", \"mergeable\": \"MERGEABLE\", \"headRefOid\": \"0123456789abcdef0123456789abcdef01234567\", \"baseRefName\": \"main\", \"author\": {\"login\": \"bot-author\"}, \"reviewThreads\": {\"nodes\": []}, \"commits\": {\"nodes\": [{\"commit\": {\"statusCheckRollup\": {\"contexts\": {\"nodes\": [{\"__typename\": \"CheckRun\", \"name\": \"lint\", \"conclusion\": \"FAILURE\", \"isRequired\": true}]}}}}]}}}}}",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"017-failing\", \"stage\": \"pr-open\", \"project\": \"alpha\", \"pr\": \"https://github.com/sample/alpha/pull/17\", \"title\": \"Made-up failing\", \"updated\": \"2026-01-01T00:00:00Z\"}]}"
+        ],
+        "GET /api/pipeline/effective/alpha": [
+          200,
+          "{\"project\": \"alpha\", \"merge\": \"auto\", \"review_rounds\": 2, \"reviewers\": [\"code\"], \"gates\": [], \"pickup\": {\"enabled\": true, \"hosts\": [\"parity\"]}, \"stage_notes\": {\"babysit\": [\"Fix the failing check.\"]}, \"versions\": {\"global\": 1, \"project\": 1}, \"floors\": []}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::AutoBabysitTest.test_dry_run_and_launch"
     }
   ]
 }

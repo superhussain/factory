@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Number, Value};
 
-use crate::cli::{not_ported, Call};
+use crate::cli::Call;
 use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job};
 use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::{
@@ -87,11 +87,6 @@ static COMMIT: Pattern = Pattern::new("[0-9a-f]{40}", Re::ASCII);
 static TRAILING_NUMBER: Pattern = Pattern::new(r"-\d+$", Re::NONE);
 /// An outcomes record line's `<slug> unknown: ` tail: the first unknown job and its reason.
 static OUTCOME_UNKNOWN: Pattern = Pattern::new(r"(\S+) \((.*?)\)(?:, |$)", Re::NONE);
-
-/// A point that waits on a sibling slice: exit 2, which no code-5 catch in pickup swallows.
-fn deferred(what: &str) -> Exit {
-    not_ported(&format!("pickup {what}"))
-}
 
 // ---- test seams
 
@@ -14618,17 +14613,6 @@ exit "$archive_code"
         }
     }
 
-    pub(super) fn assert_deferred_run(fx: &Fx, args: &[&str], what: &str) {
-        assert_eq!(
-            fx.pickup(args),
-            out_err(
-                2,
-                "",
-                &format!("factory.py: pickup {what} is not ported to the Rust binary yet\n")
-            )
-        );
-    }
-
     pub(super) fn git_in(cwd: &Path, args: &[&str]) -> String {
         let out = Command::new("git")
             .arg("-C")
@@ -18514,31 +18498,6 @@ exit "$archive_code"
                     "factory.py: auto-babysit 042-sample-export: PR head is not a string\n"
                 )
             );
-        }
-    }
-
-    mod deferred_passes {
-        use super::*;
-
-        fn assert_deferred(result: (i32, String, String), what: &str) {
-            assert_eq!(result.0, 2);
-            assert!(
-                result.2.ends_with(&format!(
-                    "factory.py: pickup {what} is not ported to the Rust binary yet\n"
-                )),
-                "{}",
-                result.2
-            );
-        }
-
-        fn alpha_repo(fx: &Fx) {
-            fs::create_dir_all(fx.home.join("projects")).unwrap();
-            fs::write(
-                fx.home.join("projects/alpha.md"),
-                "---\nrepo: sample/alpha\nauto_babysit: 3\n---\n",
-            )
-            .unwrap();
-            alpha_on(fx);
         }
     }
 }
