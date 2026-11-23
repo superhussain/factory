@@ -25,7 +25,8 @@ static WAIT_ARTIFACT: Pattern = Pattern::new(
 );
 static SKIPPED_REVIEW: Pattern = Pattern::new(r"round-[1-9][0-9]*/review-(ux|ui)\.md", Flags::NONE);
 const WAIT_USAGE: &str = "usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]";
-const WATCH_USAGE: &str = "usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]";
+const WATCH_USAGE: &str =
+    "usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]";
 const WATCH_TIMEOUT: u64 = 540;
 
 /// True when line is a finished first line for artifact.
@@ -45,7 +46,9 @@ fn wait_valid(artifact: &str, line: &str) -> bool {
 /// `read_text(errors="replace").splitlines()[0]`, or "" for an empty file.
 fn first_line(p: &Path) -> io::Result<String> {
     let text = universal_newlines(String::from_utf8_lossy(&fs::read(p)?).into_owned());
-    Ok(splitlines(&text, false).first().map_or(String::new(), |l| l.to_string()))
+    Ok(splitlines(&text, false)
+        .first()
+        .map_or(String::new(), |l| l.to_string()))
 }
 
 /// Each present artifact's first line, refusing any linked file, parent or job folder.
@@ -56,7 +59,10 @@ fn job_file_lines(folder: &Path, artifacts: &[&str]) -> Res<BTreeMap<String, Str
         for node in [path.as_path(), path.parent().unwrap(), folder] {
             if is_link(node).map_err(|e| fail(os_error(&e, Some(node)), 1))? {
                 return Err(fail(
-                    format!("{} is a symlink or junction; nothing was read through it", node.display()),
+                    format!(
+                        "{} is a symlink or junction; nothing was read through it",
+                        node.display()
+                    ),
                     6,
                 ));
             }
@@ -86,7 +92,14 @@ struct Io<'a> {
 }
 
 /// Print each artifact's first line once all are valid, checking once a second until --timeout.
-fn wait_run(home: &Path, slug: &str, job_id: &str, target: &str, args: &[String], io: &Io) -> Res<String> {
+fn wait_run(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    target: &str,
+    args: &[String],
+    io: &Io,
+) -> Res<String> {
     let (mut artifacts, mut timeout, mut refresh) = (Vec::new(), None, false);
     let mut i = 0;
     while i < args.len() {
@@ -106,7 +119,10 @@ fn wait_run(home: &Path, slug: &str, job_id: &str, target: &str, args: &[String]
             artifacts.push(args[i].as_str());
             i += 1;
         } else {
-            return Err(fail(format!("bad artifact {}. {WAIT_USAGE}", repr(&args[i])), 2));
+            return Err(fail(
+                format!("bad artifact {}. {WAIT_USAGE}", repr(&args[i])),
+                2,
+            ));
         }
     }
     if artifacts.is_empty() {
@@ -119,18 +135,30 @@ fn wait_run(home: &Path, slug: &str, job_id: &str, target: &str, args: &[String]
     let deadline = (io.now)() + timeout.unwrap_or(WATCH_TIMEOUT) as f64;
     loop {
         let lines = job_file_lines(&folder, &artifacts)?;
-        let missing: Vec<&str> = artifacts.iter().copied().filter(|a| !lines.contains_key(*a)).collect();
-        let malformed: Vec<&str> =
-            artifacts.iter().copied().filter(|a| lines.get(*a).is_some_and(|l| !wait_valid(a, l))).collect();
+        let missing: Vec<&str> = artifacts
+            .iter()
+            .copied()
+            .filter(|a| !lines.contains_key(*a))
+            .collect();
+        let malformed: Vec<&str> = artifacts
+            .iter()
+            .copied()
+            .filter(|a| lines.get(*a).is_some_and(|l| !wait_valid(a, l)))
+            .collect();
         if missing.is_empty() && malformed.is_empty() {
-            return Ok(artifacts.iter().map(|a| format!("{a}: {}\n", lines[*a])).collect());
+            return Ok(artifacts
+                .iter()
+                .map(|a| format!("{a}: {}\n", lines[*a]))
+                .collect());
         }
         if (io.now)() >= deadline {
             if !missing.is_empty() {
                 return Err(fail(format!("still missing: {}", missing.join(", ")), 3));
             }
-            let read: Vec<String> =
-                malformed.iter().map(|a| format!("{a} reads \"{}\"", printable_line(&lines[*a], 60))).collect();
+            let read: Vec<String> = malformed
+                .iter()
+                .map(|a| format!("{a} reads \"{}\"", printable_line(&lines[*a], 60)))
+                .collect();
             return Err(fail(format!("no valid first line: {}", read.join(", ")), 5));
         }
         (io.sleep)(1.0);
@@ -139,12 +167,25 @@ fn wait_run(home: &Path, slug: &str, job_id: &str, target: &str, args: &[String]
 
 pub fn wait_cmd(call: &Call) -> Res<()> {
     let (home, slug, job_id) = r2_target(&call.args[0], true)?;
-    let hold = |target: &str| claims::hold(&Call { args: vec![target.to_string()], agents: None, connection: None });
+    let hold = |target: &str| {
+        claims::hold(&Call {
+            args: vec![target.to_string()],
+            agents: None,
+            connection: None,
+        })
+    };
     let origin = Instant::now();
     let now = || origin.elapsed().as_secs_f64();
     let sleep = |s: f64| thread::sleep(Duration::from_secs_f64(s));
-    let io = Io { hold: &hold, now: &now, sleep: &sleep };
-    print!("{}", wait_run(&home, &slug, &job_id, &call.args[0], &call.args[1..], &io)?);
+    let io = Io {
+        hold: &hold,
+        now: &now,
+        sleep: &sleep,
+    };
+    print!(
+        "{}",
+        wait_run(&home, &slug, &job_id, &call.args[0], &call.args[1..], &io)?
+    );
     Ok(())
 }
 
@@ -171,14 +212,22 @@ fn watch_run(
         } else if args[i] == "--timeout" {
             match (timeout, timeout_arg(args.get(i + 1), WATCH_TIMEOUT, 1)) {
                 (None, Some(t)) => timeout = Some(t),
-                _ => return Err(fail(format!("--timeout takes one value from 1 to 540 seconds. {WATCH_USAGE}"), 2)),
+                _ => {
+                    return Err(fail(
+                        format!("--timeout takes one value from 1 to 540 seconds. {WATCH_USAGE}"),
+                        2,
+                    ))
+                }
             }
             i += 2;
         } else if WAIT_ARTIFACT.is_full(&args[i]) {
             artifacts.push(args[i].as_str());
             i += 1;
         } else {
-            return Err(fail(format!("bad artifact {}. {WATCH_USAGE}", repr(&args[i])), 2));
+            return Err(fail(
+                format!("bad artifact {}. {WATCH_USAGE}", repr(&args[i])),
+                2,
+            ));
         }
     }
     if artifacts.is_empty() && !watch_pr {
@@ -188,11 +237,15 @@ fn watch_run(
         (io.hold)(target)?;
     } else {
         let board = read_board(home)?;
-        let job = board["jobs"]
-            .as_array()
-            .and_then(|jobs| jobs.iter().find(|j| j.get("id").and_then(Value::as_str) == Some(job_id)));
+        let job = board["jobs"].as_array().and_then(|jobs| {
+            jobs.iter()
+                .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
+        });
         let Some(job) = job else {
-            return Err(fail(format!("no job {job_id} on the board. Nothing was written."), 4));
+            return Err(fail(
+                format!("no job {job_id} on the board. Nothing was written."),
+                4,
+            ));
         };
         let project = match job.get("project") {
             None | Some(Value::Null) => "None".to_string(),
@@ -200,7 +253,10 @@ fn watch_run(
             Some(other) => dumps(other, DEFAULT),
         };
         if job.get("project").and_then(Value::as_str) != Some(slug) {
-            return Err(fail(format!("{job_id} belongs to {project}, not {slug}"), 2));
+            return Err(fail(
+                format!("{job_id} belongs to {project}, not {slug}"),
+                2,
+            ));
         }
     }
     let folder = home.join("jobs").join(slug).join(job_id);
@@ -215,24 +271,35 @@ fn watch_run(
         let bad: BTreeMap<String, String> = artifacts
             .iter()
             .filter_map(|a| {
-                lines.get(*a).filter(|l| !strip(l).is_empty() && !wait_valid(a, l)).map(|l| (a.to_string(), l.clone()))
+                lines
+                    .get(*a)
+                    .filter(|l| !strip(l).is_empty() && !wait_valid(a, l))
+                    .map(|l| (a.to_string(), l.clone()))
             })
             .collect();
-        let event =
-            if !artifacts.is_empty() && artifacts.iter().all(|a| lines.get(*a).is_some_and(|l| wait_valid(a, l))) {
-                "files"
-            } else if bad.iter().any(|(a, line)| bad_before.get(a) == Some(line)) {
-                "malformed"
-            } else if (io.now)() >= deadline {
-                "timeout"
-            } else {
-                bad_before = bad;
-                (io.sleep)(1.0);
-                continue;
-            };
+        let event = if !artifacts.is_empty()
+            && artifacts
+                .iter()
+                .all(|a| lines.get(*a).is_some_and(|l| wait_valid(a, l)))
+        {
+            "files"
+        } else if bad.iter().any(|(a, line)| bad_before.get(a) == Some(line)) {
+            "malformed"
+        } else if (io.now)() >= deadline {
+            "timeout"
+        } else {
+            bad_before = bad;
+            (io.sleep)(1.0);
+            continue;
+        };
         let mut files = Map::new();
         for a in &artifacts {
-            files.insert(a.to_string(), lines.get(*a).map_or(Value::Null, |l| Value::from(l.as_str())));
+            files.insert(
+                a.to_string(),
+                lines
+                    .get(*a)
+                    .map_or(Value::Null, |l| Value::from(l.as_str())),
+            );
         }
         let elapsed = ((io.now)() - start) as i64;
         let out = json!({"event": event, "files": files, "pr": null, "elapsed": elapsed});
@@ -243,12 +310,33 @@ fn watch_run(
 pub fn watch_cmd(call: &Call) -> Res<()> {
     let (home, slug, job_id) = r2_target(&call.args[0], true)?;
     let session = std::env::var("FACTORY_SESSION").is_ok_and(|s| !s.is_empty());
-    let hold = |target: &str| claims::hold(&Call { args: vec![target.to_string()], agents: None, connection: None });
+    let hold = |target: &str| {
+        claims::hold(&Call {
+            args: vec![target.to_string()],
+            agents: None,
+            connection: None,
+        })
+    };
     let origin = Instant::now();
     let now = || origin.elapsed().as_secs_f64();
     let sleep = |s: f64| thread::sleep(Duration::from_secs_f64(s));
-    let io = Io { hold: &hold, now: &now, sleep: &sleep };
-    print!("{}", watch_run(&home, &slug, &job_id, &call.args[0], &call.args[1..], session, &io)?);
+    let io = Io {
+        hold: &hold,
+        now: &now,
+        sleep: &sleep,
+    };
+    print!(
+        "{}",
+        watch_run(
+            &home,
+            &slug,
+            &job_id,
+            &call.args[0],
+            &call.args[1..],
+            session,
+            &io
+        )?
+    );
     Ok(())
 }
 
@@ -282,16 +370,30 @@ mod tests {
     }
 
     fn wait(home: &Path, args: &[&str], io: &Io) -> Res<String> {
-        wait_run(home, "sample", "001-sample-job", "sample/001-sample-job", &strings(args), io)
+        wait_run(
+            home,
+            "sample",
+            "001-sample-job",
+            "sample/001-sample-job",
+            &strings(args),
+            io,
+        )
     }
 
     #[test]
     fn wait_default_timeout_is_540() {
         let (home, _) = home("wait-default", "001-sample-job");
         let clock = Cell::new(0.0);
-        let io = Io { hold: &no_hold, now: &|| clock.get(), sleep: &|s| clock.set(clock.get() + s) };
+        let io = Io {
+            hold: &no_hold,
+            now: &|| clock.get(),
+            sleep: &|s| clock.set(clock.get() + s),
+        };
         let e = wait(&home, &["decision.md"], &io).unwrap_err();
-        assert_eq!((e.code, e.stderr.as_str()), (3, "factory.py: still missing: decision.md\n"));
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (3, "factory.py: still missing: decision.md\n")
+        );
         assert_eq!(clock.get(), 540.0);
         fs::remove_dir_all(home).unwrap();
     }
@@ -306,8 +408,15 @@ mod tests {
                 fs::write(folder.join("decision.md"), "APPROVE\n").unwrap();
             }
         };
-        let io = Io { hold: &no_hold, now: &|| clock.get(), sleep: &sleep };
-        assert_eq!(wait(&home, &["decision.md", "--timeout", "5"], &io).unwrap(), "decision.md: APPROVE\n");
+        let io = Io {
+            hold: &no_hold,
+            now: &|| clock.get(),
+            sleep: &sleep,
+        };
+        assert_eq!(
+            wait(&home, &["decision.md", "--timeout", "5"], &io).unwrap(),
+            "decision.md: APPROVE\n"
+        );
         assert_eq!(clock.get(), 3.0);
         fs::remove_dir_all(home).unwrap();
     }
@@ -319,13 +428,24 @@ mod tests {
         fs::write(&decision, "APPROVE\n").unwrap();
         let seen = RefCell::new(Vec::new());
         let hold = |target: &str| {
-            seen.borrow_mut().push((target.to_string(), fs::read_to_string(&decision).unwrap()));
+            seen.borrow_mut()
+                .push((target.to_string(), fs::read_to_string(&decision).unwrap()));
             fs::write(&decision, "CHANGES\n").unwrap();
             Ok(())
         };
-        let io = Io { hold: &hold, now: &|| 0.0, sleep: &|_| {} };
-        assert_eq!(wait(&home, &["decision.md", "--hold", "--timeout", "0"], &io).unwrap(), "decision.md: CHANGES\n");
-        assert_eq!(*seen.borrow(), [("sample/001-sample-job".to_string(), "APPROVE\n".to_string())]);
+        let io = Io {
+            hold: &hold,
+            now: &|| 0.0,
+            sleep: &|_| {},
+        };
+        assert_eq!(
+            wait(&home, &["decision.md", "--hold", "--timeout", "0"], &io).unwrap(),
+            "decision.md: CHANGES\n"
+        );
+        assert_eq!(
+            *seen.borrow(),
+            [("sample/001-sample-job".to_string(), "APPROVE\n".to_string())]
+        );
         fs::remove_dir_all(home).unwrap();
     }
 
@@ -333,8 +453,17 @@ mod tests {
     fn wait_hold_exit_stops() {
         let (home, folder) = home("wait-hold-exit", "001-sample-job");
         fs::write(folder.join("decision.md"), "APPROVE\n").unwrap();
-        let io = Io { hold: &|_| Err(exit(6)), now: &|| 0.0, sleep: &|_| {} };
-        assert_eq!(wait(&home, &["decision.md", "--hold"], &io).unwrap_err().code, 6);
+        let io = Io {
+            hold: &|_| Err(exit(6)),
+            now: &|| 0.0,
+            sleep: &|_| {},
+        };
+        assert_eq!(
+            wait(&home, &["decision.md", "--hold"], &io)
+                .unwrap_err()
+                .code,
+            6
+        );
         fs::remove_dir_all(home).unwrap();
     }
 
@@ -344,7 +473,11 @@ mod tests {
         let (home, folder) = home("wait-link", "001-sample-job");
         fs::write(home.join("elsewhere.md"), "APPROVE\n").unwrap();
         std::os::unix::fs::symlink(home.join("elsewhere.md"), folder.join("decision.md")).unwrap();
-        let io = Io { hold: &no_hold, now: &|| 0.0, sleep: &|_| {} };
+        let io = Io {
+            hold: &no_hold,
+            now: &|| 0.0,
+            sleep: &|_| {},
+        };
         let e = wait(&home, &["decision.md", "--timeout", "0"], &io).unwrap_err();
         assert_eq!(e.code, 6);
         assert!(e.stderr.contains("symlink or junction"));
@@ -352,7 +485,15 @@ mod tests {
     }
 
     fn watch(home: &Path, args: &[&str], io: &Io) -> Res<String> {
-        watch_run(home, "sample", "042-sample-export", "sample/042-sample-export", &strings(args), true, io)
+        watch_run(
+            home,
+            "sample",
+            "042-sample-export",
+            "sample/042-sample-export",
+            &strings(args),
+            true,
+            io,
+        )
     }
 
     #[test]
@@ -365,7 +506,11 @@ mod tests {
                 fs::write(folder.join("spec.md"), "# Spec: sample export\n").unwrap();
             }
         };
-        let io = Io { hold: &no_hold, now: &|| clock.get(), sleep: &sleep };
+        let io = Io {
+            hold: &no_hold,
+            now: &|| clock.get(),
+            sleep: &sleep,
+        };
         assert_eq!(
             watch(&home, &["spec.md"], &io).unwrap(),
             "{\"event\": \"files\", \"files\": {\"spec.md\": \"# Spec: sample export\"}, \"pr\": null, \"elapsed\": 212}\n"
@@ -377,7 +522,11 @@ mod tests {
     fn watch_default_timeout_540() {
         let (home, _) = home("watch-default", "042-sample-export");
         let clock = Cell::new(0.0);
-        let io = Io { hold: &no_hold, now: &|| clock.get(), sleep: &|s| clock.set(clock.get() + s) };
+        let io = Io {
+            hold: &no_hold,
+            now: &|| clock.get(),
+            sleep: &|s| clock.set(clock.get() + s),
+        };
         assert_eq!(
             watch(&home, &["decision.md"], &io).unwrap(),
             "{\"event\": \"timeout\", \"files\": {\"decision.md\": null}, \"pr\": null, \"elapsed\": 540}\n"
@@ -396,7 +545,11 @@ mod tests {
                 fs::write(folder.join("decision.md"), "APPROVE\n").unwrap();
             }
         };
-        let io = Io { hold: &no_hold, now: &|| clock.get(), sleep: &sleep };
+        let io = Io {
+            hold: &no_hold,
+            now: &|| clock.get(),
+            sleep: &sleep,
+        };
         assert_eq!(
             watch(&home, &["decision.md"], &io).unwrap(),
             "{\"event\": \"files\", \"files\": {\"decision.md\": \"APPROVE\"}, \"pr\": null, \"elapsed\": 1}\n"
@@ -410,7 +563,11 @@ mod tests {
         let clock = Cell::new(0.0);
         let holds = RefCell::new(Vec::new());
         let hold = |target: &str| {
-            holds.borrow_mut().push((target.to_string(), folder.join("spec.md").exists(), clock.get()));
+            holds.borrow_mut().push((
+                target.to_string(),
+                folder.join("spec.md").exists(),
+                clock.get(),
+            ));
             Ok(())
         };
         let sleep = |s: f64| {
@@ -419,9 +576,18 @@ mod tests {
                 fs::write(folder.join("spec.md"), "# Spec: sample export\n").unwrap();
             }
         };
-        let io = Io { hold: &hold, now: &|| clock.get(), sleep: &sleep };
-        assert!(watch(&home, &["spec.md"], &io).unwrap().starts_with("{\"event\": \"files\""));
-        assert_eq!(*holds.borrow(), [("sample/042-sample-export".to_string(), false, 0.0)]);
+        let io = Io {
+            hold: &hold,
+            now: &|| clock.get(),
+            sleep: &sleep,
+        };
+        assert!(watch(&home, &["spec.md"], &io)
+            .unwrap()
+            .starts_with("{\"event\": \"files\""));
+        assert_eq!(
+            *holds.borrow(),
+            [("sample/042-sample-export".to_string(), false, 0.0)]
+        );
         fs::remove_dir_all(home).unwrap();
     }
 
@@ -429,7 +595,11 @@ mod tests {
     fn watch_hold_exit_stops() {
         let (home, folder) = home("watch-hold-exit", "042-sample-export");
         fs::write(folder.join("spec.md"), "# Spec: sample export\n").unwrap();
-        let io = Io { hold: &|_| Err(exit(6)), now: &|| 0.0, sleep: &|_| {} };
+        let io = Io {
+            hold: &|_| Err(exit(6)),
+            now: &|| 0.0,
+            sleep: &|_| {},
+        };
         assert_eq!(watch(&home, &["spec.md", "--pr"], &io).unwrap_err().code, 6);
         fs::remove_dir_all(home).unwrap();
     }
@@ -437,9 +607,19 @@ mod tests {
     #[test]
     fn watch_pr_not_ported() {
         let (home, _) = home("watch-pr", "042-sample-export");
-        let io = Io { hold: &no_hold, now: &|| 0.0, sleep: &|_| {} };
+        let io = Io {
+            hold: &no_hold,
+            now: &|| 0.0,
+            sleep: &|_| {},
+        };
         let e = watch(&home, &["--pr"], &io).unwrap_err();
-        assert_eq!((e.code, e.stderr.as_str()), (2, "factory.py: watch --pr is not ported to the Rust binary yet\n"));
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (
+                2,
+                "factory.py: watch --pr is not ported to the Rust binary yet\n"
+            )
+        );
         fs::remove_dir_all(home).unwrap();
     }
 
@@ -449,7 +629,11 @@ mod tests {
         let (home, folder) = home("watch-link", "042-sample-export");
         fs::write(home.join("elsewhere.md"), "# Spec: elsewhere\n").unwrap();
         std::os::unix::fs::symlink(home.join("elsewhere.md"), folder.join("spec.md")).unwrap();
-        let io = Io { hold: &no_hold, now: &|| 0.0, sleep: &|_| {} };
+        let io = Io {
+            hold: &no_hold,
+            now: &|| 0.0,
+            sleep: &|_| {},
+        };
         let e = watch(&home, &["spec.md"], &io).unwrap_err();
         assert_eq!(e.code, 6);
         assert!(e.stderr.contains("symlink or junction"));

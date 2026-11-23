@@ -3,7 +3,17 @@
   "cases": [
     {
       "id": "wait/present",
-      "argv": ["--home", "{home}", "wait", "sample/001-present", "round-1/review-ux.md", "spec.md", "round-1/review-code.md", "build.md", "decision.md"],
+      "argv": [
+        "--home",
+        "{home}",
+        "wait",
+        "sample/001-present",
+        "round-1/review-ux.md",
+        "spec.md",
+        "round-1/review-code.md",
+        "build.md",
+        "decision.md"
+      ],
       "home": "wait",
       "stubs": {},
       "exit": 0,
@@ -19,7 +29,15 @@
     },
     {
       "id": "wait/spec-evidence-blank",
-      "argv": ["--home", "{home}", "wait", "sample/002-malformed", "spec-evidence.md", "--timeout", "0"],
+      "argv": [
+        "--home",
+        "{home}",
+        "wait",
+        "sample/002-malformed",
+        "spec-evidence.md",
+        "--timeout",
+        "0"
+      ],
       "home": "wait",
       "stubs": {},
       "exit": 5,
@@ -27,7 +45,15 @@
     },
     {
       "id": "wait/malformed-security",
-      "argv": ["--home", "{home}", "wait", "sample/002-malformed", "round-1/review-security.md", "--timeout", "0"],
+      "argv": [
+        "--home",
+        "{home}",
+        "wait",
+        "sample/002-malformed",
+        "round-1/review-security.md",
+        "--timeout",
+        "0"
+      ],
       "home": "wait",
       "stubs": {},
       "exit": 5,
@@ -67,7 +93,17 @@
     },
     {
       "id": "wait/missing",
-      "argv": ["--home", "{home}", "wait", "sample/005-partial", "round-1/review-ux.md", "round-1/review-ui.md", "decision.md", "--timeout", "0"],
+      "argv": [
+        "--home",
+        "{home}",
+        "wait",
+        "sample/005-partial",
+        "round-1/review-ux.md",
+        "round-1/review-ui.md",
+        "decision.md",
+        "--timeout",
+        "0"
+      ],
       "home": "wait",
       "stubs": {},
       "exit": 3,
@@ -75,7 +111,15 @@
     },
     {
       "id": "wait/skipped-ux",
-      "argv": ["--home", "{home}", "wait", "sample/004-skipped", "round-1/review-ux.md", "--timeout", "0"],
+      "argv": [
+        "--home",
+        "{home}",
+        "wait",
+        "sample/004-skipped",
+        "round-1/review-ux.md",
+        "--timeout",
+        "0"
+      ],
       "home": "wait",
       "stubs": {},
       "exit": 0,
@@ -83,7 +127,15 @@
     },
     {
       "id": "wait/skipped-ui",
-      "argv": ["--home", "{home}", "wait", "sample/004-skipped", "round-1/review-ui.md", "--timeout", "0"],
+      "argv": [
+        "--home",
+        "{home}",
+        "wait",
+        "sample/004-skipped",
+        "round-1/review-ui.md",
+        "--timeout",
+        "0"
+      ],
       "home": "wait",
       "stubs": {},
       "exit": 0,
@@ -91,7 +143,15 @@
     },
     {
       "id": "wait/skipped-security",
-      "argv": ["--home", "{home}", "wait", "sample/004-skipped", "round-1/review-security.md", "--timeout", "0"],
+      "argv": [
+        "--home",
+        "{home}",
+        "wait",
+        "sample/004-skipped",
+        "round-1/review-security.md",
+        "--timeout",
+        "0"
+      ],
       "home": "wait",
       "stubs": {},
       "exit": 5,
@@ -99,7 +159,15 @@
     },
     {
       "id": "wait/skipped-code",
-      "argv": ["--home", "{home}", "wait", "sample/004-skipped", "round-1/review-code.md", "--timeout", "0"],
+      "argv": [
+        "--home",
+        "{home}",
+        "wait",
+        "sample/004-skipped",
+        "round-1/review-code.md",
+        "--timeout",
+        "0"
+      ],
       "home": "wait",
       "stubs": {},
       "exit": 5,
@@ -163,7 +231,17 @@
     },
     {
       "id": "wait/usage-timeout-twice",
-      "argv": ["--home", "{home}", "wait", "sample/001-present", "spec.md", "--timeout", "1", "--timeout", "1"],
+      "argv": [
+        "--home",
+        "{home}",
+        "wait",
+        "sample/001-present",
+        "spec.md",
+        "--timeout",
+        "1",
+        "--timeout",
+        "1"
+      ],
       "home": "wait",
       "stubs": {},
       "exit": 2,
@@ -232,7 +310,14 @@
     },
     {
       "id": "wait/watch-spec-evidence",
-      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "spec.md", "spec-evidence.md"],
+      "argv": [
+        "--home",
+        "{home}",
+        "watch",
+        "sample/042-sample-export",
+        "spec.md",
+        "spec-evidence.md"
+      ],
       "home": "wait",
       "stubs": {},
       "routes": {
@@ -269,7 +354,16 @@
     },
     {
       "id": "wait/watch-timeout",
-      "argv": ["--home", "{home}", "watch", "sample/043-empty", "spec.md", "build.md", "--timeout", "1"],
+      "argv": [
+        "--home",
+        "{home}",
+        "watch",
+        "sample/043-empty",
+        "spec.md",
+        "build.md",
+        "--timeout",
+        "1"
+      ],
       "home": "wait",
       "stubs": {},
       "routes": {
@@ -465,7 +559,17 @@
     },
     {
       "id": "wait/watch-usage-timeout-twice",
-      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "spec.md", "--timeout", "1", "--timeout", "1"],
+      "argv": [
+        "--home",
+        "{home}",
+        "watch",
+        "sample/042-sample-export",
+        "spec.md",
+        "--timeout",
+        "1",
+        "--timeout",
+        "1"
+      ],
       "home": "wait",
       "stubs": {},
       "exit": 2,
