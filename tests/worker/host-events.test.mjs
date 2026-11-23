@@ -33,6 +33,12 @@ async function startHostWorker(persistDir) {
     }),
   );
   const url = await mf.ready;
+  // host-entry.js signs in as client-aaaa, so mac-a is the bound host.
+  const bucket = await mf.getR2Bucket("BUCKET");
+  await bucket.put(
+    "hosts/mac-a.json",
+    JSON.stringify({ id: "mac-a", token: "client-aaaa", state: "active" }),
+  );
   return { origin: url.origin, close: () => mf.dispose() };
 }
 
