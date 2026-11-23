@@ -42,18 +42,29 @@ fn config_root_from(xdg: Option<&OsStr>, user_home: Option<&Path>) -> Res<PathBu
 
 /// Python's `config_root`.
 pub fn config_root() -> Res<PathBuf> {
-    config_root_from(std::env::var_os("XDG_CONFIG_HOME").as_deref(), std::env::home_dir().as_deref())
+    config_root_from(
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        std::env::home_dir().as_deref(),
+    )
 }
 
 /// `factory_home` with its inputs given: the selected home (override or FACTORY_HOME), else the
 /// location pointer under the config root, else `<config root>/factory`.
-pub fn resolve_home(selected: Option<&OsStr>, xdg: Option<&OsStr>, user_home: Option<&Path>) -> Res<PathBuf> {
+pub fn resolve_home(
+    selected: Option<&OsStr>,
+    xdg: Option<&OsStr>,
+    user_home: Option<&Path>,
+) -> Res<PathBuf> {
     if let Some(selected) = nonempty(selected) {
         let home = Path::new(selected);
         if !home.is_absolute() {
-            return Err(fail("factory home must be absolute. Nothing was written.", 2));
+            return Err(fail(
+                "factory home must be absolute. Nothing was written.",
+                2,
+            ));
         }
-        return resolve(home).map_err(|_| fail("cannot resolve factory home. Nothing was written.", 2));
+        return resolve(home)
+            .map_err(|_| fail("cannot resolve factory home. Nothing was written.", 2));
     }
     let root = config_root_from(xdg, user_home)?;
     let pointer = root.join("factory-location.json");
@@ -74,7 +85,11 @@ pub fn resolve_home(selected: Option<&OsStr>, xdg: Option<&OsStr>, user_home: Op
 pub fn factory_home() -> Res<PathBuf> {
     let env = std::env::var_os("FACTORY_HOME");
     let selected = OVERRIDE.get().map(|p| p.as_os_str()).or(env.as_deref());
-    resolve_home(selected, std::env::var_os("XDG_CONFIG_HOME").as_deref(), std::env::home_dir().as_deref())
+    resolve_home(
+        selected,
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        std::env::home_dir().as_deref(),
+    )
 }
 
 fn location(pointer: &Path) -> Option<PathBuf> {
@@ -94,15 +109,26 @@ fn location(pointer: &Path) -> Option<PathBuf> {
 
 /// Python's `read_location`.
 pub fn read_location(pointer: &Path) -> Res<PathBuf> {
-    let home = location(pointer).ok_or_else(|| fail(format!("Invalid location pointer: {}.", pointer.display()), 2))?;
+    let home = location(pointer).ok_or_else(|| {
+        fail(
+            format!("Invalid location pointer: {}.", pointer.display()),
+            2,
+        )
+    })?;
     validate_home(&home)?;
     Ok(home)
 }
 
 /// The skill folder that holds this binary: the grandparent of `<skill>/runtime/factory`.
 pub fn skill_root() -> Res<PathBuf> {
-    let exe = std::env::current_exe().and_then(|p| resolve(&p)).map_err(|e| fail(os_error(&e, None), 1))?;
-    Ok(exe.parent().and_then(Path::parent).unwrap_or(Path::new("/")).to_path_buf())
+    let exe = std::env::current_exe()
+        .and_then(|p| resolve(&p))
+        .map_err(|e| fail(os_error(&e, None), 1))?;
+    Ok(exe
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or(Path::new("/"))
+        .to_path_buf())
 }
 
 fn valid_manifest(path: &Path) -> Option<()> {
@@ -111,7 +137,12 @@ fn valid_manifest(path: &Path) -> Option<()> {
         let entry = value.as_object()?;
         let etag = entry.get("etag")?.as_str()?;
         let sha = entry.get("sha256")?.as_str()?;
-        if !JOB_REL.is_full(rel) || rel.contains("..") || entry.len() != 2 || etag.is_empty() || !SHA256.is_full(sha) {
+        if !JOB_REL.is_full(rel)
+            || rel.contains("..")
+            || entry.len() != 2
+            || etag.is_empty()
+            || !SHA256.is_full(sha)
+        {
             return None;
         }
     }
@@ -161,7 +192,10 @@ fn check_home(home: &Path, current: &mut PathBuf) -> Option<()> {
     *current = home.join("paths.md");
     if fs::symlink_metadata(&*current).is_ok() {
         let paths = closed_frontmatter(current).ok()?;
-        if !paths.iter().all(|(k, v)| SLUG.is_full(k) && Path::new(v).is_absolute()) {
+        if !paths
+            .iter()
+            .all(|(k, v)| SLUG.is_full(k) && Path::new(v).is_absolute())
+        {
             return None;
         }
     }
@@ -197,7 +231,9 @@ fn config_meta(home: &Path) -> Res<(PathBuf, Vec<(String, String)>)> {
     if !config.exists() {
         return Ok((config, Vec::new()));
     }
-    let meta = frontmatter(&config).map_err(|e| fail(os_error(&e, Some(&config)), 1))?.0;
+    let meta = frontmatter(&config)
+        .map_err(|e| fail(os_error(&e, Some(&config)), 1))?
+        .0;
     Ok((config, meta))
 }
 
@@ -215,9 +251,17 @@ pub fn holder(home: &Path) -> Res<(String, String, u32)> {
     let (config, meta) = config_meta(home)?;
     let session = std::env::var("FACTORY_SESSION").unwrap_or_default();
     if !session.is_empty() && !SLUG.is_full(&session) {
-        return Err(fail(format!("bad session tag {}: use letters, digits, - and _", repr(&session)), 2));
+        return Err(fail(
+            format!(
+                "bad session tag {}: use letters, digits, - and _",
+                repr(&session)
+            ),
+            2,
+        ));
     }
-    let minutes = fm_get(&meta, "claim_stale_minutes").filter(|m| !m.is_empty()).unwrap_or("120");
+    let minutes = fm_get(&meta, "claim_stale_minutes")
+        .filter(|m| !m.is_empty())
+        .unwrap_or("120");
     if !minutes.bytes().all(|b| b.is_ascii_digit()) {
         return Err(fail(
             format!(
@@ -228,7 +272,11 @@ pub fn holder(home: &Path) -> Res<(String, String, u32)> {
             2,
         ));
     }
-    Ok((device_name(home), session, minutes.parse().unwrap_or(u32::MAX)))
+    Ok((
+        device_name(home),
+        session,
+        minutes.parse().unwrap_or(u32::MAX),
+    ))
 }
 
 #[cfg(test)]
@@ -248,15 +296,24 @@ mod tests {
             "factory.py: factory home must be absolute. Nothing was written.\n"
         );
         let dir = temp_dir("home-selected");
-        assert_eq!(resolve_home(Some(dir.join("a/../b").as_os_str()), None, None).unwrap(), dir.join("b"));
+        assert_eq!(
+            resolve_home(Some(dir.join("a/../b").as_os_str()), None, None).unwrap(),
+            dir.join("b")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
     fn config_root_comes_from_xdg_or_user_home() {
         let dir = temp_dir("home-root");
-        assert_eq!(resolve_home(Some(OsStr::new("")), Some(dir.as_os_str()), None).unwrap(), dir.join("factory"));
-        assert_eq!(resolve_home(None, None, Some(&dir)).unwrap(), dir.join(".config/factory"));
+        assert_eq!(
+            resolve_home(Some(OsStr::new("")), Some(dir.as_os_str()), None).unwrap(),
+            dir.join("factory")
+        );
+        assert_eq!(
+            resolve_home(None, None, Some(&dir)).unwrap(),
+            dir.join(".config/factory")
+        );
         assert_eq!(
             err(resolve_home(None, Some(OsStr::new("rel")), None)),
             "factory.py: XDG_CONFIG_HOME must be absolute\n"
@@ -271,19 +328,39 @@ mod tests {
         fs::create_dir(&home).unwrap();
         fs::write(home.join("config.md"), "---\napi_url: https://x\n---\n").unwrap();
         let pointer = dir.join("factory-location.json");
-        fs::write(&pointer, format!("{{\"version\": 1, \"home\": {}}}", pyjson::dumps(&Value::from(home.to_str().unwrap()), pyjson::DEFAULT))).unwrap();
-        assert_eq!(resolve_home(None, Some(dir.as_os_str()), None).unwrap(), home);
+        fs::write(
+            &pointer,
+            format!(
+                "{{\"version\": 1, \"home\": {}}}",
+                pyjson::dumps(&Value::from(home.to_str().unwrap()), pyjson::DEFAULT)
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_home(None, Some(dir.as_os_str()), None).unwrap(),
+            home
+        );
         assert!(read_location(&pointer).is_ok());
         fs::write(&pointer, "{\"version\": 1.0, \"home\": \"/x\"}").unwrap();
         assert_eq!(
             read_location(&pointer).unwrap_err().stderr,
-            format!("factory.py: Invalid location pointer: {}.\n", pointer.display())
+            format!(
+                "factory.py: Invalid location pointer: {}.\n",
+                pointer.display()
+            )
         );
         fs::write(home.join("paths.md"), "---\nbad key: /x\n---\n").unwrap();
-        assert_eq!(validate_home(&home).unwrap_err().stderr, "factory.py: Invalid local metadata: paths.md.\n");
+        assert_eq!(
+            validate_home(&home).unwrap_err().stderr,
+            "factory.py: Invalid local metadata: paths.md.\n"
+        );
         fs::write(home.join("paths.md"), "---\nsample: /x\n---\n").unwrap();
         fs::create_dir_all(home.join("jobs/sample/001-x")).unwrap();
-        fs::write(home.join("jobs/sample/001-x/.sync.json"), "{\"../x.md\": {\"etag\": \"e\", \"sha256\": \"\"}}").unwrap();
+        fs::write(
+            home.join("jobs/sample/001-x/.sync.json"),
+            "{\"../x.md\": {\"etag\": \"e\", \"sha256\": \"\"}}",
+        )
+        .unwrap();
         assert_eq!(
             validate_home(&home).unwrap_err().stderr,
             "factory.py: Invalid local metadata: jobs/sample/001-x/.sync.json.\n"
@@ -294,7 +371,11 @@ mod tests {
     #[test]
     fn holder_checks_minutes() {
         let dir = temp_dir("home-holder");
-        fs::write(dir.join("config.md"), "---\ndevice: box\nclaim_stale_minutes: soon\n---\n").unwrap();
+        fs::write(
+            dir.join("config.md"),
+            "---\ndevice: box\nclaim_stale_minutes: soon\n---\n",
+        )
+        .unwrap();
         assert_eq!(
             holder(&dir).unwrap_err().stderr,
             format!(

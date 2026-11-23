@@ -12,17 +12,38 @@ pub struct Style {
 }
 
 /// `json.dumps(x)`.
-pub const DEFAULT: Style = Style { indent: None, sort_keys: false, ensure_ascii: true, compact: false };
+pub const DEFAULT: Style = Style {
+    indent: None,
+    sort_keys: false,
+    ensure_ascii: true,
+    compact: false,
+};
 /// `json.dumps(x, indent=2)`.
-pub const INDENT2: Style = Style { indent: Some(2), ..DEFAULT };
+pub const INDENT2: Style = Style {
+    indent: Some(2),
+    ..DEFAULT
+};
 /// `json.dumps(x, indent=2, sort_keys=True)`.
-pub const INDENT2_SORTED: Style = Style { indent: Some(2), sort_keys: true, ..DEFAULT };
+pub const INDENT2_SORTED: Style = Style {
+    indent: Some(2),
+    sort_keys: true,
+    ..DEFAULT
+};
 /// `json.dumps(x, sort_keys=True)`.
-pub const SORTED: Style = Style { sort_keys: true, ..DEFAULT };
+pub const SORTED: Style = Style {
+    sort_keys: true,
+    ..DEFAULT
+};
 /// `json.dumps(x, ensure_ascii=False)`.
-pub const NO_ASCII: Style = Style { ensure_ascii: false, ..DEFAULT };
+pub const NO_ASCII: Style = Style {
+    ensure_ascii: false,
+    ..DEFAULT
+};
 /// `json.dumps(x, separators=(",", ":"))`.
-pub const COMPACT: Style = Style { compact: true, ..DEFAULT };
+pub const COMPACT: Style = Style {
+    compact: true,
+    ..DEFAULT
+};
 
 pub fn dumps(v: &Value, style: Style) -> String {
     let mut out = String::new();
@@ -133,7 +154,19 @@ pub fn float_repr(x: f64) -> String {
     if x.is_infinite() {
         return if x > 0.0 { "Infinity" } else { "-Infinity" }.into();
     }
-    let sci = format!("{x:e}");
+    let mut sci = format!("{x:e}");
+    // At 17 digits the shortest form can break a tie upward; Python rounds the exact value half to even.
+    if sci
+        .split('e')
+        .next()
+        .unwrap()
+        .chars()
+        .filter(char::is_ascii_digit)
+        .count()
+        == 17
+    {
+        sci = format!("{x:.16e}");
+    }
     let (mantissa, exp) = sci.split_once('e').unwrap();
     let exp: i32 = exp.parse().unwrap();
     let (sign, mantissa) = match mantissa.strip_prefix('-') {
@@ -153,7 +186,11 @@ pub fn float_repr(x: f64) -> String {
             }
         }
     } else {
-        let tail = if digits.len() > 1 { format!("{}.{}", &digits[..1], &digits[1..]) } else { digits };
+        let tail = if digits.len() > 1 {
+            format!("{}.{}", &digits[..1], &digits[1..])
+        } else {
+            digits
+        };
         format!("{tail}e{}{:02}", if exp < 0 { '-' } else { '+' }, exp.abs())
     };
     format!("{sign}{body}")
@@ -184,6 +221,7 @@ mod tests {
             ("123.456", "123.456"),
             ("1e400", "Infinity"),
             ("-1e400", "-Infinity"),
+            ("1059438285926254.25", "1059438285926254.2"),
         ] {
             assert_eq!(all(text), vec![want; 6], "{text}");
         }
@@ -192,7 +230,10 @@ mod tests {
 
     #[test]
     fn ints_keep_their_digits() {
-        assert_eq!(all("123456789012345678901234567890"), vec!["123456789012345678901234567890"; 6]);
+        assert_eq!(
+            all("123456789012345678901234567890"),
+            vec!["123456789012345678901234567890"; 6]
+        );
         assert_eq!(all("-0"), vec!["0"; 6]);
         assert_eq!(all("-7"), vec!["-7"; 6]);
     }
@@ -203,7 +244,10 @@ mod tests {
         let ascii = "\"caf\\u00e9 \\u2713 \\ud83d\\ude00 \\u007f\\u001f\"";
         let raw = "\"café ✓ 😀 \u{7f}\\u001f\"";
         assert_eq!(got, vec![ascii, ascii, ascii, ascii, raw, ascii]);
-        assert_eq!(all("\"\\\"\\\\\\n\\r\\t\\b\\f\""), vec!["\"\\\"\\\\\\n\\r\\t\\b\\f\""; 6]);
+        assert_eq!(
+            all("\"\\\"\\\\\\n\\r\\t\\b\\f\""),
+            vec!["\"\\\"\\\\\\n\\r\\t\\b\\f\""; 6]
+        );
     }
 
     #[test]

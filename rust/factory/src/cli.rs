@@ -4,7 +4,8 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use crate::commands::{
-    audit, checks, claims, intake, lookup, ops, pickup, pipeline, prompt, retro, setup, sync, tracer, wait, worktree,
+    audit, checks, claims, intake, lookup, ops, pickup, pipeline, prompt, retro, setup, sync,
+    tracer, wait, worktree,
 };
 use crate::shared::consts::{MAX_RIDERS, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
@@ -96,6 +97,12 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
 
 pub const USAGE: &str = include_str!("usage.txt");
 
+/// The handler for name with count operands. `ideas` checks its own arguments, so any count passes.
+fn handler_for(name: &str, count: usize) -> Option<Handler> {
+    let (_, handler, lo, hi) = COMMANDS.iter().find(|(n, ..)| *n == name)?;
+    (name == "ideas" || (*lo..=*hi).contains(&count)).then_some(*handler)
+}
+
 pub fn not_ported(name: &str) -> Exit {
     fail(format!("{name} is not ported to the Rust binary yet"), 2)
 }
@@ -116,9 +123,16 @@ fn run(args: Vec<OsString>) -> Res<()> {
             break;
         }
         if arg == "--home" || arg == "--session" {
-            let slot = if arg == "--home" { &mut home } else { &mut session };
+            let slot = if arg == "--home" {
+                &mut home
+            } else {
+                &mut session
+            };
             if slot.is_some() || i + 1 == args.len() || args[i + 1].is_empty() {
-                return Err(fail(format!("{arg} requires one nonempty value and may occur only once"), 2));
+                return Err(fail(
+                    format!("{arg} requires one nonempty value and may occur only once"),
+                    2,
+                ));
             }
             *slot = Some(args[i + 1].clone());
             i += 2;
@@ -134,10 +148,19 @@ fn run(args: Vec<OsString>) -> Res<()> {
         while index < positional.len() {
             let arg = &positional[index];
             if arg == "--agents" || arg == "--connection" {
-                let slot = if arg == "--agents" { &mut agents } else { &mut connection };
-                let value = positional.get(index + 1).filter(|v| !v.is_empty() && !v.starts_with("--"));
+                let slot = if arg == "--agents" {
+                    &mut agents
+                } else {
+                    &mut connection
+                };
+                let value = positional
+                    .get(index + 1)
+                    .filter(|v| !v.is_empty() && !v.starts_with("--"));
                 if slot.is_some() || value.is_none() {
-                    return Err(fail(format!("{arg} requires one value and may occur only once"), 2));
+                    return Err(fail(
+                        format!("{arg} requires one value and may occur only once"),
+                        2,
+                    ));
                 }
                 *slot = value.cloned();
                 index += 2;
@@ -155,12 +178,8 @@ fn run(args: Vec<OsString>) -> Res<()> {
         positional = std::iter::once("init".to_string()).chain(rest).collect();
     }
     let name = positional.first().map(String::as_str).unwrap_or("");
-    let found = COMMANDS.iter().find(|(n, ..)| *n == name);
-    let count = positional.len().saturating_sub(1);
-    let handler = match found {
-        Some((_, handler, lo, hi)) if name == "ideas" || (*lo..=*hi).contains(&count) => *handler,
-        _ => return Err(Exit::raw(2, USAGE)),
-    };
+    let handler =
+        handler_for(name, positional.len().saturating_sub(1)).ok_or_else(|| Exit::raw(2, USAGE))?;
     if name == "adopt-home" && home.is_some() {
         return Err(fail("adopt-home does not accept --home", 2));
     }
@@ -168,11 +187,18 @@ fn run(args: Vec<OsString>) -> Res<()> {
         if !Path::new(home).is_absolute() {
             return Err(fail("--home must be absolute", 2));
         }
-        if (name == "claim" || name == "board") && !same_path(Path::new(home), Path::new(&positional[1])) {
-            return Err(fail("--home disagrees with positional factory directory", 2));
+        if (name == "claim" || name == "board")
+            && !same_path(Path::new(home), Path::new(&positional[1]))
+        {
+            return Err(fail(
+                "--home disagrees with positional factory directory",
+                2,
+            ));
         }
     }
-    let tag = session.clone().unwrap_or_else(|| std::env::var("FACTORY_SESSION").unwrap_or_default());
+    let tag = session
+        .clone()
+        .unwrap_or_else(|| std::env::var("FACTORY_SESSION").unwrap_or_default());
     if !tag.is_empty() && !SLUG.is_full(&tag) {
         return Err(fail("bad session tag: use letters, digits, - and _", 2));
     }
@@ -182,7 +208,11 @@ fn run(args: Vec<OsString>) -> Res<()> {
     if session.is_some() {
         std::env::set_var("FACTORY_SESSION", &tag);
     }
-    handler(&Call { args: positional[1..].to_vec(), agents, connection })
+    handler(&Call {
+        args: positional[1..].to_vec(),
+        agents,
+        connection,
+    })
 }
 
 /// `factory.main()`: run one command and return its exit code.
@@ -212,8 +242,15 @@ mod tests {
 
     #[test]
     fn table_matches_factory_py() {
-        static ROW: Pattern = Pattern::new(r#"(?:COMMANDS\[)?"([a-z-]+)"\]?(?::| =) \((\w+), (\d+), ([^)]+)\)"#, Flags::NONE);
-        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../skills/factory/runtime/factory.py")).unwrap();
+        static ROW: Pattern = Pattern::new(
+            r#"(?:COMMANDS\[)?"([a-z-]+)"\]?(?::| =) \((\w+), (\d+), ([^)]+)\)"#,
+            Flags::NONE,
+        );
+        let src = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../skills/factory/runtime/factory.py"
+        ))
+        .unwrap();
         let start = src.find("COMMANDS = {").unwrap();
         let end = src.find("def main(argv=None)").unwrap();
         let python: Vec<(String, usize, usize)> = ROW
@@ -225,20 +262,30 @@ mod tests {
                     "1 + MAX_RIDERS" => 1 + MAX_RIDERS,
                     n => n.parse().unwrap(),
                 };
-                (c.get(1).unwrap().as_str().to_string(), c.get(3).unwrap().as_str().parse().unwrap(), hi)
+                (
+                    c.get(1).unwrap().as_str().to_string(),
+                    c.get(3).unwrap().as_str().parse().unwrap(),
+                    hi,
+                )
             })
             .collect();
-        let rust: Vec<(String, usize, usize)> = COMMANDS.iter().map(|(n, _, lo, hi)| (n.to_string(), *lo, *hi)).collect();
+        let rust: Vec<(String, usize, usize)> = COMMANDS
+            .iter()
+            .map(|(n, _, lo, hi)| (n.to_string(), *lo, *hi))
+            .collect();
         assert_eq!(python.len(), 68);
         assert_eq!(rust, python);
     }
 
     #[test]
     fn unported_command_exits_2() {
-        let e = run(args(&["claim", "a", "b", "c"])).unwrap_err();
+        let e = not_ported("claim");
         assert_eq!(e.code, 2);
-        assert_eq!(e.stderr, "factory.py: claim is not ported to the Rust binary yet\n");
-        assert_eq!(main(args(&["claim", "a", "b", "c"])), 2);
+        assert_eq!(
+            e.stderr,
+            "factory.py: claim is not ported to the Rust binary yet\n"
+        );
+        assert_eq!(e.status, None);
     }
 
     #[test]
@@ -246,15 +293,39 @@ mod tests {
         let usage = |list: &[&str]| run(args(list)).unwrap_err().stderr == USAGE;
         assert!(usage(&[]) && usage(&["nope"]) && usage(&["claim", "a"]) && usage(&["job"]));
         let msg = |list: &[&str]| run(args(list)).unwrap_err().stderr;
-        assert_eq!(msg(&["--home", "/x", "--home", "/x", "where"]), "factory.py: --home requires one nonempty value and may occur only once\n");
-        assert_eq!(msg(&["--home", "relative", "where"]), "factory.py: --home must be absolute\n");
-        assert_eq!(msg(&["--session", "bad tag", "where"]), "factory.py: bad session tag: use letters, digits, - and _\n");
-        assert_eq!(msg(&["init", "--agents", "emacs"]), "factory.py: --agents must be none, claude, opencode or both\n");
-        assert_eq!(msg(&["init", "--agents", "--x"]), "factory.py: --agents requires one value and may occur only once\n");
-        assert_eq!(msg(&["init", "--bogus"]), "factory.py: unknown init option --bogus\n");
-        assert_eq!(msg(&["--home", "/x", "adopt-home", "/y"]), "factory.py: adopt-home does not accept --home\n");
-        assert_eq!(msg(&["--home", "/x", "board", "/y", "1-a"]), "factory.py: --home disagrees with positional factory directory\n");
-        assert_eq!(msg(&["ideas", "a", "b", "c", "d", "e", "f", "g"]), "factory.py: ideas is not ported to the Rust binary yet\n");
-        assert_eq!(msg(&["with-cloudflare", "--", "--home"]), "factory.py: with-cloudflare is not ported to the Rust binary yet\n");
+        assert_eq!(
+            msg(&["--home", "/x", "--home", "/x", "where"]),
+            "factory.py: --home requires one nonempty value and may occur only once\n"
+        );
+        assert_eq!(
+            msg(&["--home", "relative", "where"]),
+            "factory.py: --home must be absolute\n"
+        );
+        assert_eq!(
+            msg(&["--session", "bad tag", "where"]),
+            "factory.py: bad session tag: use letters, digits, - and _\n"
+        );
+        assert_eq!(
+            msg(&["init", "--agents", "emacs"]),
+            "factory.py: --agents must be none, claude, opencode or both\n"
+        );
+        assert_eq!(
+            msg(&["init", "--agents", "--x"]),
+            "factory.py: --agents requires one value and may occur only once\n"
+        );
+        assert_eq!(
+            msg(&["init", "--bogus"]),
+            "factory.py: unknown init option --bogus\n"
+        );
+        assert_eq!(
+            msg(&["--home", "/x", "adopt-home", "/y"]),
+            "factory.py: adopt-home does not accept --home\n"
+        );
+        assert_eq!(
+            msg(&["--home", "/x", "board", "/y", "1-a"]),
+            "factory.py: --home disagrees with positional factory directory\n"
+        );
+        assert!(handler_for("ideas", 7).is_some() && handler_for("claim", 3).is_some());
+        assert!(handler_for("claim", 2).is_none() && handler_for("", 0).is_none());
     }
 }

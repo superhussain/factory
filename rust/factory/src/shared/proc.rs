@@ -32,7 +32,9 @@ fn drain(mut pipe: impl Read + Send + 'static) -> thread::JoinHandle<Vec<u8>> {
 }
 
 fn wait(child: &mut Child, timeout: Option<Duration>) -> io::Result<ExitStatus> {
-    let Some(timeout) = timeout else { return child.wait() };
+    let Some(timeout) = timeout else {
+        return child.wait();
+    };
     let deadline = Instant::now() + timeout;
     loop {
         if let Some(status) = child.try_wait()? {
@@ -48,9 +50,18 @@ fn wait(child: &mut Child, timeout: Option<Duration>) -> io::Result<ExitStatus> 
 }
 
 /// `subprocess.run(argv, capture_output=True, text=True)`, with stdin closed.
-pub fn capture(argv: &[&str], cwd: Option<&Path>, env: &[(&str, &str)], timeout: Option<Duration>) -> io::Result<Out> {
+pub fn capture(
+    argv: &[&str],
+    cwd: Option<&Path>,
+    env: &[(&str, &str)],
+    timeout: Option<Duration>,
+) -> io::Result<Out> {
     let mut command = Command::new(argv[0]);
-    command.args(&argv[1..]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .args(&argv[1..])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
@@ -59,18 +70,29 @@ pub fn capture(argv: &[&str], cwd: Option<&Path>, env: &[(&str, &str)], timeout:
     let out = drain(child.stdout.take().unwrap());
     let err = drain(child.stderr.take().unwrap());
     let status = wait(&mut child, timeout)?;
-    let text = |h: thread::JoinHandle<Vec<u8>>| universal_newlines(String::from_utf8_lossy(&h.join().unwrap()).into_owned());
-    Ok(Out { code: code_of(status), stdout: text(out), stderr: text(err) })
+    let text = |h: thread::JoinHandle<Vec<u8>>| {
+        universal_newlines(String::from_utf8_lossy(&h.join().unwrap()).into_owned())
+    };
+    Ok(Out {
+        code: code_of(status),
+        stdout: text(out),
+        stderr: text(err),
+    })
 }
 
 /// `run`: stdout, or "" when the command cannot start.
 pub fn run(argv: &[&str]) -> String {
-    capture(argv, None, &[], None).map(|o| o.stdout).unwrap_or_default()
+    capture(argv, None, &[], None)
+        .map(|o| o.stdout)
+        .unwrap_or_default()
 }
 
 fn git_out(cwd: &Path, args: &[&str]) -> Option<Out> {
     let cwd = cwd.to_string_lossy();
-    let argv: Vec<&str> = ["git", "-C", &cwd].into_iter().chain(args.iter().copied()).collect();
+    let argv: Vec<&str> = ["git", "-C", &cwd]
+        .into_iter()
+        .chain(args.iter().copied())
+        .collect();
     capture(&argv, None, &[], None).ok()
 }
 
@@ -86,7 +108,10 @@ pub fn git(cwd: &Path, args: &[&str]) -> String {
 pub fn git_ok(cwd: &Path, args: &[&str]) -> Res<String> {
     match git_out(cwd, args) {
         Some(o) if o.code == 0 => Ok(strip(&o.stdout).to_string()),
-        Some(o) => Err(fail(format!("git {}: {}", args.join(" "), strip(&o.stderr)), 1)),
+        Some(o) => Err(fail(
+            format!("git {}: {}", args.join(" "), strip(&o.stderr)),
+            1,
+        )),
         None => Err(fail(format!("git {}: cannot run git", args.join(" ")), 1)),
     }
 }
@@ -126,9 +151,12 @@ pub fn paseo_run(args: &[&str]) -> (i32, String) {
 }
 
 fn executable(p: &Path) -> bool {
-    let Ok(meta) = std::fs::metadata(p) else { return false };
+    let Ok(meta) = std::fs::metadata(p) else {
+        return false;
+    };
     #[cfg(unix)]
-    return meta.is_file() && std::os::unix::fs::PermissionsExt::mode(&meta.permissions()) & 0o111 != 0;
+    return meta.is_file()
+        && std::os::unix::fs::PermissionsExt::mode(&meta.permissions()) & 0o111 != 0;
     #[cfg(not(unix))]
     meta.is_file()
 }
@@ -137,16 +165,35 @@ fn executable(p: &Path) -> bool {
 pub fn which(name: &str) -> Option<PathBuf> {
     let suffixes: Vec<String> = if cfg!(windows) {
         let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
-        std::iter::once(String::new()).chain(pathext.split(';').filter(|s| !s.is_empty()).map(String::from)).collect()
+        std::iter::once(String::new())
+            .chain(
+                pathext
+                    .split(';')
+                    .filter(|s| !s.is_empty())
+                    .map(String::from),
+            )
+            .collect()
     } else {
         vec![String::new()]
     };
-    let candidates = |dir: &Path| suffixes.iter().map(|s| dir.join(format!("{name}{s}"))).collect::<Vec<_>>();
-    if Path::new(name).parent().is_some_and(|p| !p.as_os_str().is_empty()) {
-        return candidates(Path::new("")).into_iter().find(|p| executable(p));
+    let candidates = |dir: &Path| {
+        suffixes
+            .iter()
+            .map(|s| dir.join(format!("{name}{s}")))
+            .collect::<Vec<_>>()
+    };
+    if Path::new(name)
+        .parent()
+        .is_some_and(|p| !p.as_os_str().is_empty())
+    {
+        return candidates(Path::new(""))
+            .into_iter()
+            .find(|p| executable(p));
     }
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).flat_map(|dir| candidates(&dir)).find(|p| executable(p))
+    std::env::split_paths(&path)
+        .flat_map(|dir| candidates(&dir))
+        .find(|p| executable(p))
 }
 
 #[cfg(unix)]
@@ -188,14 +235,25 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn capture_translates_newlines() {
-        let out = capture(&["sh", "-c", "printf 'a\\r\\nb'; printf 'e' >&2; exit 3"], None, &[], None).unwrap();
-        assert_eq!((out.code, out.stdout.as_str(), out.stderr.as_str()), (3, "a\nb", "e"));
+        let out = capture(
+            &["sh", "-c", "printf 'a\\r\\nb'; printf 'e' >&2; exit 3"],
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            (out.code, out.stdout.as_str(), out.stderr.as_str()),
+            (3, "a\nb", "e")
+        );
     }
 
     #[cfg(unix)]
     #[test]
     fn capture_times_out() {
-        let err = capture(&["sleep", "5"], None, &[], Some(Duration::from_millis(50))).err().unwrap();
+        let err = capture(&["sleep", "5"], None, &[], Some(Duration::from_millis(50)))
+            .err()
+            .unwrap();
         assert_eq!(err.kind(), io::ErrorKind::TimedOut);
     }
 

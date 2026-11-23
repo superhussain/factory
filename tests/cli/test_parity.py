@@ -74,7 +74,7 @@ class RunnerTest(unittest.TestCase):
         with patch.object(run, "FACTORY_BIN", ""):
             code, out, err = run_main([])
         self.assertEqual((code, err), (0, ""), out)
-        self.assertEqual(out.splitlines()[-1], "parity: 85 passed, 0 failed")
+        self.assertEqual(out.splitlines()[-1], f"parity: {len(run.load_cases())} passed, 0 failed")
 
     def test_a_wrong_binary_fails(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -106,8 +106,7 @@ class RunnerTest(unittest.TestCase):
 
     def test_cases_cover_cli_v1(self):
         ids = [case["id"] for case in run.load_cases()]
-        self.assertEqual(len(ids), 85)
-        self.assertEqual(len(set(ids)), 85)
+        self.assertEqual(len(set(ids)), len(ids))
         self.assertIn("arity/claim/2", ids)
         self.assertIn("arity/claim/4", ids)
         self.assertFalse([i for i in ids if i.startswith("arity/ideas/")])

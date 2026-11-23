@@ -36,13 +36,19 @@ pub fn dump_board(v: &Value) -> String {
 
 pub fn read_board(home: &Path) -> Res<Value> {
     let r = api(home, "GET", "/api/board", None, &[200, 404], &[])?;
-    let text = if r.status == 200 { Some(r.text()?) } else { None };
+    let text = if r.status == 200 {
+        Some(r.text()?)
+    } else {
+        None
+    };
     load_board(text.as_deref())
 }
 
 /// RFC 7386 merge patch: null removes a key.
 pub fn merge_patch(target: Value, patch: &Value) -> Value {
-    let Value::Object(patch) = patch else { return patch.clone() };
+    let Value::Object(patch) = patch else {
+        return patch.clone();
+    };
     let mut target = match target {
         Value::Object(map) => map,
         _ => Map::new(),
@@ -63,7 +69,10 @@ fn jobs(data: &mut Value) -> &mut Vec<Value> {
 }
 
 fn job_index(data: &Value, job_id: &str) -> Option<usize> {
-    data["jobs"].as_array()?.iter().position(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
+    data["jobs"]
+        .as_array()?
+        .iter()
+        .position(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
 }
 
 /// Python's `patch_job`: merge patch into one job, stamp it, and move its riders. Returns the job.
@@ -89,7 +98,11 @@ pub fn patch_job(data: &mut Value, job_id: &str, patch: &Value) -> Value {
     }
     let stage = job.get("stage").cloned();
     if stage != prev {
-        if stage.as_ref().and_then(Value::as_str).is_some_and(|s| TERMINAL.contains(&s)) {
+        if stage
+            .as_ref()
+            .and_then(Value::as_str)
+            .is_some_and(|s| TERMINAL.contains(&s))
+        {
             job.insert("done".into(), job["updated"].clone());
         } else {
             job.shift_remove("done");
@@ -113,7 +126,9 @@ pub fn lead_of(j: &Value) -> Option<String> {
 
 /// The lead ids of a refs list's batched-into refs.
 pub fn batch_refs(refs: &Value) -> BTreeSet<String> {
-    let Some(refs) = refs.as_array() else { return BTreeSet::new() };
+    let Some(refs) = refs.as_array() else {
+        return BTreeSet::new();
+    };
     refs.iter()
         .filter(|r| r.get("kind").and_then(Value::as_str) == Some(BATCH_REF))
         .filter_map(|r| r.get("id")?.as_str().map(String::from))
@@ -142,9 +157,13 @@ fn or_null(v: Option<&Value>) -> Value {
 
 /// Python's `mirror_batch`: move a lead's riders with its stage and PR, or back to idea when it closes.
 pub fn mirror_batch(data: &mut Value, lead_id: &str) {
-    let Some(lead) = job_index(data, lead_id).map(|i| data["jobs"][i].clone()) else { return };
+    let Some(lead) = job_index(data, lead_id).map(|i| data["jobs"][i].clone()) else {
+        return;
+    };
     for rider_id in riders_of(data, lead_id) {
-        let Some(rider) = job_index(data, &rider_id).map(|i| data["jobs"][i].clone()) else { continue };
+        let Some(rider) = job_index(data, &rider_id).map(|i| data["jobs"][i].clone()) else {
+            continue;
+        };
         if get_str(&rider, "stage").is_some_and(|s| TERMINAL.contains(&s)) {
             continue;
         }
@@ -155,22 +174,35 @@ pub fn mirror_batch(data: &mut Value, lead_id: &str) {
             .filter(|r| r.is_object() && r.get("kind").and_then(Value::as_str) != Some(BATCH_REF))
             .cloned()
             .collect();
-        let refs_or_null = if refs.is_empty() { Value::Null } else { Value::Array(refs) };
+        let refs_or_null = if refs.is_empty() {
+            Value::Null
+        } else {
+            Value::Array(refs)
+        };
         let lead_stage = lead.get("stage");
-        let ask = if get_str(&lead, "stage") == Some("needs-human") { or_null(lead.get("needs")) } else { Value::Null };
+        let ask = if get_str(&lead, "stage") == Some("needs-human") {
+            or_null(lead.get("needs"))
+        } else {
+            Value::Null
+        };
         let change = if get_str(&lead, "stage") == Some("closed") {
             let mut change = json!({"stage": IDEA, "refs": refs_or_null, "note": format!("unbatched: {lead_id} closed"), "needs": null});
             if stacked {
                 change["stacked"] = Value::Null;
                 change["pr"] = Value::Null;
                 if truthy(rider.get("pr")) {
-                    let note = format!("{}; stacked PR {} is still open", change["note"].as_str().unwrap(), py_str(&rider["pr"]));
+                    let note = format!(
+                        "{}; stacked PR {} is still open",
+                        change["note"].as_str().unwrap(),
+                        py_str(&rider["pr"])
+                    );
                     change["note"] = Value::from(note);
                 }
             }
             change
         } else if !stacked {
-            let change = json!({"stage": or_null(lead_stage), "pr": or_null(lead.get("pr")), "needs": ask});
+            let change =
+                json!({"stage": or_null(lead_stage), "pr": or_null(lead.get("pr")), "needs": ask});
             if unchanged(&rider, &change) {
                 continue;
             }
@@ -193,7 +225,13 @@ pub fn mirror_batch(data: &mut Value, lead_id: &str) {
                     }
                 })
                 .collect();
-            let flag = |key: &str| if lead.get(key) == Some(&Value::Bool(true)) { Value::Bool(true) } else { Value::Null };
+            let flag = |key: &str| {
+                if lead.get(key) == Some(&Value::Bool(true)) {
+                    Value::Bool(true)
+                } else {
+                    Value::Null
+                }
+            };
             json!({"refs": refs, "stacked": null, "automerge": flag("automerge"), "escalated": flag("escalated"),
                    "note": format!("stacked on {lead_id}, which merged"), "needs": null})
         } else {
@@ -214,7 +252,10 @@ fn py_str(v: &Value) -> String {
 
 /// True when patching rider with change would set nothing new.
 pub fn unchanged(rider: &Value, change: &Value) -> bool {
-    change.as_object().is_some_and(|c| c.iter().all(|(k, v)| rider.get(k).unwrap_or(&Value::Null) == v))
+    change.as_object().is_some_and(|c| {
+        c.iter()
+            .all(|(k, v)| rider.get(k).unwrap_or(&Value::Null) == v)
+    })
 }
 
 /// True for an escalated job, including ones from before the field that carry only the note prefix.
@@ -229,7 +270,10 @@ mod tests {
 
     #[test]
     fn merge_patch_drops_nulls() {
-        let got = merge_patch(json!({"a": 1, "b": {"c": 2, "d": 3}}), &json!({"a": null, "b": {"c": null, "e": 4}, "f": [1]}));
+        let got = merge_patch(
+            json!({"a": 1, "b": {"c": 2, "d": 3}}),
+            &json!({"a": null, "b": {"c": null, "e": 4}, "f": [1]}),
+        );
         assert_eq!(dumps(&got, COMPACT), r#"{"b":{"d":3,"e":4},"f":[1]}"#);
         assert_eq!(merge_patch(json!({"a": 1}), &json!(5)), json!(5));
     }
@@ -240,12 +284,19 @@ mod tests {
         let job = patch_job(&mut data, "1-a", &json!({"stage": "merged"}));
         assert_eq!(job["done"], job["updated"]);
         assert_eq!(data["updated"], job["updated"]);
-        let job = patch_job(&mut data, "1-a", &json!({"stage": "build", "claim": {"device": "x"}}));
+        let job = patch_job(
+            &mut data,
+            "1-a",
+            &json!({"stage": "build", "claim": {"device": "x"}}),
+        );
         assert!(job.get("done").is_none());
         assert_eq!(job["started"], job["updated"]);
         let new = patch_job(&mut data, "2-b", &json!({"stage": "idea"}));
         assert_eq!(new["id"], "2-b");
-        assert_eq!(dumps(&data["jobs"][1], COMPACT).split(',').next(), Some(r#"{"id":"2-b""#));
+        assert_eq!(
+            dumps(&data["jobs"][1], COMPACT).split(',').next(),
+            Some(r#"{"id":"2-b""#)
+        );
     }
 
     #[test]
@@ -263,8 +314,15 @@ mod tests {
         assert_eq!(rider["note"], "unbatched: 1-lead closed");
         assert!(rider.get("needs").is_none());
         let stacked = &data["jobs"][2];
-        assert_eq!(stacked["note"], "unbatched: 1-lead closed; stacked PR https://x/pull/3 is still open");
-        assert!(stacked.get("refs").is_none() && stacked.get("pr").is_none() && stacked.get("stacked").is_none());
+        assert_eq!(
+            stacked["note"],
+            "unbatched: 1-lead closed; stacked PR https://x/pull/3 is still open"
+        );
+        assert!(
+            stacked.get("refs").is_none()
+                && stacked.get("pr").is_none()
+                && stacked.get("stacked").is_none()
+        );
     }
 
     #[test]
@@ -273,11 +331,22 @@ mod tests {
             {"id": "1-lead", "stage": "build"},
             {"id": "2-rider", "stage": "build", "refs": [{"id": "1-lead", "kind": "batched-into"}]},
         ]});
-        patch_job(&mut data, "1-lead", &json!({"stage": "needs-human", "needs": "pick one", "pr": "p"}));
+        patch_job(
+            &mut data,
+            "1-lead",
+            &json!({"stage": "needs-human", "needs": "pick one", "pr": "p"}),
+        );
         assert_eq!(data["jobs"][1]["stage"], "needs-human");
         assert_eq!(data["jobs"][1]["needs"], "pick one");
         assert_eq!(data["jobs"][1]["pr"], "p");
-        assert!(escalated(&json!({"note": "Escalated: x"})) && !escalated(&json!({"escalated": 1})));
-        assert_eq!(batch_refs(&data["jobs"][1]["refs"]).into_iter().collect::<Vec<_>>(), ["1-lead"]);
+        assert!(
+            escalated(&json!({"note": "Escalated: x"})) && !escalated(&json!({"escalated": 1}))
+        );
+        assert_eq!(
+            batch_refs(&data["jobs"][1]["refs"])
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["1-lead"]
+        );
     }
 }
