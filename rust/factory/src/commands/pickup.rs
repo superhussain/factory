@@ -1,6 +1,7 @@
 //! `pickup` and `pickup setup`: launchers, detached launches, stall takeover, the host timer and the
 //! board passes.
 
+use crate::commands::checks;
 use crate::commands::claims::{self, mine};
 use crate::commands::ops;
 use crate::commands::tracer::SPEC_APPROVED_NOTES;
@@ -152,6 +153,16 @@ struct Fakes {
     close_stacked_prs: Option<Rc<dyn Fn(&Path, &str, &[Value], &str) -> Res<()>>>,
     pr_states:
         Option<Rc<dyn Fn(&str, &[u64], &str) -> Result<BTreeMap<u64, (Value, Value)>, String>>>,
+    pr_signals: Option<
+        Rc<
+            dyn Fn(
+                &str,
+                &[u64],
+                &str,
+                &BTreeMap<u64, Map<String, Value>>,
+            ) -> Result<Signals, String>,
+        >,
+    >,
     cleanup_job:
         Option<Rc<dyn Fn(&str, &Path, &str, bool, Option<&str>) -> (Vec<String>, Vec<String>)>>,
     pickup_scheduler: Option<&'static str>,
@@ -8088,16 +8099,53 @@ fn auto_babysit_match(j: &Value) -> Option<(String, String)> {
     ))
 }
 
-/// The count of the job's automatic babysits so far.
-fn auto_babysit_record(j: &Value) -> i64 {
-    j.get("auto_babysit")
-        .filter(|a| a.is_object())
-        .and_then(|a| int_of(a.get("count")))
-        .unwrap_or(0)
+/// (count, head, reason) of the job's last automatic babysit, (0, null, null) before the first.
+fn auto_babysit_record(j: &Value) -> (i64, Value, Value) {
+    let Some(a) = j.get("auto_babysit").filter(|a| a.is_object()) else {
+        return (0, Value::Null, Value::Null);
+    };
+    let field = |k: &str| a.get(k).cloned().unwrap_or(Value::Null);
+    (
+        int_of(a.get("count")).unwrap_or(0),
+        field("head"),
+        field("reason"),
+    )
 }
 
-/// Set babysit on each pr-open job whose PR needs it, in projects whose project file sets
-/// auto_babysit. Reading the PR signals waits on the checks slice.
+/// When the job was last auto-babysat, or "" before the first, so it sorts first.
+fn auto_babysit_at(j: &Value) -> &str {
+    j.get("auto_babysit")
+        .and_then(|a| get_str(a, "at"))
+        .unwrap_or("")
+}
+
+fn auto_babysit_copy(reason: &str) -> &'static str {
+    match reason {
+        "fix-reviews" => "has an open review thread",
+        "rebase" => "has a merge conflict",
+        _ => "has a failing required check",
+    }
+}
+
+type Signals = BTreeMap<u64, (Value, Option<&'static str>)>;
+
+fn pr_signals(
+    repo: &str,
+    numbers: &[u64],
+    device: &str,
+    handled: &BTreeMap<u64, Map<String, Value>>,
+) -> Result<Signals, String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(pr_signals) {
+        return f(repo, numbers, device, handled);
+    }
+    crate::commands::checks::pr_signals(repo, numbers, device, handled)
+}
+
+/// Set babysit on each pr-open job whose PR fails a required check, has an open counted review
+/// thread or a merge conflict, in projects whose project file sets auto_babysit. At most
+/// auto_babysit times per job, and never twice for the same head and reason. One gh api graphql
+/// call per repo, and one board write for the whole pass.
 #[allow(clippy::too_many_arguments)]
 fn auto_babysit_pass(
     io: &mut Io,
@@ -8114,9 +8162,9 @@ fn auto_babysit_pass(
         return f(io, home);
     }
     let (mut caps, mut repos, mut noted) = (HashMap::new(), HashMap::new(), HashMap::new());
-    let mut groups: Vec<(String, usize)> = Vec::new();
-    for j in jobs_of(data).to_vec() {
-        let Some((repo, _)) = auto_babysit_match(&j) else {
+    let mut groups: Vec<(String, Vec<(Value, u64, i64)>)> = Vec::new();
+    for j in ops::board_jobs(data)?.to_vec() {
+        let Some((repo, n)) = auto_babysit_match(&j) else {
             continue;
         };
         let (job_id, project) = (get_str(&j, "id").unwrap(), get_str(&j, "project").unwrap());
@@ -8152,23 +8200,123 @@ fn auto_babysit_pass(
             }
             continue;
         }
-        if auto_babysit_record(&j) >= cap {
+        if auto_babysit_record(&j).0 >= cap {
             if dry {
                 outln!(io, "{head}: {cap} of {cap} automatic babysits used");
             }
             continue;
         }
+        let entry = (j.clone(), n.parse().unwrap(), cap);
         match groups.iter_mut().find(|(r, _)| *r == repo) {
-            Some(slot) => slot.1 += 1,
-            None => groups.push((repo, 1)),
+            Some(slot) => slot.1.push(entry),
+            None => groups.push((repo, vec![entry])),
         }
     }
-    if let Some((repo, n)) = groups.first() {
-        let limit = auto_babysit_limit();
-        if *n > limit {
-            errln!(io, "factory.py: pickup checks {limit} of {n} auto-babysit candidates for {repo} this run, oldest automatic babysit first");
+    let limit = auto_babysit_limit();
+    let mut pending = Vec::new();
+    for (repo, mut jobs) in groups {
+        jobs.sort_by(|a, b| auto_babysit_at(&a.0).cmp(auto_babysit_at(&b.0)));
+        if jobs.len() > limit {
+            errln!(io, "factory.py: pickup checks {limit} of {} auto-babysit candidates for {repo} this run, oldest automatic babysit first", jobs.len());
         }
-        return Err(deferred("auto-babysit PR signals"));
+        jobs.truncate(limit);
+        let numbers: Vec<u64> = jobs.iter().map(|(_, n, _)| *n).collect();
+        let handled: BTreeMap<u64, Map<String, Value>> = jobs
+            .iter()
+            .map(|(j, n, _)| (*n, checks::valid_handled(j.get("handled"))))
+            .collect();
+        let signals = match pr_signals(&repo, &numbers, device, &handled) {
+            Ok(signals) => signals,
+            Err(why) => {
+                errln!(
+                    io,
+                    "factory.py: pickup skips auto-babysit for {repo}: {why}"
+                );
+                continue;
+            }
+        };
+        for (j, n, cap) in jobs {
+            let Some((head, Some(reason))) = signals.get(&n).cloned() else {
+                continue;
+            };
+            let (job_id, project) = (text_of(j.get("id")), text_of(j.get("project")));
+            let (count, last_head, last_reason) = auto_babysit_record(&j);
+            if head == last_head && last_reason == reason {
+                if dry {
+                    let Some(head) = head.as_str() else {
+                        return Err(fail(
+                            format!("auto-babysit {job_id}: PR head is not a string"),
+                            1,
+                        ));
+                    };
+                    let short: String = head.chars().take(7).collect();
+                    outln!(
+                        io,
+                        "skip auto-babysit {job_id} {project}: already babysat {reason} at {short}"
+                    );
+                }
+                continue;
+            }
+            let copy = auto_babysit_copy(reason);
+            if dry {
+                outln!(
+                    io,
+                    "would auto-babysit {job_id} {project}: PR #{n} {copy} ({} of {cap})",
+                    count + 1
+                );
+                continue;
+            }
+            pending.push((j, n, cap, head, reason, copy));
+        }
+    }
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let rows = cas(home, "/api/board", |text| {
+        let mut board = load_board(text)?;
+        ops::board_jobs(&board)?;
+        let mut rows = Vec::new();
+        for (j, n, cap, head, reason, copy) in &pending {
+            let job_id = get_str(j, "id").unwrap();
+            let Some(found) = job_index(&board, job_id).map(|b| &board["jobs"][b]) else {
+                continue;
+            };
+            if auto_babysit_match(found).is_none()
+                || found["pr"] != j["pr"]
+                || found["project"] != j["project"]
+                || claims::blocking(Some(found), device, "", minutes)?.is_some()
+            {
+                continue;
+            }
+            let (count, last_head, last_reason) = auto_babysit_record(found);
+            if count >= *cap || (*head == last_head && last_reason == *reason) {
+                continue;
+            }
+            let stamp = now();
+            let row = patch_job(
+                &mut board,
+                job_id,
+                &json!({
+                    "babysit": {"at": stamp, "via": "pickup", "by": device, "reason": reason},
+                    "auto_babysit": {"count": count + 1, "head": head, "reason": reason, "at": stamp},
+                    "note": format!("auto-babysitting PR #{n}: it {copy}")}),
+            );
+            rows.push((j.clone(), *n, *cap, *copy, row));
+        }
+        Ok(((!rows.is_empty()).then(|| dump_board(&board)), rows))
+    })?;
+    for (j, n, cap, copy, row) in rows {
+        let jobs = data["jobs"].as_array_mut().unwrap();
+        if let Some(slot) = jobs.iter_mut().find(|x| **x == j) {
+            *slot = row.clone();
+        }
+        outln!(
+            io,
+            "auto-babysat {} {}: PR #{n} {copy} ({} of {cap})",
+            text_of(j.get("id")),
+            text_of(j.get("project")),
+            text_of(row["auto_babysit"].get("count"))
+        );
     }
     Ok(())
 }
@@ -8634,6 +8782,12 @@ exit "$code"
                     checkout_problem: Some(Rc::new(|_, _, _| Ok(None))),
                     orphan_pickup_scan: Some(Rc::new(|_| {})),
                     outcomes_pickup_record: Some(Rc::new(|_| {})),
+                    pr_states: Some(Rc::new(|_, numbers, _| {
+                        Ok(numbers
+                            .iter()
+                            .map(|n| (*n, (json!("OPEN"), Value::Null)))
+                            .collect())
+                    })),
                     launch_wait_seconds: Some(60.0),
                     ..Fakes::default()
                 }
@@ -16511,11 +16665,77 @@ exit "$archive_code"
         }
     }
 
-    /// Reading PR signals waits on the checks slice. A pr-open job in such a project reaches the PR
-    /// state sync first, which waits on the same slice, so each test checks that gate and calls the
-    /// pass on its own for its skip lines.
+    /// Python's AutoBabysitTest with pr_signals faked as Python patches it. Its pr_signals and
+    /// pr_signal tests live in checks.rs; here the same names check what the pass does with a
+    /// parsed answer.
     mod auto_babysit_test {
         use super::*;
+
+        const HEAD: &str = "abc12340000000000000000000000000000000000";
+        const LINT: &str = "check:da966368ea663ea5";
+        const THREAD: &str = "thread:892c9835f792e6f5";
+
+        type Read = (String, Vec<u64>, BTreeMap<u64, Map<String, Value>>);
+
+        /// The pr_signals fake: it logs each read, applies race to 042-sample-export's board row,
+        /// then fails with failure or answers from signals.
+        struct Sig {
+            signals: Rc<RefCell<BTreeMap<u64, (Value, Option<&'static str>)>>>,
+            reads: Rc<RefCell<Vec<Read>>>,
+            failure: Rc<RefCell<Option<String>>>,
+            race: Rc<RefCell<Option<Value>>>,
+        }
+
+        fn signals(fx: &Fx) -> Sig {
+            let sig = Sig {
+                signals: Rc::new(RefCell::new(BTreeMap::new())),
+                reads: Rc::new(RefCell::new(Vec::new())),
+                failure: Rc::new(RefCell::new(None)),
+                race: Rc::new(RefCell::new(None)),
+            };
+            let (signals, reads, failure, race, state) = (
+                sig.signals.clone(),
+                sig.reads.clone(),
+                sig.failure.clone(),
+                sig.race.clone(),
+                fx.state.clone(),
+            );
+            fx.set_fakes(|f| {
+                f.pr_signals = Some(Rc::new(move |repo, numbers, _, handled| {
+                    reads
+                        .borrow_mut()
+                        .push((repo.to_string(), numbers.to_vec(), handled.clone()));
+                    if let Some(race) = race.borrow().clone() {
+                        let mut st = state.borrow_mut();
+                        let job = st.board["jobs"]
+                            .as_array_mut()
+                            .unwrap()
+                            .iter_mut()
+                            .find(|j| j["id"] == "042-sample-export")
+                            .unwrap();
+                        for (k, v) in race.as_object().unwrap() {
+                            job[k] = v.clone();
+                        }
+                    }
+                    if let Some(why) = failure.borrow().clone() {
+                        return Err(why);
+                    }
+                    Ok(numbers
+                        .iter()
+                        .filter_map(|n| Some((*n, signals.borrow().get(n)?.clone())))
+                        .collect())
+                }))
+            });
+            sig
+        }
+
+        fn fix_ci() -> (Value, Option<&'static str>) {
+            (json!(HEAD), Some("fix-ci"))
+        }
+
+        fn handled(entries: Value) -> Map<String, Value> {
+            entries.as_object().unwrap().clone()
+        }
 
         fn setup() -> Fx {
             let fx = Fx::new();
@@ -16591,32 +16811,94 @@ exit "$archive_code"
             )
         }
 
-        fn gate(fx: &Fx, jobs: Value) {
-            fx.jobs(jobs.clone());
-            for args in [&[][..], &["--dry-run"]] {
-                assert_deferred_run(fx, args, "PR state sync");
-            }
-            assert_eq!(pass(fx, true), out_err(2, "", "factory.py: pickup auto-babysit PR signals is not ported to the Rust binary yet\n"));
-            assert!(fx.puts().is_empty());
-            assert_eq!(fx.state.borrow().board["jobs"], jobs);
-        }
-
         fn one(extra: Value) -> Value {
             json!([export("042-sample-export", "alpha", 7, extra)])
+        }
+
+        fn board_puts(fx: &Fx) -> usize {
+            fx.puts().iter().filter(|c| c.1 == "/api/board").count()
         }
 
         #[test]
         fn test_dry_run_and_launch() {
             let fx = setup();
-            gate(
-                &fx,
-                one(json!({"priority": {"at": "2026-01-01T00:00:00Z"}})),
+            let sig = signals(&fx);
+            fx.jobs(one(json!({"priority": {"at": "2026-01-01T00:00:00Z"}})));
+            sig.signals.borrow_mut().insert(7, fix_ci());
+            let idle = format!("host {DEVICE}: would launch 0\n");
+            let line = "042-sample-export alpha: PR #7 has a failing required check (1 of 3)";
+            assert_eq!(
+                fx.pickup(&["--dry-run"]),
+                out_err(0, &format!("would auto-babysit {line}\n{idle}"), "")
+            );
+            assert!(fx.puts().is_empty());
+            assert_eq!(
+                *sig.reads.borrow(),
+                [(
+                    "sample/alpha".to_string(),
+                    vec![7],
+                    BTreeMap::from([(7, Map::new())])
+                )]
+            );
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let job = fx.job("042-sample-export");
+            let tag = job["claim"]["session"].as_str().unwrap().to_string();
+            assert_eq!(
+                out,
+                format!("auto-babysat {line}\nlaunched babysit 042-sample-export alpha on primary session {tag}\n")
+            );
+            let at = job["babysit"]["at"].clone();
+            assert_eq!(
+                job["babysit"],
+                json!({"at": at, "via": "pickup", "by": DEVICE, "reason": "fix-ci"})
+            );
+            assert_eq!(
+                job["auto_babysit"],
+                json!({"count": 1, "head": HEAD, "reason": "fix-ci", "at": at})
+            );
+            assert_eq!(
+                job["note"],
+                "auto-babysitting PR #7: it has a failing required check"
+            );
+            assert_eq!(job["priority"], json!({"at": "2026-01-01T00:00:00Z"}));
+            assert!(job.get("needs").is_none());
+            assert!(fx.launched()[0].argv[7].contains("/factory babysit 042-sample-export"));
+            {
+                let mut st = fx.state.borrow_mut();
+                let row = st.board["jobs"][0].as_object_mut().unwrap();
+                row.shift_remove("babysit");
+                row.shift_remove("claim");
+            }
+            fx.clear_calls();
+            assert_eq!(
+                fx.pickup(&["--dry-run"]),
+                out_err(
+                    0,
+                    &format!("skip auto-babysit 042-sample-export alpha: already babysat fix-ci at abc1234\n{idle}"),
+                    ""
+                )
+            );
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert!(fx.puts().is_empty());
+            sig.signals.borrow_mut().insert(
+                7,
+                (json!(format!("def5678{}", "0".repeat(33))), Some("fix-ci")),
+            );
+            assert_eq!(
+                fx.pickup(&["--dry-run"]),
+                out_err(
+                    0,
+                    &format!("would auto-babysit 042-sample-export alpha: PR #7 has a failing required check (2 of 3)\n{idle}"),
+                    ""
+                )
             );
         }
 
         #[test]
         fn test_guards() {
             let fx = setup();
+            let sig = signals(&fx);
             fx.jobs(json!([
                 export("043-sample-export", "alpha", 13, json!({"auto_babysit": {"count": 3, "head": "x", "reason": "rebase"}})),
                 export("044-sample-export", "alpha", 14, json!({"needs": "approve PR #14"})),
@@ -16631,54 +16913,122 @@ exit "$archive_code"
                 export("053-sample-export", "beta", 23, json!({})),
                 export("054-sample-export", "echo", 24, json!({})),
                 export("055-sample-export", "fox", 25, json!({}))]));
-            let (code, out, err) = pass(&fx, true);
+            *sig.signals.borrow_mut() = (13..26).map(|n| (n, fix_ci())).collect();
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
             assert_eq!((code, err.as_str()), (0, ""));
-            assert_eq!(lines(&out), ["skip auto-babysit 043-sample-export alpha: 3 of 3 automatic babysits used", "skip auto-babysit 049-sample-export alpha: claimed by other-host session s1", "skip auto-babysit 054-sample-export echo: no Babysit note", &format!("skip auto-babysit 055-sample-export fox: pickup does not list host {DEVICE}")]);
-            assert!(fx.puts().is_empty());
+            let skips: Vec<&str> = lines(&out)
+                .into_iter()
+                .filter(|l| l.contains("auto-babysit"))
+                .collect();
+            assert_eq!(
+                skips,
+                [
+                    "skip auto-babysit 043-sample-export alpha: 3 of 3 automatic babysits used",
+                    "skip auto-babysit 049-sample-export alpha: claimed by other-host session s1",
+                    "skip auto-babysit 054-sample-export echo: no Babysit note",
+                    &format!("skip auto-babysit 055-sample-export fox: pickup does not list host {DEVICE}")
+                ]
+            );
+            assert!(sig.reads.borrow().is_empty() && fx.puts().is_empty());
+            let (_, out, _) = fx.pickup(&[]);
+            assert!(!out.contains("auto-babysat"));
+            assert!(fx.job("044-sample-export").get("auto_babysit").is_none());
+            assert!(sig.reads.borrow().is_empty());
         }
 
         #[test]
         fn test_a_failed_read_skips_the_repo() {
             let fx = setup();
-            gate(&fx, one(json!({})));
+            let sig = signals(&fx);
+            fx.jobs(one(json!({})));
+            sig.signals.borrow_mut().insert(7, fix_ci());
+            *sig.failure.borrow_mut() = Some("gh is not installed on host-a".into());
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: pickup skips auto-babysit for sample/alpha: gh is not installed on host-a\n"
+                )
+            );
+            assert_eq!(sig.reads.borrow().len(), 1);
+            assert!(fx.puts().is_empty());
+            assert!(fx.job("042-sample-export").get("babysit").is_none());
         }
 
         #[test]
         fn test_over_the_limit_reads_the_oldest_first() {
             let fx = setup();
+            let sig = signals(&fx);
             fx.set_fakes(|f| f.auto_babysit_limit = Some(1));
             fx.jobs(json!([export("042-sample-export", "alpha", 7, json!({"auto_babysit": {"count": 1, "head": "x", "reason": "rebase", "at": "2026-01-02T00:00:00Z"}})), export("043-sample-export", "alpha", 8, json!({}))]));
-            assert_eq!(pass(&fx, false), out_err(2, "", "factory.py: pickup checks 1 of 2 auto-babysit candidates for sample/alpha this run, oldest automatic babysit first\nfactory.py: pickup auto-babysit PR signals is not ported to the Rust binary yet\n"));
+            let (code, _, err) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert_eq!(
+                *sig.reads.borrow(),
+                [(
+                    "sample/alpha".to_string(),
+                    vec![8],
+                    BTreeMap::from([(8, Map::new())])
+                )]
+            );
+            assert_eq!(err, "factory.py: pickup checks 1 of 2 auto-babysit candidates for sample/alpha this run, oldest automatic babysit first\n");
         }
 
         #[test]
         fn test_the_write_rechecks_the_job() {
             let fx = setup();
-            gate(&fx, one(json!({})));
+            let sig = signals(&fx);
+            for race in [
+                json!({"babysit": {"at": "2026-01-02T12:00:00Z", "by": "dashboard"}}),
+                json!({"auto_babysit": {"count": 3, "head": "x", "reason": "rebase"}}),
+            ] {
+                fx.clear_calls();
+                fx.jobs(one(json!({})));
+                sig.signals.borrow_mut().insert(7, fix_ci());
+                *sig.race.borrow_mut() = Some(race.clone());
+                assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+                assert!(fx.puts().is_empty());
+                assert_eq!(
+                    fx.job("042-sample-export"),
+                    export("042-sample-export", "alpha", 7, race)
+                );
+            }
         }
 
         #[test]
         fn test_two_jobs_make_one_board_write() {
             let fx = setup();
-            gate(
-                &fx,
-                json!([
-                    export("042-sample-export", "alpha", 7, json!({})),
-                    export("043-sample-export", "alpha", 8, json!({}))
-                ]),
-            );
+            let sig = signals(&fx);
+            fx.jobs(json!([
+                export("042-sample-export", "alpha", 7, json!({})),
+                export("043-sample-export", "alpha", 8, json!({}))
+            ]));
+            *sig.signals.borrow_mut() = BTreeMap::from([(7, fix_ci()), (8, fix_ci())]);
+            let (code, out, err) = pass(&fx, false);
+            assert_eq!((code, err.as_str(), board_puts(&fx)), (0, "", 1));
+            assert_eq!(out, "auto-babysat 042-sample-export alpha: PR #7 has a failing required check (1 of 3)\nauto-babysat 043-sample-export alpha: PR #8 has a failing required check (1 of 3)\n");
+            for job_id in ["042-sample-export", "043-sample-export"] {
+                assert_eq!(fx.job(job_id)["auto_babysit"]["count"], 1);
+            }
         }
 
         #[test]
         fn test_the_write_rechecks_each_row() {
             let fx = setup();
-            gate(
-                &fx,
-                json!([
-                    export("042-sample-export", "alpha", 7, json!({})),
-                    export("043-sample-export", "alpha", 8, json!({}))
-                ]),
-            );
+            let sig = signals(&fx);
+            fx.jobs(json!([
+                export("042-sample-export", "alpha", 7, json!({})),
+                export("043-sample-export", "alpha", 8, json!({}))
+            ]));
+            *sig.signals.borrow_mut() = BTreeMap::from([(7, fix_ci()), (8, fix_ci())]);
+            *sig.race.borrow_mut() =
+                Some(json!({"babysit": {"at": "2026-01-02T12:00:00Z", "by": "dashboard"}}));
+            let (code, out, err) = pass(&fx, false);
+            assert_eq!((code, err.as_str(), board_puts(&fx)), (0, "", 1));
+            assert_eq!(out, "auto-babysat 043-sample-export alpha: PR #8 has a failing required check (1 of 3)\n");
+            assert!(fx.job("042-sample-export").get("auto_babysit").is_none());
+            assert_eq!(fx.job("043-sample-export")["auto_babysit"]["count"], 1);
         }
 
         /// The board command belongs to the claims slice and is not ported yet, so it writes nothing.
@@ -16693,51 +17043,93 @@ exit "$archive_code"
         #[test]
         fn test_pr_signals_sends_one_query_per_repo() {
             let fx = setup();
-            gate(
-                &fx,
-                json!([
-                    export("042-sample-export", "alpha", 7, json!({})),
-                    export("043-sample-export", "alpha", 8, json!({}))
-                ]),
+            let sig = signals(&fx);
+            fx.jobs(json!([
+                export("042-sample-export", "alpha", 7, json!({})),
+                export(
+                    "043-sample-export",
+                    "alpha",
+                    8,
+                    json!({"handled": {LINT: {"count": 3, "at": "2026-01-02T12:00:00Z"}}})
+                )
+            ]));
+            *sig.signals.borrow_mut() = BTreeMap::from([(7, fix_ci()), (8, (json!(HEAD), None))]);
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("would auto-babysit 042-sample-export alpha: PR #7 has a failing required check (1 of 3)\nhost {DEVICE}: would launch 0\n"), ""));
+            assert_eq!(
+                *sig.reads.borrow(),
+                [(
+                    "sample/alpha".to_string(),
+                    vec![7, 8],
+                    BTreeMap::from([
+                        (7, Map::new()),
+                        (
+                            8,
+                            handled(json!({LINT: {"count": 3, "at": "2026-01-02T12:00:00Z"}}))
+                        )
+                    ])
+                )]
             );
         }
 
+        /// Each reason pr_signals reads prints its own copy.
         #[test]
         fn test_pr_signals_follow_the_reading_order() {
             let fx = setup();
-            gate(&fx, one(json!({})));
+            let sig = signals(&fx);
+            fx.jobs(one(json!({})));
+            for (reason, copy) in [
+                ("fix-reviews", "has an open review thread"),
+                ("rebase", "has a merge conflict"),
+                ("fix-ci", "has a failing required check"),
+            ] {
+                sig.signals
+                    .borrow_mut()
+                    .insert(7, (json!(HEAD), Some(reason)));
+                assert_eq!(
+                    lines(&fx.pickup(&["--dry-run"]).1)[0],
+                    format!("would auto-babysit 042-sample-export alpha: PR #7 {copy} (1 of 3)")
+                );
+            }
         }
 
+        /// A PR whose only signals are capped reads as no reason, and pickup leaves it alone.
         #[test]
         fn test_pr_signal_skips_capped_items() {
             let fx = setup();
-            gate(
-                &fx,
-                one(
-                    json!({"handled": {"check:da966368ea663ea5": {"count": 3, "at": "2026-01-02T12:00:00Z"}}}),
-                ),
-            );
+            let sig = signals(&fx);
+            fx.jobs(one(
+                json!({"handled": {LINT: {"count": 3, "at": "2026-01-02T12:00:00Z"}}}),
+            ));
+            sig.signals.borrow_mut().insert(7, (json!(HEAD), None));
+            fx.assert_silent(fx.pickup(&[]));
+            assert!(fx.job("042-sample-export").get("auto_babysit").is_none());
         }
 
         #[test]
         fn test_pr_signal_skips_handled_threads() {
             let fx = setup();
-            gate(
-                &fx,
-                one(
-                    json!({"handled": {"thread:892c9835f792e6f5": {"count": 1, "at": "2026-01-02T12:00:00Z"}}}),
-                ),
-            );
+            let sig = signals(&fx);
+            let thread = json!({THREAD: {"count": 1, "at": "2026-01-02T12:00:00Z"}});
+            fx.jobs(one(json!({"handled": thread})));
+            sig.signals.borrow_mut().insert(7, (json!(HEAD), None));
+            fx.assert_silent(fx.pickup(&[]));
+            assert_eq!(sig.reads.borrow()[0].2[&7], handled(thread));
         }
 
         #[test]
         fn test_pass_hands_handled_to_pr_signals() {
             let fx = setup();
-            gate(
-                &fx,
-                one(
-                    json!({"handled": {"check:da966368ea663ea5": {"count": 1, "at": "2026-01-02T12:00:00Z"}}}),
-                ),
+            let sig = signals(&fx);
+            let capped = json!({"count": 3, "at": "2026-01-02T12:00:00Z"});
+            fx.jobs(one(json!({"handled": {LINT: capped, "bogus": capped}})));
+            assert_eq!(fx.pickup(&["--dry-run"]).0, 0);
+            assert_eq!(
+                *sig.reads.borrow(),
+                [(
+                    "sample/alpha".to_string(),
+                    vec![7],
+                    BTreeMap::from([(7, handled(json!({LINT: capped})))])
+                )]
             );
         }
     }
@@ -18026,39 +18418,6 @@ exit "$archive_code"
             )
             .unwrap();
             alpha_on(fx);
-        }
-
-        #[test]
-        fn auto_babysit_pr_signals() {
-            let fx = Fx::new();
-            alpha_repo(&fx);
-            fx.view(
-                "alpha",
-                200,
-                with(
-                    effective("alpha", Some(json!({"pickup": on()})), None),
-                    json!({"stage_notes": {"babysit": [{"text": "Fix it."}]}}),
-                ),
-            );
-            let mut data = json!({"jobs": [{"id": "042-sample-export", "stage": "pr-open", "project": "alpha", "pr": "https://github.com/sample/alpha/pull/7", "updated": "2026-01-01T00:00:00Z"}]});
-            let (mut out, mut err) = (Vec::new(), Vec::new());
-            let mut io = Io {
-                out: &mut out,
-                err: &mut err,
-            };
-            let paths = paths_of(&fx.home).unwrap();
-            let e = auto_babysit_pass(
-                &mut io,
-                &fx.home,
-                &mut data,
-                DEVICE,
-                120,
-                &paths,
-                &mut HashMap::new(),
-                false,
-            )
-            .unwrap_err();
-            assert_eq!((e.code, e.stderr.as_str()), (2, "factory.py: pickup auto-babysit PR signals is not ported to the Rust binary yet\n"));
         }
     }
 }
