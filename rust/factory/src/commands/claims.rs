@@ -1093,8 +1093,8 @@ mod tests {
 
     const NO_PASEO: &[(&str, &str)] = &[("PASEO_AGENT_ID", ""), ("FACTORY_SESSION", "s")];
 
-    /// PASEO_HOME with a server id and an agent, so paseo_session links, and a FACTORY_HOME that cannot resolve.
-    fn paseo_without_home(name: &str) -> PathBuf {
+    /// A PASEO_HOME folder with a server id, so paseo_session links once PASEO_AGENT_ID is set.
+    fn paseo_home(name: &str) -> PathBuf {
         let paseo = temp_dir(name);
         fs::write(paseo.join("server-id"), "srv_new\n").unwrap();
         paseo
@@ -1193,7 +1193,7 @@ mod tests {
 
     #[test]
     fn board_resolves_home_before_the_write() {
-        let paseo = paseo_without_home("claims-paseo-board");
+        let paseo = paseo_home("claims-paseo-board");
         let home = refused_home("claims-home-board");
         let opts = WriteOpts { show: false, verdict: None, rewrite_round: None };
         let patch = json!({"note": "checking"}).as_object().unwrap().clone();
@@ -1204,7 +1204,7 @@ mod tests {
 
     #[test]
     fn claim_id_resolves_home_before_the_write() {
-        let paseo = paseo_without_home("claims-paseo-claim");
+        let paseo = paseo_home("claims-paseo-claim");
         let home = refused_home("claims-home-claim");
         let vars = [("PASEO_HOME", paseo.to_str().unwrap()), ("PASEO_AGENT_ID", "agent_new"), ("FACTORY_HOME", "relative"), ("FACTORY_SESSION", "s")];
         let e = with_env(&vars, || claim_id(&home, "sample-export", "sample", None)).unwrap_err();
@@ -1214,7 +1214,7 @@ mod tests {
 
     #[test]
     fn claim_id_resolves_home_before_the_folder_and_session() {
-        let paseo = paseo_without_home("claims-paseo-fresh");
+        let paseo = paseo_home("claims-paseo-fresh");
         let fresh = temp_dir("claims-fresh").join("fresh");
         let vars = [("PASEO_HOME", paseo.to_str().unwrap()), ("PASEO_AGENT_ID", "agent_new"), ("FACTORY_HOME", "relative"), ("FACTORY_SESSION", "")];
         let session = with_env(&vars, || {
