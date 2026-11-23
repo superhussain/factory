@@ -35,7 +35,6 @@ const CATCH_UP_HOME_FILES: [&str; 5] = [
 ];
 static CHECKOUT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Flags::NONE);
 static REPO_PATH: Pattern = Pattern::new("[A-Za-z0-9_./-]{1,200}", Flags::ASCII);
-static BUNDLE_HASH: Pattern = Pattern::new("[0-9a-f]{7,64}", Flags::NONE);
 static GITHUB: Pattern = Pattern::new(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", Flags::NONE);
 const TIMER_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -262,17 +261,10 @@ fn catch_up_entry(skill: &Path) -> Vec<String> {
     argv
 }
 
-/// {commit, tree} from the bundle.json install.py writes in skill, or None.
+/// {commit, tree} from the bundle.json install.py writes in skill, or None. A Rust build adds entry
+/// and binary_sha256 beside them.
 fn bundle_stamp(skill: &Path) -> Option<Value> {
-    let stamp = loads(&read_text(&skill.join("bundle.json")).ok()?).ok()?;
-    let map = stamp.as_object()?;
-    let ok = map.len() == 2
-        && ["commit", "tree"].iter().all(|k| {
-            map.get(*k)
-                .and_then(Value::as_str)
-                .is_some_and(|v| BUNDLE_HASH.is_full(v))
-        });
-    ok.then_some(stamp)
+    crate::commands::setup::stamp_of(&loads(&read_text(&skill.join("bundle.json")).ok()?).ok()?)
 }
 
 /// `shutil.copy2`: the file's bytes and mode, then its mtime. dst may be a folder.
@@ -748,6 +740,7 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
 mod tests {
     use super::*;
     use crate::shared::fs::{temp_dir, TEMP_ROOT};
+    use serde_json::json;
     use std::collections::VecDeque;
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
@@ -1272,6 +1265,27 @@ mod tests {
             .unwrap();
             assert_eq!(catch_up_entry(&folder), fallback, "{entry}");
         }
+    }
+
+    #[test]
+    fn rust_bundle_keeps_its_stamp_and_entry() {
+        let skill = temp_dir("catch-up-rust-bundle");
+        let (commit, tree) = ("a".repeat(40), "b".repeat(64));
+        let bundle = json!({"commit": commit, "tree": tree, "entry": ["runtime/factory"],
+                            "binary_sha256": "c".repeat(64)});
+        fs::write(skill.join("bundle.json"), bundle.to_string()).unwrap();
+        assert_eq!(
+            bundle_stamp(&skill),
+            Some(json!({"commit": commit, "tree": tree}))
+        );
+        assert_eq!(
+            catch_up_entry(&skill),
+            vec![skill.join("runtime/factory").to_string_lossy().into_owned()]
+        );
+        let unknown = json!({"commit": commit, "tree": tree, "extra": "c"});
+        fs::write(skill.join("bundle.json"), unknown.to_string()).unwrap();
+        assert_eq!(bundle_stamp(&skill), None);
+        fs::remove_dir_all(skill).unwrap();
     }
 
     #[test]
