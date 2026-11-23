@@ -1065,11 +1065,90 @@
       "exit": 0,
       "from": "tests/cli/test_retro.py::RetroUploadTest.test_a_failed_request_keeps_the_exit_code"
     },
-    {"id": "retro/admit-card-admitted", "argv": ["--home", "{home}", "retro", "admit", "card-admitted"], "home": "retro-cards", "stubs": {}, "routes": {"GET /projects.json": [200, [{"slug": "factory"}, {"slug": "sample-tools"}]], "GET /api/board": [200, {"updated": "", "jobs": [], "autonomy": {"paused": false}}], "GET /api/backlog": [404, ""], "PUT /api/backlog": [200, ""], "PUT /api/retros/card-admitted": [200, ""]}, "exit": 0},
-    {"id": "retro/admit-card-links-red-flags", "argv": ["--home", "{home}", "retro", "admit", "card-red-flag"], "home": "retro-cards", "stubs": {}, "routes": {"GET /projects.json": [200, [{"slug": "factory"}, {"slug": "sample-tools"}]], "GET /api/board": [200, {"updated": "", "jobs": [], "autonomy": {"paused": false}}], "GET /api/backlog": [404, ""], "PUT /api/backlog": [200, ""], "PUT /api/retros/card-red-flag": [200, ""], "POST /api/audit-flags/backlog": [200, "{\"linked\": 2}"]}, "exit": 0},
-    {"id": "retro/admit-card-bad-link", "argv": ["--home", "{home}", "retro", "admit", "card-bad-link"], "home": "retro-cards", "stubs": {}, "routes": {"GET /projects.json": [200, [{"slug": "factory"}, {"slug": "sample-tools"}]], "GET /api/board": [200, {"updated": "", "jobs": [], "autonomy": {"paused": false}}], "GET /api/backlog": [404, ""], "PUT /api/backlog": [200, ""], "PUT /api/retros/card-bad-link": [200, ""]}, "exit": 2},
-    {"id": "retro/admit-card-autonomy-paused", "argv": ["--home", "{home}", "retro", "admit", "card-paused"], "home": "retro-cards", "stubs": {}, "routes": {"GET /projects.json": [200, [{"slug": "factory"}, {"slug": "sample-tools"}]], "GET /api/board": [200, {"updated": "", "jobs": [], "autonomy": {"paused": true}}], "GET /api/backlog": [404, ""], "PUT /api/backlog": [200, ""], "PUT /api/retros/card-paused": [200, ""]}, "exit": 3},
-    {"id": "retro/admit-lesson-card-queued", "argv": ["--home", "{home}", "retro", "admit", "lesson-card"], "home": "retro-cards", "stubs": {}, "routes": {"GET /projects.json": [200, [{"slug": "factory"}, {"slug": "sample-tools"}]], "GET /api/board": [200, {"updated": "", "jobs": [], "autonomy": {"paused": false}}], "GET /api/backlog": [404, ""], "PUT /api/backlog": [200, ""], "PUT /api/retros/lesson-card": [200, ""]}, "exit": 0},
-    {"id": "retro/admit-lesson-card-rejected", "argv": ["--home", "{home}", "retro", "admit", "lesson-card-bad"], "home": "retro-cards", "stubs": {}, "routes": {"GET /projects.json": [200, [{"slug": "factory"}, {"slug": "sample-tools"}]], "GET /api/board": [200, {"updated": "", "jobs": [], "autonomy": {"paused": false}}], "GET /api/backlog": [404, ""], "PUT /api/backlog": [200, ""], "PUT /api/retros/lesson-card-bad": [200, ""]}, "exit": 0}
+    {
+      "id": "retro/admit-card-admitted",
+      "argv": ["--home", "{home}", "retro", "admit", "card-admitted"],
+      "home": "retro-cards",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
+        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": false } }],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-admitted": [200, ""]
+      },
+      "exit": 0
+    },
+    {
+      "id": "retro/admit-card-links-red-flags",
+      "argv": ["--home", "{home}", "retro", "admit", "card-red-flag"],
+      "home": "retro-cards",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
+        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": false } }],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-red-flag": [200, ""],
+        "POST /api/audit-flags/backlog": [200, "{\"linked\": 2}"]
+      },
+      "exit": 0
+    },
+    {
+      "id": "retro/admit-card-bad-link",
+      "argv": ["--home", "{home}", "retro", "admit", "card-bad-link"],
+      "home": "retro-cards",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
+        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": false } }],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-bad-link": [200, ""]
+      },
+      "exit": 2
+    },
+    {
+      "id": "retro/admit-card-autonomy-paused",
+      "argv": ["--home", "{home}", "retro", "admit", "card-paused"],
+      "home": "retro-cards",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
+        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": true } }],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-paused": [200, ""]
+      },
+      "exit": 3
+    },
+    {
+      "id": "retro/admit-lesson-card-queued",
+      "argv": ["--home", "{home}", "retro", "admit", "lesson-card"],
+      "home": "retro-cards",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
+        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": false } }],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/lesson-card": [200, ""]
+      },
+      "exit": 0
+    },
+    {
+      "id": "retro/admit-lesson-card-rejected",
+      "argv": ["--home", "{home}", "retro", "admit", "lesson-card-bad"],
+      "home": "retro-cards",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
+        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": false } }],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/lesson-card-bad": [200, ""]
+      },
+      "exit": 0
+    }
   ]
 }

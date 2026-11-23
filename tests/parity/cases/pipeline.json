@@ -14557,9 +14557,123 @@
       "exit": 4,
       "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
     },
-    {"id": "pipeline/grounding-bad-round", "argv": ["--home", "{home}", "grounding", "sample/042-sample-export", "0"], "home": "pipeline-grounding", "stubs": {}, "env": {"FACTORY_SESSION": "s1"}, "routes": {"GET /api/board": [200, {"updated": "", "jobs": [{"id": "042-sample-export", "project": "sample", "stage": "review", "round": 1, "started": "2999-01-01T00:00:00Z", "rounds": [{"security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS"}]}]}], "PUT /api/board": [200, ""], "GET /api/jobs/sample/042-sample-export/?etags=1": [200, []]}, "exit": 2},
-    {"id": "pipeline/grounding-no-rounds-entry", "argv": ["--home", "{home}", "grounding", "sample/042-sample-export", "2"], "home": "pipeline-grounding", "stubs": {}, "env": {"FACTORY_SESSION": "s1"}, "routes": {"GET /api/board": [200, {"updated": "", "jobs": [{"id": "042-sample-export", "project": "sample", "stage": "review", "round": 1, "started": "2999-01-01T00:00:00Z", "rounds": [{"security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS"}]}]}], "PUT /api/board": [200, ""], "GET /api/jobs/sample/042-sample-export/?etags=1": [200, []]}, "exit": 4},
-    {"id": "pipeline/grounding-no-worktree", "argv": ["--home", "{home}", "grounding", "sample/042-sample-export", "1"], "home": "pipeline-grounding", "stubs": {}, "env": {"FACTORY_SESSION": "s1"}, "routes": {"GET /api/board": [200, {"updated": "", "jobs": [{"id": "042-sample-export", "project": "sample", "stage": "review", "round": 1, "started": "2999-01-01T00:00:00Z", "rounds": [{"security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS"}]}]}], "PUT /api/board": [200, ""], "GET /api/jobs/sample/042-sample-export/?etags=1": [200, []]}, "exit": 4},
-    {"id": "pipeline/grounding-held-elsewhere", "argv": ["--home", "{home}", "grounding", "sample/042-sample-export", "1"], "home": "pipeline-grounding", "stubs": {}, "env": {"FACTORY_SESSION": "s1"}, "routes": {"GET /api/board": [200, {"updated": "", "jobs": [{"id": "042-sample-export", "project": "sample", "stage": "review", "round": 1, "started": "2999-01-01T00:00:00Z", "rounds": [{"security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS"}], "claim": {"device": "studio-mac", "session": "other", "since": "2026-11-01T00:00:00Z", "seen": "2999-01-01T00:00:00Z"}}]}], "PUT /api/board": [200, ""], "GET /api/jobs/sample/042-sample-export/?etags=1": [200, []]}, "exit": 6}
+    {
+      "id": "pipeline/grounding-bad-round",
+      "argv": ["--home", "{home}", "grounding", "sample/042-sample-export", "0"],
+      "home": "pipeline-grounding",
+      "stubs": {},
+      "env": { "FACTORY_SESSION": "s1" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "project": "sample",
+                "stage": "review",
+                "round": 1,
+                "started": "2999-01-01T00:00:00Z",
+                "rounds": [{ "security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS" }]
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/?etags=1": [200, []]
+      },
+      "exit": 2
+    },
+    {
+      "id": "pipeline/grounding-no-rounds-entry",
+      "argv": ["--home", "{home}", "grounding", "sample/042-sample-export", "2"],
+      "home": "pipeline-grounding",
+      "stubs": {},
+      "env": { "FACTORY_SESSION": "s1" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "project": "sample",
+                "stage": "review",
+                "round": 1,
+                "started": "2999-01-01T00:00:00Z",
+                "rounds": [{ "security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS" }]
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/?etags=1": [200, []]
+      },
+      "exit": 4
+    },
+    {
+      "id": "pipeline/grounding-no-worktree",
+      "argv": ["--home", "{home}", "grounding", "sample/042-sample-export", "1"],
+      "home": "pipeline-grounding",
+      "stubs": {},
+      "env": { "FACTORY_SESSION": "s1" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "project": "sample",
+                "stage": "review",
+                "round": 1,
+                "started": "2999-01-01T00:00:00Z",
+                "rounds": [{ "security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS" }]
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/?etags=1": [200, []]
+      },
+      "exit": 4
+    },
+    {
+      "id": "pipeline/grounding-held-elsewhere",
+      "argv": ["--home", "{home}", "grounding", "sample/042-sample-export", "1"],
+      "home": "pipeline-grounding",
+      "stubs": {},
+      "env": { "FACTORY_SESSION": "s1" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-sample-export",
+                "project": "sample",
+                "stage": "review",
+                "round": 1,
+                "started": "2999-01-01T00:00:00Z",
+                "rounds": [{ "security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS" }],
+                "claim": {
+                  "device": "studio-mac",
+                  "session": "other",
+                  "since": "2026-11-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/?etags=1": [200, []]
+      },
+      "exit": 6
+    }
   ]
 }
