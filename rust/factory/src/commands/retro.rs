@@ -4,27 +4,28 @@ use std::collections::hash_map::RandomState;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::hash::{BuildHasher, Hasher};
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::board::load_board;
-use crate::shared::conf::{fm_get, frontmatter};
+use crate::shared::board::{dump_board, load_board};
+use crate::shared::conf::{fm_get, frontmatter, read_env_ordered};
 use crate::shared::consts::{
     tag_lookalike, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG,
+    PIPELINE_STAGES, RETRO_STAGES, SLUG,
 };
 use crate::shared::exit::{fail, Res};
-use crate::shared::fs::{is_link, write_atomic};
+use crate::shared::fs::{is_link, read_text, write_atomic};
 use crate::shared::home::factory_home;
-use crate::shared::http::{access_message, api, Response};
+use crate::shared::http::{access_message, api, cas, Response};
 use crate::shared::proc::hostname;
 use crate::shared::py::{is_space, os_error, printable_line, repr, round_int, splitlines, strip};
 use crate::shared::pyjson::{dumps, float_repr, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Captures, Flags, Pattern};
-use crate::shared::time::{format_stamp, unix_now};
+use crate::shared::time::{format_stamp, now, parse_stamp, unix_now};
 use crate::shared::unicode::nfkc;
 
 macro_rules! secret_words {
@@ -224,7 +225,7 @@ pub fn retro_cmd(call: &Call) -> Res<()> {
         return pull(&args[0]);
     }
     if action == "admit" && args.len() == 1 && RUN_TAG.is_full(&args[0]) {
-        return Err(not_ported("retro admit"));
+        return admit(&factory_home()?, &args[0]);
     }
     let most = match action {
         "digest" => 90,
@@ -1635,6 +1636,1025 @@ fn aggregate_in(home: &Path, today: &str, run: &str, days: i64, get: &mut Get) -
                 "findings": path("findings.md")}),
         INDENT2,
     ))
+}
+
+/// `x in container` for parsed JSON: list items, dict keys, or a substring of a string.
+fn py_in(x: &Value, container: &Value) -> bool {
+    match container {
+        Value::Array(items) => items.contains(x),
+        Value::Object(map) => x.as_str().is_some_and(|k| map.contains_key(k)),
+        Value::String(s) => x.as_str().is_some_and(|x| s.contains(x)),
+        _ => false,
+    }
+}
+
+fn check_keys(value: &Value, required: &[&str], optional: &[&str]) -> Option<String> {
+    let Some(map) = value.as_object() else {
+        return Some("must be an object".into());
+    };
+    let missing = required.iter().any(|k| !map.contains_key(*k));
+    let unknown = map
+        .keys()
+        .any(|k| !required.contains(&k.as_str()) && !optional.contains(&k.as_str()));
+    if !missing && !unknown {
+        return None;
+    }
+    let listed = |keys: &[&str]| {
+        let mut keys = keys.to_vec();
+        keys.sort();
+        format!(
+            "[{}]",
+            keys.iter().map(|k| repr(k)).collect::<Vec<_>>().join(", ")
+        )
+    };
+    let may = if optional.is_empty() {
+        String::new()
+    } else {
+        format!(", may have {}", listed(optional))
+    };
+    Some(format!("needs keys {}{may}", listed(required)))
+}
+
+fn check_list(value: &Value, lo: usize, hi: usize) -> Option<String> {
+    let fits = value
+        .as_array()
+        .is_some_and(|a| (lo..=hi).contains(&a.len()));
+    (!fits).then(|| format!("must be a list of {lo}-{hi} items"))
+}
+
+fn check_session_refs(value: &Value) -> Option<String> {
+    check_list(value, 1, 5).or_else(|| {
+        let bad = value
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| !r.as_str().is_some_and(|r| RETRO_SESSION_REF.is_full(r)));
+        bad.then(|| "must be host/session refs".into())
+    })
+}
+
+/// The first reply-level violation of the factory.retro/1 reply as "<where>: <problem>", or None.
+fn check_retro(doc: &Value) -> Option<String> {
+    if let Some(err) = check_keys(
+        doc,
+        &["schema", "run", "findings", "suggestions"],
+        &["edits"],
+    ) {
+        return Some(format!("reply: {err}"));
+    }
+    let none = json!([]);
+    let checks = [
+        (
+            "schema",
+            (doc["schema"] != json!(RETRO_REPLY_SCHEMA))
+                .then(|| format!("must be {RETRO_REPLY_SCHEMA}")),
+        ),
+        (
+            "run",
+            (!doc["run"].as_str().is_some_and(|r| RUN_TAG.is_full(r)))
+                .then(|| "must match [A-Za-z0-9_-]{1,64}".into()),
+        ),
+        ("findings", check_list(&doc["findings"], 1, 12)),
+        (
+            "suggestions",
+            check_list(&doc["suggestions"], 0, MAX_PER_RUN),
+        ),
+        (
+            "edits",
+            check_list(doc.get("edits").unwrap_or(&none), 0, MAX_RETRO_EDITS),
+        ),
+    ];
+    checks
+        .into_iter()
+        .find_map(|(at, err)| err.map(|err| format!("{at}: {err}")))
+}
+
+/// The characters changed between a and b once their shared prefix and suffix are trimmed:
+/// the removed ones plus the added ones. The Worker's changedChars counts the same way.
+fn changed_chars(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let most = a.len().min(b.len());
+    let start = (0..most).take_while(|&i| a[i] == b[i]).count();
+    let end = (0..most - start)
+        .take_while(|&i| a[a.len() - 1 - i] == b[b.len() - 1 - i])
+        .count();
+    a.len() - start - end + b.len() - start - end
+}
+
+type Violation = Option<(Option<&'static str>, String)>;
+
+/// The first violation of one retro edit as (field, problem), or None. field is None for the whole edit.
+/// An edit with a file key edits a project file.
+fn check_edit(e: &Value, agg: &Value) -> Violation {
+    if py_in(&json!("file"), e) {
+        return check_doc_edit(e, agg);
+    }
+    if let Some(err) = check_keys(e, &["scope", "stage", "note", "summary"], &[]) {
+        return Some((None, err));
+    }
+    let empty = json!({});
+    let pipeline = agg.get("pipeline").unwrap_or(&empty);
+    let Some(scope) = e["scope"].as_str().filter(|s| pipeline.get(*s).is_some()) else {
+        return Some((Some("scope"), "must be a scope in aggregate.json".into()));
+    };
+    let stage = e["stage"].as_str().filter(|s| RETRO_STAGES.contains(s));
+    let checks = [
+        (
+            "stage",
+            stage
+                .is_none()
+                .then(|| format!("must be one of {}", RETRO_STAGES.join(", "))),
+        ),
+        ("note", check_text(&e["note"], 1, 2000, true)),
+        ("summary", check_text(&e["summary"], 1, 120, false)),
+    ];
+    if let Some((at, err)) = checks
+        .into_iter()
+        .find_map(|(at, err)| err.map(|err| (at, err)))
+    {
+        return Some((Some(at), err));
+    }
+    let old = pipeline[scope]["stage_notes"]
+        .get(stage.unwrap())
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if changed_chars(old, e["note"].as_str().unwrap()) > RETRO_EDIT_CHANGE {
+        return Some((
+            Some("note"),
+            format!("changes more than {RETRO_EDIT_CHANGE} characters"),
+        ));
+    }
+    None
+}
+
+/// The first violation of one retro file edit as (field, problem), or None. field is None for the whole edit.
+fn check_doc_edit(e: &Value, agg: &Value) -> Violation {
+    if let Some(err) = check_keys(e, &["file", "find", "replace", "summary"], &[]) {
+        return Some((None, err));
+    }
+    let empty = json!({});
+    let documents = agg.get("documents").unwrap_or(&empty);
+    let Some(file) = e["file"].as_str().filter(|f| documents.get(*f).is_some()) else {
+        return Some((Some("file"), "must be a file in aggregate.json".into()));
+    };
+    let checks = [
+        ("find", check_text(&e["find"], 1, 600, true)),
+        ("replace", check_text(&e["replace"], 0, 600, true)),
+        ("summary", check_text(&e["summary"], 1, 120, false)),
+    ];
+    if let Some((at, err)) = checks
+        .into_iter()
+        .find_map(|(at, err)| err.map(|err| (at, err)))
+    {
+        return Some((Some(at), err));
+    }
+    let text = documents[file]["text"].as_str().unwrap_or("");
+    let (find, replace) = (e["find"].as_str().unwrap(), e["replace"].as_str().unwrap());
+    let start = text.find(find);
+    let again =
+        start.is_some_and(|s| text[s + find.chars().next().unwrap().len_utf8()..].contains(find));
+    let Some(start) = start.filter(|_| !again) else {
+        return Some((
+            Some("find"),
+            "must match the stored text exactly once".into(),
+        ));
+    };
+    let next = format!("{}{replace}{}", &text[..start], &text[start + find.len()..]);
+    if changed_chars(text, &next) > RETRO_EDIT_CHANGE {
+        return Some((
+            Some("find"),
+            format!("changes more than {RETRO_EDIT_CHANGE} characters"),
+        ));
+    }
+    None
+}
+
+fn now_micros() -> i128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros() as i128
+}
+
+/// How many retro versions the history at route has from the last 24 hours. Only retro saves carry run.
+fn edits_today(home: &Path, route: &str) -> Res<usize> {
+    let r = api(home, "GET", route, None, &[200, 404], &[])?;
+    let cutoff = now_micros() - 24 * 3600 * 1_000_000;
+    let versions = if r.status == 200 {
+        json_of(&r.text()?)?
+    } else {
+        json!([])
+    };
+    let mut n = 0;
+    for v in py_iter(&versions)? {
+        if !py_in(&json!("run"), &v) {
+            continue;
+        }
+        let saved = when(v.get("saved_at"))
+            .ok_or_else(|| fail(format!("{route}: saved_at is not a time with an offset"), 1))?;
+        n += usize::from(saved > cutoff);
+    }
+    Ok(n)
+}
+
+fn trial_valid(t: &Value) -> bool {
+    let Some(project) = t
+        .get("project")
+        .and_then(Value::as_str)
+        .filter(|p| SLUG.is_full(p))
+    else {
+        return false;
+    };
+    let (stage, version, champion) = (&t["stage"], &t["version"], &t["champion_version"]);
+    stage.as_str().is_some_and(|s| PIPELINE_STAGES.contains(&s))
+        && is_int(version)
+        && is_int(champion)
+        && champion.as_f64().unwrap() >= 0.0
+        && t["id"] == json!(format!("{project}-{}-v{}", py_str(stage), py_str(version)))
+        && t.get("opened")
+            .and_then(Value::as_str)
+            .and_then(parse_stamp)
+            .is_some()
+}
+
+fn trials(data: &Value) -> impl Iterator<Item = &Value> {
+    data.get("trials")
+        .filter(|t| truthy(Some(t)))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+}
+
+/// The board's open, well-formed trial for slug's stage note, if any.
+fn open_trial_for(data: &Value, slug: &str, stage: &str) -> bool {
+    trials(data).any(|t| {
+        trial_valid(t)
+            && t["status"] == json!("open")
+            && t["project"] == json!(slug)
+            && t["stage"] == json!(stage)
+    })
+}
+
+/// True when slug has TRIAL_PAUSE_REVERTS reverted trials no person resumed.
+fn trials_paused(data: &Value, slug: &str) -> bool {
+    trials(data)
+        .filter(|t| {
+            t.is_object()
+                && t["project"] == json!(slug)
+                && t["status"] == json!("reverted")
+                && !truthy(t.get("resumed"))
+        })
+        .count()
+        >= TRIAL_PAUSE_REVERTS
+}
+
+/// Append an open trial record for one saved stage-note edit to the board, print its line and return it.
+/// champion_version is the version the edit replaced; champion is display text.
+fn open_trial(
+    home: &Path,
+    run: &str,
+    e: &Value,
+    version: &str,
+    champion_version: &Value,
+    champion: &Value,
+) -> Res<Value> {
+    let slug: String = e["scope"]
+        .as_str()
+        .unwrap()
+        .chars()
+        .skip("projects/".len())
+        .collect();
+    let stage = e["stage"].as_str().unwrap();
+    let record = json!({"id": format!("{slug}-{stage}-v{version}"), "project": slug, "stage": stage,
+                        "version": int_text(version)?, "run": run, "summary": e["summary"],
+                        "champion_version": champion_version, "champion": champion, "challenger": e["note"],
+                        "opened": now(), "status": "open"});
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let trials = data
+            .as_object_mut()
+            .unwrap()
+            .entry("trials")
+            .or_insert_with(|| json!([]));
+        trials
+            .as_array_mut()
+            .ok_or_else(|| fail("the board's trials is not a list", 1))?
+            .push(record.clone());
+        data["updated"] = record["opened"].clone();
+        Ok((Some(dump_board(&data)), ()))
+    })?;
+    println!(
+        "trial {} opened: alternate jobs keep the old note until trial settle decides",
+        py_str(&record["id"])
+    );
+    Ok(record)
+}
+
+/// `int(text)` for a Worker version header.
+fn int_text(text: &str) -> Res<i64> {
+    strip(text)
+        .parse()
+        .map_err(|_| fail(format!("version {text} is not a number"), 1))
+}
+
+/// PUT each checked edit to the Worker's retro route while autonomy runs. Returns one
+/// {scope, stage, summary, result} row per edit; a bad edit's text is left out. A saved
+/// edit moves agg's version and note on, so a later edit to the same scope builds on it.
+/// A saved stage-note edit opens a trial, and no stage-note edit is sent while its stage has an
+/// open trial or its project's trials are paused.
+fn apply_edits(home: &Path, run: &str, edits: &[Value], agg: &mut Value) -> Res<Vec<Value>> {
+    let mut board = load_board(Some(
+        &api(home, "GET", "/api/board", None, &[200], &[])?.text()?,
+    ))?;
+    let autonomy = load_autonomy(&board);
+    if autonomy["paused"] != json!(false) {
+        println!("autonomy is paused; no pipeline edit");
+        return Ok((0..edits.len())
+            .map(|i| json!({"scope": format!("edits[{i}]"), "stage": "", "result": "not sent: autonomy is paused", "summary": ""}))
+            .collect());
+    }
+    let allowed = |slug: &str| {
+        autonomy["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p == slug)
+    };
+    let mut results = Vec::new();
+    for (i, e) in edits.iter().enumerate() {
+        let skip = |mut row: Value, reason: String| {
+            println!("skipped edits[{i}]: {reason}");
+            row["result"] = json!(format!("skipped: {reason}"));
+            row
+        };
+        if let Some((field, problem)) = check_edit(e, agg) {
+            let at = field.map_or(format!("edits[{i}]"), |f| format!("edits[{i}].{f}"));
+            println!("skipped {at}: {problem}");
+            results.push(json!({"scope": format!("edits[{i}]"), "stage": "", "result": format!("skipped: {at}: {problem}"), "summary": ""}));
+            continue;
+        }
+        let file = e
+            .get("file")
+            .and_then(Value::as_str)
+            .filter(|f| !f.is_empty());
+        let row = match file {
+            Some(f) => json!({"scope": f, "stage": "", "summary": e["summary"]}),
+            None => json!({"scope": e["scope"], "stage": e["stage"], "summary": e["summary"]}),
+        };
+        let (listed, rule) = match file {
+            Some(f) => {
+                let slash = f
+                    .find('/')
+                    .ok_or_else(|| fail(format!("{f} has no /"), 1))?;
+                (allowed(&f[..slash]), RETRO_DOC_EDIT_SCOPE)
+            }
+            None => {
+                let scope = e["scope"].as_str().unwrap();
+                let slug: String = scope.chars().skip("projects/".len()).collect();
+                (scope != "global" && allowed(&slug), RETRO_EDIT_SCOPE)
+            }
+        };
+        if !listed {
+            results.push(skip(row, rule.to_string()));
+            continue;
+        }
+        if file.is_none() {
+            let slug: String = e["scope"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .skip("projects/".len())
+                .collect();
+            let stage = e["stage"].as_str().unwrap();
+            let reason = if trials_paused(&board, &slug) {
+                Some(format!(
+                    "stage-note trials are paused after {TRIAL_PAUSE_REVERTS} reverts; a person runs trial resume {slug}"
+                ))
+            } else if open_trial_for(&board, &slug, stage) {
+                Some(format!(
+                    "a trial is open for {} stage_notes.{stage}",
+                    py_str(&e["scope"])
+                ))
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                results.push(skip(row, reason));
+                continue;
+            }
+        }
+        let today = match file {
+            Some(f) => edits_today(home, &format!("/api/project-history/{f}"))?,
+            None => edits_today(
+                home,
+                &format!("/api/pipeline/history/{}", py_str(&e["scope"])),
+            )?,
+        };
+        if today >= RETRO_EDITS_PER_DAY {
+            let per = if file.is_some() { "file" } else { "scope" };
+            results.push(skip(
+                row,
+                format!("retro edit cap: {RETRO_EDITS_PER_DAY} per {per} per day"),
+            ));
+            continue;
+        }
+        let (body, route) = match file {
+            Some(f) => (
+                json!({"schema": RETRO_DOC_EDIT_SCHEMA, "run": run, "base_version": agg["documents"][f]["version"],
+                       "find": e["find"], "replace": e["replace"], "summary": e["summary"]}),
+                format!("/api/project-retro/{f}"),
+            ),
+            None => {
+                let scope = e["scope"].as_str().unwrap();
+                (
+                    json!({"schema": RETRO_EDIT_SCHEMA, "run": run, "base_version": agg["pipeline"][scope]["version"],
+                           "stage": e["stage"], "note": e["note"], "summary": e["summary"]}),
+                    format!("/api/pipeline/retro/{scope}"),
+                )
+            }
+        };
+        let r = api(
+            home,
+            "PUT",
+            &route,
+            Some(dumps(&body, DEFAULT).as_bytes()),
+            &[200, 400, 403, 404, 409, 412, 413, 429],
+            &[("Content-Type", "application/json")],
+        )?;
+        if r.status != 200 {
+            let reason =
+                strip(&format!("{} {}", r.status, printable_line(&r.text()?, 200))).to_string();
+            results.push(skip(row, reason));
+            continue;
+        }
+        let summary = py_str(&e["summary"]);
+        let version = match file {
+            Some(f) => {
+                let version = r
+                    .header("X-Project-Version")
+                    .ok_or_else(|| fail("the Worker sent no X-Project-Version", 1))?;
+                let doc = &mut agg["documents"][f];
+                let (find, replace) = (e["find"].as_str().unwrap(), e["replace"].as_str().unwrap());
+                let text = doc["text"].as_str().unwrap().replacen(find, replace, 1);
+                doc["text"] = json!(text);
+                doc["version"] = json!(int_text(version)?);
+                println!("edited {f} to version {version}: {summary}");
+                version
+            }
+            None => {
+                let version = r
+                    .header("X-Pipeline-Version")
+                    .ok_or_else(|| fail("the Worker sent no X-Pipeline-Version", 1))?;
+                let (scope, stage) = (e["scope"].as_str().unwrap(), e["stage"].as_str().unwrap());
+                let saved = &mut agg["pipeline"][scope];
+                let champion = saved["stage_notes"]
+                    .get(stage)
+                    .cloned()
+                    .unwrap_or(json!(""));
+                saved["version"] = json!(int_text(version)?);
+                saved["stage_notes"][stage] = e["note"].clone();
+                println!("edited {scope} stage_notes.{stage} to version {version}: {summary}");
+                let record = open_trial(home, run, e, version, &body["base_version"], &champion)?;
+                let trials = board
+                    .as_object_mut()
+                    .unwrap()
+                    .entry("trials")
+                    .or_insert_with(|| json!([]));
+                trials
+                    .as_array_mut()
+                    .ok_or_else(|| fail("the board's trials is not a list", 1))?
+                    .push(record);
+                version
+            }
+        };
+        let mut row = row;
+        row["result"] = json!(format!("version {version}"));
+        results.push(row);
+    }
+    Ok(results)
+}
+
+/// The rank order of checked findings: score count x cost first, then title.
+fn by_score(a: &&Value, b: &&Value) -> std::cmp::Ordering {
+    let score = |f: &Value| int_of(f.get("count")) * int_of(f.get("cost"));
+    score(b)
+        .cmp(&score(a))
+        .then_with(|| a["title"].as_str().cmp(&b["title"].as_str()))
+}
+
+fn host_sessions(agg: &Value) -> i64 {
+    agg["hosts"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(_, h)| int_of(h.get("sessions")))
+        .sum()
+}
+
+/// text as a markdown blockquote, one > per line.
+fn quote_md(text: &str) -> String {
+    text.split('\n')
+        .map(|line| {
+            if line.is_empty() {
+                ">".to_string()
+            } else {
+                format!("> {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn cell(text: &str) -> String {
+    text.replace('|', "\\|")
+}
+
+type Rejected<'a> = (usize, Option<&'a str>, String);
+type Fixed<'a> = (usize, &'a Value, Value, Value);
+
+/// findings.md: the reply's findings ranked by count x cost, built from checked fields only.
+/// rejected holds (index, field, problem) for dropped findings, listed without their text.
+/// edits holds apply_edits rows. fixed holds (index, finding, job id, merged) for findings a
+/// merged job fixed.
+fn render_findings(
+    agg: &Value,
+    run: &str,
+    findings: &[&Value],
+    rejected: &[Rejected],
+    edits: &[Value],
+    fixed: &[Fixed],
+) -> String {
+    let mut ranked = findings.to_vec();
+    ranked.sort_by(by_score);
+    let hosts: BTreeSet<&String> = agg["hosts"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .map(|(h, _)| h)
+        .collect();
+    let mut window = format!(
+        "Window {} to {} · hosts {} · {} sessions · ranked by count x cost",
+        py_str(&agg["from"]),
+        py_str(&agg["to"]),
+        hosts.into_iter().cloned().collect::<Vec<_>>().join(", "),
+        host_sessions(agg)
+    );
+    if !rejected.is_empty() {
+        window += &format!(" · {} rejected", rejected.len());
+    }
+    if !fixed.is_empty() {
+        window += &format!(" · {} fixed", fixed.len());
+    }
+    let mut lines = vec![
+        format!("# Retro {run}"),
+        String::new(),
+        window,
+        String::new(),
+        "| Rank | Finding | Category | Count | Cost each | Score | Target |".into(),
+        "| --- | --- | --- | --- | --- | --- | --- |".into(),
+    ];
+    for (n, f) in ranked.iter().enumerate() {
+        let (count, cost) = (int_of(f.get("count")), int_of(f.get("cost")));
+        lines.push(format!(
+            "| {} | {} | {} | {} | {} | {} | {} |",
+            n + 1,
+            cell(&py_str(&f["title"])),
+            py_str(&f["category"]),
+            commas(count),
+            commas(cost),
+            commas(count * cost),
+            py_str(&f["project"])
+        ));
+    }
+    for (n, f) in ranked.iter().enumerate() {
+        let sessions: Vec<String> = f["sessions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|r| format!("`{}`", py_str(r)))
+            .collect();
+        lines.extend([
+            String::new(),
+            format!("## {}. {}", n + 1, py_str(&f["title"])),
+            String::new(),
+            "Root cause:".into(),
+            String::new(),
+            quote_md(&py_str(&f["root_cause"])),
+            String::new(),
+            "Fix:".into(),
+            String::new(),
+            quote_md(&py_str(&f["fix"])),
+            String::new(),
+            format!("Sessions: {}", sessions.join(", ")),
+        ]);
+        if let Some(job) = f.get("fixed_by") {
+            lines.extend([
+                String::new(),
+                format!(
+                    "Fixed by: `{}`, but a session started after its merge.",
+                    py_str(job)
+                ),
+            ]);
+        }
+    }
+    let accept: Vec<(&String, &Value)> = agg
+        .get("reviewers")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, s)| s["changes"].as_f64().is_some_and(|n| n > 0.0))
+        .collect();
+    if !accept.is_empty() {
+        lines.extend([
+            String::new(),
+            "## Reviewer accept rate".into(),
+            String::new(),
+            "CHANGES findings in jobs merged or closed in the window. Disputed counts findings the builder listed under Disputed findings in build.md; fixed is the rest.".into(),
+            String::new(),
+            "| Reviewer | CHANGES findings | Fixed | Disputed | Accept rate | Jobs |".into(),
+            "| --- | --- | --- | --- | --- | --- |".into(),
+        ]);
+        for (r, s) in accept {
+            lines.push(format!(
+                "| {r} | {} | {} | {} | {}% | {} |",
+                py_str(&s["changes"]),
+                py_str(&s["fixed"]),
+                py_str(&s["disputed"]),
+                py_str(&s["accept_pct"]),
+                py_str(&s["jobs"])
+            ));
+        }
+    }
+    if !rejected.is_empty() {
+        lines.extend([
+            String::new(),
+            "## Rejected findings".into(),
+            String::new(),
+            "Admission dropped these findings. Their text is not shown; read reply.json to see it."
+                .into(),
+            String::new(),
+            "| Finding | Field | Problem |".into(),
+            "| --- | --- | --- |".into(),
+        ]);
+        for (i, field, problem) in rejected {
+            lines.push(format!(
+                "| {i} | {} | {} |",
+                field.unwrap_or("whole finding"),
+                cell(problem)
+            ));
+        }
+    }
+    if !fixed.is_empty() {
+        lines.extend([
+            String::new(),
+            "## Fixed findings".into(),
+            String::new(),
+            "A merged job fixed these before every session they cite started.".into(),
+            String::new(),
+            "| Finding | Title | Fixed by | Merged |".into(),
+            "| --- | --- | --- | --- |".into(),
+        ]);
+        for (i, f, job, at) in fixed {
+            lines.push(format!(
+                "| {i} | {} | {} | {} |",
+                cell(&py_str(&f["title"])),
+                cell(&py_str(job)),
+                cell(&py_str(at))
+            ));
+        }
+    }
+    if !edits.is_empty() {
+        lines.extend([
+            String::new(),
+            "## Pipeline edits".into(),
+            String::new(),
+            "| Scope | Stage | Result | Summary |".into(),
+            "| --- | --- | --- | --- |".into(),
+        ]);
+        for e in edits {
+            lines.push(format!(
+                "| {} | {} | {} | {} |",
+                py_str(&e["scope"]),
+                py_str(&e["stage"]),
+                cell(&py_str(&e["result"])),
+                cell(&py_str(&e["summary"]))
+            ));
+        }
+    }
+    lines.join("\n") + "\n"
+}
+
+/// The first violation of one retro finding as (field, problem), or None. field is None for the whole finding.
+/// merged holds the aggregate's merged rows, which an optional fixed_by must name.
+fn check_finding(f: &Value, projects: &Value, merged: &Value) -> Violation {
+    let required = [
+        "title",
+        "category",
+        "count",
+        "cost",
+        "sessions",
+        "root_cause",
+        "fix",
+        "project",
+    ];
+    if let Some(err) = check_keys(f, &required, &["fixed_by"]) {
+        return Some((None, err));
+    }
+    let whole =
+        |v: &Value, most: f64| is_int(v) && v.as_f64().is_some_and(|n| (1.0..=most).contains(&n));
+    let ids: Vec<&Value> = merged
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|m| &m["id"])
+        .collect();
+    let checks = [
+        ("title", check_text(&f["title"], 1, 80, false)),
+        (
+            "category",
+            (!f["category"]
+                .as_str()
+                .is_some_and(|c| RETRO_CATEGORIES.contains(&c)))
+            .then(|| format!("must be one of {}", RETRO_CATEGORIES.join(", "))),
+        ),
+        (
+            "count",
+            (!whole(&f["count"], 10_000_000.0))
+                .then(|| "must be a whole number from 1 to 10000000".into()),
+        ),
+        (
+            "cost",
+            (!whole(&f["cost"], 1_000_000_000.0))
+                .then(|| "must be a whole number from 1 to 1000000000".into()),
+        ),
+        ("sessions", check_session_refs(&f["sessions"])),
+        ("root_cause", check_text(&f["root_cause"], 1, 300, false)),
+        ("fix", check_text(&f["fix"], 1, 300, false)),
+        (
+            "project",
+            (!py_in(&f["project"], projects)).then(|| "must be a project in aggregate.json".into()),
+        ),
+        (
+            "fixed_by",
+            f.get("fixed_by")
+                .is_some_and(|id| !ids.contains(&id))
+                .then(|| "must be a job id from merged in aggregate.json".into()),
+        ),
+    ];
+    checks
+        .into_iter()
+        .find_map(|(at, err)| err.map(|err| (Some(at), err)))
+}
+
+/// Each host/session ref in the run's digest.jsonl mapped to its start. A missing or linked file gives none.
+fn session_starts(folder: &Path) -> Res<Map<String, Value>> {
+    let path = folder.join("digest.jsonl");
+    if is_link(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))? || !path.is_file() {
+        return Ok(Map::new());
+    }
+    let text = read_text(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
+    let mut starts = Map::new();
+    for line in splitlines(&text, false) {
+        let row = loads(line).map_err(|e| fail(format!("{}: {e}", path.display()), 1))?;
+        starts.insert(
+            session_ref(&row),
+            row.get("start").cloned().unwrap_or(Value::Null),
+        );
+    }
+    Ok(starts)
+}
+
+/// (id, merged) of the job in f's fixed_by when every session f cites has a known start before its merge.
+fn fixed(f: &Value, merged: &Value, starts: &Map<String, Value>) -> Option<(Value, Value)> {
+    let job = f.get("fixed_by")?;
+    let m = merged.as_array()?.iter().find(|m| &m["id"] == job)?;
+    let at = when(m.get("merged"))?;
+    let sessions = f["sessions"].as_array()?;
+    let before = sessions
+        .iter()
+        .all(|r| when(r.as_str().and_then(|r| starts.get(r))).is_some_and(|t| t < at));
+    before.then(|| (m["id"].clone(), m["merged"].clone()))
+}
+
+/// Every string inside a parsed JSON value.
+fn strings(v: &Value) -> Vec<&str> {
+    match v {
+        Value::String(s) => vec![s],
+        Value::Array(items) => items.iter().flat_map(strings).collect(),
+        Value::Object(map) => map.values().flat_map(strings).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The first key in home/.env whose value, ENV_SECRET_MIN or more characters long, appears in text.
+fn env_secret(home: &Path, text: &str) -> Res<Option<String>> {
+    let env = home.join(".env");
+    if !env.exists() {
+        return Ok(None);
+    }
+    let pairs = read_env_ordered(&env).map_err(|e| fail(os_error(&e, Some(&env)), 1))?;
+    Ok(pairs
+        .into_iter()
+        .find(|(_, v)| v.chars().count() >= ENV_SECRET_MIN && text.contains(v.as_str()))
+        .map(|(k, _)| k))
+}
+
+/// PUT the run's checked findings as a factory.retro-run/1 record. kept holds each reply finding in order,
+/// None where admission rejected it or a merged job fixed it; rejected counts the findings that failed
+/// checks. Errors print to stderr and never change the exit code.
+fn upload(
+    home: &Path,
+    run: &str,
+    agg: &Value,
+    kept: &[Option<&Value>],
+    rejected: usize,
+) -> Res<()> {
+    let device = config_device(home)?;
+    if !HOST_NAME.is_full(&device) {
+        eprintln!("retro upload skipped: set device: in config.md");
+        return Ok(());
+    }
+    let mut ranked: Vec<&Value> = kept.iter().flatten().copied().collect();
+    ranked.sort_by(by_score);
+    let findings: Vec<Value> = ranked
+        .iter()
+        .enumerate()
+        .map(|(n, f)| {
+            let mut row = Map::new();
+            row.insert("rank".into(), json!(n + 1));
+            for k in [
+                "title",
+                "category",
+                "count",
+                "cost",
+                "project",
+                "root_cause",
+                "fix",
+            ] {
+                row.insert(k.into(), f[k].clone());
+            }
+            row.insert("cards".into(), json!([]));
+            Value::Object(row)
+        })
+        .collect();
+    let record = json!({"schema": RETRO_RUN_SCHEMA, "run": run, "host": device, "from": agg["from"], "to": agg["to"],
+                        "sessions": host_sessions(agg), "rejected": rejected, "findings": findings, "cards": []});
+    let sent = api(
+        home,
+        "PUT",
+        &format!("/api/retros/{run}"),
+        Some(dumps(&record, DEFAULT).as_bytes()),
+        &[200, 400, 403, 404, 409, 413],
+        &[("Content-Type", "application/json")],
+    )
+    .and_then(|r| Ok((r.status, r.text()?)));
+    match sent {
+        Ok((200, _)) => println!("uploaded retro run {run}"),
+        Ok((status, text)) => eprintln!(
+            "retro upload failed: {status} {}",
+            printable_line(&text, 200)
+        ),
+        Err(e) => eprint!("{}", e.stderr),
+    }
+    Ok(())
+}
+
+/// Check a retro run's reply and write its ranked findings.md. A bad finding is dropped and listed; a
+/// finding a merged job fixed is listed apart. A reply with cards waits for the backlog port.
+fn admit(home: &Path, run: &str) -> Res<()> {
+    let folder = home.join("retro").join(run);
+    let (path, agg_path) = (folder.join("reply.json"), folder.join("aggregate.json"));
+    let (findings_path, suggestions_path) =
+        (folder.join("findings.md"), folder.join("suggestions.json"));
+    let link = |p: &Path| is_link(p).map_err(|e| fail(os_error(&e, Some(p)), 1));
+    if link(folder.parent().unwrap())? || link(&folder)? || !folder.is_dir() {
+        return Err(fail(format!("no retro run {run}"), 4));
+    }
+    for p in [&path, &agg_path, &findings_path, &suggestions_path] {
+        if link(p)? {
+            return Err(fail(
+                format!("{} is a link; nothing written", p.display()),
+                2,
+            ));
+        }
+    }
+    if !path.is_file() || !agg_path.is_file() {
+        return Err(fail(format!("no retro run {run}"), 4));
+    }
+    let mut raw = Vec::new();
+    File::open(&path)
+        .and_then(|f| f.take(MAX_RETRO_BYTES + 1).read_to_end(&mut raw))
+        .map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
+    if raw.len() as u64 > MAX_RETRO_BYTES {
+        return Err(fail(
+            format!(
+                "{} is larger than {MAX_RETRO_BYTES} bytes; nothing written",
+                path.display()
+            ),
+            2,
+        ));
+    }
+    let doc = String::from_utf8(raw)
+        .map_err(|e| e.to_string())
+        .and_then(|text| loads(&text).map_err(|e| e.to_string()))
+        .map_err(|e| {
+            fail(
+                format!("{} is not UTF-8 JSON: {e}; nothing written", path.display()),
+                2,
+            )
+        })?;
+    if is_none_reply(&doc) {
+        return Err(fail("the retro agent found nothing", 3));
+    }
+    if let Some(key) = env_secret(home, &strings(&doc).join("\n"))? {
+        return Err(fail(
+            format!(
+                "{} holds this device's {key}; nothing written",
+                path.display()
+            ),
+            2,
+        ));
+    }
+    let agg_text = read_text(&agg_path).map_err(|e| fail(os_error(&e, Some(&agg_path)), 1))?;
+    let mut agg = loads(&agg_text).map_err(|e| fail(format!("{}: {e}", agg_path.display()), 1))?;
+    let err = check_retro(&doc)
+        .or_else(|| (doc["run"] != json!(run)).then(|| format!("run: must be {run}")));
+    if let Some(err) = err {
+        return Err(fail(
+            format!("{}: {err}; nothing written", path.display()),
+            2,
+        ));
+    }
+    if !doc["suggestions"].as_array().unwrap().is_empty() {
+        return Err(not_ported("retro admit with suggestions"));
+    }
+    let merged = agg.get("merged").cloned().unwrap_or(json!([]));
+    let (mut passed, mut rejected) = (Vec::new(), Vec::new());
+    for (i, f) in doc["findings"].as_array().unwrap().iter().enumerate() {
+        match check_finding(f, &agg["projects"], &merged) {
+            Some((field, problem)) => rejected.push((i, field, problem)),
+            None => passed.push((i, f)),
+        }
+    }
+    let lines: Vec<String> = rejected
+        .iter()
+        .map(|(i, field, problem)| match field {
+            Some(field) => format!("findings[{i}].{field}: {problem}"),
+            None => format!("findings[{i}]: {problem}"),
+        })
+        .collect();
+    if passed.is_empty() {
+        return Err(fail(
+            format!("{}: {}; nothing written", path.display(), lines[0]),
+            2,
+        ));
+    }
+    let starts = session_starts(&folder)?;
+    let fixes: Vec<(usize, &Value, Option<(Value, Value)>)> = passed
+        .iter()
+        .map(|(i, f)| (*i, *f, fixed(f, &merged, &starts)))
+        .collect();
+    let kept: Vec<&Value> = fixes
+        .iter()
+        .filter(|(.., fix)| fix.is_none())
+        .map(|(_, f, _)| *f)
+        .collect();
+    let fixed: Vec<Fixed> = fixes
+        .iter()
+        .filter_map(|(i, f, fix)| fix.clone().map(|(job, at)| (*i, *f, job, at)))
+        .collect();
+    let write = |text: String| {
+        write_atomic(&findings_path, text.as_bytes())
+            .map_err(|e| fail(os_error(&e, Some(&findings_path)), 1))
+    };
+    write(render_findings(&agg, run, &kept, &rejected, &[], &fixed))?;
+    println!("wrote {}", findings_path.display());
+    for line in &lines {
+        println!("rejected {line}");
+    }
+    for (i, _, job, at) in &fixed {
+        println!("fixed findings[{i}]: {} merged {}", py_str(job), py_str(at));
+    }
+    if truthy(doc.get("edits")) {
+        let results = apply_edits(home, run, doc["edits"].as_array().unwrap(), &mut agg)?;
+        write(render_findings(
+            &agg, run, &kept, &rejected, &results, &fixed,
+        ))?;
+    }
+    let reply_findings: Vec<Option<&Value>> = doc["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            fixes
+                .iter()
+                .any(|(j, _, fix)| *j == i && fix.is_none())
+                .then_some(f)
+        })
+        .collect();
+    println!("no suggestions");
+    upload(home, run, &agg, &reply_findings, rejected.len())
 }
 
 fn check_text(value: &Value, lo: usize, hi: usize, multiline: bool) -> Option<String> {
@@ -3789,6 +4809,230 @@ mod tests {
         let e = aggregate_in(&home, TODAY, RUN, 1, &mut serve(&routes)).unwrap_err();
         assert_eq!(e.code, 2);
         assert_eq!(fs::read_dir(&target).unwrap().count(), 0);
+    }
+
+    const RUN_A: &str = "20261111T090000Z-a1b2c3";
+    const REF: &str = "host-a/3ae1fc86-0000-4000-8000-000000000001";
+
+    fn finding(over: Value) -> Value {
+        with(
+            &json!({"title": "ls alias crashes in non-interactive shells", "category": "tool-economy", "count": 253,
+                    "cost": 250, "sessions": [REF], "root_cause": "The colorls alias needs a terminal size.",
+                    "fix": "Alias ls only in interactive shells.", "project": "sample-tools"}),
+            over,
+        )
+    }
+
+    fn retro_reply(over: Value) -> Value {
+        with(
+            &json!({"schema": "factory.retro/1", "run": RUN_A, "findings": [finding(json!({}))], "suggestions": []}),
+            over,
+        )
+    }
+
+    /// A home with retro/RUN_A/aggregate.json, as RetroAdmitTest sets up.
+    fn admit_home(name: &str) -> (PathBuf, PathBuf) {
+        let home = temp_dir(&format!("retro-admit-{name}"));
+        let folder = home.join("retro").join(RUN_A);
+        fs::create_dir_all(&folder).unwrap();
+        let agg = json!({"schema": "factory.retro-aggregate/1", "run": RUN_A, "from": "2026-11-05", "to": "2026-11-11",
+                         "host": "host-a", "projects": ["factory", "sample-tools"],
+                         "hosts": {"host-a": {"sessions": 40, "jobs": 12, "ad_hoc": 3}}});
+        fs::write(folder.join("aggregate.json"), dumps(&agg, DEFAULT)).unwrap();
+        (home, folder)
+    }
+
+    fn names(folder: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(folder)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn admit_bad_reply_writes_nothing() {
+        let (home, folder) = admit_home("bad-reply");
+        for raw in [&b"not json"[..], b"{\"schema\": \"\xff\"}"] {
+            fs::write(folder.join("reply.json"), raw).unwrap();
+            let e = admit(&home, RUN_A).unwrap_err();
+            assert_eq!(e.code, 2);
+            let prefix = format!(
+                "factory.py: {} is not UTF-8 JSON: ",
+                folder.join("reply.json").display()
+            );
+            assert!(
+                e.stderr.starts_with(&prefix) && e.stderr.ends_with("; nothing written\n"),
+                "{}",
+                e.stderr
+            );
+        }
+        assert_eq!(names(&folder), ["aggregate.json", "reply.json"]);
+    }
+
+    #[test]
+    fn admit_with_suggestions_not_ported() {
+        let (home, folder) = admit_home("suggestions");
+        let card = json!({"kind": "tooling", "title": "Guard the ls alias", "finding": 1});
+        fs::write(
+            folder.join("reply.json"),
+            dumps(&retro_reply(json!({"suggestions": [card]})), DEFAULT),
+        )
+        .unwrap();
+        let e = admit(&home, RUN_A).unwrap_err();
+        assert_eq!(e.code, 2);
+        assert_eq!(
+            e.stderr,
+            "factory.py: retro admit with suggestions is not ported to the Rust binary yet\n"
+        );
+        assert_eq!(names(&folder), ["aggregate.json", "reply.json"]);
+    }
+
+    #[test]
+    fn admit_fixed_job_id_escaped() {
+        let agg =
+            json!({"from": "2026-11-10", "to": "2026-11-16", "hosts": {"pc": {"sessions": 1}}});
+        let title = json!({"title": "t"});
+        let fixed = [(
+            0,
+            &title,
+            json!("1700|legacy"),
+            json!("2026-11-15T12:30:00Z"),
+        )];
+        let text = render_findings(&agg, "r1", &[], &[], &[], &fixed);
+        assert!(
+            text.contains("| 0 | t | 1700\\|legacy | 2026-11-15T12:30:00Z |"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn admit_reviewer_accept_rate_section() {
+        let agg =
+            json!({"from": "2026-11-10", "to": "2026-11-16", "hosts": {"pc": {"sessions": 1}}});
+        let text = render_findings(
+            &with(&agg, json!({"reviewers": accept()})),
+            "r1",
+            &[],
+            &[],
+            &[],
+            &[],
+        );
+        let section = [
+            "## Reviewer accept rate",
+            "",
+            "CHANGES findings in jobs merged or closed in the window. Disputed counts findings the builder listed under Disputed findings in build.md; fixed is the rest.",
+            "",
+            "| Reviewer | CHANGES findings | Fixed | Disputed | Accept rate | Jobs |",
+            "| --- | --- | --- | --- | --- | --- |",
+            "| security | 1 | 1 | 0 | 100% | 1 |",
+            "| code | 2 | 1 | 1 | 50% | 1 |",
+        ]
+        .join("\n");
+        assert!(text.contains(&section), "{text}");
+        assert!(
+            !render_findings(&agg, "r1", &[], &[], &[], &[]).contains("## Reviewer accept rate")
+        );
+    }
+
+    #[test]
+    fn admit_session_refs_still_validate() {
+        assert_eq!(check_session_refs(&json!([REF])), None);
+        assert_eq!(
+            check_session_refs(&json!(["host-a/not-hex"])),
+            Some("must be host/session refs".into())
+        );
+        assert_eq!(
+            check_finding(
+                &finding(json!({"sessions": ["host-a/not-hex"]})),
+                &json!(["sample-tools"]),
+                &json!([])
+            ),
+            Some((Some("sessions"), "must be host/session refs".into()))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn admit_linked_run_folder_refused() {
+        let (home, folder) = admit_home("linked-folder");
+        fs::write(
+            folder.join("reply.json"),
+            dumps(&retro_reply(json!({})), DEFAULT),
+        )
+        .unwrap();
+        admit(&home, RUN_A).unwrap();
+        std::os::unix::fs::symlink(&folder, home.join("retro/linked")).unwrap();
+        let e = admit(&home, "linked").unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr),
+            (4, "factory.py: no retro run linked\n".to_string())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn admit_linked_run_files_refused() {
+        let (home, folder) = admit_home("linked-files");
+        let target = home.join("elsewhere");
+        fs::write(
+            folder.join("reply.json"),
+            dumps(&retro_reply(json!({})), DEFAULT),
+        )
+        .unwrap();
+        for name in [
+            "reply.json",
+            "aggregate.json",
+            "findings.md",
+            "suggestions.json",
+        ] {
+            let path = folder.join(name);
+            let body = fs::read(&path).unwrap_or(b"keep\n".to_vec());
+            fs::write(&target, &body).unwrap();
+            let _ = fs::remove_file(&path);
+            std::os::unix::fs::symlink(&target, &path).unwrap();
+            let e = admit(&home, RUN_A).unwrap_err();
+            assert_eq!(e.code, 2, "{name}");
+            assert_eq!(
+                e.stderr,
+                format!(
+                    "factory.py: {} is a link; nothing written\n",
+                    path.display()
+                )
+            );
+            assert_eq!(fs::read(&target).unwrap(), body);
+            let mut want = vec![
+                "aggregate.json".to_string(),
+                "reply.json".to_string(),
+                name.to_string(),
+            ];
+            want.sort();
+            want.dedup();
+            assert_eq!(names(&folder), want);
+            fs::remove_file(&path).unwrap();
+            if name == "reply.json" || name == "aggregate.json" {
+                fs::write(&path, &body).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn admit_exactly_600_changed_characters_is_sent() {
+        let note = "Name the acceptance check for each criterion.";
+        let longer = format!("{}{}", &note[..10], "y".repeat(600 - (note.len() - 10)));
+        assert_eq!(changed_chars(note, &longer), 600);
+        assert_eq!(changed_chars("abc", "abc"), 0);
+        assert_eq!(changed_chars("a\u{1F600}c", "abc"), 2);
+        let agg = json!({"pipeline": {"projects/factory": {"version": 7, "stage_notes": {"spec": note}}}});
+        let edit = json!({"scope": "projects/factory", "stage": "spec", "note": longer, "summary": "Spec note"});
+        assert_eq!(check_edit(&edit, &agg), None);
+        let over = with(&edit, json!({"note": format!("{longer}y")}));
+        assert_eq!(
+            check_edit(&over, &agg),
+            Some((Some("note"), "changes more than 600 characters".into()))
+        );
     }
 
     const PAIR_HINT: &str = "pair this host with factory.py host pair <id> <code>";
