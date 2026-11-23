@@ -12089,4 +12089,369 @@ exit "$archive_code"
             assert_eq!(gh_cli(&["view", "x"]), None);
         }
     }
+
+    pub(super) fn assert_deferred_run(fx: &Fx, args: &[&str], what: &str) {
+        assert_eq!(fx.pickup(args), out_err(2, "", &format!("factory.py: pickup {what} is not ported to the Rust binary yet\n")));
+    }
+
+    pub(super) fn git_in(cwd: &Path, args: &[&str]) -> String {
+        let out = Command::new("git").arg("-C").arg(cwd).args(args).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        strip(&String::from_utf8_lossy(&out.stdout)).to_string()
+    }
+
+    /// repo_a with a main commit and the job's worktree on branch factory/042-sample-export.
+    pub(super) fn job_worktree(fx: &Fx) -> PathBuf {
+        let wt = fx.home.join("worktrees/alpha/042-sample-export");
+        let id = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"];
+        git_in(&fx.repo_a, &["init", "-q"]);
+        git_in(&fx.repo_a, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        git_in(&fx.repo_a, &[&id[..], &["commit", "-q", "--allow-empty", "-m", "base"]].concat());
+        git_in(&fx.repo_a, &["worktree", "add", "-q", &wt.display().to_string(), "-b", "factory/042-sample-export"]);
+        wt
+    }
+
+    /// Cleanup itself waits on the worktree slice. Each test keeps its name, and checks the gate:
+    /// pickup finds the closed job's leftovers, prints the dry lines, then exits 2 where Python cleans up.
+    mod close_cleanup_test {
+        use super::*;
+
+        fn setup() -> (Fx, PathBuf, Files) {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            let files = Files::install(&fx);
+            let wt = job_worktree(&fx);
+            (fx, wt, files)
+        }
+
+        fn closed(extra: Value) -> Value {
+            json!({"id": "042-sample-export", "stage": "closed", "project": "alpha", "port": 8230,
+                "updated": "2026-01-02T12:05:00Z", "done": "2026-01-02T12:05:00Z",
+                "close": with(json!({"reason": "Duplicate of 041-sample-report", "at": "2026-01-02T12:00:00Z", "closed": "2026-01-02T12:05:00Z"}), extra)})
+        }
+
+        fn gate(fx: &Fx, wt: &Path) {
+            fx.jobs(json!([closed(json!({}))]));
+            assert_deferred_run(fx, &[], "close cleanup");
+            assert!(wt.exists());
+            assert!(fx.job("042-sample-export")["close"].get("cleanup").is_none());
+            assert!(fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_cleanup_keeps_an_unmerged_branch() {
+            let (fx, wt, _) = setup();
+            gate(&fx, &wt);
+        }
+
+        #[test]
+        fn test_cleanup_runs_beside_a_pull_request_close() {
+            let (fx, wt, files) = setup();
+            fx.jobs(json!([closed(json!({})), {"id": "043-sample-import", "stage": "build", "project": "alpha", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}}]));
+            assert_eq!(fx.pickup(&[]), out_err(2, "closed 043-sample-import alpha\n", "factory.py: pickup close cleanup is not ported to the Rust binary yet\n"));
+            assert_eq!(fx.job("043-sample-import")["stage"], "closed");
+            assert!(files.get("/api/jobs/alpha/043-sample-import/decision.md").is_some());
+            assert!(wt.exists());
+        }
+
+        #[test]
+        fn test_cleanup_deletes_a_branch_origin_holds() {
+            let (fx, wt, _) = setup();
+            gate(&fx, &wt);
+        }
+
+        #[test]
+        fn test_cleanup_keeps_a_branch_ahead_of_origin() {
+            let (fx, wt, _) = setup();
+            gate(&fx, &wt);
+        }
+
+        #[test]
+        fn test_cleanup_keeps_a_branch_origin_lacks() {
+            let (fx, wt, _) = setup();
+            gate(&fx, &wt);
+        }
+
+        #[test]
+        fn test_cleanup_keeps_a_branch_checked_out_elsewhere() {
+            let (fx, wt, _) = setup();
+            git_in(&fx.repo_a, &["worktree", "remove", "--force", &wt.display().to_string()]);
+            let elsewhere = fx.home.join("elsewhere").display().to_string();
+            git_in(&fx.repo_a, &["worktree", "add", "-q", &elsewhere, "factory/042-sample-export"]);
+            fx.jobs(json!([closed(json!({}))]));
+            assert_deferred_run(&fx, &[], "close cleanup");
+        }
+
+        #[test]
+        fn test_merged_head_keeps_a_branch_ahead_of_the_pr() {
+            let (fx, wt, _) = setup();
+            fx.jobs(json!([{"id": "042-sample-export", "stage": "merged", "project": "alpha", "updated": "2026-01-02T12:05:00Z", "github": {"merged": "2026-01-02T12:05:00Z", "head": "a1b2".repeat(10)}}]));
+            assert_deferred_run(&fx, &[], "close cleanup");
+            assert!(wt.exists());
+        }
+
+        #[test]
+        fn test_merged_head_keeps_a_branch_checked_out_elsewhere() {
+            let (fx, wt, _) = setup();
+            git_in(&fx.repo_a, &["worktree", "remove", "--force", &wt.display().to_string()]);
+            fx.jobs(json!([{"id": "042-sample-export", "stage": "merged", "project": "alpha", "updated": "2026-01-02T12:05:00Z", "github": {"merged": "2026-01-02T12:05:00Z"}}]));
+            assert_deferred_run(&fx, &[], "close cleanup");
+        }
+
+        #[test]
+        fn test_cleanup_job_keeps_a_pushed_branch_by_default() {
+            let (fx, wt, _) = setup();
+            gate(&fx, &wt);
+        }
+
+        #[test]
+        fn test_cleanup_skips_ls_remote_without_a_branch_tip() {
+            let (fx, wt, _) = setup();
+            gate(&fx, &wt);
+        }
+
+        #[test]
+        fn test_cleanup_removes_a_merged_job() {
+            let (fx, wt, _) = setup();
+            let id = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"];
+            git_in(&fx.repo_a, &[&id[..], &["merge", "-q", "--no-ff", "-m", "merge", "factory/042-sample-export"]].concat());
+            gate(&fx, &wt);
+        }
+
+        #[test]
+        fn test_cleanup_without_lsof_still_removes_a_merged_job() {
+            let (fx, wt, _) = setup();
+            gate(&fx, &wt);
+        }
+
+        #[test]
+        fn test_stop_pids_without_lsof_is_unchecked() {
+            let (fx, wt, _) = setup();
+            gate(&fx, &wt);
+        }
+
+        #[test]
+        fn test_lsof_falls_back_to_a_system_folder() {
+            let (fx, wt, _) = setup();
+            gate(&fx, &wt);
+        }
+
+        #[test]
+        fn test_a_cleanup_error_still_launches_ideas() {
+            let (fx, _, _) = setup();
+            fx.jobs(json!([closed(json!({})), idea("001-alpha", "alpha", json!({}))]));
+            assert_deferred_run(&fx, &[], "close cleanup");
+            assert!(fx.launched().is_empty());
+        }
+
+        #[test]
+        fn test_cleanup_dry_run() {
+            let (fx, wt, _) = setup();
+            fx.jobs(json!([closed(json!({}))]));
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(lines(&out)[0], "would clean up 042-sample-export alpha");
+            assert!(fx.puts().is_empty());
+            assert!(wt.exists());
+        }
+
+        #[test]
+        fn test_cleanup_skips_pickup_off() {
+            let (fx, wt, _) = setup();
+            fx.view("alpha", 200, effective("alpha", None, None));
+            fx.jobs(json!([closed(json!({}))]));
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(lines(&out)[0], "skip cleanup 042-sample-export alpha: pickup off");
+            fx.clear_calls();
+            fx.assert_silent(fx.pickup(&[]));
+            assert!(wt.exists());
+        }
+
+        #[test]
+        fn test_cleanup_skips_without_local_work() {
+            let (fx, wt, _) = setup();
+            git_in(&fx.repo_a, &["worktree", "remove", &wt.display().to_string()]);
+            git_in(&fx.repo_a, &["branch", "-D", "factory/042-sample-export"]);
+            fx.jobs(json!([closed(json!({}))]));
+            fx.assert_silent(fx.pickup(&[]));
+        }
+
+        #[test]
+        fn test_cleanup_skips_a_recorded_host() {
+            let (fx, wt, _) = setup();
+            fx.jobs(json!([closed(json!({"cleanup": {DEVICE: {"at": "2026-01-02T12:10:00Z", "left": []}}}))]));
+            fx.assert_silent(fx.pickup(&[]));
+            assert!(wt.exists());
+        }
+
+        #[test]
+        fn test_cleanup_skips_an_agent_close() {
+            let (fx, wt, _) = setup();
+            let mut job = closed(json!({}));
+            job.as_object_mut().unwrap().shift_remove("close");
+            fx.jobs(json!([job]));
+            fx.assert_silent(fx.pickup(&[]));
+            assert!(wt.exists());
+        }
+    }
+
+    /// Reading PR states waits on the checks slice: past job matching, pickup exits 2, dry run included.
+    mod pr_sync_test {
+        use super::*;
+
+        const PR7: &str = "https://github.com/sample/alpha/pull/7";
+        const PR8: &str = "https://github.com/sample/alpha/pull/8";
+
+        fn setup() -> (Fx, Files) {
+            let fx = Fx::new();
+            for slug in ["alpha", "beta"] {
+                fx.view(slug, 200, effective(slug, Some(json!({"pickup": on()})), None));
+            }
+            fx.view("delta", 200, effective("delta", Some(json!({"pickup": {"enabled": true, "hosts": ["other-host"]}})), None));
+            fs::create_dir(fx.home.join("projects")).unwrap();
+            for slug in ["alpha", "beta", "delta"] {
+                fs::write(fx.home.join(format!("projects/{slug}.md")), "---\nrepo: Sample/Alpha\n---\n").unwrap();
+            }
+            let files = Files::install(&fx);
+            (fx, files)
+        }
+
+        fn export(extra: Value) -> Value {
+            with(json!({"id": "042-sample-export", "stage": "needs-human", "project": "alpha", "pr": PR7, "automerge": false, "needs": "review and merge PR #7", "note": "held for review", "updated": "2026-01-01T00:00:00Z"}), extra)
+        }
+
+        fn sample_import(extra: Value) -> Value {
+            with(json!({"id": "043-sample-import", "stage": "pr-open", "project": "alpha", "pr": PR8, "branch": "factory/043-sample-import", "updated": "2026-01-01T00:00:00Z"}), extra)
+        }
+
+        fn gate(fx: &Fx, jobs: Value) {
+            fx.jobs(jobs.clone());
+            for args in [&[][..], &["--dry-run"]] {
+                assert_deferred_run(fx, args, "PR state sync");
+            }
+            assert!(fx.puts().is_empty());
+            assert_eq!(fx.state.borrow().board["jobs"], jobs);
+        }
+
+        #[test]
+        fn test_pr_states_sends_one_query_and_parses_it() {
+            let (fx, _) = setup();
+            gate(&fx, json!([export(json!({})), sample_import(json!({}))]));
+        }
+
+        #[test]
+        fn test_merged_pr_moves_the_job_to_merged() {
+            let (fx, _) = setup();
+            let stale = json!({"device": "other-host", "session": "s1", "since": stamp(-300), "seen": stamp(-240)});
+            gate(&fx, json!([export(json!({"stage": "pr-open", "babysit": {"at": "2026-01-01T00:00:00Z", "by": "dashboard"}}))]));
+            gate(&fx, json!([export(json!({"claim": stale}))]));
+        }
+
+        #[test]
+        fn test_merged_pr_records_the_head() {
+            let (fx, _) = setup();
+            gate(&fx, json!([export(json!({}))]));
+        }
+
+        #[test]
+        fn test_two_merged_prs_make_one_board_write() {
+            let (fx, _) = setup();
+            gate(&fx, json!([export(json!({})), sample_import(json!({}))]));
+        }
+
+        #[test]
+        fn test_closed_pr_closes_the_job() {
+            let (fx, files) = setup();
+            gate(&fx, json!([sample_import(json!({}))]));
+            assert!(files.is_empty());
+        }
+
+        #[test]
+        fn test_a_host_named_github_still_closes_the_pr() {
+            let (fx, files) = setup();
+            fx.jobs(json!([sample_import(json!({"close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z", "by": "github", "via": "chat"}}))]));
+            assert_deferred_run(&fx, &[], "PR close");
+            assert!(files.is_empty());
+        }
+
+        #[test]
+        fn test_merged_job_is_cleaned_once_per_host() {
+            let (fx, _) = setup();
+            job_worktree(&fx);
+            gate(&fx, json!([export(json!({"port": 8230}))]));
+        }
+
+        #[test]
+        fn test_merged_job_deletes_a_branch_main_lacks() {
+            let (fx, _) = setup();
+            job_worktree(&fx);
+            gate(&fx, json!([export(json!({"port": 8230}))]));
+        }
+
+        /// The board command belongs to the claims slice and is not ported yet, so it writes nothing.
+        #[test]
+        fn test_board_refuses_a_github_patch() {
+            let (fx, _) = setup();
+            fx.jobs(json!([export(json!({}))]));
+            let home = fx.home.display().to_string();
+            assert_eq!(crate::cli::main(vec!["board".into(), home.into(), "042-sample-export".into()]), 2);
+            assert!(fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_one_read_per_repo_across_projects() {
+            let (fx, _) = setup();
+            gate(&fx, json!([export(json!({})), sample_import(json!({"project": "beta"}))]));
+        }
+
+        #[test]
+        fn test_skips_a_pr_number_past_nine_digits() {
+            let (fx, _) = setup();
+            fx.jobs(json!([export(json!({"pr": "https://github.com/sample/alpha/pull/9999999999"}))]));
+            fx.assert_silent(fx.pickup(&[]));
+            gate(&fx, json!([export(json!({"pr": "https://github.com/sample/alpha/pull/9999999999"})), sample_import(json!({}))]));
+        }
+
+        #[test]
+        fn test_all_open_is_silent() {
+            let (fx, _) = setup();
+            gate(&fx, json!([export(json!({})), sample_import(json!({}))]));
+        }
+
+        #[test]
+        fn test_dry_run_prints_and_writes_nothing() {
+            let (fx, _) = setup();
+            gate(&fx, json!([export(json!({})), sample_import(json!({}))]));
+        }
+
+        #[test]
+        fn test_a_failed_read_warns_and_later_passes_run() {
+            let (fx, _) = setup();
+            gate(&fx, json!([export(json!({})), sample_import(json!({})), {"id": "044-sample-close", "stage": "build", "project": "alpha", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}}]));
+        }
+
+        #[test]
+        fn test_syncs_the_first_hundred_pull_requests_of_a_repo() {
+            let (fx, _) = setup();
+            let jobs: Vec<Value> = (1..102).map(|n| sample_import(json!({"id": format!("{n:03}-sample"), "pr": format!("https://github.com/sample/alpha/pull/{n}")}))).collect();
+            fx.jobs(Value::Array(jobs));
+            assert_eq!(fx.pickup(&[]), out_err(2, "", "factory.py: pickup syncs the first 100 of 101 pull requests in sample/alpha\nfactory.py: pickup PR state sync is not ported to the Rust binary yet\n"));
+        }
+
+        #[test]
+        fn test_skips_claimed_closing_riders_unlisted_hosts_and_other_repos() {
+            let (fx, _) = setup();
+            fx.jobs(json!([
+                export(json!({"claim": held("other-host")})),
+                sample_import(json!({"close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}})),
+                export(json!({"id": "045-sample-rider", "pr": "https://github.com/sample/alpha/pull/9", "refs": [{"id": "042-sample-export", "kind": "batched-into"}]})),
+                export(json!({"id": "046-sample-delta", "project": "delta", "pr": "https://github.com/sample/alpha/pull/10"})),
+                export(json!({"id": "047-sample-other", "pr": "https://github.com/sample/other/pull/11"}))]));
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(lines(&out), ["skip sync 042-sample-export alpha: claimed by other-host session s1", "skip sync 046-sample-delta delta: pickup does not list host host-a", &format!("would close 043-sample-import alpha and pull request {PR8}"), "host host-a: would launch 0"]);
+            assert!(fx.puts().is_empty());
+        }
+    }
 }
