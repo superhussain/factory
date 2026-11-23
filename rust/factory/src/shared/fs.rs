@@ -124,7 +124,11 @@ pub fn readable(p: &Path) -> bool {
     #[cfg(unix)]
     return access(p, 4);
     #[cfg(not(unix))]
-    fs::File::open(p).is_ok()
+    if p.is_dir() {
+        fs::read_dir(p).is_ok()
+    } else {
+        fs::File::open(p).is_ok()
+    }
 }
 
 /// `os.access(p, os.R_OK | os.X_OK)` for a directory.
@@ -427,6 +431,18 @@ pub(crate) fn temp_dir(name: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readable_covers_directories_and_files() {
+        let dir = std::env::temp_dir().join(format!("factory-readable-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("f");
+        fs::write(&file, b"x").unwrap();
+        assert!(readable(&dir));
+        assert!(readable(&file));
+        assert!(!readable(&dir.join("missing")));
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn normpath_matches_posix_and_nt() {
