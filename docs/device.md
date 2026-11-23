@@ -2,7 +2,10 @@
 
 ## Prerequisites and copy installation
 
-Use a Rust toolchain (rustup), Git and Python 3.8+. Python is required only for `tools/install.py` and the other `tools/*.py` scripts. The installer builds the factory binary with cargo, which must be on PATH. No pip, npm, daemon or native agent runtime is required
+Use a Rust toolchain (rustup), Git and Python 3.8+. Python is required only for `tools/install.py` and the other `tools/*.py` scripts. Install rustup from https://rustup.rs. The installer builds the factory binary with cargo from PATH or
+`~/.cargo/bin`. Without cargo it installs only the Python runtime, `runtime/factory.py` run with `python3`
+(`py -3` on Windows), and no `runtime/factory` binary, so the `runtime/factory` commands below do not exist
+until job 2222. No pip, npm, daemon or native agent runtime is required
 for the device CLI. The repository installer copies only the self-contained skill.
 Choose an absolute destination directory, then run from this checkout:
 

@@ -7,7 +7,7 @@ A portable software factory: a shared board, safe multi-device state, and a priv
 - mise (installs the development tools from `mise.toml`)
 - Node `>=22.18.0` (development and verification are pinned to `24.14.0`; see `.node-version`)
 - pnpm `11.9.0` (`package.json` `packageManager`)
-- Rust toolchain (rustup). `tools/install.py` builds the factory binary with cargo, which must be on PATH
+- Rust toolchain: install rustup from https://rustup.rs. `tools/install.py` uses cargo from PATH or `~/.cargo/bin`. Without cargo it installs only the Python runtime, `runtime/factory.py` run with `python3` (`py -3` on Windows), and no `runtime/factory` binary, so the `runtime/factory` commands in these docs do not exist until job 2222
 - Python `3.8+` for `tools/install.py` and the other `tools/*.py` scripts (still needed until those scripts move off Python)
 - Git
 - A Cloudflare account with an active zone (for deployment)
