@@ -313,3 +313,5 @@ pipeline/lesson-bad-input-writes-nothing-11
 pipeline/lesson-bad-input-writes-nothing-12
 pipeline/lesson-bad-input-writes-nothing-13
 pipeline/grounding-*
+pipeline/verdict-*
+pipeline/lesson-*
