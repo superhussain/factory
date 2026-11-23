@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "pull/new-file",
+      "argv": ["--home", "{home}", "pull", "sample/001-test"],
+      "home": "job",
+      "stubs": {},
+      "routes": {
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          200,
+          [
+            {
+              "name": "handoff.md",
+              "etag": "5b4eed2f2394634339754fd50536de0433858a75ff423ca09555227c9e96acae"
+            }
+          ]
+        ],
+        "GET /api/jobs/sample/001-test/handoff.md": [
+          200,
+          "Resume build, round 1. Checks not yet run.\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_handoff_uploads_then_releases_without_resetting_stage_or_round"
+    }
+  ]
+}

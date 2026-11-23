@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "with-cloudflare/bare",
+      "argv": ["with-cloudflare"],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "with-cloudflare/separator-only",
+      "argv": ["with-cloudflare", "--"],
+      "home": null,
+      "stubs": {}
+    }
+  ]
+}

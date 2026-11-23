@@ -1,0 +1,298 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "lookup/where-project",
+      "argv": ["--home", "{home}", "where", "sample"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample",
+              "repo": "octo/sample"
+            },
+            {
+              "slug": "other",
+              "repo": "octo/other"
+            }
+          ]
+        ],
+        "GET /api/projects/sample.md": [200, "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n"]
+      },
+      "exit": 0
+    },
+    {
+      "id": "lookup/where-unknown",
+      "argv": ["--home", "{home}", "where", "nope"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample",
+              "repo": "octo/sample"
+            },
+            {
+              "slug": "other",
+              "repo": "octo/other"
+            }
+          ]
+        ]
+      },
+      "exit": 4
+    },
+    {
+      "id": "lookup/where-no-path",
+      "argv": ["--home", "{home}", "where", "other"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample",
+              "repo": "octo/sample"
+            },
+            {
+              "slug": "other",
+              "repo": "octo/other"
+            }
+          ]
+        ],
+        "GET /api/projects/other.md": [200, "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n"]
+      },
+      "exit": 1
+    },
+    {
+      "id": "lookup/where-no-slug",
+      "argv": ["--home", "{home}", "where"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample",
+              "repo": "octo/sample"
+            },
+            {
+              "slug": "other",
+              "repo": "octo/other"
+            }
+          ]
+        ]
+      },
+      "exit": 4
+    },
+    {
+      "id": "lookup/where-unreachable",
+      "argv": ["--home", "{home}", "where", "sample"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 5
+    },
+    {
+      "id": "lookup/job-board",
+      "argv": ["--home", "{home}", "job", "042-dark-mode"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "review",
+                "note": "café ✓ 😀",
+                "score": 0.1,
+                "ratio": 1e-5,
+                "big": 12345678901234567890123,
+                "tokens": {},
+                "refs": [],
+                "pr": "https://github.com/octo/sample/pull/7"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "lookup/job-archive",
+      "argv": ["--home", "{home}", "job", "007-old"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "review",
+                "note": "café ✓ 😀",
+                "score": 0.1,
+                "ratio": 1e-5,
+                "big": 12345678901234567890123,
+                "tokens": {},
+                "refs": [],
+                "pr": "https://github.com/octo/sample/pull/7"
+              }
+            ]
+          }
+        ],
+        "GET /api/board/archive?id=007-old": [
+          200,
+          {
+            "jobs": [
+              {
+                "id": "007-old",
+                "stage": "merged"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "lookup/job-missing",
+      "argv": ["--home", "{home}", "job", "009 gone/é"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "review",
+                "note": "café ✓ 😀",
+                "score": 0.1,
+                "ratio": 1e-5,
+                "big": 12345678901234567890123,
+                "tokens": {},
+                "refs": [],
+                "pr": "https://github.com/octo/sample/pull/7"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 4
+    },
+    {
+      "id": "lookup/job-access-denied",
+      "argv": ["--home", "{home}", "job", "042-dark-mode"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [302, ""]
+      },
+      "exit": 5
+    },
+    {
+      "id": "lookup/job-status-500",
+      "argv": ["--home", "{home}", "job", "042-dark-mode"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [500, "boom"]
+      },
+      "exit": 5
+    },
+    {
+      "id": "lookup/builds",
+      "argv": ["--home", "{home}", "builds", "sample"],
+      "home": "lookup",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "101-queued",
+                "project": "sample",
+                "stage": "merged",
+                "build": {
+                  "state": "queued"
+                }
+              },
+              {
+                "id": "102-flight",
+                "project": "sample",
+                "stage": "build",
+                "updated": "2999-01-01T00:00:00Z"
+              },
+              {
+                "id": "103-stale",
+                "project": "sample",
+                "stage": "review",
+                "updated": "2001-01-01T00:00:00Z"
+              },
+              {
+                "id": "104-escalated",
+                "project": "sample",
+                "stage": "pr-open",
+                "escalated": true,
+                "updated": "2999-01-01T00:00:00Z"
+              },
+              {
+                "id": "105-running",
+                "project": "sample",
+                "stage": "merged",
+                "build": {
+                  "state": "running"
+                }
+              },
+              {
+                "id": "106-other",
+                "project": "other",
+                "stage": "build",
+                "updated": "2999-01-01T00:00:00Z"
+              },
+              {
+                "id": "107-bad-stamp",
+                "project": "sample",
+                "stage": "pr-open",
+                "updated": "soon"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "lookup/builds-bad-target",
+      "argv": ["--home", "{home}", "builds", "bad/x/y"],
+      "home": "lookup",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "lookup/builds-bad-minutes",
+      "argv": ["--home", "{home}", "builds", "sample"],
+      "home": "lookup-bad-minutes",
+      "stubs": {},
+      "exit": 2
+    }
+  ]
+}

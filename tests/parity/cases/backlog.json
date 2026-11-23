@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "backlog/unknown-sub",
+      "argv": ["backlog", "list", "x"],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "backlog/add",
+      "argv": ["--home", "{home}", "backlog", "add", "sample: Add CSV export"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "beta"
+            }
+          ]
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_backlog_triage.py::BacklogTriageTests.test_queue_writes_the_idea_then_checks_the_line_off"
+    },
+    {
+      "id": "backlog/add-unknown-project",
+      "argv": ["--home", "{home}", "backlog", "add", "other: Add CSV export"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "beta"
+            }
+          ]
+        ]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_backlog_triage.py::BacklogTriageTests.test_queue_writes_the_idea_then_checks_the_line_off"
+    },
+    {
+      "id": "backlog/rework",
+      "argv": ["--home", "{home}", "backlog", "rework", "002-add-csv-export"],
+      "home": null,
+      "stubs": {},
+      "stdin": "Add CSV export to the weekly report\n",
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"002-add-csv-export\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Add CSV export to reports\",\"claim\":{\"device\":\"device\",\"session\":\"session\",\"since\":\"2026-01-02T12:00:00Z\",\"seen\":\"2026-01-02T12:00:00Z\"},\"backlog\":{\"line\":\"- [ ] sample: Add CSV export to reports\",\"decision\":\"rework\",\"at\":\"2026-11-02T10:00:00Z\",\"notes\":\"Limit it to the weekly report and say which columns.\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/backlog": [
+          200,
+          "# factory backlog\n\n- [x] sample: Add CSV export to reports (002-add-csv-export)\n"
+        ],
+        "PUT /api/backlog": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::BacklogReworkTest.test_appends_line_and_closes_job"
+    },
+    {
+      "id": "backlog/rework-two-lines",
+      "argv": ["--home", "{home}", "backlog", "rework", "002-add-csv-export"],
+      "home": null,
+      "stubs": {},
+      "stdin": "one\ntwo",
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"002-add-csv-export\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Add CSV export to reports\",\"claim\":{\"device\":\"device\",\"session\":\"session\",\"since\":\"2026-01-02T12:00:00Z\",\"seen\":\"2026-01-02T12:00:00Z\"},\"backlog\":{\"line\":\"- [ ] sample: Add CSV export to reports\",\"decision\":\"rework\",\"at\":\"2026-11-02T10:00:00Z\",\"notes\":\"Limit it to the weekly report and say which columns.\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/backlog": [
+          200,
+          "# factory backlog\n\n- [x] sample: Add CSV export to reports (002-add-csv-export)\n"
+        ],
+        "PUT /api/backlog": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::BacklogReworkTest.test_bad_input_exits_2"
+    }
+  ]
+}

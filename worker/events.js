@@ -2,6 +2,7 @@
 // It stores nothing. A board write's rows frame goes only to sockets whose Access
 // sign-in has not expired; every other socket, and every backlog write, gets "changed".
 export const EVENTS_PATH = "/events/board";
+export const HOST_EVENTS_PATH = "/events/host";
 const KEYS = ["board.json", "backlog.md"];
 const MAX_SOCKETS = 100;
 
