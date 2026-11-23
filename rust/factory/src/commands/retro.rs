@@ -1,13 +1,16 @@
 //! retro: digest, push, pull, aggregate and admit.
 
+use std::borrow::Cow;
 use std::collections::hash_map::RandomState;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::hash::{BuildHasher, Hasher};
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use regex::{RegexSet, SetMatches};
 use serde_json::{json, Map, Value};
 
 use crate::cli::Call;
@@ -270,9 +273,9 @@ fn cut(s: &str, n: usize) -> String {
 }
 
 /// `p.sub(r"\1[redacted]", text, count=count)`; a count of 0 replaces every match.
-fn redact_after_group(p: &Pattern, text: &str, count: usize) -> String {
+fn redact_after_group<'t>(p: &Pattern, text: &'t str, count: usize) -> Cow<'t, str> {
     let mut seen = 0;
-    p.replace_all(text, |c| {
+    p.replace_cow(text, |c| {
         seen += 1;
         if count == 0 || seen <= count {
             format!("{}[redacted]", group(c, 1))
@@ -311,11 +314,8 @@ fn openssl_part(part: &str) -> String {
     else {
         return part.to_string();
     };
-    let rest = redact_after_group(
-        &RETRO_OPENSSL_BARE,
-        &redact_after_group(&RETRO_OPENSSL_K, &part[end..], 0),
-        0,
-    );
+    let k = redact_after_group(&RETRO_OPENSSL_K, &part[end..], 0);
+    let rest = redact_after_group(&RETRO_OPENSSL_BARE, &k, 0);
     format!("{}{rest}", &part[..end])
 }
 
@@ -363,28 +363,98 @@ fn tool_pass(line: &str) -> String {
     line
 }
 
-pub(crate) fn retro_redact(text: &str) -> String {
-    let text = RETRO_HEADERS.replace_all(text, |c| {
-        format!("{}{}[redacted]", group(c, 1), group(c, 2))
-    });
-    let text = RETRO_URL_CREDS.replace_all(&text, |_| "://[redacted]@".into());
-    let text = redact_after_group(&RETRO_BEARER, &text, 0);
-    let text = redact_after_group(&RETRO_USER_PASS, &text, 0);
-    let mut text = text
-        .split('\n')
-        .map(tool_pass)
-        .collect::<Vec<_>>()
-        .join("\n");
-    for p in [
-        &RETRO_KEYVALUE,
-        &RETRO_FLAG,
-        &RETRO_LONG_KEYVALUE,
-        &RETRO_LONG_FLAG,
-    ] {
-        text = p.replace_all(&text, secret_pair);
+/// retro_redact's patterns in the order it runs them: four whole-text passes, tool_pass's five gates,
+/// the four secret_pair passes and NOTE_SECRETS.
+static REDACT_ORDER: [&Pattern; 21] = [
+    &RETRO_HEADERS,
+    &RETRO_URL_CREDS,
+    &RETRO_BEARER,
+    &RETRO_USER_PASS,
+    &RETRO_MYSQL,
+    &RETRO_SSHPASS,
+    &RETRO_REDIS,
+    &RETRO_DOCKER_LOGIN,
+    &RETRO_OPENSSL,
+    &RETRO_KEYVALUE,
+    &RETRO_FLAG,
+    &RETRO_LONG_KEYVALUE,
+    &RETRO_LONG_FLAG,
+    &NOTE_SECRETS[0],
+    &NOTE_SECRETS[1],
+    &NOTE_SECRETS[2],
+    &NOTE_SECRETS[3],
+    &NOTE_SECRETS[4],
+    &NOTE_SECRETS[5],
+    &NOTE_SECRETS[6],
+    &NOTE_SECRETS[7],
+];
+const TOOL_GATES: std::ops::Range<usize> = 4..9;
+
+/// Each REDACT_ORDER pattern's linear-time superset, so a pattern runs only on text it might match.
+fn redact_set() -> &'static RegexSet {
+    static SET: OnceLock<RegexSet> = OnceLock::new();
+    SET.get_or_init(|| RegexSet::new(REDACT_ORDER.iter().map(|p| p.linear())).unwrap())
+}
+
+/// One redaction pass when hit: text becomes f's result if it replaced anything, and hits is read again.
+fn redact_step(
+    hit: bool,
+    text: &mut String,
+    hits: &mut SetMatches,
+    f: impl FnOnce(&str) -> Cow<str>,
+) {
+    if !hit {
+        return;
     }
-    for p in &NOTE_SECRETS {
-        text = p.replace_all(&text, |_| "[redacted]".into());
+    let Cow::Owned(out) = f(text) else {
+        return;
+    };
+    *text = out;
+    *hits = redact_set().matches(text);
+}
+
+pub(crate) fn retro_redact(text: &str) -> String {
+    let set = redact_set();
+    let mut text = text.to_string();
+    let mut hits = set.matches(&text);
+    redact_step(hits.matched(0), &mut text, &mut hits, |s| {
+        RETRO_HEADERS.replace_cow(s, |c| format!("{}{}[redacted]", group(c, 1), group(c, 2)))
+    });
+    redact_step(hits.matched(1), &mut text, &mut hits, |s| {
+        RETRO_URL_CREDS.replace_cow(s, |_| "://[redacted]@".into())
+    });
+    redact_step(hits.matched(2), &mut text, &mut hits, |s| {
+        redact_after_group(&RETRO_BEARER, s, 0)
+    });
+    redact_step(hits.matched(3), &mut text, &mut hits, |s| {
+        redact_after_group(&RETRO_USER_PASS, s, 0)
+    });
+    let tool = |m: &SetMatches| TOOL_GATES.clone().any(|i| m.matched(i));
+    redact_step(tool(&hits), &mut text, &mut hits, |s| {
+        let lines: Vec<Cow<str>> = s
+            .split('\n')
+            .map(|l| {
+                if tool(&set.matches(l)) {
+                    tool_pass(l).into()
+                } else {
+                    l.into()
+                }
+            })
+            .collect();
+        if lines.iter().all(|l| matches!(l, Cow::Borrowed(_))) {
+            return s.into();
+        }
+        lines.join("\n").into()
+    });
+    for i in 9..13 {
+        redact_step(hits.matched(i), &mut text, &mut hits, |s| {
+            REDACT_ORDER[i].replace_cow(s, secret_pair)
+        });
+    }
+    for i in 13..21 {
+        redact_step(hits.matched(i), &mut text, &mut hits, |s| {
+            REDACT_ORDER[i].replace_cow(s, |_| "[redacted]".into())
+        });
     }
     text
 }
@@ -5712,5 +5782,132 @@ mod tests {
         assert!(has_envelope_tag("＜operator-preferences"));
         assert!(has_envelope_tag("‹/ operator‐preferences"));
         assert!(!has_envelope_tag("operator preferences"));
+    }
+
+    /// Each distinct line of every file under tests/parity, and every string inside a JSON line.
+    fn parity_corpus() -> BTreeSet<String> {
+        fn walk(dir: &Path, out: &mut BTreeSet<String>) {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, out);
+                    continue;
+                }
+                for line in String::from_utf8_lossy(&fs::read(&path).unwrap()).lines() {
+                    let mut found = vec![line.to_string()];
+                    if let Ok(v) = serde_json::from_str::<Value>(line) {
+                        strings_in(&v, &mut found);
+                    }
+                    out.extend(found);
+                }
+            }
+        }
+        let mut out = BTreeSet::new();
+        walk(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/parity"),
+            &mut out,
+        );
+        out
+    }
+
+    /// Texts each REDACT_ORDER pattern matches, with Unicode case and space look-alikes. Tokens are built
+    /// at run time so no secret-shaped literal sits in the source.
+    fn crafted_corpus() -> Vec<String> {
+        let (a24, a70) = ("a1B2".repeat(6), "a".repeat(70));
+        let mut out: Vec<String> = [
+            "Authorization: Basic dXNl",
+            "X-API-\u{212a}EY: v",
+            "\\\"set-cookie\\\": \\\"sid=1\\\"",
+            "https://u:p@host.example.test/r",
+            "git+ssh://git:pw@host",
+            "BEARER\u{a0}tok",
+            "curl -u ci:pw https://example.test", // gitleaks:allow
+            "docker run --user=1000:pw img",
+            "mysql -u root -phunter2 db",
+            "mariadb-dump -p'two words' db",
+            "x;mysqldump.exe -px",
+            "sshpass -p pw ssh host",
+            "redis-cli -a pw",
+            "redis-cli.exe --pass pw",
+            "docker login -u ci -p pw",
+            "echo pw | docker login --password-stdin",
+            "openssl enc -k pw -pass pass:x -passin env:X",
+            "openssl rsa -passout secret",
+            "GH_TOKEN=abc",
+            "Api-Key: 'x y'",
+            "{\"password\": \"x\"}",
+            "max_tokens=100",
+            "--api-key hunter2",
+            "--with-token abc",
+            "S\u{17f}HPASS=x",
+            "cf-access-client-secret",
+            "CF-Access-Client-Secret: v",
+            "-----BEGIN RSA PRIVATE KEY-----",
+        ]
+        .map(String::from)
+        .into();
+        out.extend([
+            format!("{a70}=v"),
+            format!("--{a70} v"),
+            format!("ghp_{a24}"),
+            format!("github_pat_{a24}"),
+            format!("sk-{a24}"),
+            format!("AKIA{}", "A1".repeat(8)),
+            format!("xoxb-{a24}"),
+            format!("eyJ{a24}.{a24}.sig"),
+            format!("line one\n  token = {a24}\nopenssl -k {a24} | mysql -p{a24}"),
+        ]);
+        out
+    }
+
+    /// retro_redact before the prefilter: every pass on the whole text, tool_pass on every line.
+    fn unfiltered_redact(text: &str) -> String {
+        let text = RETRO_HEADERS.replace_all(text, |c| {
+            format!("{}{}[redacted]", group(c, 1), group(c, 2))
+        });
+        let text = RETRO_URL_CREDS.replace_all(&text, |_| "://[redacted]@".into());
+        let text = redact_after_group(&RETRO_BEARER, &text, 0).into_owned();
+        let text = redact_after_group(&RETRO_USER_PASS, &text, 0).into_owned();
+        let mut text = text
+            .split('\n')
+            .map(tool_pass)
+            .collect::<Vec<_>>()
+            .join("\n");
+        for p in &REDACT_ORDER[9..13] {
+            text = p.replace_all(&text, secret_pair);
+        }
+        for p in &NOTE_SECRETS {
+            text = p.replace_all(&text, |_| "[redacted]".into());
+        }
+        text
+    }
+
+    #[test]
+    fn redact_supersets_cover_every_match() {
+        let mut matched = [0; REDACT_ORDER.len()];
+        let mut check = |piece: &str, range: std::ops::Range<usize>| {
+            let hits = redact_set().matches(piece);
+            for i in range {
+                if REDACT_ORDER[i].search(piece).is_some() {
+                    matched[i] += 1;
+                    assert!(hits.matched(i), "pattern {i} on {piece:?}");
+                }
+            }
+        };
+        for text in parity_corpus().iter().chain(&crafted_corpus()) {
+            check(text, 0..REDACT_ORDER.len());
+            // tool_pass reads its gates one line at a time.
+            if text.contains('\n') {
+                text.split('\n').for_each(|line| check(line, TOOL_GATES));
+            }
+        }
+        assert!(matched.iter().all(|&n| n > 0), "{matched:?}");
+    }
+
+    #[test]
+    fn redact_matches_every_pass_run_unfiltered() {
+        for text in parity_corpus().iter().chain(&crafted_corpus()) {
+            assert_eq!(retro_redact(text), unfiltered_redact(text), "{text:?}");
+        }
     }
 }

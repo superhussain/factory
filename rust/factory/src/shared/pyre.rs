@@ -1,5 +1,6 @@
 //! Python `re` patterns on fancy-regex: `translate` rewrites the parts whose meaning differs.
 
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
@@ -136,10 +137,20 @@ impl Pattern {
 
     /// `re.sub` with a function. Past the backtrack limit it exits, so unredacted text is never written.
     pub fn replace_all(&self, s: &str, f: impl FnMut(&Captures) -> String) -> String {
-        match self.compiled("search").try_replacen(s, 0, f) {
-            Ok(out) => out.into_owned(),
-            Err(_) => self.stop(),
-        }
+        self.replace_cow(s, f).into_owned()
+    }
+
+    /// `replace_all`, borrowing s when nothing matched.
+    pub fn replace_cow<'t>(&self, s: &'t str, f: impl FnMut(&Captures) -> String) -> Cow<'t, str> {
+        self.compiled("search")
+            .try_replacen(s, 0, f)
+            .unwrap_or_else(|_| self.stop())
+    }
+
+    /// A linear-time superset of this pattern: its translation with every lookaround dropped, so a
+    /// text this pattern can match always matches it too.
+    pub fn linear(&self) -> String {
+        drop_lookaround(&translate(self.src, self.flags))
     }
 
     /// `re.search` for a redaction gate. Past the backtrack limit it exits rather than count it as no match.
@@ -199,6 +210,45 @@ fn prefix(flags: Flags) -> String {
 /// A Python pattern as a fancy-regex pattern with the same meaning, flags included.
 pub fn translate(src: &str, flags: Flags) -> String {
     prefix(flags) + &body(src, flags)
+}
+
+/// A translated pattern without its lookaround groups, `\b` and `$` included, since translate writes
+/// them as lookarounds.
+fn drop_lookaround(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut chars = src.chars();
+    let (mut depth, mut skip_from, mut in_class) = (0, None, false);
+    while let Some(c) = chars.next() {
+        let mut piece = String::from(c);
+        match c {
+            '\\' => piece.extend(chars.next()),
+            '[' => in_class = true,
+            ']' => in_class = false,
+            '(' if !in_class => {
+                depth += 1;
+                let rest = chars.as_str();
+                if skip_from.is_none()
+                    && ["?=", "?!", "?<=", "?<!"]
+                        .iter()
+                        .any(|p| rest.starts_with(p))
+                {
+                    skip_from = Some(depth);
+                }
+            }
+            ')' if !in_class => {
+                depth -= 1;
+                if skip_from == Some(depth + 1) {
+                    skip_from = None;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        if skip_from.is_none() {
+            out.push_str(&piece);
+        }
+    }
+    out
 }
 
 fn body(src: &str, flags: Flags) -> String {
