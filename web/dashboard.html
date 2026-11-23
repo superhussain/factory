@@ -8463,6 +8463,7 @@ function approveSpecJob(board, id, now) {
   j.stage = 'build';
   j.note = DASHBOARD_APPROVED_NOTE;
   delete j.needs;
+  j.spec_approval = { decider: 'person', via: 'dashboard', at: now };
   j.updated = now;
   board.updated = now;
   return '';
