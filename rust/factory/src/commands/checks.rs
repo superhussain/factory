@@ -51,19 +51,30 @@ const AUTONOMY_DAYS: i64 = 90;
 const AUTONOMY_CLASSES: &[&str] = &["internal", "visible"];
 const AUTONOMY_HOLD_NOTE: &str = "earned autonomy hold: a person reviews and merges";
 
-static GH_PR: Pattern = Pattern::new(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/\d+", Flags::ASCII);
-static GH_PR_PARTS: Pattern = Pattern::new(r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})", Flags::ASCII);
+static GH_PR: Pattern = Pattern::new(
+    r"https://github\.com/([\w.-]+/[\w.-]+)/pull/\d+",
+    Flags::ASCII,
+);
+static GH_PR_PARTS: Pattern = Pattern::new(
+    r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})",
+    Flags::ASCII,
+);
 static BRANCH: Pattern = Pattern::new(r"(?!-)[A-Za-z0-9._/-]{1,255}", Flags::NONE);
 static COMMIT: Pattern = Pattern::new(r"[0-9a-f]{40}", Flags::NONE);
 static NO_CHECKS: Pattern = Pattern::new(r"no (required )?checks reported", Flags::NONE);
-static HANDLED_SIG: Pattern = Pattern::new(r"(review|thread|check|conflict):[0-9a-f]{16}", Flags::NONE);
+static HANDLED_SIG: Pattern =
+    Pattern::new(r"(review|thread|check|conflict):[0-9a-f]{16}", Flags::NONE);
 static BUILDKITE_BUILD: Pattern = Pattern::new(
     r"https://buildkite\.com/([A-Za-z0-9-]{1,100})/([A-Za-z0-9_-]{1,100})/builds/([0-9]{1,12})(?:#([0-9a-f-]{36}))?",
     Flags::ASCII,
 );
 static BUILDKITE_JOB: Pattern = Pattern::new(r"[0-9a-f-]{36}", Flags::NONE);
-static BUILDKITE_STRIP: Pattern = Pattern::new(r"\x1b_bk;t=[0-9]+\x07|\x1b\[[0-9;?]*[A-Za-z]", Flags::NONE);
-static MERGE_ASYNC_ID: Pattern = Pattern::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", Flags::NONE);
+static BUILDKITE_STRIP: Pattern =
+    Pattern::new(r"\x1b_bk;t=[0-9]+\x07|\x1b\[[0-9;?]*[A-Za-z]", Flags::NONE);
+static MERGE_ASYNC_ID: Pattern = Pattern::new(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    Flags::NONE,
+);
 
 #[derive(Clone)]
 pub(crate) enum GhCode {
@@ -94,7 +105,9 @@ pub(crate) struct System {
 
 impl System {
     pub(crate) fn new() -> System {
-        System { start: Instant::now() }
+        System {
+            start: Instant::now(),
+        }
     }
 }
 
@@ -102,13 +115,25 @@ impl Host for System {
     fn gh(&mut self, args: &[&str]) -> Option<GhOut> {
         let gh = which("gh")?;
         let gh = gh.to_string_lossy();
-        let argv: Vec<&str> = std::iter::once(gh.as_ref()).chain(args.iter().copied()).collect();
-        let empty = |code| GhOut { code, stdout: String::new(), stderr: String::new() };
-        Some(match capture(&argv, None, &[], Some(Duration::from_secs(60))) {
-            Ok(o) => GhOut { code: GhCode::Exit(o.code), stdout: o.stdout, stderr: o.stderr },
-            Err(e) if e.kind() == io::ErrorKind::TimedOut => empty(GhCode::Timeout),
-            Err(_) => empty(GhCode::Exit(1)),
-        })
+        let argv: Vec<&str> = std::iter::once(gh.as_ref())
+            .chain(args.iter().copied())
+            .collect();
+        let empty = |code| GhOut {
+            code,
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        Some(
+            match capture(&argv, None, &[], Some(Duration::from_secs(60))) {
+                Ok(o) => GhOut {
+                    code: GhCode::Exit(o.code),
+                    stdout: o.stdout,
+                    stderr: o.stderr,
+                },
+                Err(e) if e.kind() == io::ErrorKind::TimedOut => empty(GhCode::Timeout),
+                Err(_) => empty(GhCode::Exit(1)),
+            },
+        )
     }
 
     fn monotonic(&mut self) -> f64 {
@@ -158,32 +183,49 @@ fn small_int(s: &str) -> Option<u64> {
         return None;
     }
     let digits = s.trim_start_matches('0');
-    Some(if digits.len() > 18 { u64::MAX } else { digits.parse().unwrap_or(0) })
+    Some(if digits.len() > 18 {
+        u64::MAX
+    } else {
+        digits.parse().unwrap_or(0)
+    })
 }
 
 /// stdout of a gh answer, failing with exit 5 when gh cannot answer.
 fn gh_answer(r: Option<GhOut>, what: &str) -> Res<String> {
-    let Some(r) = r else { return Err(fail("gh is not installed", 5)) };
+    let Some(r) = r else {
+        return Err(fail("gh is not installed", 5));
+    };
     match r.code {
         GhCode::Timeout => Err(fail(format!("{what} timed out after 60 seconds"), 5)),
         GhCode::Exit(0) => Ok(r.stdout),
-        GhCode::Exit(code) => Err(fail(format!("{what} exited {code} (check gh auth status)"), 5)),
+        GhCode::Exit(code) => Err(fail(
+            format!("{what} exited {code} (check gh auth status)"),
+            5,
+        )),
     }
 }
 
 /// stdout of gh pr view <pr> <args>, failing with exit 5 when gh cannot answer.
 fn gh_pr_view(h: &mut dyn Host, pr: &str, args: &[&str]) -> Res<String> {
-    let argv: Vec<&str> = ["pr", "view", pr].into_iter().chain(args.iter().copied()).collect();
+    let argv: Vec<&str> = ["pr", "view", pr]
+        .into_iter()
+        .chain(args.iter().copied())
+        .collect();
     gh_answer(h.gh(&argv), "gh pr view")
 }
 
 fn find_job<'a>(data: &'a Value, job_id: &str) -> Option<&'a Value> {
-    data["jobs"].as_array()?.iter().find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
+    data["jobs"]
+        .as_array()?
+        .iter()
+        .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
 }
 
 fn project_meta(home: &Path, slug: &str) -> Res<Vec<(String, String)>> {
     let path = project_files(home, slug)?.0;
-    Ok(frontmatter(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))?.0)
+    Ok(frontmatter(&path)
+        .map_err(|e| fail(os_error(&e, Some(&path)), 1))?
+        .0)
 }
 
 /// The job's PR URL from the board, after checking it is a pull request in the project file repo,
@@ -195,14 +237,25 @@ pub(crate) fn board_pr(home: &Path, slug: &str, job_id: &str, archive: bool) -> 
         _ => return Err(fail(format!("{job_id} has no pr on the board"), 4)),
     };
     let meta = project_meta(home, slug)?;
-    let archive_repo = if archive { fm_get(&meta, "archive").unwrap_or("") } else { "" };
-    let repos: Vec<&str> = [fm_get(&meta, "repo").unwrap_or(""), archive_repo].into_iter().filter(|r| !r.is_empty()).collect();
+    let archive_repo = if archive {
+        fm_get(&meta, "archive").unwrap_or("")
+    } else {
+        ""
+    };
+    let repos: Vec<&str> = [fm_get(&meta, "repo").unwrap_or(""), archive_repo]
+        .into_iter()
+        .filter(|r| !r.is_empty())
+        .collect();
     let found = GH_PR.fullmatch(&pr).is_some_and(|m| {
         let repo = m.get(1).unwrap().as_str().to_lowercase();
         repos.iter().any(|r| r.to_lowercase() == repo)
     });
     if !found {
-        let names = if repos.is_empty() { "the project file repo".to_string() } else { repos.join(" or ") };
+        let names = if repos.is_empty() {
+            "the project file repo".to_string()
+        } else {
+            repos.join(" or ")
+        };
         return Err(fail(format!("{pr} is not a pull request in {names}"), 4));
     }
     Ok(pr)
@@ -214,7 +267,11 @@ fn escalation_hold(home: &Path, slug: &str, job_id: &str) -> Res<Option<&'static
     if find_job(&data, job_id).is_some_and(escalated) {
         return Ok(Some("is escalated on the board"));
     }
-    let decision = home.join("jobs").join(slug).join(job_id).join("decision.md");
+    let decision = home
+        .join("jobs")
+        .join(slug)
+        .join(job_id)
+        .join("decision.md");
     let unreadable = Ok(Some("has a decision.md that cannot be read"));
     match is_link(&decision) {
         Ok(false) => {}
@@ -225,8 +282,14 @@ fn escalation_hold(home: &Path, slug: &str, job_id: &str) -> Res<Option<&'static
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return unreadable,
     };
-    let first = splitlines(&text, false).into_iter().map(strip).find(|l| !l.is_empty()).unwrap_or("");
-    Ok(first.starts_with("ESCALATE").then_some("has a decision.md that says ESCALATE"))
+    let first = splitlines(&text, false)
+        .into_iter()
+        .map(strip)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    Ok(first
+        .starts_with("ESCALATE")
+        .then_some("has a decision.md that says ESCALATE"))
 }
 
 fn stamp_of(v: Option<&Value>) -> Option<i64> {
@@ -240,19 +303,30 @@ pub(crate) fn job_class(j: &Value) -> Option<&'static str> {
         return None;
     }
     let skipped = Some(&Value::from("SKIPPED"));
-    Some(if first.get("ux") == skipped && first.get("ui") == skipped { "internal" } else { "visible" })
+    Some(
+        if first.get("ux") == skipped && first.get("ui") == skipped {
+            "internal"
+        } else {
+            "visible"
+        },
+    )
 }
 
 /// The board's well-formed `{"<slug>/<class>": "<UTC time>"}` restores, as times.
 fn autonomy_restored(data: &Value) -> BTreeMap<String, i64> {
-    let Some(restored) = data.get("autonomy").and_then(|r| r.get("restored")).and_then(Value::as_object) else {
+    let Some(restored) = data
+        .get("autonomy")
+        .and_then(|r| r.get("restored"))
+        .and_then(Value::as_object)
+    else {
         return BTreeMap::new();
     };
     restored
         .iter()
         .filter_map(|(k, v)| {
             let (slug, class) = k.split_once('/')?;
-            let ok = !class.contains('/') && SLUG.is_full(slug) && AUTONOMY_CLASSES.contains(&class);
+            let ok =
+                !class.contains('/') && SLUG.is_full(slug) && AUTONOMY_CLASSES.contains(&class);
             ok.then(|| stamp_of(Some(v)).map(|at| (k.clone(), at)))?
         })
         .collect()
@@ -266,7 +340,9 @@ pub(crate) fn autonomy_holds(data: &Value) -> BTreeMap<(String, String), Vec<Str
     for j in data["jobs"].as_array().into_iter().flatten() {
         let project = j.get("project").and_then(Value::as_str).unwrap_or("");
         let outcome = j.get("outcome").filter(|o| o.is_object());
-        let (Some(cls), Some(outcome)) = (job_class(j), outcome) else { continue };
+        let (Some(cls), Some(outcome)) = (job_class(j), outcome) else {
+            continue;
+        };
         if !(j.get("stage").and_then(Value::as_str) == Some("merged")
             && stamp_of(j.get("done")).unwrap_or(cutoff) > cutoff
             && !project.is_empty()
@@ -279,7 +355,10 @@ pub(crate) fn autonomy_holds(data: &Value) -> BTreeMap<(String, String), Vec<Str
         if lifted.is_some_and(|lifted| !at.is_some_and(|at| at > *lifted)) {
             continue;
         }
-        holds.entry((project.to_string(), cls.to_string())).or_default().push(py_str(j.get("id").unwrap_or(&Value::Null)));
+        holds
+            .entry((project.to_string(), cls.to_string()))
+            .or_default()
+            .push(py_str(j.get("id").unwrap_or(&Value::Null)));
     }
     holds.values_mut().for_each(|ids| ids.sort());
     holds
@@ -301,15 +380,31 @@ pub(crate) fn autonomy_hold(data: &Value, job: &Value) -> Option<String> {
 pub(crate) fn autonomy_hold_write(home: &Path, job_id: &str) -> Res<Option<String>> {
     cas(home, "/api/board", |text| {
         let mut data = load_board(text)?;
-        let Some(job) = find_job(&data, job_id) else { return Ok((None, None)) };
+        let Some(job) = find_job(&data, job_id) else {
+            return Ok((None, None));
+        };
         let held = job.get("stage").and_then(Value::as_str) == Some("pr-open")
             && job.get("automerge") == Some(&Value::Bool(true))
             && !escalated(job);
-        let why = if held { autonomy_hold(&data, job) } else { None };
-        let number = job.get("pr").and_then(Value::as_str).and_then(|pr| GH_PR_PARTS.fullmatch(pr)).map(|m| m[3].to_string());
-        let (Some(why), Some(number)) = (why, number) else { return Ok((None, None)) };
+        let why = if held {
+            autonomy_hold(&data, job)
+        } else {
+            None
+        };
+        let number = job
+            .get("pr")
+            .and_then(Value::as_str)
+            .and_then(|pr| GH_PR_PARTS.fullmatch(pr))
+            .map(|m| m[3].to_string());
+        let (Some(why), Some(number)) = (why, number) else {
+            return Ok((None, None));
+        };
         let needs = format!("review and merge PR #{number}: {why}");
-        patch_job(&mut data, job_id, &json!({"automerge": false, "needs": needs, "note": AUTONOMY_HOLD_NOTE}));
+        patch_job(
+            &mut data,
+            job_id,
+            &json!({"automerge": false, "needs": needs, "note": AUTONOMY_HOLD_NOTE}),
+        );
         Ok((Some(dump_board(&data)), Some(needs)))
     })
 }
@@ -334,13 +429,21 @@ fn when_cmp(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
 
 /// The rollup's checks, keeping per name a pending run over a finished one, then its latest. None when malformed.
 fn rollup_checks(rollup: &Value) -> Option<Vec<Check>> {
-    let nodes = rollup.get("contexts")?.as_object()?.get("nodes")?.as_array()?;
+    let nodes = rollup
+        .get("contexts")?
+        .as_object()?
+        .get("nodes")?
+        .as_array()?;
     let mut latest: BTreeMap<String, ((bool, Value), &'static str)> = BTreeMap::new();
     for node in nodes {
         let node = node.as_object()?;
         let (check, when, state, bucket) = match node.get("__typename")? {
             Value::String(t) if t == "CheckRun" => {
-                let (check, when, state) = (node.get("name")?, node.get("startedAt")?, node.get("status")?);
+                let (check, when, state) = (
+                    node.get("name")?,
+                    node.get("startedAt")?,
+                    node.get("status")?,
+                );
                 let bucket = if state == "COMPLETED" {
                     match node.get("conclusion")? {
                         Value::Array(_) | Value::Object(_) => return None,
@@ -355,7 +458,11 @@ fn rollup_checks(rollup: &Value) -> Option<Vec<Check>> {
                 (check, when, state, bucket)
             }
             Value::String(t) if t == "StatusContext" => {
-                let (check, when, state) = (node.get("context")?, node.get("createdAt")?, node.get("state")?);
+                let (check, when, state) = (
+                    node.get("context")?,
+                    node.get("createdAt")?,
+                    node.get("state")?,
+                );
                 let bucket = match state.as_str() {
                     Some("SUCCESS") => "pass",
                     Some("PENDING" | "EXPECTED") => "pending",
@@ -365,12 +472,23 @@ fn rollup_checks(rollup: &Value) -> Option<Vec<Check>> {
             }
             _ => return None,
         };
-        let (Value::String(check), true) = (check, state.is_string()) else { return None };
-        let rank = (bucket == "pending", if truthy(when) { when.clone() } else { Value::from("") });
+        let (Value::String(check), true) = (check, state.is_string()) else {
+            return None;
+        };
+        let rank = (
+            bucket == "pending",
+            if truthy(when) {
+                when.clone()
+            } else {
+                Value::from("")
+            },
+        );
         let newer = match latest.get(check) {
             None => true,
             Some(((pending, seen), _)) => match rank.0.cmp(pending) {
-                std::cmp::Ordering::Equal => when_cmp(&rank.1, seen)? == std::cmp::Ordering::Greater,
+                std::cmp::Ordering::Equal => {
+                    when_cmp(&rank.1, seen)? == std::cmp::Ordering::Greater
+                }
                 order => order == std::cmp::Ordering::Greater,
             },
         };
@@ -378,29 +496,62 @@ fn rollup_checks(rollup: &Value) -> Option<Vec<Check>> {
             latest.insert(check.clone(), (rank, bucket));
         }
     }
-    Some(latest.into_iter().map(|(name, (_, bucket))| Check { name, bucket: bucket.into(), link: None }).collect())
+    Some(
+        latest
+            .into_iter()
+            .map(|(name, (_, bucket))| Check {
+                name,
+                bucket: bucket.into(),
+                link: None,
+            })
+            .collect(),
+    )
 }
 
 /// (checks, problem) for commit sha's checks from one gh api graphql call.
 fn head_checks(h: &mut dyn Host, pr: &str, sha: &str) -> (Vec<Check>, Option<String>) {
     let repo = GH_PR.fullmatch(pr).unwrap()[1].to_string();
     let (owner, name) = repo.split_once('/').unwrap();
-    let (o, r, s) = (format!("o={owner}"), format!("r={name}"), format!("sha={sha}"));
-    let args = ["api", "graphql", "-f", HEAD_CHECKS_QUERY, "-f", &o, "-f", &r, "-f", &s, "--jq", ".data.repository.object"];
-    let Some(result) = h.gh(&args) else { return (vec![], Some("gh is not installed".into())) };
+    let (o, r, s) = (
+        format!("o={owner}"),
+        format!("r={name}"),
+        format!("sha={sha}"),
+    );
+    let args = [
+        "api",
+        "graphql",
+        "-f",
+        HEAD_CHECKS_QUERY,
+        "-f",
+        &o,
+        "-f",
+        &r,
+        "-f",
+        &s,
+        "--jq",
+        ".data.repository.object",
+    ];
+    let Some(result) = h.gh(&args) else {
+        return (vec![], Some("gh is not installed".into()));
+    };
     match result.code {
         GhCode::Timeout => return (vec![], Some("timed out after 60 seconds".into())),
         GhCode::Exit(0) => {}
         GhCode::Exit(code) => return (vec![], Some(format!("exited {code} with no check list"))),
     }
     let unusable = || (vec![], Some("printed no check list".to_string()));
-    let Ok(Value::Object(object)) = loads(&result.stdout) else { return unusable() };
+    let Ok(Value::Object(object)) = loads(&result.stdout) else {
+        return unusable();
+    };
     let rollup = match object.get("statusCheckRollup") {
         None => return unusable(),
         Some(Value::Null) => return (vec![], None),
         Some(rollup) => rollup,
     };
-    let more = rollup.get("contexts").and_then(|c| c.get("pageInfo")).and_then(|p| p.get("hasNextPage"));
+    let more = rollup
+        .get("contexts")
+        .and_then(|c| c.get("pageInfo"))
+        .and_then(|p| p.get("hasNextPage"));
     match more {
         None => return unusable(),
         Some(more) if truthy(more) => return (vec![], Some("listed more than 100 checks".into())),
@@ -414,29 +565,56 @@ fn head_checks(h: &mut dyn Host, pr: &str, sha: &str) -> (Vec<Check>, Option<Str
 
 /// How many commits of base the PR head sha lacks, from GitHub's compare API.
 fn behind_by(h: &mut dyn Host, pr: &str, base: &str, sha: &Value) -> Res<u64> {
-    let sha = sha.as_str().filter(|s| COMMIT.is_full(s)).ok_or_else(|| fail("gh pr view printed an unusable headRefOid", 5))?;
+    let sha = sha
+        .as_str()
+        .filter(|s| COMMIT.is_full(s))
+        .ok_or_else(|| fail("gh pr view printed an unusable headRefOid", 5))?;
     let repo = &GH_PR.fullmatch(pr).unwrap()[1];
     let path = format!("repos/{repo}/compare/{base}...{sha}");
-    let behind = gh_answer(h.gh(&["api", &path, "--jq", ".behind_by"]), "gh api compare")?;
+    let behind = gh_answer(
+        h.gh(&["api", &path, "--jq", ".behind_by"]),
+        "gh api compare",
+    )?;
     small_int(strip(&behind)).ok_or_else(|| fail("gh api compare printed no behind_by", 5))
 }
 
 /// (behind_by, head sha, base): how many commits of its base the PR's head lacks.
 fn pr_behind(h: &mut dyn Host, pr: &str) -> Res<(u64, String, String)> {
     let view = loads(&gh_pr_view(h, pr, &["--json", "headRefOid,baseRefName"])?).ok();
-    let field = |k: &str| view.as_ref().and_then(|v| v.get(k)).and_then(Value::as_str).map(str::to_string);
+    let field = |k: &str| {
+        view.as_ref()
+            .and_then(|v| v.get(k))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
     let (sha, base) = (field("headRefOid"), field("baseRefName"));
     let (Some(sha), Some(base)) = (sha, base) else {
-        return Err(fail("gh pr view printed an unusable headRefOid or baseRefName", 5));
+        return Err(fail(
+            "gh pr view printed an unusable headRefOid or baseRefName",
+            5,
+        ));
     };
     if !(COMMIT.is_full(&sha) && BRANCH.is_full(&base)) {
-        return Err(fail("gh pr view printed an unusable headRefOid or baseRefName", 5));
+        return Err(fail(
+            "gh pr view printed an unusable headRefOid or baseRefName",
+            5,
+        ));
     }
-    Ok((behind_by(h, pr, &base, &Value::from(sha.as_str()))?, sha, base))
+    Ok((
+        behind_by(h, pr, &base, &Value::from(sha.as_str()))?,
+        sha,
+        base,
+    ))
 }
 
 /// The `while True` of checks: read the head's checks every 10 seconds until they settle or timeout passes.
-fn checks_loop(h: &mut dyn Host, pr: &str, timeout: u64, out: &mut dyn Write, err: &mut dyn Write) -> Res<()> {
+fn checks_loop(
+    h: &mut dyn Host,
+    pr: &str,
+    timeout: u64,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Res<()> {
     let start = h.monotonic();
     let mut since = start;
     let mut usable = false;
@@ -447,15 +625,26 @@ fn checks_loop(h: &mut dyn Host, pr: &str, timeout: u64, out: &mut dyn Write, er
         let (checks, problem) = head_checks(h, pr, &sha);
         match &problem {
             Some(p) => {
-                writeln!(err, "factory.py: warning: gh api graphql gave no usable check list ({p})").ok();
+                writeln!(
+                    err,
+                    "factory.py: warning: gh api graphql gave no usable check list ({p})"
+                )
+                .ok();
             }
             None => usable = true,
         }
-        let pending: Vec<&str> = checks.iter().filter(|c| c.bucket == "pending").map(|c| c.name.as_str()).collect();
+        let pending: Vec<&str> = checks
+            .iter()
+            .filter(|c| c.bucket == "pending")
+            .map(|c| c.name.as_str())
+            .collect();
         let fresh = updated_from.as_deref() != Some(sha.as_str());
         if !checks.is_empty() && pending.is_empty() {
-            let failing: Vec<&str> =
-                checks.iter().filter(|c| c.bucket != "pass" && c.bucket != "skipping").map(|c| c.name.as_str()).collect();
+            let failing: Vec<&str> = checks
+                .iter()
+                .filter(|c| c.bucket != "pass" && c.bucket != "skipping")
+                .map(|c| c.name.as_str())
+                .collect();
             if !failing.is_empty() || (behind == 0 && fresh) {
                 for c in &checks {
                     writeln!(out, "{} {}", c.bucket, c.name).ok();
@@ -467,12 +656,20 @@ fn checks_loop(h: &mut dyn Host, pr: &str, timeout: u64, out: &mut dyn Write, er
             }
             if behind != 0 && fresh {
                 let n = pr.rsplit('/').next().unwrap();
-                let Some(result) = h.gh(&["pr", "update-branch", pr]) else { return Err(fail("gh is not installed", 5)) };
+                let Some(result) = h.gh(&["pr", "update-branch", pr]) else {
+                    return Err(fail("gh is not installed", 5));
+                };
                 match result.code {
-                    GhCode::Timeout => return Err(fail("gh pr update-branch timed out after 60 seconds", 5)),
+                    GhCode::Timeout => {
+                        return Err(fail("gh pr update-branch timed out after 60 seconds", 5))
+                    }
                     GhCode::Exit(0) => {}
                     GhCode::Exit(_) => {
-                        let why = if result.stderr.is_empty() { &result.stdout } else { &result.stderr };
+                        let why = if result.stderr.is_empty() {
+                            &result.stdout
+                        } else {
+                            &result.stderr
+                        };
                         return Err(fail(
                             format!(
                                 "gh pr update-branch could not bring PR #{n} up to date with {base}: {}. Merge {base} into the branch and push.",
@@ -503,7 +700,10 @@ fn checks_loop(h: &mut dyn Host, pr: &str, timeout: u64, out: &mut dyn Write, er
         }
         if elapsed >= timeout_f {
             if let Some(p) = problem {
-                return Err(fail(format!("gh api graphql gave no usable check list by the deadline ({p})"), 5));
+                return Err(fail(
+                    format!("gh api graphql gave no usable check list by the deadline ({p})"),
+                    5,
+                ));
             }
             let why = if !pending.is_empty() {
                 format!("still pending: {}", pending.join(", "))
@@ -523,26 +723,55 @@ pub fn checks_cmd(call: &Call) -> Res<()> {
     let (home, slug, job_id) = r2_target(&call.args[0], true)?;
     let timeout = match args {
         [] => 300,
-        [flag, value] if flag == "--timeout" && small_int(value).is_some_and(|n| n <= 600) => small_int(value).unwrap(),
-        _ => return Err(fail(format!("--timeout takes one value from 0 to 600 seconds. {CHECKS_USAGE}"), 2)),
+        [flag, value] if flag == "--timeout" && small_int(value).is_some_and(|n| n <= 600) => {
+            small_int(value).unwrap()
+        }
+        _ => {
+            return Err(fail(
+                format!("--timeout takes one value from 0 to 600 seconds. {CHECKS_USAGE}"),
+                2,
+            ))
+        }
     };
     let pr = board_pr(&home, &slug, &job_id, false)?;
     if let Some(why) = escalation_hold(&home, &slug, &job_id)? {
-        return Err(fail(format!("{job_id} {why}, so a person reviews and merges {pr}. Nothing merges."), 7));
+        return Err(fail(
+            format!("{job_id} {why}, so a person reviews and merges {pr}. Nothing merges."),
+            7,
+        ));
     }
     let data = read_board(&home)?;
     let empty = json!({});
     if let Some(why) = autonomy_hold(&data, find_job(&data, &job_id).unwrap_or(&empty)) {
         autonomy_hold_write(&home, &job_id)?;
-        return Err(fail(format!("{job_id} is held: {why}. A person reviews and merges {pr}. Nothing merges."), 8));
+        return Err(fail(
+            format!("{job_id} is held: {why}. A person reviews and merges {pr}. Nothing merges."),
+            8,
+        ));
     }
     let mut host = System::new();
     let state = gh_pr_view(&mut host, &pr, &["--json", "state", "--jq", ".state"])?;
     let state = strip(&state);
     if state != "OPEN" {
-        return Err(fail(format!("{pr} is {}, not OPEN", if state.is_empty() { "in no state" } else { state }), 4));
+        return Err(fail(
+            format!(
+                "{pr} is {}, not OPEN",
+                if state.is_empty() {
+                    "in no state"
+                } else {
+                    state
+                }
+            ),
+            4,
+        ));
     }
-    checks_loop(&mut host, &pr, timeout, &mut io::stdout(), &mut io::stderr())
+    checks_loop(
+        &mut host,
+        &pr,
+        timeout,
+        &mut io::stdout(),
+        &mut io::stderr(),
+    )
 }
 
 /// The branch a job's PR should target: the project base, or the archive repo's default branch for an archive PR.
@@ -550,11 +779,20 @@ pub(crate) fn pr_base(h: &mut dyn Host, meta: &[(String, String)], pr: &str) -> 
     let repo = GH_PR.fullmatch(pr).unwrap()[1].to_string();
     let archive = fm_get(meta, "archive").unwrap_or("");
     let lower = repo.to_lowercase();
-    if archive.is_empty() || lower != archive.to_lowercase() || lower == fm_get(meta, "repo").unwrap_or("").to_lowercase() {
-        return Ok(fm_get(meta, "base").filter(|b| !b.is_empty()).unwrap_or("main").to_string());
+    if archive.is_empty()
+        || lower != archive.to_lowercase()
+        || lower == fm_get(meta, "repo").unwrap_or("").to_lowercase()
+    {
+        return Ok(fm_get(meta, "base")
+            .filter(|b| !b.is_empty())
+            .unwrap_or("main")
+            .to_string());
     }
     let path = format!("repos/{repo}");
-    let answer = gh_answer(h.gh(&["api", &path, "--jq", ".default_branch"]), "gh api repos")?;
+    let answer = gh_answer(
+        h.gh(&["api", &path, "--jq", ".default_branch"]),
+        "gh api repos",
+    )?;
     let base = strip(&answer);
     if !BRANCH.is_full(base) {
         return Err(fail("gh printed an unusable default_branch", 5));
@@ -570,7 +808,9 @@ fn pr_checks(h: &mut dyn Host, pr: &str, required: bool) -> (Vec<Check>, Option<
         args.push("--required");
     }
     args.extend(["--json", "name,bucket,link"]);
-    let Some(result) = h.gh(&args) else { return (vec![], Some("gh is not installed".into())) };
+    let Some(result) = h.gh(&args) else {
+        return (vec![], Some("gh is not installed".into()));
+    };
     let code = match result.code {
         GhCode::Timeout => return (vec![], Some("timed out after 60 seconds".into())),
         GhCode::Exit(code) => code,
@@ -593,7 +833,14 @@ fn pr_checks(h: &mut dyn Host, pr: &str, required: bool) -> (Vec<Check>, Option<
     if code == 1 && strip(&result.stdout).is_empty() && NO_CHECKS.search(&result.stderr).is_some() {
         return (vec![], None);
     }
-    (vec![], Some(if code != 0 { format!("exited {code} with no check list") } else { "printed no check list".into() }))
+    (
+        vec![],
+        Some(if code != 0 {
+            format!("exited {code} with no check list")
+        } else {
+            "printed no check list".into()
+        }),
+    )
 }
 
 /// The signature babysit records for one PR item: its kind and a hash of what identifies it.
@@ -603,14 +850,20 @@ pub(crate) fn handled_sig(kind: &str, parts: &[&str]) -> String {
 
 /// The well-formed entries of a job's handled field, in board order.
 pub(crate) fn valid_handled(v: Option<&Value>) -> Map<String, Value> {
-    let Some(Value::Object(entries)) = v else { return Map::new() };
+    let Some(Value::Object(entries)) = v else {
+        return Map::new();
+    };
     entries
         .iter()
         .filter_map(|(sig, e)| {
-            let (Value::Number(count), at) = (e.get("count")?, e.get("at")?) else { return None };
+            let (Value::Number(count), at) = (e.get("count")?, e.get("at")?) else {
+                return None;
+            };
             let digits = count.to_string();
-            let positive_int = !digits.contains(['.', 'e', 'E', '-']) && !digits.trim_start_matches('0').is_empty();
-            (HANDLED_SIG.is_full(sig) && positive_int && at.is_string()).then(|| (sig.clone(), json!({"count": count, "at": at})))
+            let positive_int = !digits.contains(['.', 'e', 'E', '-'])
+                && !digits.trim_start_matches('0').is_empty();
+            (HANDLED_SIG.is_full(sig) && positive_int && at.is_string())
+                .then(|| (sig.clone(), json!({"count": count, "at": at})))
         })
         .collect()
 }
@@ -618,14 +871,19 @@ pub(crate) fn valid_handled(v: Option<&Value>) -> Map<String, Value> {
 /// The job's valid handled entries from the board, else {}.
 pub(crate) fn job_handled(home: &Path, job_id: &str) -> Res<Map<String, Value>> {
     let data = read_board(home)?;
-    Ok(valid_handled(find_job(&data, job_id).and_then(|j| j.get("handled"))))
+    Ok(valid_handled(
+        find_job(&data, job_id).and_then(|j| j.get("handled")),
+    ))
 }
 
 /// The body of one Buildkite GET, at most max + 1 bytes, or the problem line. The token goes only into its header.
 fn buildkite_get(url: &str, token: &str, max: usize) -> Result<Vec<u8>, String> {
     static AGENT: OnceLock<Agent> = OnceLock::new();
     let agent = AGENT.get_or_init(|| {
-        let tls = TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(RootCerts::PlatformVerifier).build();
+        let tls = TlsConfig::builder()
+            .provider(TlsProvider::NativeTls)
+            .root_certs(RootCerts::PlatformVerifier)
+            .build();
         Agent::config_builder()
             .max_redirects(0)
             .max_redirects_will_error(false)
@@ -639,7 +897,12 @@ fn buildkite_get(url: &str, token: &str, max: usize) -> Result<Vec<u8>, String> 
             .build()
             .new_agent()
     });
-    let unreachable = |text: String| format!("can't reach Buildkite: {}", printable_line(&text.replace(token, "[token]"), 200));
+    let unreachable = |text: String| {
+        format!(
+            "can't reach Buildkite: {}",
+            printable_line(&text.replace(token, "[token]"), 200)
+        )
+    };
     let response = agent
         .get(url)
         .header("Authorization", format!("Bearer {token}"))
@@ -649,37 +912,71 @@ fn buildkite_get(url: &str, token: &str, max: usize) -> Result<Vec<u8>, String> 
         .map_err(|e| unreachable(urlopen_error(&e)))?;
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
-        let scopes = if status == 401 || status == 403 { " (the token needs read_builds and read_build_logs)" } else { "" };
+        let scopes = if status == 401 || status == 403 {
+            " (the token needs read_builds and read_build_logs)"
+        } else {
+            ""
+        };
         return Err(format!("Buildkite answered {status}{scopes}"));
     }
     let mut body = Vec::new();
-    response.into_body().into_reader().take(max as u64 + 1).read_to_end(&mut body).map_err(|e| unreachable(e.to_string()))?;
+    response
+        .into_body()
+        .into_reader()
+        .take(max as u64 + 1)
+        .read_to_end(&mut body)
+        .map_err(|e| unreachable(e.to_string()))?;
     Ok(body)
 }
 
 /// ci_log for a failing check that links to a Buildkite build: the failed job's name and the stripped,
 /// redacted tail of its log, or a problem saying why there is none. Reads only the project's buildkite_org.
 fn buildkite_log(home: &Path, check: &Check, org: &str, api: &str, max: usize) -> Value {
-    let caps = BUILDKITE_BUILD.fullmatch(check.link.as_deref().unwrap_or("")).unwrap();
+    let caps = BUILDKITE_BUILD
+        .fullmatch(check.link.as_deref().unwrap_or(""))
+        .unwrap();
     let (link_org, pipeline, number) = (&caps[1], &caps[2], &caps[3]);
     let job_id = caps.get(4).map(|m| m.as_str());
     let reading = |job: &str, tail: &str, problem: &str| json!({"check": check.name, "job": job, "tail": tail, "problem": problem});
     if org.is_empty() {
-        return reading("", "", "set buildkite_org in the project frontmatter to read Buildkite logs");
+        return reading(
+            "",
+            "",
+            "set buildkite_org in the project frontmatter to read Buildkite logs",
+        );
     }
     if link_org != org {
-        let why = format!("the check links to Buildkite org {link_org}, not the project's buildkite_org {}", printable_line(org, 100));
+        let why = format!(
+            "the check links to Buildkite org {link_org}, not the project's buildkite_org {}",
+            printable_line(org, 100)
+        );
         return reading("", "", &why);
     }
     let env_file = home.join(".env");
-    let env = if env_file.exists() { read_conf(&env_file).unwrap_or_default() } else { Default::default() };
+    let env = if env_file.exists() {
+        read_conf(&env_file).unwrap_or_default()
+    } else {
+        Default::default()
+    };
     let token = env.get("BUILDKITE_API_TOKEN").map_or("", String::as_str);
     if token.is_empty() {
-        return reading("", "", "set BUILDKITE_API_TOKEN in the factory .env to read Buildkite logs");
+        return reading(
+            "",
+            "",
+            "set BUILDKITE_API_TOKEN in the factory .env to read Buildkite logs",
+        );
     }
     let get = |path: &str| -> Result<Map<String, Value>, String> {
-        let body = buildkite_get(&format!("{api}/organizations/{link_org}/pipelines/{pipeline}/builds/{number}{path}"), token, max)?;
-        let data = if body.len() <= max { std::str::from_utf8(&body).ok().and_then(|t| loads(t).ok()) } else { None };
+        let body = buildkite_get(
+            &format!("{api}/organizations/{link_org}/pipelines/{pipeline}/builds/{number}{path}"),
+            token,
+            max,
+        )?;
+        let data = if body.len() <= max {
+            std::str::from_utf8(&body).ok().and_then(|t| loads(t).ok())
+        } else {
+            None
+        };
         match data {
             Some(Value::Object(data)) => Ok(data),
             _ => Err("Buildkite sent no usable log".into()),
@@ -694,31 +991,49 @@ fn buildkite_log(home: &Path, check: &Check, org: &str, api: &str, max: usize) -
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|j| j.get("id").and_then(Value::as_str).is_some_and(|id| BUILDKITE_JOB.is_full(id)))
+        .filter(|j| {
+            j.get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| BUILDKITE_JOB.is_full(id))
+        })
         .find(|j| match job_id {
             Some(id) => j["id"] == id,
             None => {
                 j.get("type").and_then(Value::as_str) == Some("script")
-                    && matches!(j.get("state").and_then(Value::as_str), Some("failed" | "timed_out"))
+                    && matches!(
+                        j.get("state").and_then(Value::as_str),
+                        Some("failed" | "timed_out")
+                    )
             }
         });
-    let Some(job) = job else { return reading("", "", &format!("no failed job in build {number}")) };
+    let Some(job) = job else {
+        return reading("", "", &format!("no failed job in build {number}"));
+    };
     let log = get(&format!("/jobs/{}/log", job["id"].as_str().unwrap()));
     let content = match log.as_ref().map(|l| l.get("content")) {
         Ok(Some(Value::String(content))) => content,
         Ok(_) => return reading("", "", "Buildkite sent no usable log"),
         Err(problem) => return reading("", "", problem),
     };
-    let mut text = BUILDKITE_STRIP.replace_all(content, |_| String::new()).replace("\r\n", "\n");
+    let mut text = BUILDKITE_STRIP
+        .replace_all(content, |_| String::new())
+        .replace("\r\n", "\n");
     for value in env.values() {
         if value.chars().count() >= ENV_SECRET_MIN {
             text = text.replace(value.as_str(), "[redacted]");
         }
     }
-    let lines: Vec<&str> = text.trim_end_matches('\n').split('\n').map(|l| l.rsplit('\r').next().unwrap()).collect();
+    let lines: Vec<&str> = text
+        .trim_end_matches('\n')
+        .split('\n')
+        .map(|l| l.rsplit('\r').next().unwrap())
+        .collect();
     let tail = lines[lines.len().saturating_sub(BUILDKITE_TAIL_LINES)..].join("\n");
     let chars = tail.chars().count();
-    let tail: String = tail.chars().skip(chars.saturating_sub(BUILDKITE_TAIL_CHARS)).collect();
+    let tail: String = tail
+        .chars()
+        .skip(chars.saturating_sub(BUILDKITE_TAIL_CHARS))
+        .collect();
     reading(&str_or_empty(job.get("name")), &tail, "")
 }
 
@@ -730,16 +1045,30 @@ fn py_int(digits: &str) -> Value {
 
 /// `str((item.get("author") or {}).get("login") or "")`.
 fn login(item: &Value) -> String {
-    str_or_empty(item.get("author").filter(|a| truthy(a)).and_then(|a| a.get("login")))
+    str_or_empty(
+        item.get("author")
+            .filter(|a| truthy(a))
+            .and_then(|a| a.get("login")),
+    )
 }
 
 /// `(v or {}).get("nodes") or []`, as a list.
 fn nodes(v: Option<&Value>) -> &[Value] {
-    v.filter(|v| truthy(v)).and_then(|v| v.get("nodes")).and_then(Value::as_array).map_or(&[], Vec::as_slice)
+    v.filter(|v| truthy(v))
+        .and_then(|v| v.get("nodes"))
+        .and_then(Value::as_array)
+        .map_or(&[], Vec::as_slice)
 }
 
 /// Add one item to items or capped. False when it is a review or thread babysit already handled.
-fn note(handled: &Map<String, Value>, items: &mut Vec<Value>, capped: &mut Vec<Value>, kind: &str, label: &str, parts: &[&str]) -> bool {
+fn note(
+    handled: &Map<String, Value>,
+    items: &mut Vec<Value>,
+    capped: &mut Vec<Value>,
+    kind: &str,
+    label: &str,
+    parts: &[&str],
+) -> bool {
     let sig = handled_sig(kind, parts);
     let seen = handled.get(&sig);
     if (kind == "review" || kind == "thread") && seen.is_some() {
@@ -757,16 +1086,38 @@ fn note(handled: &Map<String, Value>, items: &mut Vec<Value>, capped: &mut Vec<V
 
 /// One reading of the PR for a babysit session, with the next step it calls for. A handled review or thread
 /// is skipped, and a check or conflict worked HANDLED_CAP times reads as capped.
-pub(crate) fn pr_reading(h: &mut dyn Host, home: &Path, pr: &str, base: &str, org: &str, handled: &Map<String, Value>) -> Res<Value> {
-    let view = loads(&gh_pr_view(h, pr, &["--json", PR_STATE_FIELDS])?).ok().filter(Value::is_object);
-    let Some(view) = view else { return Err(fail("gh pr view printed no JSON object", 5)) };
-    let target = view.get("baseRefName").filter(|t| truthy(t)).cloned().unwrap_or_else(|| Value::from(base));
-    let Some(target) = target.as_str().filter(|t| BRANCH.is_full(t)).map(String::from) else {
+pub(crate) fn pr_reading(
+    h: &mut dyn Host,
+    home: &Path,
+    pr: &str,
+    base: &str,
+    org: &str,
+    handled: &Map<String, Value>,
+) -> Res<Value> {
+    let view = loads(&gh_pr_view(h, pr, &["--json", PR_STATE_FIELDS])?)
+        .ok()
+        .filter(Value::is_object);
+    let Some(view) = view else {
+        return Err(fail("gh pr view printed no JSON object", 5));
+    };
+    let target = view
+        .get("baseRefName")
+        .filter(|t| truthy(t))
+        .cloned()
+        .unwrap_or_else(|| Value::from(base));
+    let Some(target) = target
+        .as_str()
+        .filter(|t| BRANCH.is_full(t))
+        .map(String::from)
+    else {
         return Err(fail("gh printed an unusable baseRefName", 5));
     };
     let (listed, problem) = pr_checks(h, pr, true);
     if problem.is_some() && view.get("statusCheckRollup").is_some_and(truthy) {
-        return Err(fail("gh pr checks listed none of the PR's checks (check gh auth status)", 5));
+        return Err(fail(
+            "gh pr checks listed none of the PR's checks (check gh auth status)",
+            5,
+        ));
     }
     let buckets: BTreeSet<&str> = listed.iter().map(|c| c.bucket.as_str()).collect();
     let checks = if buckets.contains("fail") || buckets.contains("cancel") {
@@ -789,17 +1140,50 @@ pub(crate) fn pr_reading(h: &mut dyn Host, home: &Path, pr: &str, base: &str, or
     let new = parse_stamp(&head).is_some_and(|at| h.unix_time() - at < CHECKS_REGISTER as i64);
 
     let parts: Vec<&str> = pr.split('/').collect();
-    let (o, r, n) = (format!("o={}", parts[3]), format!("r={}", parts[4]), format!("n={}", parts[6]));
-    let args = ["api", "graphql", "-f", PR_GRAPHQL_QUERY, "-f", &o, "-f", &r, "-F", &n, "--jq", ".data.repository.pullRequest"];
-    let pull = loads(&gh_answer(h.gh(&args), "gh api graphql")?).ok().filter(Value::is_object);
-    let Some(pull) = pull else { return Err(fail("gh api graphql printed no JSON object", 5)) };
+    let (o, r, n) = (
+        format!("o={}", parts[3]),
+        format!("r={}", parts[4]),
+        format!("n={}", parts[6]),
+    );
+    let args = [
+        "api",
+        "graphql",
+        "-f",
+        PR_GRAPHQL_QUERY,
+        "-f",
+        &o,
+        "-f",
+        &r,
+        "-F",
+        &n,
+        "--jq",
+        ".data.repository.pullRequest",
+    ];
+    let pull = loads(&gh_answer(h.gh(&args), "gh api graphql")?)
+        .ok()
+        .filter(Value::is_object);
+    let Some(pull) = pull else {
+        return Err(fail("gh api graphql printed no JSON object", 5));
+    };
     let bot_logins: BTreeSet<String> = nodes(pull.get("latestReviews"))
         .iter()
-        .filter(|r| r.get("author").filter(|a| truthy(a)).and_then(|a| a.get("__typename")).and_then(Value::as_str) == Some("Bot"))
+        .filter(|r| {
+            r.get("author")
+                .filter(|a| truthy(a))
+                .and_then(|a| a.get("__typename"))
+                .and_then(Value::as_str)
+                == Some("Bot")
+        })
         .map(login)
         .collect();
     let author = login(&view);
-    let reviews: Vec<&Value> = view.get("latestReviews").and_then(Value::as_array).into_iter().flatten().filter(|r| r.is_object()).collect();
+    let reviews: Vec<&Value> = view
+        .get("latestReviews")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|r| r.is_object())
+        .collect();
     let replied = reviews
         .iter()
         .filter(|r| login(r) == author)
@@ -812,7 +1196,9 @@ pub(crate) fn pr_reading(h: &mut dyn Host, home: &Path, pr: &str, base: &str, or
         .iter()
         .copied()
         .filter(|r| {
-            r.get("authorAssociation").and_then(Value::as_str).is_some_and(|a| PR_REVIEWERS.contains(&a))
+            r.get("authorAssociation")
+                .and_then(Value::as_str)
+                .is_some_and(|a| PR_REVIEWERS.contains(&a))
                 && login(r) != author
                 && !bot_logins.contains(&login(r))
         })
@@ -822,36 +1208,76 @@ pub(crate) fn pr_reading(h: &mut dyn Host, home: &Path, pr: &str, base: &str, or
     let mut unanswered = false;
     for r in &human {
         let at = str_or_empty(r.get("submittedAt"));
-        if matches!(state_of(r).as_deref(), Some("CHANGES_REQUESTED" | "COMMENTED")) && at > replied {
+        if matches!(
+            state_of(r).as_deref(),
+            Some("CHANGES_REQUESTED" | "COMMENTED")
+        ) && at > replied
+        {
             let who = login(r);
             let body = str_or_empty(r.get("body"));
-            unanswered = note(handled, &mut items, &mut capped, "review", &who, &[&who, &body, &at]) || unanswered;
+            unanswered = note(
+                handled,
+                &mut items,
+                &mut capped,
+                "review",
+                &who,
+                &[&who, &body, &at],
+            ) || unanswered;
         }
     }
     let decision = view.get("reviewDecision").filter(|d| truthy(d));
     let approved = decision.and_then(Value::as_str) == Some("APPROVED")
         || (decision.is_none()
-            && human.iter().any(|r| state_of(r).as_deref() == Some("APPROVED"))
-            && !human.iter().any(|r| state_of(r).as_deref() == Some("CHANGES_REQUESTED")));
+            && human
+                .iter()
+                .any(|r| state_of(r).as_deref() == Some("APPROVED"))
+            && !human
+                .iter()
+                .any(|r| state_of(r).as_deref() == Some("CHANGES_REQUESTED")));
     let state = str_or_empty(view.get("state")).to_lowercase();
-    let in_queue = pull.get("isInMergeQueue") == Some(&Value::Bool(true)) || pull.get("mergeQueueEntry").is_some_and(Value::is_object);
+    let in_queue = pull.get("isInMergeQueue") == Some(&Value::Bool(true))
+        || pull.get("mergeQueueEntry").is_some_and(Value::is_object);
     let (mut bots, mut threads) = (0, 0);
     for thread in nodes(pull.get("reviewThreads")) {
         if !thread.is_object() || thread.get("isResolved").is_some_and(truthy) {
             continue;
         }
-        let comments: Vec<&Value> = nodes(thread.get("comments")).iter().filter(|c| c.is_object()).collect();
+        let comments: Vec<&Value> = nodes(thread.get("comments"))
+            .iter()
+            .filter(|c| c.is_object())
+            .collect();
         if comments.is_empty() || comments.iter().any(|c| login(c) == author) {
             continue;
         }
         let first = comments[0];
-        let bot = first.get("author").filter(|a| truthy(a)).and_then(|a| a.get("__typename")).and_then(Value::as_str) == Some("Bot");
-        if !bot && !first.get("authorAssociation").and_then(Value::as_str).is_some_and(|a| PR_REVIEWERS.contains(&a)) {
+        let bot = first
+            .get("author")
+            .filter(|a| truthy(a))
+            .and_then(|a| a.get("__typename"))
+            .and_then(Value::as_str)
+            == Some("Bot");
+        if !bot
+            && !first
+                .get("authorAssociation")
+                .and_then(Value::as_str)
+                .is_some_and(|a| PR_REVIEWERS.contains(&a))
+        {
             continue;
         }
         let path = str_or_empty(thread.get("path"));
-        let label = if path.is_empty() { "a review thread" } else { &path };
-        if !note(handled, &mut items, &mut capped, "thread", label, &[&path, &str_or_empty(first.get("body"))]) {
+        let label = if path.is_empty() {
+            "a review thread"
+        } else {
+            &path
+        };
+        if !note(
+            handled,
+            &mut items,
+            &mut capped,
+            "thread",
+            label,
+            &[&path, &str_or_empty(first.get("body"))],
+        ) {
             continue;
         }
         if bot {
@@ -864,26 +1290,51 @@ pub(crate) fn pr_reading(h: &mut dyn Host, home: &Path, pr: &str, base: &str, or
     let merge_state = view.get("mergeStateStatus").and_then(Value::as_str);
     let conflict = merge_state == Some("DIRTY");
     if conflict {
-        note(handled, &mut items, &mut capped, "conflict", &format!("a merge conflict with {target}"), &[&target]);
+        note(
+            handled,
+            &mut items,
+            &mut capped,
+            "conflict",
+            &format!("a merge conflict with {target}"),
+            &[&target],
+        );
     }
     for c in &listed {
         if c.bucket == "fail" || c.bucket == "cancel" {
-            note(handled, &mut items, &mut capped, "check", &c.name, &[&c.name]);
+            note(
+                handled,
+                &mut items,
+                &mut capped,
+                "check",
+                &c.name,
+                &[&c.name],
+            );
         }
     }
     let sig_of = |i: &Value| i["sig"].as_str().unwrap().to_string();
     let listed_sigs: BTreeSet<String> = items.iter().chain(&capped).map(sig_of).collect();
     let mut rearm: Vec<String> = Vec::new();
-    for c in listed.iter().filter(|c| c.bucket == "pass" || c.bucket == "skipping") {
+    for c in listed
+        .iter()
+        .filter(|c| c.bucket == "pass" || c.bucket == "skipping")
+    {
         let sig = handled_sig("check", &[&c.name]);
         if !rearm.contains(&sig) && handled.contains_key(&sig) && !listed_sigs.contains(&sig) {
             rearm.push(sig);
         }
     }
     if !matches!(merge_state, Some("DIRTY" | "UNKNOWN")) {
-        rearm.extend(handled.keys().filter(|s| s.starts_with("conflict:")).cloned());
+        rearm.extend(
+            handled
+                .keys()
+                .filter(|s| s.starts_with("conflict:"))
+                .cloned(),
+        );
     }
-    let kinds: BTreeSet<String> = items.iter().map(|i| sig_of(i).split(':').next().unwrap().to_string()).collect();
+    let kinds: BTreeSet<String> = items
+        .iter()
+        .map(|i| sig_of(i).split(':').next().unwrap().to_string())
+        .collect();
     let stacked = target != base;
     let merge_queue = pull.get("isMergeQueueEnabled") == Some(&Value::Bool(true));
     let mut behind = Value::Null;
@@ -908,18 +1359,38 @@ pub(crate) fn pr_reading(h: &mut dyn Host, home: &Path, pr: &str, base: &str, or
     } else if merge_queue {
         "merge"
     } else {
-        let n = behind_by(h, pr, &target, view.get("headRefOid").unwrap_or(&Value::Null))?;
+        let n = behind_by(
+            h,
+            pr,
+            &target,
+            view.get("headRefOid").unwrap_or(&Value::Null),
+        )?;
         behind = Value::from(n);
-        if n != 0 { "update" } else { "merge" }
+        if n != 0 {
+            "update"
+        } else {
+            "merge"
+        }
     };
     let failed = listed.iter().find(|c| {
-        (c.bucket == "fail" || c.bucket == "cancel") && c.link.as_deref().is_some_and(|l| BUILDKITE_BUILD.is_full(l))
+        (c.bucket == "fail" || c.bucket == "cancel")
+            && c.link
+                .as_deref()
+                .is_some_and(|l| BUILDKITE_BUILD.is_full(l))
     });
     let ci_log = match failed {
-        Some(c) if step == "fix-ci" => buildkite_log(home, c, org, BUILDKITE_API, BUILDKITE_MAX_BYTES),
+        Some(c) if step == "fix-ci" => {
+            buildkite_log(home, c, org, BUILDKITE_API, BUILDKITE_MAX_BYTES)
+        }
         _ => Value::Null,
     };
-    let review = if unanswered { "changes" } else if approved { "approved" } else { "none" };
+    let review = if unanswered {
+        "changes"
+    } else if approved {
+        "approved"
+    } else {
+        "none"
+    };
     Ok(json!({
         "pr": py_int(pr.rsplit('/').next().unwrap()), "state": state, "review": review, "bots": bots,
         "checks": checks, "queued": queued, "conflict": conflict, "stacked": stacked, "base": target, "next": step,
@@ -943,7 +1414,8 @@ fn pr_state_loop(
     loop {
         let reading = pr_reading(h, home, pr, base, org, handled)?;
         let elapsed = h.monotonic() - start;
-        if !matches!(reading["next"].as_str(), Some("wait" | "wait-base")) || elapsed >= wait as f64 {
+        if !matches!(reading["next"].as_str(), Some("wait" | "wait-base")) || elapsed >= wait as f64
+        {
             writeln!(out, "{}", dumps(&reading, DEFAULT)).ok();
             return Ok(());
         }
@@ -956,8 +1428,17 @@ pub fn pr_state_cmd(call: &Call) -> Res<()> {
     let (home, slug, job_id) = r2_target(&call.args[0], true)?;
     let wait = match args {
         [] => 0,
-        [flag, value] if flag == "--wait" && small_int(value).is_some_and(|n| (1..=600).contains(&n)) => small_int(value).unwrap(),
-        _ => return Err(fail(format!("--wait takes one value from 1 to 600 seconds. {PR_STATE_USAGE}"), 2)),
+        [flag, value]
+            if flag == "--wait" && small_int(value).is_some_and(|n| (1..=600).contains(&n)) =>
+        {
+            small_int(value).unwrap()
+        }
+        _ => {
+            return Err(fail(
+                format!("--wait takes one value from 1 to 600 seconds. {PR_STATE_USAGE}"),
+                2,
+            ))
+        }
     };
     let pr = board_pr(&home, &slug, &job_id, true)?;
     let meta = project_meta(&home, &slug)?;
@@ -965,53 +1446,149 @@ pub fn pr_state_cmd(call: &Call) -> Res<()> {
     let base = pr_base(&mut host, &meta, &pr)?;
     let handled = job_handled(&home, &job_id)?;
     let org = fm_get(&meta, "buildkite_org").unwrap_or("");
-    pr_state_loop(&mut host, &home, &pr, &base, org, &handled, wait, &mut io::stdout())
+    pr_state_loop(
+        &mut host,
+        &home,
+        &pr,
+        &base,
+        org,
+        &handled,
+        wait,
+        &mut io::stdout(),
+    )
 }
 
 /// Queue the PR with the enqueuePullRequest mutation, else through merge-async, and print one JSON line once
 /// GitHub says enqueued or failed.
-fn pr_queue_run(h: &mut dyn Host, pr: &str, base: &str, number: &str, out: &mut dyn Write) -> Res<()> {
-    let view = loads(&gh_pr_view(h, pr, &["--json", "headRefOid,baseRefName,id"])?).unwrap_or(Value::Null);
-    let Some(sha) = view.get("headRefOid").and_then(Value::as_str).filter(|s| COMMIT.is_full(s)).map(String::from) else {
+fn pr_queue_run(
+    h: &mut dyn Host,
+    pr: &str,
+    base: &str,
+    number: &str,
+    out: &mut dyn Write,
+) -> Res<()> {
+    let view = loads(&gh_pr_view(
+        h,
+        pr,
+        &["--json", "headRefOid,baseRefName,id"],
+    )?)
+    .unwrap_or(Value::Null);
+    let Some(sha) = view
+        .get("headRefOid")
+        .and_then(Value::as_str)
+        .filter(|s| COMMIT.is_full(s))
+        .map(String::from)
+    else {
         return Err(fail("gh pr view printed no usable headRefOid", 5));
     };
     if view.get("baseRefName").and_then(Value::as_str) != Some(base) {
-        let target = printable_line(&py_str(view.get("baseRefName").unwrap_or(&Value::Null)), 255);
-        return Err(fail(format!("PR #{number} targets {target}, not {base}: it waits for its parent"), 4));
+        let target = printable_line(
+            &py_str(view.get("baseRefName").unwrap_or(&Value::Null)),
+            255,
+        );
+        return Err(fail(
+            format!("PR #{number} targets {target}, not {base}: it waits for its parent"),
+            4,
+        ));
     }
     let parts: Vec<&str> = pr.split('/').collect();
     let path = format!("repos/{}/{}/pulls/{number}/merge-async", parts[3], parts[4]);
     let done = |out: &mut dyn Write, status: &str, detail: String, code: i32| -> Res<()> {
-        writeln!(out, "{}", dumps(&json!({"pr": py_int(number), "status": status, "detail": detail}), DEFAULT)).ok();
-        if code == 0 { Ok(()) } else { Err(exit(code)) }
+        writeln!(
+            out,
+            "{}",
+            dumps(
+                &json!({"pr": py_int(number), "status": status, "detail": detail}),
+                DEFAULT
+            )
+        )
+        .ok();
+        if code == 0 {
+            Ok(())
+        } else {
+            Err(exit(code))
+        }
     };
 
-    let (id, sha_arg) = (format!("id={}", py_str(view.get("id").unwrap_or(&Value::Null))), format!("sha={sha}"));
-    if let Some(GhOut { code: GhCode::Exit(0), stdout, .. }) = h.gh(&["api", "graphql", "-f", PR_ENQUEUE_MUTATION, "-f", &id, "-f", &sha_arg]) {
-        let entry = loads(&stdout).ok().and_then(|v| v.get("data")?.get("enqueuePullRequest")?.get("mergeQueueEntry").cloned());
+    let (id, sha_arg) = (
+        format!("id={}", py_str(view.get("id").unwrap_or(&Value::Null))),
+        format!("sha={sha}"),
+    );
+    if let Some(GhOut {
+        code: GhCode::Exit(0),
+        stdout,
+        ..
+    }) = h.gh(&[
+        "api",
+        "graphql",
+        "-f",
+        PR_ENQUEUE_MUTATION,
+        "-f",
+        &id,
+        "-f",
+        &sha_arg,
+    ]) {
+        let entry = loads(&stdout).ok().and_then(|v| {
+            v.get("data")?
+                .get("enqueuePullRequest")?
+                .get("mergeQueueEntry")
+                .cloned()
+        });
         if let Some(entry) = entry.filter(Value::is_object) {
-            let detail = entry.get("position").filter(|p| !p.is_null()).map_or(String::new(), |p| format!("position {}", py_str(p)));
+            let detail = entry
+                .get("position")
+                .filter(|p| !p.is_null())
+                .map_or(String::new(), |p| format!("position {}", py_str(p)));
             return done(out, "enqueued", detail, 0);
         }
     }
 
-    let result = h.gh(&["api", "-X", "PUT", &path, "-f", &sha_arg, "-f", "merge_action=merge_queue"]);
-    let Some(GhOut { code: GhCode::Exit(code), stdout, stderr }) = result else {
+    let result = h.gh(&[
+        "api",
+        "-X",
+        "PUT",
+        &path,
+        "-f",
+        &sha_arg,
+        "-f",
+        "merge_action=merge_queue",
+    ]);
+    let Some(GhOut {
+        code: GhCode::Exit(code),
+        stdout,
+        stderr,
+    }) = result
+    else {
         return Err(gh_answer(result, "gh api merge-async").unwrap_err());
     };
     if code != 0 {
-        return done(out, "refused", printable_line(if stderr.is_empty() { &stdout } else { &stderr }, 500), 1);
+        return done(
+            out,
+            "refused",
+            printable_line(if stderr.is_empty() { &stdout } else { &stderr }, 500),
+            1,
+        );
     }
     let uuid = match loads(&stdout) {
-        Ok(Value::Object(reply)) => reply.values().filter_map(Value::as_str).find(|v| MERGE_ASYNC_ID.is_full(v)).map(String::from),
+        Ok(Value::Object(reply)) => reply
+            .values()
+            .filter_map(Value::as_str)
+            .find(|v| MERGE_ASYNC_ID.is_full(v))
+            .map(String::from),
         _ => None,
     };
-    let Some(uuid) = uuid else { return Err(fail("gh api merge-async printed no request id", 5)) };
+    let Some(uuid) = uuid else {
+        return Err(fail("gh api merge-async printed no request id", 5));
+    };
     let poll = format!("{path}/{uuid}");
     let start = h.monotonic();
     loop {
-        let data = loads(&gh_answer(h.gh(&["api", &poll]), "gh api merge-async")?).ok().filter(Value::is_object);
-        let Some(data) = data else { return Err(fail("gh api merge-async printed no JSON object", 5)) };
+        let data = loads(&gh_answer(h.gh(&["api", &poll]), "gh api merge-async")?)
+            .ok()
+            .filter(Value::is_object);
+        let Some(data) = data else {
+            return Err(fail("gh api merge-async printed no JSON object", 5));
+        };
         let status = str_or_empty(data.get("status")).to_lowercase();
         if status == "enqueued" {
             return done(out, &status, String::new(), 0);
@@ -1030,7 +1607,9 @@ pub fn pr_queue_cmd(call: &Call) -> Res<()> {
     let (home, slug, job_id) = r2_target(&call.args[0], true)?;
     let pr = board_pr(&home, &slug, &job_id, false)?;
     let meta = project_meta(&home, &slug)?;
-    let base = fm_get(&meta, "base").filter(|b| !b.is_empty()).unwrap_or("main");
+    let base = fm_get(&meta, "base")
+        .filter(|b| !b.is_empty())
+        .unwrap_or("main");
     let number = pr.split('/').nth(6).unwrap();
     pr_queue_run(&mut System::new(), &pr, base, number, &mut io::stdout())
 }
@@ -1054,7 +1633,11 @@ mod tests {
     }
 
     fn reply(code: i32, stdout: &str, stderr: &str) -> Option<GhOut> {
-        Some(GhOut { code: GhCode::Exit(code), stdout: stdout.into(), stderr: stderr.into() })
+        Some(GhOut {
+            code: GhCode::Exit(code),
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+        })
     }
 
     fn ok(stdout: &str) -> Option<GhOut> {
@@ -1062,7 +1645,11 @@ mod tests {
     }
 
     fn timeout() -> Option<GhOut> {
-        Some(GhOut { code: GhCode::Timeout, stdout: String::new(), stderr: String::new() })
+        Some(GhOut {
+            code: GhCode::Timeout,
+            stdout: String::new(),
+            stderr: String::new(),
+        })
     }
 
     fn miss() -> Option<GhOut> {
@@ -1080,22 +1667,29 @@ mod tests {
 
     impl Fake {
         fn on(mut self, prefix: &[&str], replies: Vec<Option<GhOut>>) -> Fake {
-            self.rules.push((prefix.iter().map(|s| s.to_string()).collect(), replies));
+            self.rules
+                .push((prefix.iter().map(|s| s.to_string()).collect(), replies));
             self
         }
 
         fn count(&self, word: &str) -> usize {
-            self.calls.iter().filter(|c| c.iter().any(|a| a == word)).count()
+            self.calls
+                .iter()
+                .filter(|c| c.iter().any(|a| a == word))
+                .count()
         }
     }
 
     impl Host for Fake {
         fn gh(&mut self, args: &[&str]) -> Option<GhOut> {
-            self.calls.push(args.iter().map(|s| s.to_string()).collect());
+            self.calls
+                .push(args.iter().map(|s| s.to_string()).collect());
             let (_, replies) = self
                 .rules
                 .iter_mut()
-                .find(|(prefix, _)| prefix.len() <= args.len() && prefix.iter().zip(args).all(|(p, a)| p == a))
+                .find(|(prefix, _)| {
+                    prefix.len() <= args.len() && prefix.iter().zip(args).all(|(p, a)| p == a)
+                })
                 .unwrap_or_else(|| panic!("no rule for {args:?}"));
             if replies.len() > 1 {
                 replies.remove(0)
@@ -1122,7 +1716,12 @@ mod tests {
     }
 
     fn done(name: &str, conclusion: &str) -> Value {
-        run(name, "COMPLETED", conclusion.into(), "2026-01-01T00:00:00Z".into())
+        run(
+            name,
+            "COMPLETED",
+            conclusion.into(),
+            "2026-01-01T00:00:00Z".into(),
+        )
     }
 
     fn status(context: &str, state: &str, created: &str) -> Value {
@@ -1138,7 +1737,12 @@ mod tests {
         let nodes = checks
             .iter()
             .map(|&(bucket, name)| match bucket {
-                "pending" => run(name, "IN_PROGRESS", Value::Null, "2026-01-01T00:00:00Z".into()),
+                "pending" => run(
+                    name,
+                    "IN_PROGRESS",
+                    Value::Null,
+                    "2026-01-01T00:00:00Z".into(),
+                ),
                 "pass" => done(name, "SUCCESS"),
                 "fail" => done(name, "FAILURE"),
                 "cancel" => done(name, "CANCELLED"),
@@ -1148,14 +1752,25 @@ mod tests {
         rollup(nodes, false)
     }
 
-    fn behind_fake(behind: &[(u64, &str)], polls: Vec<Option<GhOut>>, update: Option<GhOut>) -> Fake {
-        let views = behind.iter().map(|(_, sha)| ok(&json!({"headRefOid": sha, "baseRefName": "main"}).to_string())).collect();
-        let mut fake = Fake::default().on(&["pr", "view", PR, "--json", "headRefOid,baseRefName"], views);
+    fn behind_fake(
+        behind: &[(u64, &str)],
+        polls: Vec<Option<GhOut>>,
+        update: Option<GhOut>,
+    ) -> Fake {
+        let views = behind
+            .iter()
+            .map(|(_, sha)| ok(&json!({"headRefOid": sha, "baseRefName": "main"}).to_string()))
+            .collect();
+        let mut fake = Fake::default().on(
+            &["pr", "view", PR, "--json", "headRefOid,baseRefName"],
+            views,
+        );
         for (n, sha) in behind {
             let path = format!("repos/example/sample/compare/main...{sha}");
             fake = fake.on(&["api", &path], vec![ok(&format!("{n}\n"))]);
         }
-        fake.on(&["api", "graphql"], polls).on(&["pr", "update-branch", PR], vec![update])
+        fake.on(&["api", "graphql"], polls)
+            .on(&["pr", "update-branch", PR], vec![update])
     }
 
     /// (exit code, stdout, stderr) of checks_loop.
@@ -1168,10 +1783,18 @@ mod tests {
                 e.code
             }
         };
-        (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+        (
+            code,
+            String::from_utf8(out).unwrap(),
+            String::from_utf8(err).unwrap(),
+        )
     }
 
-    fn checks(polls: Vec<Option<GhOut>>, timeout: u64, behind: &[(u64, &str)]) -> ((i32, String, String), Fake) {
+    fn checks(
+        polls: Vec<Option<GhOut>>,
+        timeout: u64,
+        behind: &[(u64, &str)],
+    ) -> ((i32, String, String), Fake) {
         let mut fake = behind_fake(behind, polls, reply(0, "", ""));
         (run_loop(&mut fake, timeout), fake)
     }
@@ -1187,7 +1810,12 @@ mod tests {
     // ChecksTest.test_behind_pr_updates_and_waits
     #[test]
     fn loop_updates_then_waits() {
-        let polls = vec![listed(&[("pass", "ci")]), listed(&[]), listed(&[("pending", "ci")]), listed(&[("pass", "ci")])];
+        let polls = vec![
+            listed(&[("pass", "ci")]),
+            listed(&[]),
+            listed(&[("pending", "ci")]),
+            listed(&[("pass", "ci")]),
+        ];
         let (result, fake) = checks(polls, 540, &[(1, &old()), (0, &new())]);
         assert_eq!(result, got(0, "pass ci\n", UPDATED));
         assert_eq!(fake.count("update-branch"), 1);
@@ -1198,7 +1826,11 @@ mod tests {
     // ChecksTest.test_stale_head_after_update_is_pending
     #[test]
     fn stale_head_after_update_is_pending() {
-        let (result, fake) = checks(vec![listed(&[("pass", "ci")])], 540, &[(1, &old()), (1, &old()), (0, &new())]);
+        let (result, fake) = checks(
+            vec![listed(&[("pass", "ci")])],
+            540,
+            &[(1, &old()), (1, &old()), (0, &new())],
+        );
         assert_eq!(result, got(0, "pass ci\n", UPDATED));
         assert_eq!(fake.count("update-branch"), 1);
         assert_eq!(fake.now, 20.0);
@@ -1207,7 +1839,11 @@ mod tests {
     // ChecksTest.test_new_head_passing_exits_0_on_first_reading
     #[test]
     fn new_head_passes_on_first_reading() {
-        let (result, fake) = checks(vec![listed(&[("pass", "ci")])], 540, &[(1, &old()), (0, &new())]);
+        let (result, fake) = checks(
+            vec![listed(&[("pass", "ci")])],
+            540,
+            &[(1, &old()), (0, &new())],
+        );
         assert_eq!(result, got(0, "pass ci\n", UPDATED));
         assert_eq!(fake.count("headRefOid,baseRefName"), 2);
         assert_eq!(fake.now, 10.0);
@@ -1216,11 +1852,31 @@ mod tests {
     // ChecksTest.test_checks_are_read_for_the_head_sha
     #[test]
     fn checks_read_for_head_sha() {
-        let polls = vec![listed(&[("pass", "ci")]), listed(&[]), listed(&[("pass", "ci")])];
+        let polls = vec![
+            listed(&[("pass", "ci")]),
+            listed(&[]),
+            listed(&[("pass", "ci")]),
+        ];
         let (_, fake) = checks(polls, 540, &[(1, &old()), (1, &old()), (0, &new())]);
-        let shas: Vec<String> = fake.calls.iter().filter(|c| c[1] == "graphql").map(|c| c[9].clone()).collect();
-        assert_eq!(shas, [format!("sha={}", old()), format!("sha={}", old()), format!("sha={}", new())]);
-        let views = fake.calls.iter().filter(|c| c[0] == "pr" && c[1] == "view").count();
+        let shas: Vec<String> = fake
+            .calls
+            .iter()
+            .filter(|c| c[1] == "graphql")
+            .map(|c| c[9].clone())
+            .collect();
+        assert_eq!(
+            shas,
+            [
+                format!("sha={}", old()),
+                format!("sha={}", old()),
+                format!("sha={}", new())
+            ]
+        );
+        let views = fake
+            .calls
+            .iter()
+            .filter(|c| c[0] == "pr" && c[1] == "view")
+            .count();
         assert_eq!(views, 3);
     }
 
@@ -1242,7 +1898,11 @@ mod tests {
     // ChecksTest.test_all_pass_prints_each_check_and_exits_0
     #[test]
     fn warn_then_pass() {
-        let polls = vec![miss(), listed(&[("pending", "test"), ("pass", "lint")]), listed(&[("pass", "test"), ("pass", "lint")])];
+        let polls = vec![
+            miss(),
+            listed(&[("pending", "test"), ("pass", "lint")]),
+            listed(&[("pass", "test"), ("pass", "lint")]),
+        ];
         let (result, fake) = checks(polls, 300, &up_to_date());
         assert_eq!(result, got(0, "pass lint\npass test\n", WARN));
         assert_eq!(fake.calls[0][..2], ["pr", "view"]);
@@ -1264,12 +1924,21 @@ mod tests {
             (miss(), "exited 1 with no check list"),
             (timeout(), "timed out after 60 seconds"),
             (ok("not json"), "printed no check list"),
-            (rollup(vec![done("ci", "SUCCESS")], true), "listed more than 100 checks"),
+            (
+                rollup(vec![done("ci", "SUCCESS")], true),
+                "listed more than 100 checks",
+            ),
             (None, "gh is not installed"),
         ] {
             let (result, fake) = checks(vec![poll], 540, &up_to_date());
-            let warn = format!("factory.py: warning: gh api graphql gave no usable check list ({problem})\n");
-            assert_eq!(result, (5, String::new(), warn.repeat(13) + NEVER), "{problem}");
+            let warn = format!(
+                "factory.py: warning: gh api graphql gave no usable check list ({problem})\n"
+            );
+            assert_eq!(
+                result,
+                (5, String::new(), warn.repeat(13) + NEVER),
+                "{problem}"
+            );
             assert_eq!(fake.now, 120.0);
         }
     }
@@ -1287,7 +1956,11 @@ mod tests {
     // ChecksTest.test_pending_then_unusable_replies_exit_5
     #[test]
     fn pending_then_unusable() {
-        let (result, fake) = checks(vec![listed(&[("pending", "ci")]), miss()], 540, &up_to_date());
+        let (result, fake) = checks(
+            vec![listed(&[("pending", "ci")]), miss()],
+            540,
+            &up_to_date(),
+        );
         assert_eq!(result, (5, String::new(), WARN.repeat(54) + DEADLINE));
         assert_eq!(fake.now, 540.0);
     }
@@ -1299,7 +1972,10 @@ mod tests {
         polls.extend(vec![miss(); 12]);
         polls.push(listed(&[]));
         let (result, fake) = checks(polls, 540, &up_to_date());
-        assert_eq!(result, (0, "no checks reported\n".to_string(), WARN.repeat(12)));
+        assert_eq!(
+            result,
+            (0, "no checks reported\n".to_string(), WARN.repeat(12))
+        );
         assert_eq!(fake.now, 130.0);
     }
 
@@ -1324,31 +2000,54 @@ mod tests {
     // ChecksTest.test_update_failure_exits_6, the timeout and missing gh subtests
     #[test]
     fn update_branch_timeout_or_missing_gh() {
-        for (update, why) in [(timeout(), "gh pr update-branch timed out after 60 seconds"), (None, "gh is not installed")] {
+        for (update, why) in [
+            (timeout(), "gh pr update-branch timed out after 60 seconds"),
+            (None, "gh is not installed"),
+        ] {
             let mut fake = behind_fake(&[(2, &old())], vec![listed(&[("pass", "ci")])], update);
-            assert_eq!(run_loop(&mut fake, 300), (5, String::new(), format!("factory.py: {why}\n")));
+            assert_eq!(
+                run_loop(&mut fake, 300),
+                (5, String::new(), format!("factory.py: {why}\n"))
+            );
         }
     }
 
     // ChecksTest.test_gh_problem_exits_5, the timeout and missing gh subtests
     #[test]
     fn state_view_timeout_or_missing_gh() {
-        for (view, why) in [(None, "gh is not installed"), (timeout(), "gh pr view timed out after 60 seconds")] {
+        for (view, why) in [
+            (None, "gh is not installed"),
+            (timeout(), "gh pr view timed out after 60 seconds"),
+        ] {
             let mut fake = Fake::default().on(&["pr", "view"], vec![view]);
-            let e = gh_pr_view(&mut fake, PR, &["--json", "state", "--jq", ".state"]).err().unwrap();
+            let e = gh_pr_view(&mut fake, PR, &["--json", "state", "--jq", ".state"])
+                .err()
+                .unwrap();
             assert_eq!((e.code, e.stderr), (5, format!("factory.py: {why}\n")));
-            assert_eq!(fake.calls, [["pr", "view", PR, "--json", "state", "--jq", ".state"]]);
+            assert_eq!(
+                fake.calls,
+                [["pr", "view", PR, "--json", "state", "--jq", ".state"]]
+            );
         }
     }
 
     fn head(reply: Option<GhOut>) -> ((Vec<(String, String)>, Option<String>), Fake) {
         let mut fake = Fake::default().on(&["api", "graphql"], vec![reply]);
         let (checks, problem) = head_checks(&mut fake, PR, &new());
-        ((checks.into_iter().map(|c| (c.name, c.bucket)).collect(), problem), fake)
+        (
+            (
+                checks.into_iter().map(|c| (c.name, c.bucket)).collect(),
+                problem,
+            ),
+            fake,
+        )
     }
 
     fn named(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
-        pairs.iter().map(|(n, b)| (n.to_string(), b.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(n, b)| (n.to_string(), b.to_string()))
+            .collect()
     }
 
     // HeadChecksTest.test_unusable_replies and test_query_names_the_sha
@@ -1357,7 +2056,20 @@ mod tests {
         let ((checks, problem), fake) = head(rollup(vec![done("ci", "SUCCESS")], false));
         assert_eq!((checks, problem), (named(&[("ci", "pass")]), None));
         let sha = format!("sha={}", new());
-        let expected = ["api", "graphql", "-f", HEAD_CHECKS_QUERY, "-f", "o=example", "-f", "r=sample", "-f", &sha, "--jq", ".data.repository.object"];
+        let expected = [
+            "api",
+            "graphql",
+            "-f",
+            HEAD_CHECKS_QUERY,
+            "-f",
+            "o=example",
+            "-f",
+            "r=sample",
+            "-f",
+            &sha,
+            "--jq",
+            ".data.repository.object",
+        ];
         assert_eq!(fake.calls, [expected]);
         let nodes_dict = r#"{"statusCheckRollup": {"contexts": {"pageInfo": {"hasNextPage": false}, "nodes": {}}}}"#;
         for (reply, problem) in [
@@ -1368,9 +2080,16 @@ mod tests {
             (ok("null"), "printed no check list"),
             (ok("[]"), "printed no check list"),
             (ok(nodes_dict), "printed no check list"),
-            (rollup(vec![done("ci", "SUCCESS")], true), "listed more than 100 checks"),
+            (
+                rollup(vec![done("ci", "SUCCESS")], true),
+                "listed more than 100 checks",
+            ),
         ] {
-            assert_eq!(head(reply).0, (vec![], Some(problem.to_string())), "{problem}");
+            assert_eq!(
+                head(reply).0,
+                (vec![], Some(problem.to_string())),
+                "{problem}"
+            );
         }
         assert_eq!(head(ok(r#"{"statusCheckRollup": null}"#)).0, (vec![], None));
     }
@@ -1389,7 +2108,11 @@ mod tests {
             json!({"__typename": "Other", "name": "ci"}),
         ] {
             let reply = rollup(vec![done("lint", "SUCCESS"), node.clone()], false);
-            assert_eq!(head(reply).0, (vec![], Some("printed no check list".to_string())), "{node}");
+            assert_eq!(
+                head(reply).0,
+                (vec![], Some("printed no check list".to_string())),
+                "{node}"
+            );
         }
     }
 
@@ -1397,25 +2120,58 @@ mod tests {
     #[test]
     fn head_checks_pending_wins() {
         let nodes = vec![
-            run("ci", "COMPLETED", "SUCCESS".into(), "2026-01-01T00:00:05Z".into()),
+            run(
+                "ci",
+                "COMPLETED",
+                "SUCCESS".into(),
+                "2026-01-01T00:00:05Z".into(),
+            ),
             run("ci", "QUEUED", Value::Null, Value::Null),
-            run("lint", "IN_PROGRESS", Value::Null, "2026-01-01T00:00:01Z".into()),
-            run("lint", "COMPLETED", "FAILURE".into(), "2026-01-01T00:00:09Z".into()),
+            run(
+                "lint",
+                "IN_PROGRESS",
+                Value::Null,
+                "2026-01-01T00:00:01Z".into(),
+            ),
+            run(
+                "lint",
+                "COMPLETED",
+                "FAILURE".into(),
+                "2026-01-01T00:00:09Z".into(),
+            ),
         ];
-        assert_eq!(head(rollup(nodes, false)).0, (named(&[("ci", "pending"), ("lint", "pending")]), None));
+        assert_eq!(
+            head(rollup(nodes, false)).0,
+            (named(&[("ci", "pending"), ("lint", "pending")]), None)
+        );
         let nodes = vec![
-            run("ci", "COMPLETED", "FAILURE".into(), "2026-01-01T00:00:10Z".into()),
-            run("ci", "COMPLETED", "SUCCESS".into(), "2026-01-01T00:00:05Z".into()),
+            run(
+                "ci",
+                "COMPLETED",
+                "FAILURE".into(),
+                "2026-01-01T00:00:10Z".into(),
+            ),
+            run(
+                "ci",
+                "COMPLETED",
+                "SUCCESS".into(),
+                "2026-01-01T00:00:05Z".into(),
+            ),
             status("lint", "FAILURE", "2026-01-01T00:00:01Z"),
             status("lint", "SUCCESS", "2026-01-01T00:00:02Z"),
         ];
-        assert_eq!(head(rollup(nodes, false)).0, (named(&[("ci", "fail"), ("lint", "pass")]), None));
+        assert_eq!(
+            head(rollup(nodes, false)).0,
+            (named(&[("ci", "fail"), ("lint", "pass")]), None)
+        );
     }
 
     // PrBehindTest.test_bad_output_exits_5
     #[test]
     fn pr_behind_bad_outputs() {
-        let view = |sha: &str, base: &str| ok(&json!({"headRefOid": sha, "baseRefName": base}).to_string());
+        let view = |sha: &str, base: &str| {
+            ok(&json!({"headRefOid": sha, "baseRefName": base}).to_string())
+        };
         let good = view(&old(), "main");
         for (view, compare) in [
             (view(&"A1".repeat(20), "main"), ok("1\n")),
@@ -1426,11 +2182,18 @@ mod tests {
             (good.clone(), miss()),
             (None, ok("1\n")),
         ] {
-            let mut fake = Fake::default().on(&["pr", "view"], vec![view]).on(&["api"], vec![compare]);
+            let mut fake = Fake::default()
+                .on(&["pr", "view"], vec![view])
+                .on(&["api"], vec![compare]);
             assert_eq!(pr_behind(&mut fake, PR).err().unwrap().code, 5);
         }
-        let mut fake = Fake::default().on(&["pr", "view"], vec![good]).on(&["api"], vec![ok("1\n")]);
-        assert_eq!(pr_behind(&mut fake, PR).ok().unwrap(), (1, old(), "main".to_string()));
+        let mut fake = Fake::default()
+            .on(&["pr", "view"], vec![good])
+            .on(&["api"], vec![ok("1\n")]);
+        assert_eq!(
+            pr_behind(&mut fake, PR).ok().unwrap(),
+            (1, old(), "main".to_string())
+        );
     }
 
     const SPR: &str = "https://github.com/example/sample/pull/44";
@@ -1450,7 +2213,11 @@ mod tests {
     }
 
     fn buckets(buckets: &[&str]) -> Option<GhOut> {
-        let list: Vec<Value> = buckets.iter().enumerate().map(|(i, b)| json!({"bucket": b, "name": format!("check-{i}")})).collect();
+        let list: Vec<Value> = buckets
+            .iter()
+            .enumerate()
+            .map(|(i, b)| json!({"bucket": b, "name": format!("check-{i}")}))
+            .collect();
         ok(&Value::from(list).to_string())
     }
 
@@ -1468,8 +2235,17 @@ mod tests {
     /// (exit code, the one printed reading) of pr_state_loop.
     fn run_state(fake: &mut Fake, wait: u64) -> (i32, Value) {
         let mut out = Vec::new();
-        let code = pr_state_loop(fake, Path::new("/nonexistent"), SPR, "main", "example-org", &Map::new(), wait, &mut out)
-            .map_or_else(|e| e.code, |()| 0);
+        let code = pr_state_loop(
+            fake,
+            Path::new("/nonexistent"),
+            SPR,
+            "main",
+            "example-org",
+            &Map::new(),
+            wait,
+            &mut out,
+        )
+        .map_or_else(|e| e.code, |()| 0);
         let text = String::from_utf8(out).unwrap();
         assert_eq!(text.matches('\n').count(), 1);
         (code, loads(&text).unwrap())
@@ -1485,7 +2261,16 @@ mod tests {
         for (age, step) in [(60, "wait"), (120, "merge")] {
             let mut fake = state_fake(vec![state_view(json!({}))], vec![buckets(&[])]);
             fake.unix = parse_stamp(HEAD).unwrap() + age;
-            let reading = pr_reading(&mut fake, Path::new("/nonexistent"), SPR, "main", "", &Map::new()).ok().unwrap();
+            let reading = pr_reading(
+                &mut fake,
+                Path::new("/nonexistent"),
+                SPR,
+                "main",
+                "",
+                &Map::new(),
+            )
+            .ok()
+            .unwrap();
             assert_eq!(reading["next"], step);
         }
     }
@@ -1493,7 +2278,14 @@ mod tests {
     // PrStateTest.test_wait_rereads_every_30_seconds_until_next_changes
     #[test]
     fn wait_rereads_every_30_seconds() {
-        let mut fake = state_fake(vec![state_view(json!({}))], vec![buckets(&["pending"]), buckets(&["pending"]), buckets(&["pass"])]);
+        let mut fake = state_fake(
+            vec![state_view(json!({}))],
+            vec![
+                buckets(&["pending"]),
+                buckets(&["pending"]),
+                buckets(&["pass"]),
+            ],
+        );
         let (code, reading) = run_state(&mut fake, 540);
         assert_eq!((code, reading["next"].as_str()), (0, Some("merge")));
         assert_eq!((fake.now, views(&fake)), (60.0, 3));
@@ -1503,9 +2295,15 @@ mod tests {
     #[test]
     fn wait_rereads_stacked_pr() {
         let stacked = state_view(json!({"baseRefName": PARENT}));
-        let mut fake = state_fake(vec![stacked.clone(), stacked, state_view(json!({}))], vec![buckets(&["pass"])]);
+        let mut fake = state_fake(
+            vec![stacked.clone(), stacked, state_view(json!({}))],
+            vec![buckets(&["pass"])],
+        );
         let (code, reading) = run_state(&mut fake, 540);
-        assert_eq!((code, reading["stacked"].clone(), reading["next"].as_str()), (0, Value::Bool(false), Some("merge")));
+        assert_eq!(
+            (code, reading["stacked"].clone(), reading["next"].as_str()),
+            (0, Value::Bool(false), Some("merge"))
+        );
         assert_eq!((fake.now, views(&fake)), (60.0, 3));
     }
 
@@ -1514,7 +2312,10 @@ mod tests {
     fn wait_stops_at_deadline() {
         let mut fake = state_fake(vec![state_view(json!({}))], vec![buckets(&["pending"])]);
         let (code, reading) = run_state(&mut fake, 45);
-        assert_eq!((code, reading["next"].as_str(), fake.now), (0, Some("wait"), 45.0));
+        assert_eq!(
+            (code, reading["next"].as_str(), fake.now),
+            (0, Some("wait"), 45.0)
+        );
     }
 
     // PrStateTest.test_without_wait_a_wait_reading_prints_at_once
@@ -1522,7 +2323,10 @@ mod tests {
     fn no_wait_prints_at_once() {
         let mut fake = state_fake(vec![state_view(json!({}))], vec![buckets(&["pending"])]);
         let (code, reading) = run_state(&mut fake, 0);
-        assert_eq!((code, reading["next"].as_str(), fake.now, fake.calls.len()), (0, Some("wait"), 0.0, 3));
+        assert_eq!(
+            (code, reading["next"].as_str(), fake.now, fake.calls.len()),
+            (0, Some("wait"), 0.0, 3)
+        );
     }
 
     // LINT in test_pr_state.py
@@ -1558,32 +2362,72 @@ mod tests {
     }
 
     fn bk_check(link: &str) -> Check {
-        Check { name: "buildkite/sample-web".into(), bucket: "fail".into(), link: Some(link.into()) }
+        Check {
+            name: "buildkite/sample-web".into(),
+            bucket: "fail".into(),
+            link: Some(link.into()),
+        }
     }
 
     // PrStateTest.test_fix_ci_reads_the_failed_buildkite_job_log_tail
     #[test]
     fn buildkite_tail() {
-        let home = bk_home("bk-tail", &format!("BUILDKITE_API_TOKEN={TOKEN}\nSAMPLE_SECRET=sample-secret-value-0002\n"));
-        let mut lines: Vec<String> = (0..100).map(|i| format!("\x1b_bk;t=17000000{i:02}000\x07\x1b[32mstep {i}\x1b[0m")).collect();
+        let home = bk_home(
+            "bk-tail",
+            &format!("BUILDKITE_API_TOKEN={TOKEN}\nSAMPLE_SECRET=sample-secret-value-0002\n"),
+        );
+        let mut lines: Vec<String> = (0..100)
+            .map(|i| format!("\x1b_bk;t=17000000{i:02}000\x07\x1b[32mstep {i}\x1b[0m"))
+            .collect();
         lines.push("progress 10%\rprogress 100%".into());
         lines.push(format!("using {TOKEN} and sample-secret-value-0002"));
         lines.push("error  'unused' is defined but never used".into());
         let log = lines.join("\r\n") + "\r\n";
         let log_body = leak(json!({"url": "", "content": log, "size": log.len()}).to_string());
         let (origin, seen) = crate::shared::http::tests::serve(vec![
-            (200, build_jobs(&[("script", "failed", "Lint frontend")]), vec![]),
+            (
+                200,
+                build_jobs(&[("script", "failed", "Lint frontend")]),
+                vec![],
+            ),
             (200, log_body, vec![]),
         ]);
-        let got = buildkite_log(&home, &bk_check(&format!("{LINK}#{JOB_ID}")), "example-org", &format!("{origin}/v2"), BUILDKITE_MAX_BYTES);
+        let got = buildkite_log(
+            &home,
+            &bk_check(&format!("{LINK}#{JOB_ID}")),
+            "example-org",
+            &format!("{origin}/v2"),
+            BUILDKITE_MAX_BYTES,
+        );
         let mut tail: Vec<String> = (23..100).map(|i| format!("step {i}")).collect();
-        tail.extend(["progress 100%".into(), "using [redacted] and [redacted]".into(), "error  'unused' is defined but never used".into()]);
-        assert_eq!(got, json!({"check": "buildkite/sample-web", "job": "Lint frontend", "tail": tail.join("\n"), "problem": ""}));
+        tail.extend([
+            "progress 100%".into(),
+            "using [redacted] and [redacted]".into(),
+            "error  'unused' is defined but never used".into(),
+        ]);
+        assert_eq!(
+            got,
+            json!({"check": "buildkite/sample-web", "job": "Lint frontend", "tail": tail.join("\n"), "problem": ""})
+        );
         let seen = seen.lock().unwrap();
-        assert_eq!(seen.iter().map(|s| s.path.as_str()).collect::<Vec<_>>(), [BUILD.to_string(), format!("{BUILD}/jobs/{JOB_ID}/log")]);
+        assert_eq!(
+            seen.iter().map(|s| s.path.as_str()).collect::<Vec<_>>(),
+            [BUILD.to_string(), format!("{BUILD}/jobs/{JOB_ID}/log")]
+        );
         for s in seen.iter() {
             let bearer = format!("Bearer {TOKEN}");
-            assert_eq!((s.header("Authorization"), s.header("Accept"), s.header("User-Agent")), (Some(bearer.as_str()), Some("application/json"), Some("factory")));
+            assert_eq!(
+                (
+                    s.header("Authorization"),
+                    s.header("Accept"),
+                    s.header("User-Agent")
+                ),
+                (
+                    Some(bearer.as_str()),
+                    Some("application/json"),
+                    Some("factory")
+                )
+            );
         }
         assert!(!got.to_string().contains(TOKEN));
     }
@@ -1593,15 +2437,48 @@ mod tests {
     fn buildkite_first_failed_job() {
         let home = bk_home("bk-first", &format!("BUILDKITE_API_TOKEN={TOKEN}\n"));
         let second = "0190a1b2-0000-4000-8000-000000000003";
-        let jobs = build_jobs(&[("waiter", "failed", ""), ("script", "passed", "Unit tests"), ("script", "timed_out", "Lint frontend"), ("script", "failed", "Type check")]);
+        let jobs = build_jobs(&[
+            ("waiter", "failed", ""),
+            ("script", "passed", "Unit tests"),
+            ("script", "timed_out", "Lint frontend"),
+            ("script", "failed", "Type check"),
+        ]);
         let log = leak(json!({"content": "x".repeat(9000) + "\n"}).to_string());
-        let (origin, seen) = crate::shared::http::tests::serve(vec![(200, jobs, vec![]), (200, log, vec![])]);
-        let got = buildkite_log(&home, &bk_check(LINK), "example-org", &format!("{origin}/v2"), BUILDKITE_MAX_BYTES);
-        assert_eq!(got, json!({"check": "buildkite/sample-web", "job": "Lint frontend", "tail": "x".repeat(8000), "problem": ""}));
-        let paths: Vec<String> = seen.lock().unwrap().iter().map(|s| s.path.clone()).collect();
-        assert_eq!(paths, [BUILD.to_string(), format!("{BUILD}/jobs/{second}/log")]);
-        let (origin, seen) = crate::shared::http::tests::serve(vec![(200, build_jobs(&[("script", "passed", "Unit tests")]), vec![])]);
-        let got = buildkite_log(&home, &bk_check(LINK), "example-org", &format!("{origin}/v2"), BUILDKITE_MAX_BYTES);
+        let (origin, seen) =
+            crate::shared::http::tests::serve(vec![(200, jobs, vec![]), (200, log, vec![])]);
+        let got = buildkite_log(
+            &home,
+            &bk_check(LINK),
+            "example-org",
+            &format!("{origin}/v2"),
+            BUILDKITE_MAX_BYTES,
+        );
+        assert_eq!(
+            got,
+            json!({"check": "buildkite/sample-web", "job": "Lint frontend", "tail": "x".repeat(8000), "problem": ""})
+        );
+        let paths: Vec<String> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.path.clone())
+            .collect();
+        assert_eq!(
+            paths,
+            [BUILD.to_string(), format!("{BUILD}/jobs/{second}/log")]
+        );
+        let (origin, seen) = crate::shared::http::tests::serve(vec![(
+            200,
+            build_jobs(&[("script", "passed", "Unit tests")]),
+            vec![],
+        )]);
+        let got = buildkite_log(
+            &home,
+            &bk_check(LINK),
+            "example-org",
+            &format!("{origin}/v2"),
+            BUILDKITE_MAX_BYTES,
+        );
         assert_eq!(got["problem"], "no failed job in build 812");
         assert_eq!(seen.lock().unwrap().len(), 1);
     }
@@ -1609,32 +2486,75 @@ mod tests {
     // PrStateTest.test_buildkite_problems_still_print_the_reading
     #[test]
     fn buildkite_problems() {
-        let problem = |name: &str, env: &str, replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>| {
-            let home = bk_home(name, env);
-            let origin = if replies.is_empty() {
-                let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-                let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-                drop(listener);
-                origin
-            } else {
-                crate::shared::http::tests::serve(replies).0
+        let problem =
+            |name: &str,
+             env: &str,
+             replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>| {
+                let home = bk_home(name, env);
+                let origin = if replies.is_empty() {
+                    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+                    let origin =
+                        format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+                    drop(listener);
+                    origin
+                } else {
+                    crate::shared::http::tests::serve(replies).0
+                };
+                let got = buildkite_log(
+                    &home,
+                    &bk_check(&format!("{LINK}#{JOB_ID}")),
+                    "example-org",
+                    &format!("{origin}/v2"),
+                    BUILDKITE_MAX_BYTES,
+                );
+                assert!(!got.to_string().contains(TOKEN));
+                assert_eq!(
+                    (got["job"].as_str(), got["tail"].as_str()),
+                    (Some(""), Some(""))
+                );
+                got["problem"].as_str().unwrap().to_string()
             };
-            let got = buildkite_log(&home, &bk_check(&format!("{LINK}#{JOB_ID}")), "example-org", &format!("{origin}/v2"), BUILDKITE_MAX_BYTES);
-            assert!(!got.to_string().contains(TOKEN));
-            assert_eq!((got["job"].as_str(), got["tail"].as_str()), (Some(""), Some("")));
-            got["problem"].as_str().unwrap().to_string()
-        };
         let env = leak(format!("BUILDKITE_API_TOKEN={TOKEN}\n"));
-        assert_eq!(problem("bk-none", "", vec![]), "set BUILDKITE_API_TOKEN in the factory .env to read Buildkite logs");
-        assert_eq!(problem("bk-401", env, vec![(401, "{}", vec![])]), "Buildkite answered 401 (the token needs read_builds and read_build_logs)");
-        assert_eq!(problem("bk-302", env, vec![(302, "{}", vec![("Location", "https://example.invalid/login")])]), "Buildkite answered 302");
-        assert_eq!(problem("bk-text", env, vec![(200, "not json", vec![])]), "Buildkite sent no usable log");
+        assert_eq!(
+            problem("bk-none", "", vec![]),
+            "set BUILDKITE_API_TOKEN in the factory .env to read Buildkite logs"
+        );
+        assert_eq!(
+            problem("bk-401", env, vec![(401, "{}", vec![])]),
+            "Buildkite answered 401 (the token needs read_builds and read_build_logs)"
+        );
+        assert_eq!(
+            problem(
+                "bk-302",
+                env,
+                vec![(
+                    302,
+                    "{}",
+                    vec![("Location", "https://example.invalid/login")]
+                )]
+            ),
+            "Buildkite answered 302"
+        );
+        assert_eq!(
+            problem("bk-text", env, vec![(200, "not json", vec![])]),
+            "Buildkite sent no usable log"
+        );
         let jobs = build_jobs(&[("script", "failed", "Lint frontend")]);
-        assert_eq!(problem("bk-size", env, vec![(200, jobs, vec![]), (200, r#"{"size": 0}"#, vec![])]), "Buildkite sent no usable log");
+        assert_eq!(
+            problem(
+                "bk-size",
+                env,
+                vec![(200, jobs, vec![]), (200, r#"{"size": 0}"#, vec![])]
+            ),
+            "Buildkite sent no usable log"
+        );
         let down = problem("bk-down", env, vec![]);
         assert!(down.starts_with("can't reach Buildkite: "), "{down}");
         #[cfg(target_os = "linux")]
-        assert_eq!(down, "can't reach Buildkite: <urlopen error [Errno 111] Connection refused>");
+        assert_eq!(
+            down,
+            "can't reach Buildkite: <urlopen error [Errno 111] Connection refused>"
+        );
     }
 
     // PrStateTest.test_a_buildkite_log_over_the_read_cap_is_no_usable_log
@@ -1643,9 +2563,19 @@ mod tests {
         let home = bk_home("bk-cap", &format!("BUILDKITE_API_TOKEN={TOKEN}\n"));
         let build = leak(json!({"jobs": [{"id": JOB_ID}]}).to_string());
         let log = leak(json!({"content": "x".repeat(100)}).to_string());
-        let (origin, seen) = crate::shared::http::tests::serve(vec![(200, build, vec![]), (200, log, vec![])]);
-        let got = buildkite_log(&home, &bk_check(&format!("{LINK}#{JOB_ID}")), "example-org", &format!("{origin}/v2"), 64);
-        assert_eq!((got["problem"].as_str(), got["tail"].as_str()), (Some("Buildkite sent no usable log"), Some("")));
+        let (origin, seen) =
+            crate::shared::http::tests::serve(vec![(200, build, vec![]), (200, log, vec![])]);
+        let got = buildkite_log(
+            &home,
+            &bk_check(&format!("{LINK}#{JOB_ID}")),
+            "example-org",
+            &format!("{origin}/v2"),
+            64,
+        );
+        assert_eq!(
+            (got["problem"].as_str(), got["tail"].as_str()),
+            (Some("Buildkite sent no usable log"), Some(""))
+        );
         assert_eq!(seen.lock().unwrap().len(), 2);
     }
 
@@ -1684,14 +2614,55 @@ mod tests {
     // PrQueueTest.test_enqueued_after_one_pending_poll
     #[test]
     fn queue_enqueued_after_pending_poll() {
-        let mut fake = queue_fake(reply(1, "", "mutation refused\n"), pending_put(), vec![queue_status("pending"), queue_status("ENQUEUED")]);
-        assert_eq!(run_queue(&mut fake), got(0, "{\"pr\": 44, \"status\": \"enqueued\", \"detail\": \"\"}\n", ""));
+        let mut fake = queue_fake(
+            reply(1, "", "mutation refused\n"),
+            pending_put(),
+            vec![queue_status("pending"), queue_status("ENQUEUED")],
+        );
+        assert_eq!(
+            run_queue(&mut fake),
+            got(
+                0,
+                "{\"pr\": 44, \"status\": \"enqueued\", \"detail\": \"\"}\n",
+                ""
+            )
+        );
         let sha = format!("sha={SHA}");
-        assert_eq!(fake.calls[0], ["pr", "view", SPR, "--json", "headRefOid,baseRefName,id"]);
-        assert_eq!(fake.calls[1], ["api", "graphql", "-f", PR_ENQUEUE_MUTATION, "-f", "id=PR_node44", "-f", &sha]);
-        assert_eq!(fake.calls[2], ["api", "-X", "PUT", MERGE_ASYNC, "-f", &sha, "-f", "merge_action=merge_queue"]);
+        assert_eq!(
+            fake.calls[0],
+            ["pr", "view", SPR, "--json", "headRefOid,baseRefName,id"]
+        );
+        assert_eq!(
+            fake.calls[1],
+            [
+                "api",
+                "graphql",
+                "-f",
+                PR_ENQUEUE_MUTATION,
+                "-f",
+                "id=PR_node44",
+                "-f",
+                &sha
+            ]
+        );
+        assert_eq!(
+            fake.calls[2],
+            [
+                "api",
+                "-X",
+                "PUT",
+                MERGE_ASYNC,
+                "-f",
+                &sha,
+                "-f",
+                "merge_action=merge_queue"
+            ]
+        );
         let poll = format!("{MERGE_ASYNC}/{UUID}");
-        assert_eq!(fake.calls[3..], [["api", poll.as_str()], ["api", poll.as_str()]]);
+        assert_eq!(
+            fake.calls[3..],
+            [["api", poll.as_str()], ["api", poll.as_str()]]
+        );
         assert_eq!(fake.now, 10.0);
     }
 
@@ -1701,18 +2672,36 @@ mod tests {
         let mut fake = queue_fake(miss(), pending_put(), vec![queue_status("pending")]);
         let (code, out, _) = run_queue(&mut fake);
         let reading = loads(&out).unwrap();
-        assert_eq!((code, reading["status"].as_str(), fake.now), (3, Some("pending"), 120.0));
-        assert!(reading["detail"].as_str().unwrap().contains("\"status\": \"pending\""));
+        assert_eq!(
+            (code, reading["status"].as_str(), fake.now),
+            (3, Some("pending"), 120.0)
+        );
+        assert!(reading["detail"]
+            .as_str()
+            .unwrap()
+            .contains("\"status\": \"pending\""));
         let poll = format!("{MERGE_ASYNC}/{UUID}");
-        assert_eq!(fake.calls.iter().filter(|c| **c == ["api", poll.as_str()]).count(), 13);
+        assert_eq!(
+            fake.calls
+                .iter()
+                .filter(|c| **c == ["api", poll.as_str()])
+                .count(),
+            13
+        );
     }
 
     // PrQueueTest.test_gh_problem_on_the_put_exits_5
     #[test]
     fn queue_put_timeout_or_missing_gh() {
-        for (put, why) in [(None, "gh is not installed"), (timeout(), "gh api merge-async timed out after 60 seconds")] {
+        for (put, why) in [
+            (None, "gh is not installed"),
+            (timeout(), "gh api merge-async timed out after 60 seconds"),
+        ] {
             let mut fake = queue_fake(miss(), put, vec![queue_status("enqueued")]);
-            assert_eq!(run_queue(&mut fake), got(5, "", &format!("factory.py: {why}\n")));
+            assert_eq!(
+                run_queue(&mut fake),
+                got(5, "", &format!("factory.py: {why}\n"))
+            );
         }
     }
 
@@ -1720,7 +2709,14 @@ mod tests {
     #[test]
     fn queue_mutation_missing_gh() {
         let mut fake = queue_fake(None, pending_put(), vec![queue_status("enqueued")]);
-        assert_eq!(run_queue(&mut fake), got(0, "{\"pr\": 44, \"status\": \"enqueued\", \"detail\": \"\"}\n", ""));
+        assert_eq!(
+            run_queue(&mut fake),
+            got(
+                0,
+                "{\"pr\": 44, \"status\": \"enqueued\", \"detail\": \"\"}\n",
+                ""
+            )
+        );
         assert_eq!(fake.count("graphql"), 1);
         assert_eq!(fake.calls[2][..3], ["api", "-X", "PUT"]);
     }
