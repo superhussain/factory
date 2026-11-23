@@ -140,15 +140,17 @@ runs them directly with no Node. Lint and format run as package scripts (`pnpm r
 The parity harness proves a `factory` binary against the Python CLI, one argv at a time. It runs on POSIX hosts only.
 
 ```sh
-python3 tests/parity/run.py [--bin PATH] [--ids FILE] [--case ID]...
-python3 tests/parity/run.py --bin rust/target/release/factory --ids rust/parity.txt
+python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]...
+python3 tests/parity/run.py --bin rust/target/release/factory --ids rust/parity
 ```
 
-- `tests/parity/cases.json` holds the hand-written cases. The runner adds an `arity/<command>/<n>` case for each argument count just outside a command's range in `tests/fixtures/cli-v1.json`.
-- Each case runs twice, once on `python3 skills/factory/runtime/factory.py` and once on the binary, each in its own temp root with `home/`, `bin/` and `stub/`. `home/` starts as a copy of `tests/parity/homes/<home>`, or empty. The runner compares the exit code, stdout, stderr, the home tree and each stub's call log, with the home path and temp root written as `{home}` and `{tmp}`.
+- `tests/parity/cases/<subsystem>.json` holds the hand-written cases as `{"version": 1, "cases": [...]}`. A case id is `<subsystem>/<name>` and lives in its subsystem's file; a misplaced or duplicate id exits 2. The runner adds an `arity/<command>/<n>` case for each argument count just outside a command's range in `tests/fixtures/cli-v1.json`.
+- A case has `id`, `argv`, `home` and `stubs`, and may add `routes`, `stdin`, `env`, `exit` and `from`. `stdin` is piped to both sides; without it stdin is `/dev/null`. `env` is added to the isolated environment. `from` names the source test as `tests/cli/<file>::<Class>.<test>`.
+- `routes` maps `"METHOD /path"` to `[status, body]`, `[status, body, headers]`, or a list of those served in order, the last one repeating. A string body is sent as its UTF-8 bytes; any other body as JSON. Each side gets its own loopback Worker from `support.http_fixture`, a `config.md` pointing at it and a `.env` with a fake Access token. A case with `routes` must set `exit`, and Python must exit with it.
+- Each case runs twice, once on `python3 skills/factory/runtime/factory.py` and once on the binary, each in its own temp root with `home/`, `bin/` and `stub/`. `home/` starts as a copy of `tests/parity/homes/<home>`, or empty. The runner compares the exit code, stdout, stderr, the home tree, each stub's call log and the Worker requests, with the Worker origin, home path and temp root written as `{api}`, `{home}` and `{tmp}`. A `YYYY-MM-DDTHH:MM:SSZ` stamp inside the side's run window becomes `{now}`. A request is one JSON line of method, path, body and the `content-type`, `if-match`, `if-none-match`, `cf-access-client-id`, `cf-access-client-secret` and `user-agent` headers.
 - The binary is `--bin`, else `FACTORY_BIN`, else Python, which checks that the runner is deterministic. `FACTORY_BIN` also points `support.invoke_process` in `tests/cli` at a binary.
 - `bin/gh`, `bin/paseo` and `bin/git` run `tests/parity/stub.py`, which replays the first entry in the case's `stubs` map whose `argv` matches, logs every call, and exits 127 with `stub: no recorded response for ...` otherwise.
-- `--ids` reads one `fnmatch` pattern per line, with `#` comments. `rust/parity.txt` lists the cases the Rust binary must pass; each port slice adds its lines. A pattern that matches nothing exits 2.
+- `--ids` reads one `fnmatch` pattern per line, with `#` comments, from a file or from every `*.txt` in a folder. `rust/parity/<subsystem>.txt` lists the cases the Rust binary must pass; each port slice adds only its own `cases/<subsystem>.json` and `rust/parity/<subsystem>.txt`. In a folder, each pattern must start with its file's `<subsystem>/`. A pattern that matches nothing exits 2.
 - `python3 tests/parity/startup.py --bin PATH` times 20 no-argument runs on each side and exits 1 unless the binary's median is at most a tenth of Python's.
 - `rust/factory/src/usage.txt` is Python's no-argument stderr. When the runtime docstring changes, regenerate it with `python3 -B skills/factory/runtime/factory.py 2> rust/factory/src/usage.txt`.
 

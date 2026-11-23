@@ -155,7 +155,7 @@ test("the rust job builds linux-x64, checks darwin-arm64 and windows-x64, and ru
       "cargo build --release --locked\ncargo test --locked",
       "cargo check --locked --target aarch64-apple-darwin",
       "cargo check --locked --target x86_64-pc-windows-gnu",
-      "python3 tests/parity/run.py --bin rust/target/release/factory --ids rust/parity.txt",
+      "python3 tests/parity/run.py --bin rust/target/release/factory --ids rust/parity",
       "python3 tests/parity/startup.py --bin rust/target/release/factory",
     ],
   );
