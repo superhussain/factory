@@ -104,10 +104,6 @@ fn handler_for(name: &str, count: usize) -> Option<Handler> {
     (name == "ideas" || (*lo..=*hi).contains(&count)).then_some(*handler)
 }
 
-pub fn not_ported(name: &str) -> Exit {
-    fail(format!("{name} is not ported to the Rust binary yet"), 2)
-}
-
 fn run(args: Vec<OsString>) -> Res<()> {
     let args: Vec<String> = args
         .into_iter()
@@ -276,17 +272,6 @@ mod tests {
             .collect();
         assert_eq!(python.len(), 69);
         assert_eq!(rust, python);
-    }
-
-    #[test]
-    fn unported_command_exits_2() {
-        let e = not_ported("claim");
-        assert_eq!(e.code, 2);
-        assert_eq!(
-            e.stderr,
-            "factory.py: claim is not ported to the Rust binary yet\n"
-        );
-        assert_eq!(e.status, None);
     }
 
     #[test]
