@@ -175,7 +175,7 @@ Route `#/settings/notifications`.
 
 Route `#/settings/scheduler`.
 
-- Agent or Human setup for the 5-minute `factory.py pickup` timer.
+- Agent or Human setup for the 5-minute `factory pickup` timer.
 - Snippets for cron, launchd and Task Scheduler.
 
 ### Reference

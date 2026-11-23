@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::rc::Rc;
 use std::time::Duration;
@@ -309,25 +309,8 @@ fn python() -> Vec<String> {
 
 /// The argv prefix that runs an installed bundle: its bundle.json entry when valid, else its runtime.
 fn catch_up_entry(skill: &Path) -> Vec<String> {
-    let entry = read_text(&skill.join("bundle.json"))
-        .ok()
-        .and_then(|t| loads(&t).ok())
-        .and_then(|v| v.get("entry").cloned());
-    let args: Option<Vec<String>> = entry
-        .as_ref()
-        .and_then(Value::as_array)
-        .and_then(|a| a.iter().map(|v| v.as_str().map(String::from)).collect());
-    if let Some(args) = args.filter(|a| !a.is_empty() && !a[0].is_empty()) {
-        let first = Path::new(&args[0]);
-        if !first.is_absolute()
-            && !first.has_root()
-            && !first.components().any(|c| c == Component::ParentDir)
-        {
-            let program: PathBuf = skill.join(first).components().collect();
-            return std::iter::once(program.to_string_lossy().into_owned())
-                .chain(args[1..].iter().cloned())
-                .collect();
-        }
+    if let Some(entry) = crate::shared::home::bundle_entry(skill) {
+        return entry;
     }
     let mut argv = python();
     argv.push(

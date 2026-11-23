@@ -24,7 +24,7 @@ not checkout aliases. Only registered projects can access them. There are at mos
 three per project, each at most 1 MiB of valid UTF-8 without controls except tab/CR/LF.
 Empty Markdown is valid; extras need no configuration frontmatter. No arbitrary
 names, file imports, rename, delete or preview is provided. Before a session
-first dispatches an agent for a job, `factory.py documents <slug>` writes the
+first dispatches an agent for a job, `factory documents <slug>` writes the
 non-empty documents to `projects/<slug>.documents.md`, and Rules passes that
 path as `$DOCUMENTS`. That copy is read-only: edit documents in the dashboard;
 the CLI never uploads them. Do not store secrets here.

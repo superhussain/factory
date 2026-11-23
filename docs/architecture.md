@@ -112,7 +112,7 @@ carries `summary` (`""` when none), and a retro version also carries `run` and
 `host`. A person's PUT may send `X-Pipeline-Summary`, percent-encoded. Each entry's
 `history_copy` says whether its create-only copy exists. A PUT whose copy failed
 answers `X-Pipeline-History: missing`. Devices read only the effective view,
-through `factory.py pipeline <slug>`.
+through `factory pipeline <slug>`.
 
 Project file and document PUTs keep every saved version the same way. Each save
 answers `X-Project-Version` and may send `X-Project-Summary`, percent-encoded; a
@@ -176,7 +176,7 @@ date.
 | `POST /api/backlog/lesson` | a signed-in person | append an open lesson card's bullet to `<slug>/notes.md` as the next version |
 
 Audit routes store one JSON-lines file per host per job at
-`audit/<job>/<host>.jsonl`, written by `factory.py audit push`. The bound host
+`audit/<job>/<host>.jsonl`, written by `factory audit push`. The bound host
 owns its file and a re-push replaces it. The body is at most 1 MiB of UTF-8, and
 each line is a JSON object whose `host` and `job` are the route's. A job id that
 does not match `^\d+-[a-z0-9]+(?:-[a-z0-9]+)*$`, a bad host id or any other method
@@ -396,7 +396,7 @@ A device's `factory daemon` (`rust/factory/src/commands/daemon.rs`) opens one so
 Every dashboard edit goes through `casBoard` in `web/dashboard.html`. It runs the edit's
 pure helper (`addIdea`, `discardIdea`, `assignProject`, ...) on a copy of the rows the tab
 already holds, diffs them by id with `rowChanges`, and sends only the changed rows to
-`PATCH /api/board`. Devices and `factory.py` keep `GET`/`PUT /api/board`.
+`PATCH /api/board`. Devices and `factory` keep `GET`/`PUT /api/board`.
 
 ```mermaid
 sequenceDiagram

@@ -45,7 +45,7 @@ supported. Local dead-session detection is optional; core operations need no
 daemon or executable. Agent app/web links are hosted deployment configuration,
 disabled unless configured, not device defaults.
 
-`factory.py archive-workspace <slug>/<id>` runs as the last step of a merged or closed job.
+`factory archive-workspace <slug>/<id>` runs as the last step of a merged or closed job.
 It archives the session's Paseo workspace only when the job is at `merged` or `closed`, the
 workspace's `isolation` is `worktree`, and its folder is named `factory-<id>` or
 `factory-<id>-<n>`. Any other workspace is skipped. Git state never skips the archive.
@@ -64,7 +64,7 @@ Without `PASEO_AGENT_ID`, a Paseo server id or `paseo` on PATH, the command prin
 exits 0.
 
 Cleanup rule: on a merged or closed job, the pipeline runs
-`factory.py archive-workspace <slug>/<id>` and `factory.py cleanup <slug>/<id>`
+`factory archive-workspace <slug>/<id>` and `factory cleanup <slug>/<id>`
 without asking. They remove only worktrees this pipeline created: a `factory-<id>`
 Paseo workspace, or the job's worktree under the factory home, and that job's private prompt folder under
 `prompts/<slug>/<id>`, refusing a link. `archive-workspace` archives
@@ -74,12 +74,12 @@ forces. A host owner who runs Claude Code in auto mode can allow them with this 
 entry under `autoMode.allow` in their settings:
 
 ```json
-"Run factory.py archive-workspace <slug>/<id> or factory.py cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home, and that job's private prompt folder under prompts/<slug>/<id>, refusing a link). archive-workspace archives a merged or closed job's own factory-<id> workspace whatever its git state and reports leftovers first, cleanup refuses a dirty worktree and keeps unmerged branches, and neither forces."
+"Run factory archive-workspace <slug>/<id> or factory cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home, and that job's private prompt folder under prompts/<slug>/<id>, refusing a link). archive-workspace archives a merged or closed job's own factory-<id> workspace whatever its git state and reports leftovers first, cleanup refuses a dirty worktree and keeps unmerged branches, and neither forces."
 ```
 
-`schedules/resume.md`, `schedules/explore.md` and `schedules/retro.md` are prompt templates, not executables. Ideas are picked up by `factory.py pickup` instead (see Automatic pickup below and `references/pickup.md` in the installed skill).
+`schedules/resume.md`, `schedules/explore.md` and `schedules/retro.md` are prompt templates, not executables. Ideas are picked up by `factory pickup` instead (see Automatic pickup below and `references/pickup.md` in the installed skill).
 Using the scheduler's native tools, discover existing IDs and configured routes.
-Materialize `<installed-skill>`, `<python-launcher>` and the available dispatch
+Materialize `<installed-skill>` and the available dispatch
 route before explicitly creating or refreshing a stored prompt. Unresolved
 values stop before claiming. Refresh using the existing schedule ID, never a
 duplicate. Inspect the stored prompt, then enable only explicitly. Each prompt
@@ -101,7 +101,7 @@ Each host lists its own dispatch routes in `<home>/routes.md`, primary first, on
 
 ### Automatic pickup
 
-Instead of a stored scheduler prompt, a host can run `python3 <installed-skill>/runtime/factory.py pickup` on a timer every 5 minutes. A registered host's `max_inflight`, set in Settings, Hosts, caps its in-flight claims across projects. A `max_inflight` of 0 pauses pickup on that host, stall takeover included; jobs already in flight and deny-notes launches keep running. The lower of it and `--max-inflight` wins. Pickup is model-free, silent when there is nothing to do, claims one idea at a time through the board compare-and-swap, and launches each through a host-local `<home>/launchers.json`. Enable it per project or globally with the pipeline `pickup` key, which lists the host names allowed to pick up. The installed reference has the launcher examples, cron, launchd and Task Scheduler setup and the steps for moving off a stored scheduler prompt: see `references/pickup.md` in the installed skill. When `<home>/stalls.json` names an adapter, pickup also takes over a session stalled on a usage limit whose reset is more than `takeover_minutes` (default 30) away, launching the recover flow on the next route. Resets 30 minutes away or closer are left to the host's limit-resume sweep, so the two never act on the same session; the installed reference has the setup. The dashboard shows the same scheduler and launcher setup under Settings, Scheduler.
+Instead of a stored scheduler prompt, a host can run `<installed-skill>/runtime/factory pickup` on a timer every 5 minutes. A registered host's `max_inflight`, set in Settings, Hosts, caps its in-flight claims across projects. A `max_inflight` of 0 pauses pickup on that host, stall takeover included; jobs already in flight and deny-notes launches keep running. The lower of it and `--max-inflight` wins. Pickup is model-free, silent when there is nothing to do, claims one idea at a time through the board compare-and-swap, and launches each through a host-local `<home>/launchers.json`. Enable it per project or globally with the pipeline `pickup` key, which lists the host names allowed to pick up. The installed reference has the launcher examples, cron, launchd and Task Scheduler setup and the steps for moving off a stored scheduler prompt: see `references/pickup.md` in the installed skill. When `<home>/stalls.json` names an adapter, pickup also takes over a session stalled on a usage limit whose reset is more than `takeover_minutes` (default 30) away, launching the recover flow on the next route. Resets 30 minutes away or closer are left to the host's limit-resume sweep, so the two never act on the same session; the installed reference has the setup. The dashboard shows the same scheduler and launcher setup under Settings, Scheduler.
 
 ### Operating schedules
 
@@ -114,7 +114,7 @@ nothing to do it exits 3 (`no ideas`) without retrying, as specified above.
 
 ### Buildkite logs in pr-state
 
-When a PR's CI runs on Buildkite, `factory.py pr-state` can add the failed job's log tail
+When a PR's CI runs on Buildkite, `factory pr-state` can add the failed job's log tail
 to a `fix-ci` reading as `ci_log`, so a babysit session can fix CI without the Buildkite MCP.
 The token is optional. Create a Buildkite API access token with the `read_builds` and
 `read_build_logs` scopes and store it as `BUILDKITE_API_TOKEN` in `<home>/.env`, never in
@@ -201,16 +201,16 @@ Turn on Open in Factory buttons under Agent replies in these settings. When an a
 The Factory row shows the same number as the dashboard's Inbox badge: jobs waiting on you plus
 unchecked backlog lines. While the Factory screen shows your board, the framed dashboard sends its
 own Inbox count to the Paseo origin that framed it, so the badge matches what you see, including
-the per-browser project filter. Otherwise the plugin runs `factory.py inbox` from the installed
+the per-browser project filter. Otherwise the plugin runs `factory inbox` from the installed
 factory skill (`~/.claude/skills/factory` or `~/.agents/skills/factory`) once a minute. That count
 covers all projects and can trail the dashboard by up to a minute. A host without the factory
-skill, or with a skill older than `factory.py inbox`, shows a badge only while the board is open.
+skill, or with a skill older than `factory inbox`, shows a badge only while the board is open.
 
-On Windows the plugin runs `python3.exe`, and if Windows cannot find it or it is the Microsoft Store stub (exit 9009), `py.exe -3`.
+On Windows the plugin runs `runtime\factory.exe` from the installed skill.
 
 ### Needs-you alerts
 
-`factory.py inbox` also lists the jobs waiting on you, by id, project and title, in board order.
+`factory inbox` also lists the jobs waiting on you, by id, project and title, in board order.
 When a job joins that list, Paseo web and desktop show a notification such as
 "Needs you: 042-sample-links". Clicking it opens the Factory screen at that job. The first list
 after Paseo starts raises no alerts, so only jobs that start waiting while Paseo runs notify you.
@@ -263,12 +263,12 @@ Tracer writes its token to `TRACER_DATA/token`, and only when it starts with `TR
 
 ### First run
 
-1. Set the board `jira` field before the first mirror, because it picks the ticket and the feature id: `echo '{"jira":"PLAN-1234"}' | python3 "$RUNTIME" board "$FACTORY" <job-id>`. Setting it later creates a second feature.
-2. Run `factory.py tracer sync <slug>/<id>` once. A good run prints one line, `<slug>/<id>: PLAN-1234 as Tracer feature plan-1234: stage build, 3 tasks, 0 review rounds posted`.
+1. Set the board `jira` field before the first mirror, because it picks the ticket and the feature id: `echo '{"jira":"PLAN-1234"}' | "$RUNTIME" board "$FACTORY" <job-id>`. Setting it later creates a second feature.
+2. Run `factory tracer sync <slug>/<id>` once. A good run prints one line, `<slug>/<id>: PLAN-1234 as Tracer feature plan-1234: stage build, 3 tasks, 0 review rounds posted`.
 3. Open Tracer and find the feature under the lower-cased key (`plan-1234`). Its tasks `t1` to `tN` and the `factory-builder` agent appear in the Build view.
 4. A mirror that stopped partway is fixed by running the same command again. Every write is idempotent.
 
-`factory.py tracer sync [<project-slug>[/<job-id>]]` mirrors on demand: every configured project, one project, or one job. A bulk run that finds nothing to mirror prints one `nothing to mirror` line. A bulk run skips `idea`, `closed` and `merged` jobs and jobs with no `spec.md`. A board patch that sets `stage` or `rounds` mirrors that job on its own. Every write is idempotent, so `tracer sync` is also the recovery.
+`factory tracer sync [<project-slug>[/<job-id>]]` mirrors on demand: every configured project, one project, or one job. A bulk run that finds nothing to mirror prints one `nothing to mirror` line. A bulk run skips `idea`, `closed` and `merged` jobs and jobs with no `spec.md`. A board patch that sets `stage` or `rounds` mirrors that job on its own. Every write is idempotent, so `tracer sync` is also the recovery.
 
 | Factory | Tracer |
 | --- | --- |
@@ -291,18 +291,18 @@ Tracer writes its token to `TRACER_DATA/token`, and only when it starts with `TR
 
 `idea` and `closed` jobs are not mirrored.
 
-A Tracer outage never fails a board patch. The change is saved, `board` prints the same job and exits 0, and stderr gets one warning line. Pickup treats a Worker error inside its Tracer passes the same way. A 503 on `PUT /api/board`, for example, prints the error and "Tracer build pass stopped; Building in Tracer marks wait for the next pickup run" (or "Tracer follow pass stopped; followed jobs wait for the next pickup run"), and pickup still claims and launches ideas. The board patch warning line names the step that failed: `mirror`, `gather`, `scope poll` or `build stop`. A failed mirror names `factory.py tracer sync <slug>/<id>` to retry. The other steps say the next pickup retries, and a device with no scheduled pickup can run `factory.py pickup` itself. Each request times out after 5 seconds, and the first failure stops the mirror. `tracer sync` exits 2 on bad config or usage, 4 when the named job is not on the board, and 5 on a Tracer failure.
+A Tracer outage never fails a board patch. The change is saved, `board` prints the same job and exits 0, and stderr gets one warning line. Pickup treats a Worker error inside its Tracer passes the same way. A 503 on `PUT /api/board`, for example, prints the error and "Tracer build pass stopped; Building in Tracer marks wait for the next pickup run" (or "Tracer follow pass stopped; followed jobs wait for the next pickup run"), and pickup still claims and launches ideas. The board patch warning line names the step that failed: `mirror`, `gather`, `scope poll` or `build stop`. A failed mirror names `factory tracer sync <slug>/<id>` to retry. The other steps say the next pickup retries, and a device with no scheduled pickup can run `factory pickup` itself. Each request times out after 5 seconds, and the first failure stops the mirror. `tracer sync` exits 2 on bad config or usage, 4 when the named job is not on the board, and 5 on a Tracer failure.
 
 Tracer locks task assignment until scope is approved in Tracer. The mirror treats that refusal as normal: tasks still sync, and the summary says `tasks unassigned until scope is approved in Tracer`. The mirror also leaves task assignment alone while a Tracer build agent other than `factory-builder` holds the feature, by the rule under Building in Tracer. Tasks still sync, and the summary says `tasks left with the Tracer build agent`. While that agent holds the feature, the mirror also keeps each task's current Tracer status, and a task Tracer does not have yet gets the status from the table above.
 
 ### Follow in Tracer
 
-The job drawer's **Follow in Tracer** button puts a job into Tracer from the dashboard. It shows for a job with a project at `idea` or a mirrored stage, and it sets the board field `tracer` to `{"follow": true}`. A board patch can do the same: `echo '{"tracer":{"follow":true}}' | python3 "$RUNTIME" board "$FACTORY" <job-id>` mirrors at once on a device with `tracer.json`. `board` refuses any other `tracer` value except `null`, `{"follow": null}` and the gather request below, exit 2.
+The job drawer's **Follow in Tracer** button puts a job into Tracer from the dashboard. It shows for a job with a project at `idea` or a mirrored stage, and it sets the board field `tracer` to `{"follow": true}`. A board patch can do the same: `echo '{"tracer":{"follow":true}}' | "$RUNTIME" board "$FACTORY" <job-id>` mirrors at once on a device with `tracer.json`. `board` refuses any other `tracer` value except `null`, `{"follow": null}` and the gather request below, exit 2.
 
-The hosted dashboard never calls Tracer. The next `factory.py pickup` run (not `--dry-run`) on a device with `tracer.json` mirrors each followed job that has no link yet, pulling its `spec.md` first when the device lacks it. After any mirror, from that pass, a board patch or `tracer sync`, factory.py saves `tracer.feature` and `tracer.url` (`<url>/#/f/<feature>`) on the board. The drawer then shows a **Tracer** link to that page. Until then it shows `Tracer: waiting for a device with tracer.json`. Past `spec`, the feature is created without `start_gather`, and its reading says approving scope in Tracer starts a second build, so leave scope unapproved there.
+The hosted dashboard never calls Tracer. The next `factory pickup` run (not `--dry-run`) on a device with `tracer.json` mirrors each followed job that has no link yet, pulling its `spec.md` first when the device lacks it. After any mirror, from that pass, a board patch or `tracer sync`, factory saves `tracer.feature` and `tracer.url` (`<url>/#/f/<feature>`) on the board. The drawer then shows a **Tracer** link to that page. Until then it shows `Tracer: waiting for a device with tracer.json`. Past `spec`, the feature is created without `start_gather`, and its reading says approving scope in Tracer starts a second build, so leave scope unapproved there.
 ### Building in Tracer
 
-When Tracer's own build agent builds a job's feature, the factory must not build it too. Each `factory.py pickup` run (not `--dry-run`) on a device with `tracer.json` asks Tracer for the feature of each job at `idea` or an in-flight stage whose project is configured. The feature counts as building when it is at stage `build`, not closed, on the job's ticket, and some agent other than `factory-builder` is at stage `build` with kind `session`. Pickup asks only for the feature id the job maps to, the Jira key or else `factory-<n>`. It skips a job whose board `tracer.feature` names another feature, and a feature on another ticket fails the check with the warning below. The warning names the job and Tracer's ticket, with control characters removed, or `no ticket` when the feature has none. Pickup then saves `tracer.building: true` on the board. `board` refuses to set it.
+When Tracer's own build agent builds a job's feature, the factory must not build it too. Each `factory pickup` run (not `--dry-run`) on a device with `tracer.json` asks Tracer for the feature of each job at `idea` or an in-flight stage whose project is configured. The feature counts as building when it is at stage `build`, not closed, on the job's ticket, and some agent other than `factory-builder` is at stage `build` with kind `session`. Pickup asks only for the feature id the job maps to, the Jira key or else `factory-<n>`. It skips a job whose board `tracer.feature` names another feature, and a feature on another ticket fails the check with the warning below. The warning names the job and Tracer's ticket, with control characters removed, or `no ticket` when the feature has none. Pickup then saves `tracer.building: true` on the board. `board` refuses to set it.
 
 A job with that mark is skipped: pickup, `ideas` and stall takeover all read the board flag only and make no Tracer call, so `--dry-run` prints `skip <id> <project>: building in Tracer`. The dashboard card shows `Building in Tracer`. The next pickup run removes the mark when the Tracer build ends or the feature closes. It also removes the mark, with no Tracer call, from a job that has left `idea` and the in-flight stages or whose project is no longer configured in `tracer.json`. If Tracer is unreachable, pickup prints one stderr warning, `Tracer build check failed`, and unchecked jobs keep their mark. An existing claim is never released.
 
@@ -314,25 +314,25 @@ The job drawer shows a collapsed `Tracer tasks: 1 of 3 done` line under the head
 
 ### Gather in Tracer
 
-Following a job at `idea` or `spec` asks Tracer to gather scope before the factory builds. The drawer then writes `{"follow": true, "gather": true}`. A board patch can do the same: `echo '{"tracer":{"follow":true,"gather":true}}' | python3 "$RUNTIME" board "$FACTORY" <job-id>`. `board` refuses `"gather": false` and any `scope`, exit 2. Only factory.py sets `tracer.scope`.
+Following a job at `idea` or `spec` asks Tracer to gather scope before the factory builds. The drawer then writes `{"follow": true, "gather": true}`. A board patch can do the same: `echo '{"tracer":{"follow":true,"gather":true}}' | "$RUNTIME" board "$FACTORY" <job-id>`. `board` refuses `"gather": false` and any `scope`, exit 2. Only factory sets `tracer.scope`.
 
 | `tracer` key | Writer | Example |
 | --- | --- | --- |
 | `follow` | dashboard or patch | `true` |
 | `gather` | dashboard at `idea` or `spec`, or patch | `true` |
-| `feature`, `url` | factory.py | `factory-42`, `<url>/#/f/factory-42` |
-| `scope` | factory.py only | `gathering`, then `approved` or `declined` |
-| `stopped` | factory.py only | `true` |
-| `receipt` | factory.py only | Tracer's signed `scope_receipt` |
+| `feature`, `url` | factory | `factory-42`, `<url>/#/f/factory-42` |
+| `scope` | factory only | `gathering`, then `approved` or `declined` |
+| `stopped` | factory only | `true` |
+| `receipt` | factory only | Tracer's signed `scope_receipt` |
 
-On a device with `tracer.json`, the board patch or the next `factory.py pickup` creates the feature with `start_gather: true`. No `spec.md` is needed. The ticket is the Jira key or `FACTORY-<n>`. The feature text is the board `idea`. The reading asks you to approve or decline scope in Tracer and says the factory stops any Tracer build that approval starts. factory.py records `tracer.scope`:
+On a device with `tracer.json`, the board patch or the next `factory pickup` creates the feature with `start_gather: true`. No `spec.md` is needed. The ticket is the Jira key or `FACTORY-<n>`. The feature text is the board `idea`. The reading asks you to approve or decline scope in Tracer and says the factory stops any Tracer build that approval starts. factory records `tracer.scope`:
 
 - `gathering` until Tracer decides.
 - `approved` once Tracer sets `scope_approved_at`.
 - `declined` once the feature is `closed`.
 
-Approval also queues a Tracer build when a companion listens. Right after it records `approved`, factory.py sends `POST api/features/<feature>/build-runs/stop` once and saves `tracer.stopped: true`. While the companion is still starting the run, the next pickup retries. A board patch that finds a stop still due runs it first and then mirrors that patch's stage. A stopped session holds the job as Building in Tracer until it ends. Builds a person starts later in Tracer are left alone.
+Approval also queues a Tracer build when a companion listens. Right after it records `approved`, factory sends `POST api/features/<feature>/build-runs/stop` once and saves `tracer.stopped: true`. While the companion is still starting the run, the next pickup retries. A board patch that finds a stop still due runs it first and then mirrors that patch's stage. A stopped session holds the job as Building in Tracer until it ends. Builds a person starts later in Tracer are left alone.
 
 While the scope is `gathering`, each pickup sends one GET for the feature. The task mirror is skipped, and `tracer sync` prints `skipped: Tracer is gathering scope`. The drawer shows `Tracer: gathering scope`, then `Tracer: scope approved` or `Tracer: scope declined`.
 
-The build waits on Tracer only when the project's pipeline has the `spec-approval` gate. A job that reaches the gate while the scope is `gathering` stops at `needs-human` with note `gate: tracer-scope`. When Tracer approves, factory.py moves the job to `build` with note `spec approved in Tracer`, and pickup launches `/factory recover <job-id>`, which starts the build. When Tracer declines, factory.py moves the note to `gate: spec-approval` and sets the declined `needs` line, and `/factory approve-spec <job-id>` builds anyway. Only a person passes the gate, by approving scope in Tracer, by `/factory approve-spec`, or by pressing Approve spec on the dashboard, which moves the job to `build` with note `spec approved on the dashboard`. The Worker refuses the dashboard note from a device token, and `factory.py board` refuses both notes. A device write of `spec approved in Tracer` also needs `tracer.receipt`, a Tracer-signed scope receipt for the job id and ticket that the Worker checks against `tracer_receipt_key`; without one, the job waits at `gate: spec-approval` for a person. With the gate off, gathering is advisory and the build starts as usual. Without a Tracer companion listening, `start_gather` queues nothing, so the hold lasts until a person decides in Tracer. A job whose scope Tracer already approved skips the hold: factory.py moves it to `build` with that note when it reaches the gate.
+The build waits on Tracer only when the project's pipeline has the `spec-approval` gate. A job that reaches the gate while the scope is `gathering` stops at `needs-human` with note `gate: tracer-scope`. When Tracer approves, factory moves the job to `build` with note `spec approved in Tracer`, and pickup launches `/factory recover <job-id>`, which starts the build. When Tracer declines, factory moves the note to `gate: spec-approval` and sets the declined `needs` line, and `/factory approve-spec <job-id>` builds anyway. Only a person passes the gate, by approving scope in Tracer, by `/factory approve-spec`, or by pressing Approve spec on the dashboard, which moves the job to `build` with note `spec approved on the dashboard`. The Worker refuses the dashboard note from a device token, and `factory board` refuses both notes. A device write of `spec approved in Tracer` also needs `tracer.receipt`, a Tracer-signed scope receipt for the job id and ticket that the Worker checks against `tracer_receipt_key`; without one, the job waits at `gate: spec-approval` for a person. With the gate off, gathering is advisory and the build starts as usual. Without a Tracer companion listening, `start_gather` queues nothing, so the hold lasts until a person decides in Tracer. A job whose scope Tracer already approved skips the hold: factory moves it to `build` with that note when it reaches the gate.

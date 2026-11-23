@@ -63,7 +63,7 @@ spec.md sections:
    credentials, sandbox, storage or state layout, a protocol or wire format, a
    migration, a dependency, CI or check config, or three or more components.
    Everything else is medium. When unsure, pick the higher tier.
-   `factory.py review-plan` reads this line to route reviewers.
+   `factory review-plan` reads this line to route reviewers.
 9. **Sub-jobs**: only when the request was split.
 
 A job is a bug fix when it makes existing behaviour work as intended. A bug-fix spec

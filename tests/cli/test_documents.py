@@ -116,12 +116,12 @@ class DocumentsTest(IsolatedTestCase):
     def test_skill_and_trust_describe_documents(self):
         skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("the absolute path in `$DOCUMENTS`", skill)
-        self.assertIn('runtime/factory.py documents "$SLUG"', skill)
+        self.assertIn('runtime/factory documents "$SLUG"', skill)
         self.assertNotIn("automatic agent consumption", skill)
         self.assertIn("document:<slug>/<name>", (ROOT / "docs/trust.md").read_text(encoding="utf-8"))
         settings = (SKILL / "references/project-settings.md").read_text(encoding="utf-8")
         flat = " ".join((skill + " " + settings).split())
         self.assertNotIn("cache/sync", flat)
-        self.assertIn("`factory.py documents <slug>` writes the non-empty documents to "
+        self.assertIn("`factory documents <slug>` writes the non-empty documents to "
                       "`projects/<slug>.documents.md`", flat)
         self.assertIn("That copy is read-only: edit documents in the dashboard; the CLI never uploads them.", flat)

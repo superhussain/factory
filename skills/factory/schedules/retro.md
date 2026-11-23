@@ -1,7 +1,7 @@
 # Optional weekday retro schedule prompt
 
 Before enabling or refreshing this stored prompt, the user materializes
-`<installed-skill>` and `<python-launcher>`. Enable it Monday to Friday at 09:00 on
+`<installed-skill>`. Enable it Monday to Friday at 09:00 on
 one host only. Save the materialized prompt as `<home>/retro-schedule-prompt.md` on
 that host only, so pickup can catch up a missed slot; see `retro-catchup.json` in
 references/schedules.md. Stop before running anything if any placeholder remains unresolved.
@@ -10,7 +10,7 @@ This is a prompt template, not an executable or an automatically enabled schedul
 1. Pick a route. Run:
 
 ```text
-<python-launcher> <installed-skill>/runtime/factory.py routes pick
+<installed-skill>/runtime/factory routes pick
 ```
 
 On any nonzero exit, name the exit code and first stderr line, then stop. On exit 0,
@@ -20,7 +20,7 @@ If `runtime` is not `claude`, reply `no claude route: runtime <runtime>`, with t
 2. Check autonomy. Run:
 
 ```text
-<python-launcher> <installed-skill>/runtime/factory.py autonomy status
+<installed-skill>/runtime/factory autonomy status
 ```
 
 If `paused` is not `false`, reply `retro: autonomy paused` and stop.
@@ -28,7 +28,7 @@ If `paused` is not `false`, reply `retro: autonomy paused` and stop.
 3. Settle trials. Run:
 
 ```text
-<python-launcher> <installed-skill>/runtime/factory.py trial settle
+<installed-skill>/runtime/factory trial settle
 ```
 
 Report its output. On a nonzero exit, note the exit code and continue.
@@ -36,7 +36,7 @@ Report its output. On a nonzero exit, note the exit code and continue.
 4. Push this host's digest. Run:
 
 ```text
-<python-launcher> <installed-skill>/runtime/factory.py retro push
+<installed-skill>/runtime/factory retro push
 ```
 
 On a nonzero exit, note the exit code and continue.
@@ -44,7 +44,7 @@ On a nonzero exit, note the exit code and continue.
 5. Aggregate. Run:
 
 ```text
-<python-launcher> <installed-skill>/runtime/factory.py retro aggregate --days 3
+<installed-skill>/runtime/factory retro aggregate --days 3
 ```
 
 On exit 3, reply `retro: no digests` with the first stderr line and stop. On any
@@ -60,7 +60,7 @@ printed JSON, and `host` from the `aggregate` file.
 8. Admit. Run:
 
 ```text
-<python-launcher> <installed-skill>/runtime/factory.py retro admit <run>
+<installed-skill>/runtime/factory retro admit <run>
 ```
 
 Report its output and the aggregated `hosts`, and name each host in `expected`
