@@ -12867,7 +12867,10 @@ exit "$archive_code"
                     at(jobs, &e["id"]).map_or(Value::Null, |i| jobs[i].clone()) != e["expect"]
                 });
                 let stale_read = patch["reads"].as_array().into_iter().flatten().any(|r| {
-                    at(jobs, &r["id"]).is_none_or(|i| row_sha256(&jobs[i]) != r["sha256"])
+                    at(jobs, &r["id"]).is_none_or(|i| match r.get("stage") {
+                        Some(stage) => jobs[i].get("stage").unwrap_or(&Value::Null) != stage,
+                        None => row_sha256(&jobs[i]) != r["sha256"],
+                    })
                 });
                 if stale_row || stale_read {
                     return Some(ok(409, r#"{"error":"conflict"}"#));

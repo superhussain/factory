@@ -154,11 +154,13 @@ test("reads", async () => {
   assert.equal(s.etag(), before);
 
   const SHAPE =
-    "a board patch's reads need [{id, sha256}], one per id and none in rows. Nothing was written.";
+    "a board patch's reads need [{id, sha256}] or [{id, stage}], one per id and none in rows. Nothing was written.";
   const row = [{ id: BUILD.id, expect: done, row: BUILD }];
   for (const bad of [
     "x",
     [{ id: held[0].id }],
+    [{ id: held[0].id, stage: 7 }],
+    [{ id: held[0].id, stage: "idea", sha256: reads[0].sha256 }],
     [{ id: held[0].id, sha256: reads[0].sha256.toUpperCase() }],
     [reads[0], reads[0]],
     [{ id: BUILD.id, sha256: reads[0].sha256 }],
@@ -370,4 +372,27 @@ test("a board read advertises Accept-Patch and a backlog read does not", async (
     serveFactory(new Request("http://local" + path), { BUCKET: s.bucket }, person, {});
   assert.equal((await get("/api/board")).headers.get("Accept-Patch"), "application/json");
   assert.equal((await get("/api/backlog")).headers.get("Accept-Patch"), null);
+});
+
+// A stage read is a plain compare: it holds while the row keeps its stage, whatever else
+// changes, and refuses the write once the stage moves, such as a merged row reopened.
+test("stage reads", async () => {
+  const merged = { id: "1600-sample-old", project: "sample", stage: "merged" };
+  const s = setup({ updated: "", jobs: [BUILD, merged] });
+  const done = { ...BUILD, stage: "review" };
+  const ok = await s.patch({
+    rows: [{ id: BUILD.id, expect: BUILD, row: done }],
+    reads: [{ id: merged.id, stage: "merged" }],
+  });
+  assert.equal(ok.status, 200);
+  const before = s.etag();
+  for (const reads of [
+    [{ id: merged.id, stage: "build" }],
+    [{ id: merged.id, stage: null }],
+    [{ id: "1999-missing", stage: "merged" }],
+  ]) {
+    const refused = await s.patch({ rows: [{ id: BUILD.id, expect: done, row: BUILD }], reads });
+    assert.equal(refused.status, 409, JSON.stringify(reads));
+  }
+  assert.equal(s.etag(), before);
 });

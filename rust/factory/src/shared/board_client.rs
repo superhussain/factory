@@ -350,6 +350,10 @@ pub fn row_sha256(row: &Value) -> String {
 }
 
 /// Which unchanged rows a write read to decide, so the Worker refuses it if any of them changed.
+/// An open row it picks goes as a whole-row digest, since a claim reads many of its fields. A
+/// merged or closed row it picks, and any depends-on row of a row it writes, goes as a stage
+/// read: those decisions read only whether the row is still finished, and the Worker checks a
+/// stage with a string compare instead of hashing the row.
 pub type Reads<'a> = Option<&'a dyn Fn(&Value) -> bool>;
 
 /// A row that is neither merged nor closed: the scope a claim under an in-flight cap reads.
@@ -432,10 +436,17 @@ pub fn row_patch(old: &str, new: &str, reads: Reads) -> Option<String> {
             .collect();
         let digests: Vec<Value> = before
             .iter()
-            .filter(|(id, row)| {
-                now.get(id.as_str()) == Some(&row) && (deps.contains(id.as_str()) || picks(row))
+            .filter(|(id, row)| now.get(id.as_str()) == Some(&row))
+            .filter_map(|(id, row)| match (picks(row), open_row(row)) {
+                (true, true) => Some(json!({"id": id, "sha256": row_sha256(row)})),
+                (true, false) => {
+                    Some(json!({"id": id, "stage": row.get("stage").unwrap_or(&Value::Null)}))
+                }
+                (false, _) if deps.contains(id.as_str()) => {
+                    Some(json!({"id": id, "stage": row.get("stage").unwrap_or(&Value::Null)}))
+                }
+                _ => None,
             })
-            .map(|(id, row)| json!({"id": id, "sha256": row_sha256(row)}))
             .collect();
         if !digests.is_empty() {
             body["reads"] = Value::Array(digests);
@@ -711,9 +722,15 @@ mod tests {
             }
         }
         for r in body["reads"].as_array().into_iter().flatten() {
-            match find(jobs, &r["id"]) {
-                Some(i) if row_sha256(&jobs[i]) == r["sha256"] => {}
-                _ => return false,
+            let Some(i) = find(jobs, &r["id"]) else {
+                return false;
+            };
+            let held = match r.get("stage") {
+                Some(stage) => jobs[i].get("stage").unwrap_or(&Value::Null) == stage,
+                None => row_sha256(&jobs[i]) == r["sha256"],
+            };
+            if !held {
+                return false;
             }
         }
         for e in body["rows"].as_array().unwrap() {
@@ -767,15 +784,45 @@ mod tests {
             assert!(worker_patch(&mut worker, &mac));
             assert_eq!(worker_patch(&mut worker, &wsl), both);
         }
-        // The terminal row is never sent as a read.
+        // Open rows go as digests. A merged row in scope, or a dependency, goes as a stage read,
+        // and a row outside both is not sent.
+        let everything = |_: &Value| true;
+        let mac = parsed(row_patch(
+            &start,
+            &claim(&start, "2001-a"),
+            Some(&everything),
+        ));
+        assert_eq!(mac["reads"][0]["id"], "1999-a");
+        assert!(mac["reads"][0]["sha256"].is_string());
+        assert_eq!(
+            mac["reads"][2],
+            json!({"id": "1000-old", "stage": "merged"})
+        );
         let mac = parsed(row_patch(&start, &claim(&start, "2001-a"), Some(&open)));
-        let ids: Vec<&Value> = mac["reads"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|r| &r["id"])
-            .collect();
-        assert_eq!(ids, ["1999-a", "2002-b"]);
+        assert_eq!(mac["reads"].as_array().unwrap().len(), 2);
+    }
+
+    /// A merged dependency of a written row goes as a stage read even outside the scope, and its
+    /// reopening refuses the write.
+    #[test]
+    fn a_reopened_dependency_refuses_the_write() {
+        let start = board(json!([
+            {"id": "1000-base", "stage": "merged", "note": "old"},
+            {"id": "2001-a", "stage": "idea", "refs": [{"id": "1000-base", "kind": "depends-on"}]},
+        ]));
+        let mut b = loads(&start).unwrap();
+        b["jobs"][1]["stage"] = "build".into();
+        let none = |_: &Value| false;
+        let body = row_patch(&start, &dumps(&b, COMPACT), Some(&none)).unwrap();
+        assert_eq!(
+            parsed(Some(body.clone()))["reads"],
+            json!([{"id": "1000-base", "stage": "merged"}])
+        );
+        let mut worker = loads(&start).unwrap();
+        worker["jobs"][0]["note"] = "edited, still merged".into();
+        assert!(worker_patch(&mut worker.clone(), &body));
+        worker["jobs"][0]["stage"] = "build".into();
+        assert!(!worker_patch(&mut worker, &body));
     }
 
     #[test]

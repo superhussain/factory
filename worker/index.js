@@ -639,14 +639,24 @@ async function rowSha256(row) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// rowSha256 of row, reused from memo when this request already hashed the same row text.
+async function digestOnce(memo, row) {
+  const key = JSON.stringify(row);
+  if (!memo.has(key)) memo.set(key, await rowSha256(row));
+  return memo.get(key);
+}
+
 const BOARD_PATCH_SHAPE =
   "a board patch needs rows: [{id, expect, row}], one entry per id. Nothing was written.";
 const READS_SHAPE =
-  "a board patch's reads need [{id, sha256}], one per id and none in rows. Nothing was written.";
+  "a board patch's reads need [{id, sha256}] or [{id, stage}], one per id and none in rows. Nothing was written.";
 
 // Applies the dashboard's changed rows, each with the row it expects to replace, to the
 // stored board. A row that changed since the client read it comes back as a 409 conflict;
-// an R2 race with another writer is retried here.
+// an R2 race with another writer is retried here. Each read names a row the write decided
+// from: {id, sha256} when the decision read the whole row, or {id, stage} when it read only
+// the stage, such as whether a merged row is still finished. A stage read is a string compare,
+// so a client can name thousands of rows without the Worker hashing them.
 async function boardPatch(request, env, principal, ctx) {
   const body = await readBody(request);
   if (body === null) return reply("body over 1 MiB", 413);
@@ -680,13 +690,16 @@ async function boardPatch(request, env, principal, ctx) {
     !reads.every(
       (r) =>
         typeof r?.id === "string" &&
-        typeof r.sha256 === "string" &&
-        /^[0-9a-f]{64}$/.test(r.sha256) &&
+        ("sha256" in r
+          ? typeof r.sha256 === "string" && /^[0-9a-f]{64}$/.test(r.sha256) && !("stage" in r)
+          : "stage" in r && (typeof r.stage === "string" || r.stage === null)) &&
         !entries.has(r.id),
     ) ||
     new Set(reads.map((r) => r.id)).size !== reads.length
   )
     return reply(READS_SHAPE, 400);
+  // Digests keyed by the row's JSON text, so an R2 retry hashes only rows that changed.
+  const digests = new Map();
   for (let attempt = 0; attempt < 10; attempt++) {
     const stored = await storedBoard(env);
     if (stored.etag && !stored.doc)
@@ -713,7 +726,10 @@ async function boardPatch(request, env, principal, ctx) {
     }
     for (const r of reads) {
       const row = byId.get(r.id);
-      if (!row || (await rowSha256(row)) !== r.sha256) conflicts.add(r.id);
+      if (!row) conflicts.add(r.id);
+      else if ("stage" in r) {
+        if ((row.stage ?? null) !== r.stage) conflicts.add(r.id);
+      } else if ((await digestOnce(digests, row)) !== r.sha256) conflicts.add(r.id);
     }
     if (conflicts.size)
       return reply(
