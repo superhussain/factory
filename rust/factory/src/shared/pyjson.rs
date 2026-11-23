@@ -1,5 +1,7 @@
 //! Python's `json.dumps` output styles and `repr(float)`.
 
+use std::borrow::Cow;
+
 use serde_json::Value;
 
 #[derive(Clone, Copy)]
@@ -51,9 +53,52 @@ pub fn dumps(v: &Value, style: Style) -> String {
     out
 }
 
-/// `json.loads`.
+/// `json.loads`, with each lone surrogate escape dropped first, since a Rust string cannot hold one.
 pub fn loads(text: &str) -> Result<Value, serde_json::Error> {
-    serde_json::from_str(text)
+    serde_json::from_str(&strip_lone_surrogates(text))
+}
+
+/// The `\uXXXX` surrogate escape at byte i inside a string, if any.
+fn surrogate_at(b: &[u8], i: usize) -> Option<u32> {
+    let hex = b.get(i..i + 6)?.strip_prefix(b"\\u")?;
+    let n = u32::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()?;
+    (0xD800..=0xDFFF).contains(&n).then_some(n)
+}
+
+/// text without the `\uD800`-`\uDFFF` escapes inside strings that are not a high-low pair.
+fn strip_lone_surrogates(text: &str) -> Cow<'_, str> {
+    let b = text.as_bytes();
+    let mut out: Option<String> = None;
+    let (mut copied, mut i, mut in_string) = (0, 0, false);
+    while i < b.len() {
+        match b[i] {
+            b'"' => in_string = !in_string,
+            b'\\' if in_string => {
+                if let Some(n) = surrogate_at(b, i) {
+                    let low = surrogate_at(b, i + 6).filter(|m| *m >= 0xDC00);
+                    if n < 0xDC00 && low.is_some() {
+                        i += 12;
+                    } else {
+                        let o = out.get_or_insert_with(String::new);
+                        o.push_str(&text[copied..i]);
+                        i += 6;
+                        copied = i;
+                    }
+                    continue;
+                }
+                i += 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    match out {
+        Some(mut o) => {
+            o.push_str(&text[copied..]);
+            Cow::Owned(o)
+        }
+        None => Cow::Borrowed(text),
+    }
 }
 
 fn newline(out: &mut String, style: Style, level: usize) {
@@ -264,6 +309,18 @@ mod tests {
                 r#"{"b": [1, {}], "a": {"c": null, "d": true}}"#,
                 r#"{"b":[1,{}],"a":{"c":null,"d":true}}"#,
             ]
+        );
+    }
+
+    #[test]
+    fn lone_surrogates_dropped() {
+        assert_eq!(loads(r#""x\ud800y""#).unwrap(), "xy");
+        assert_eq!(loads(r#""x\udc00y\ud800""#).unwrap(), "xy");
+        assert_eq!(loads(r#""\ud83d\ude00""#).unwrap(), "\u{1F600}");
+        assert_eq!(loads(r#""\\ud800""#).unwrap(), "\\ud800");
+        assert_eq!(
+            loads(r#"{"a\ud800": "\"\ud800"}"#).unwrap(),
+            serde_json::json!({"a": "\""})
         );
     }
 }

@@ -1,0 +1,1 @@
+not closed synthetic text

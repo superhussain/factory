@@ -25,8 +25,7 @@ static SHA256: Pattern = Pattern::new("[0-9a-f]{64}", Flags::NONE);
 pub fn r2_target(target: &str, need_job: bool) -> Res<(PathBuf, String, String)> {
     let home = factory_home()?;
     let (slug, job_id) = target.split_once('/').unwrap_or((target, ""));
-    let bad_job =
-        (!job_id.is_empty() || need_job) && !(JOB_ID.is_full(job_id) && !job_id.contains(".."));
+    let bad_job = (!job_id.is_empty() || need_job) && bad_job_id(job_id, cfg!(windows));
     if !SLUG.is_full(slug) || bad_job {
         let tail = if need_job { "" } else { " or <project-slug>" };
         return Err(fail(
@@ -38,6 +37,11 @@ pub fn r2_target(target: &str, need_job: bool) -> Res<(PathBuf, String, String)>
         ));
     }
     Ok((home, slug.to_string(), job_id.to_string()))
+}
+
+/// Windows drops a trailing dot from a path name, so there `a.` would name the folder `a`.
+fn bad_job_id(job_id: &str, windows: bool) -> bool {
+    !JOB_ID.is_full(job_id) || job_id.contains("..") || windows && job_id.ends_with('.')
 }
 
 fn inspect_project_paths(
@@ -249,12 +253,15 @@ pub fn pull_project(home: &Path, slug: &str) -> Res<bool> {
 }
 
 /// This device's checkout of each project, from paths.md.
-pub fn read_paths(home: &Path) -> Vec<(String, String)> {
+/// A read or decode error fails 1, as Python raises, so no caller rewrites paths.md from an empty list.
+pub fn read_paths(home: &Path) -> Res<Vec<(String, String)>> {
     let path = home.join("paths.md");
     if !path.exists() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    frontmatter(&path).map(|(meta, _)| meta).unwrap_or_default()
+    frontmatter(&path)
+        .map(|(meta, _)| meta)
+        .map_err(|e| fail(os_error(&e, Some(&path)), 1))
 }
 
 fn link_inside(link: &Path) -> crate::shared::exit::Exit {
@@ -337,6 +344,13 @@ mod tests {
     use super::*;
     use crate::shared::fs::temp_dir;
     use crate::shared::http::tests::{home_for, serve};
+
+    #[test]
+    fn trailing_dot_refused_on_windows() {
+        assert!(!bad_job_id("001-a.", false));
+        assert!(bad_job_id("001-a.", true));
+        assert!(!bad_job_id("001-a.b", true));
+    }
 
     #[test]
     fn etags_and_hashes() {

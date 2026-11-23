@@ -1,4 +1,5 @@
 pub mod audit;
+pub mod catch_up;
 pub mod checks;
 pub mod claims;
 pub mod daemon;

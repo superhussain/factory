@@ -350,6 +350,28 @@ class TrialSettleTest(TrialWorkerCase):
         self.assertEqual(record["status"], "revert-failed")
         self.assertIsNotNone(factory.stamp_of(record["settled"]))
 
+    def test_lasting_refusal_after_28_days_is_revert_failed(self):
+        for status in (400, 403, 404, 413):
+            with self.subTest(status=status):
+                routes = {REVERT_ROUTE: (status, b"refused")}
+                old = trial(opened=stamp(days=-28))
+                code, out, _, _, written = self.settle(running([old], arm_jobs(b={"rounds": 3})), routes)
+                self.assertEqual((code, out), (0, f"trial {TRIAL} revert failed after 28 days: kept the edit: "
+                                                  f"{status} refused\n"))
+                self.assertEqual(written[0]["trials"][0]["status"], "revert-failed")
+
+    def test_transient_refusal_after_28_days_stays_open(self):
+        for status, text in ((409, "autonomy is paused; no retro edit"), (412, "precondition failed"),
+                             (429, "retro edit cap: 2 per scope per day")):
+            with self.subTest(status=status):
+                routes = {REVERT_ROUTE: (status, text.encode())}
+                old = trial(opened=stamp(days=-31))
+                code, out, _, _, written = self.settle(running([old], arm_jobs(b={"rounds": 3})), routes)
+                self.assertEqual((code, out), (0, f"trial {TRIAL} revert failed: {status} {text}\n"))
+                record = written[0]["trials"][0]
+                self.assertEqual(record["status"], "open")
+                self.assertNotIn("settled", record)
+
     def test_paused_autonomy_settles_nothing(self):
         code, out, err, requests, _ = self.settle(running([trial()], arm_jobs(b={"rounds": 3}), paused=True))
         self.assertEqual((code, out), (3, ""))

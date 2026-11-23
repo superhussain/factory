@@ -64,7 +64,7 @@ pub fn where_cmd(call: &Call) -> Res<()> {
     } else {
         None
     };
-    let paths = read_paths(&home);
+    let paths = read_paths(&home)?;
     let listed = loads(&api(&home, "GET", "/projects.json", None, &[200], &[])?.text()?)
         .map_err(json_error)?;
     let mut projects: Vec<(String, Value)> = Vec::new();

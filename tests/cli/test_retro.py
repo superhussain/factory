@@ -1434,7 +1434,8 @@ class RetroRoleCardTest(unittest.TestCase):
 
     def test_role_reads_lessons(self):
         role = (ROOT / "skills/factory/agents/factory-retro.md").read_text(encoding="utf-8")
-        for text in ("`lessons`", "Most rows teach nothing.", "Notes: lesson from <job>"):
+        for text in ("`lessons`", "Most rows teach nothing.", "Notes: lesson from <job>", "`lesson_cards`",
+                     "A run holds at most 1 lesson"):
             self.assertIn(text, role)
 
     def test_role_reads_reviewers(self):
@@ -1787,6 +1788,106 @@ class RetroDocEditTest(RetroWorkerCase):
         self.assertIn("autonomy is paused; no pipeline edit", out)
         self.assertEqual([f"{m} {p}" for m, p, _, _ in requests], ["GET /api/board"])
         self.assertIn("| edits[0] |  | not sent: autonomy is paused |  |", text)
+
+
+LESSON_FACT = "Worker route changes run pnpm test:protocol; pnpm test skips them."
+LESSON_WHY = "factory/notes.md has no bullet yet, and only a person adds its first one."
+LESSON_ITEM = f"factory: Lesson: {LESSON_FACT}"
+
+
+def lesson_card(**over):
+    c = {"job": "1712-export-csv", "fact": LESSON_FACT, "why": LESSON_WHY}
+    c.update(over)
+    return c
+
+
+class RetroLessonCardTest(RetroWorkerCase):
+    def setUp(self):
+        super().setUp()
+        patcher = patch.object(factory, "retro_upload")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.folder = self.home / "retro" / RUN
+        self.folder.mkdir(parents=True)
+        self.write_agg("")
+
+    def write_agg(self, notes):
+        agg = {"schema": "factory.retro-aggregate/1", "run": RUN, "from": "2026-11-05", "to": "2026-11-11",
+               "host": "host-a", "projects": ["factory", "sample-tools"],
+               "hosts": {"host-a": {"sessions": 40, "jobs": 12, "ad_hoc": 3}},
+               "lessons": [{"job": "1712-export-csv", "project": "factory", "kind": "pr-closed",
+                            "title": "Export CSV", "reason": "pnpm test missed the Worker route.",
+                            "at": "2026-11-10T10:00:00Z", "sessions": []}],
+               "documents": {DOC_FILE: {"version": 4, "text": notes}}}
+        (self.folder / "aggregate.json").write_text(json.dumps(agg), encoding="utf-8")
+
+    def admit(self, cards, paused=False):
+        (self.folder / "reply.json").write_text(json.dumps(reply(lesson_cards=cards)), encoding="utf-8")
+        board = {"updated": "2026-11-12T09:00:00Z", "jobs": [],
+                 "autonomy": {"paused": paused, "projects": ["factory"], "self": []}}
+        routes = {"GET /api/board": (200, board), "GET /projects.json": (200, [{"slug": "factory"}]),
+                  "GET /api/backlog": (404, b""), "PUT /api/backlog": (200, b"ok")}
+        with http_fixture(routes) as server:
+            self.config(server.origin)
+            code, out, err = invoke(factory, ["retro", "admit", RUN])
+        return code, out, err, server
+
+    def test_lesson_card_is_queued_as_a_held_line(self):
+        code, out, err, server = self.admit([lesson_card()])
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = factory.backlog_key(f"- [ ] {LESSON_ITEM}")
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"wrote {self.folder / 'findings.md'}\n"
+                              f"added {LESSON_ITEM} with context\n"
+                              f"link: {server.origin}/#/backlog/{key}\n"
+                              f"held {LESSON_ITEM} for review: lesson cards always wait for a person\n"
+                              "no suggestions\n")
+        self.assertEqual([f"{m} {p}" for m, p, _, _ in server.requests],
+                         ["GET /api/board", "GET /projects.json", "GET /api/backlog", "PUT /api/backlog"])
+        self.assertEqual(server.requests[3][3].decode("utf-8"), factory.BACKLOG_TEMPLATE + (
+            f"- [ ] {LESSON_ITEM}\n  Recommend: approve\n\n"
+            f"  Approve adds this bullet to factory/notes.md. No job starts.\n  Why it waits: {LESSON_WHY}\n\n"
+            f"  Lesson: from 1712-export-csv, queued {today}\n"))
+
+    def test_bad_lesson_cards_are_rejected(self):
+        cases = [
+            (lesson_card(job="1999-unlisted"), "lesson_cards[0].job: must be a job in aggregate.json lessons"),
+            (dict(lesson_card(), extra=1), "lesson_cards[0]: needs keys ['fact', 'job', 'why']"),
+            (lesson_card(fact="x" * 201), "lesson_cards[0].fact: must be a string of 1-200 characters"),
+            (lesson_card(why=""), "lesson_cards[0].why: must be a string of 1-300 characters"),
+        ]
+        for bad, line in cases:
+            with self.subTest(line=line):
+                code, out, err, server = self.admit([bad])
+                self.assertEqual((code, err), (0, ""))
+                self.assertEqual(out, f"wrote {self.folder / 'findings.md'}\nrejected {line}\nno suggestions\n")
+                self.assertEqual(server.requests, [])
+                self.assertNotIn("lesson_cards", (self.folder / "findings.md").read_text(encoding="utf-8"))
+
+    def test_two_lesson_cards_fail_the_reply(self):
+        code, out, err, server = self.admit([lesson_card(), lesson_card()])
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(err, f"factory.py: {self.folder / 'reply.json'}: lesson_cards: must be a list of 0-1 items; "
+                              "nothing written\n")
+        self.assertEqual(server.requests, [])
+        self.assertFalse((self.folder / "findings.md").exists())
+
+    def test_paused_autonomy_skips_the_card(self):
+        code, out, err, server = self.admit([lesson_card()], paused=True)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"wrote {self.folder / 'findings.md'}\n"
+                              "skipped lesson_cards[0]: autonomy is paused\nno suggestions\n")
+        self.assertEqual([f"{m} {p}" for m, p, _, _ in server.requests], ["GET /api/board"])
+
+    def test_fact_in_notes_is_skipped(self):
+        for notes in (f"- Run pnpm test.\n- {LESSON_FACT}\n", f"- {LESSON_FACT} (1712-export-csv, 2026-11-20)\n"):
+            with self.subTest(notes=notes):
+                self.write_agg(notes)
+                code, out, err, server = self.admit([lesson_card()])
+                self.assertEqual((code, err), (0, ""))
+                self.assertEqual(out, f"wrote {self.folder / 'findings.md'}\n"
+                                      f"skipped lesson_cards[0]: already in {DOC_FILE}\nno suggestions\n")
+                self.assertEqual(server.requests, [])
 
 
 class RetroPatternTimingTest(unittest.TestCase):
