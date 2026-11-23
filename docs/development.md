@@ -142,7 +142,7 @@ The parity harness proves a `factory` binary against the Python CLI, one argv at
 
 ```sh
 python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]...
-python3 tests/parity/run.py --bin rust/target/release/factory --ids rust/parity
+python3 tests/parity/run.py --bin rust/target/host/factory --ids rust/parity
 ```
 
 - `tests/parity/cases/<subsystem>.json` holds the hand-written cases as `{"version": 1, "cases": [...]}`. A case id is `<subsystem>/<name>` and lives in its subsystem's file; a misplaced or duplicate id exits 2. The runner adds an `arity/<command>/<n>` case for each argument count just outside a command's range in `tests/fixtures/cli-v1.json`.

@@ -4,8 +4,8 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use crate::commands::{
-    audit, catch_up, checks, claims, daemon, intake, lookup, ops, pickup, pipeline, prompt, retro,
-    setup, sync, tracer, wait, worktree,
+    audit, catch_up, checks, claims, daemon, install, intake, lookup, ops, pickup, pipeline,
+    prompt, retro, setup, sync, tracer, wait, worktree,
 };
 use crate::shared::consts::{MAX_RIDERS, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
@@ -97,7 +97,10 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
 ];
 
 /// Commands only the binary has. `factory.py` and `USAGE` do not list them.
-const EXTRA: &[(&str, Handler, usize, usize)] = &[("daemon", daemon::daemon, 0, 0)];
+const EXTRA: &[(&str, Handler, usize, usize)] = &[
+    ("daemon", daemon::daemon, 0, 2),
+    ("install", install::install, 4, 5),
+];
 
 pub const USAGE: &str = include_str!("usage.txt");
 
@@ -280,7 +283,8 @@ mod tests {
     #[test]
     fn daemon_is_binary_only() {
         assert!(handler_for("daemon", 0).is_some());
-        assert!(handler_for("daemon", 1).is_none());
+        assert!(handler_for("daemon", 2).is_some());
+        assert!(handler_for("daemon", 3).is_none());
         assert!(!USAGE.contains("daemon"));
     }
 

@@ -213,8 +213,16 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
   }
   assert.deepEqual(runs(build), [
     "rustup toolchain install",
-    "cargo build --release --locked",
-    "python3 tests/parity/startup.py --bin rust/target/release/factory",
+    "cargo build --profile host --locked",
+    "python3 tests/parity/startup.py --bin rust/target/host/factory",
+    [
+      'cargo_home="${CARGO_HOME:-$HOME/.cargo}"',
+      'rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"',
+      'root="$(mktemp -d)"',
+      'HOME="$root/home" CARGO_HOME="$cargo_home" RUSTUP_HOME="$rustup_home" sh ../tools/install.sh "$root/skills"',
+      'test -x "$root/skills/factory/runtime/factory"',
+      'grep -q \'"entry": \\["runtime/factory"\\]\' "$root/skills/factory/bundle.json"',
+    ].join("\n"),
   ]);
   assert.deepEqual(runs(unit), ["rustup toolchain install", "cargo test --locked"]);
   assert.deepEqual(runs(check), [
@@ -228,6 +236,6 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
   assert.equal(parity.strategy["fail-fast"], false);
   assert.match(
     runs(parity)[0],
-    /python3 tests\/parity\/run\.py --bin rust\/target\/release\/factory --ids rust\/parity --shard \$\{\{ matrix\.shard \}\}\/6$/,
+    /python3 tests\/parity\/run\.py --bin rust\/target\/host\/factory --ids rust\/parity --shard \$\{\{ matrix\.shard \}\}\/6$/,
   );
 });

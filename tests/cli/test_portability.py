@@ -1,5 +1,4 @@
 import ast
-import importlib.util
 import json
 import os
 import re
@@ -29,6 +28,31 @@ def owned_files():
         ".github/actions/ci-setup/action.yml")]
 
 
+# shlex substitutes launcher argv; zoneinfo resolves usage-limit reset times but is
+# imported under try/except ImportError in factory.py, because Python 3.8 lacks it.
+ALLOWED = set("argparse ast concurrent contextlib datetime errno fnmatch hashlib http importlib io json os pathlib platform plistlib random re secrets shlex shutil signal socket ssl stat statistics subprocess sys tarfile tempfile threading time types unicodedata unittest urllib uuid xml zoneinfo".split()) | {
+    "support", "test_factory", "test_suggest", "test_backlog_triage", "test_pr_state", "test_pickup", "test_autonomy_report", "run", "stub"}
+# Stdlib modules that exist on one platform only. They may be imported inside a function or an
+# if branch that runs on that platform, never at module top level, where every host would import them.
+PLATFORM_ONLY = {"fcntl", "msvcrt"}
+
+
+def rejected_imports(tree):
+    """The module names of each import in tree that is outside ALLOWED, or platform-only at top level."""
+    top = {id(node) for node in tree.body}
+    rejected = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [item.name.split(".")[0] for item in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [node.module.split(".")[0]]
+        else:
+            continue
+        if not set(names) <= ALLOWED | (set() if id(node) in top else PLATFORM_ONLY):
+            rejected.append(names)
+    return rejected
+
+
 class PortabilityTest(IsolatedTestCase):
     def test_supplied_forbidden_literals_cover_all_tracked_files(self):
         literals = json.loads(os.environ.get("FACTORY_FORBID_LITERALS_JSON", "[]"))
@@ -53,28 +77,25 @@ class PortabilityTest(IsolatedTestCase):
                 path.read_bytes().decode("utf-8")
 
     def test_python_38_syntax_and_stdlib_only_imports(self):
-        # shlex substitutes launcher argv; zoneinfo resolves usage-limit reset times but is
-        # imported under try/except ImportError in factory.py, because Python 3.8 lacks it.
-        allowed = set("argparse ast concurrent contextlib datetime errno fnmatch hashlib http importlib io json os pathlib platform plistlib random re secrets shlex shutil signal socket ssl stat statistics subprocess sys tarfile tempfile threading time types unicodedata unittest urllib uuid xml zoneinfo".split())
         for path in owned_files():
             if path.suffix != ".py":
                 continue
             tree = ast.parse(path.read_text(), filename=str(path), feature_version=8)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    names = [item.name.split(".")[0] for item in node.names]
-                elif isinstance(node, ast.ImportFrom):
-                    names = [node.module.split(".")[0]]
-                else:
-                    continue
-                self.assertTrue(set(names) <= allowed | {"support", "test_factory", "test_suggest", "test_backlog_triage", "test_pr_state", "test_pickup", "test_autonomy_report", "run", "stub"}, (path.name, names))
+            self.assertEqual(rejected_imports(tree), [], path.name)
+
+    def test_platform_only_modules_must_not_be_imported_at_top_level(self):
+        self.assertEqual(rejected_imports(ast.parse("import fcntl\n")), [["fcntl"]])
+        self.assertEqual(rejected_imports(ast.parse("from msvcrt import locking\n")), [["msvcrt"]])
+        self.assertEqual(rejected_imports(ast.parse("def hold():\n    import fcntl\n")), [])
+        self.assertEqual(rejected_imports(ast.parse("import os\nif os.name == 'nt':\n    import msvcrt\n")), [])
+        self.assertEqual(rejected_imports(ast.parse("def f():\n    import requests\n")), [["requests"]])
 
     def test_exact_bundle_and_relative_installed_references(self):
-        spec = importlib.util.spec_from_file_location("installer", ROOT / "tools/install.py")
-        installer = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(installer)
-        files, _ = installer.tree(SKILL, source=True)
-        self.assertEqual(set(files), set(installer.REQUIRED))
+        # factory install checks the exact file list; these are the files it ships.
+        files = {path.relative_to(SKILL).as_posix(): path.read_bytes() for path in SKILL.rglob("*")
+                 if path.is_file() and not any(part.startswith(".") or part == "__pycache__"
+                                               for part in path.relative_to(SKILL).parts)
+                 and path.suffix not in (".pyc", ".pyo")}
         self.assertIn("runtime/pr_screenshots.py", files)
         self.assertEqual(len(files), 44)
         for name, data in files.items():
