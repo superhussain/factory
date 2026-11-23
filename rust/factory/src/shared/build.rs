@@ -295,6 +295,7 @@ fn make_dirs(path: &Path) -> io::Result<()> {
 pub fn private_dir(path: &Path) -> Result<PathBuf, String> {
     make_dirs(path).map_err(|e| os_error(&e, Some(path)))?;
     let info = fs::symlink_metadata(path).map_err(|e| os_error(&e, Some(path)))?;
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut private = info.is_dir() && !is_link(path).unwrap_or(true);
     #[cfg(unix)]
     {

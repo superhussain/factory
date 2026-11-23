@@ -437,6 +437,7 @@ fn attempt_install(
     }
     hook("stage")?;
     let stage = destination.join(format!(".factory-stage-{}", random_hex(4)));
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
