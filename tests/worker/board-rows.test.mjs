@@ -209,6 +209,12 @@ for (const [name, board, write] of [
       }),
   ],
   [
+    "a row added before the end",
+    undefined,
+    (s) => s.put({ updated: UPDATED, jobs: [BUILD, IDEA, SPEC] }),
+  ],
+  ["rows reordered", undefined, (s) => s.put({ updated: UPDATED, jobs: [SPEC, BUILD] })],
+  [
     "over 100 changed rows",
     { updated: UPDATED, jobs: many },
     (s) => s.put({ updated: UPDATED, jobs: many.map((j) => ({ ...j, stage: "pr-open" })) }),

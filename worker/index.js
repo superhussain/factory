@@ -529,7 +529,8 @@ const MAX_FRAME_BYTES = 262144;
 
 // The rows frame for a committed board write from stored to data at etag, or "" when
 // open tabs must read instead: no prior version, a top-level change other than jobs and
-// updated, ids that cannot be diffed, a finished row, or a frame too large.
+// updated, ids that cannot be diffed, a finished row, rows moved or added anywhere but
+// the end (a frame carries no order), or a frame too large.
 function rowsFrame(stored, data, etag) {
   if (!stored.etag || !stored.doc) return "";
   for (const k of new Set([...Object.keys(stored.doc), ...Object.keys(data)]))
@@ -550,6 +551,9 @@ function rowsFrame(stored, data, etag) {
   const before = ids(stored.jobs),
     after = ids(data.jobs);
   if (!before || !after) return "";
+  const kept = [...before.keys()].filter((id) => after.has(id));
+  const order = [...after.keys()];
+  if (kept.some((id, i) => order[i] !== id)) return "";
   const rows = [],
     removed = [];
   for (const [id, row] of after) {
