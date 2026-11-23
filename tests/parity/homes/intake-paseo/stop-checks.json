@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "jobs": {
+    "002-test": {
+      "key": "bfac10ce4dc0",
+      "at": "2026-01-01T00:00:00Z",
+      "verdict": "resume",
+      "why": "stopped at build with no live session"
+    }
+  }
+}
