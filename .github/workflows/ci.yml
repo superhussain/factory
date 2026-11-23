@@ -156,6 +156,9 @@ jobs:
       - name: Parity
         working-directory: .
         run: python3 tests/parity/run.py --bin rust/target/release/factory --ids rust/parity.txt
+      - name: Startup
+        working-directory: .
+        run: python3 tests/parity/startup.py --bin rust/target/release/factory
   ci:
     if: ${{ !cancelled() }}
     needs: [targets, python, browser, paseo-plugin, rust]
