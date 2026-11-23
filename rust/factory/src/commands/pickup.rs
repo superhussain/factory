@@ -8110,7 +8110,8 @@ exit "$code"
             .borrow_mut()
             .calls
             .push((method.to_string(), path.to_string()));
-        if let Some(extra) = state.borrow().extra.clone() {
+        let extra = state.borrow().extra.clone();
+        if let Some(extra) = extra {
             if let Some(reply) = extra(method, path, body) {
                 return reply;
             }
@@ -8210,7 +8211,7 @@ exit "$code"
                     "CLAUDE_CONFIG_DIR",
                     Some(root.join("claude").into_os_string()),
                 ),
-                ("PASEO_HOME", Some(root.join("paseo").into_os_string())),
+                ("PASEO_HOME", None),
                 ("PASEO_AGENT_ID", None),
                 ("FACTORY_SESSION", None),
                 ("PATH", std::env::var_os("PATH")),
@@ -9382,6 +9383,649 @@ exit "$archive_code"
             assert!(err.contains("pickup launches nothing; factory stopped by an unknown source at an unknown time"));
             assert!(tk.puts().is_empty());
             assert!(tk.launched().is_empty());
+        }
+    }
+
+    const MOVE_AT: &str = "2026-11-08T10:00:00Z";
+    const AGENT: &str = "4cec0a47-1d21-4115-945b-9e7dfb668ef4";
+    const AGENT2: &str = "9b2d71e0-5a3c-4e8f-b1d2-7c6e5f4a3b21";
+    const OTHER: &str = "9f1c2d3e-0000-4000-8000-000000000001";
+    const LEFT_OUT: &str = " (left out --home because PASEO_HOME has unprintable characters)";
+
+    /// Python's MoveFixture. Stopping a worktree's processes waits on the worktree slice, so the
+    /// worktree folder exists only inside `gate`, which checks that exit; every other run follows
+    /// Python with no worktree, where stop_pids is never called.
+    pub(super) struct Mv {
+        pub tk: Tk,
+        pub wt: PathBuf,
+    }
+
+    impl std::ops::Deref for Mv {
+        type Target = Tk;
+        fn deref(&self) -> &Tk {
+            &self.tk
+        }
+    }
+
+    impl Mv {
+        pub fn new() -> Mv {
+            let tk = Tk::new();
+            tk.set_adapter(Vec::new(), 0, 0);
+            let wt = tk.home.join("worktrees/alpha/042-sample-export");
+            Mv { tk, wt }
+        }
+
+        pub fn moved(&self, extra: Value) -> Value {
+            let m = with(json!({"from": DEVICE, "session": "a1b2c3", "to": "studio-mac", "at": MOVE_AT}), extra);
+            let job = json!({"id": "042-sample-export", "stage": "build", "project": "alpha", "updated": stamp(0), "move": m});
+            self.jobs(json!([job.clone()]));
+            job
+        }
+
+        /// With the worktree there, pickup stops at the deferred worktree stop and writes nothing.
+        pub fn gate(&self) {
+            fs::create_dir_all(&self.wt).unwrap();
+            let before = self.state.borrow().board.clone();
+            let (code, _, err) = self.pickup(&[]);
+            assert_eq!((code, err.as_str()), (2, "factory.py: pickup worktree stop is not ported to the Rust binary yet\n"));
+            assert_eq!(self.state.borrow().board, before);
+            fs::remove_dir_all(&self.wt).unwrap();
+            let _ = fs::remove_file(self.root.join("adapter-calls"));
+            self.clear_calls();
+        }
+
+        pub fn mv(&self) -> Value {
+            self.job("042-sample-export")["move"].clone()
+        }
+
+        pub fn claim_marker(&self, job: &str, agent: &str) {
+            let dir = self.home.join("paseo-claims").join(job);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join(agent), "{}").unwrap();
+        }
+
+        pub fn archive_server(&self) {
+            self.set_fakes(|f| f.paseo_server = Some(Rc::new(|| Some("srv-lab".into()))));
+            self.claim_marker("042-sample-export", AGENT);
+        }
+
+        pub fn archives(&self) -> Vec<Vec<String>> {
+            self.recorded().into_iter().filter(|c| c[0] == "archive").collect()
+        }
+
+        pub fn hint(&self, agent: &str) -> String {
+            format!("factory.py: pickup kept session {agent} of 042-sample-export: no claim recorded on this host, archive it by hand if it still runs: paseo archive --force {agent}\n")
+        }
+
+        pub fn skipped(&self, shown: &str, agent: Option<&str>) -> String {
+            format!("factory.py: pickup skipped archive of session {shown} of 042-sample-export: not an id the stall adapter accepts, archive it by hand if it still runs{}\n", agent.map_or(String::new(), |a| format!(": paseo archive --force {a}")))
+        }
+    }
+
+    fn is_stamp(v: &Value) -> bool {
+        v.as_str().is_some_and(|s| matches(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", s))
+    }
+
+    mod move_host_test {
+        use super::*;
+
+        #[test]
+        fn test_old_host_stops_the_worktree_and_records_it() {
+            let mv = Mv::new();
+            mv.moved(json!({}));
+            mv.gate();
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out, "stopped 042-sample-export alpha: moved to studio-mac\n");
+            let m = mv.mv();
+            assert!(is_stamp(&m["stopped"]));
+            assert_eq!(m["at"], MOVE_AT);
+            mv.clear_calls();
+            assert_eq!(mv.pickup(&[]), out_err(0, "", ""));
+            assert!(mv.puts().is_empty());
+        }
+
+        fn assert_stop_left_queued(mv: &Mv, project: &str, reason: &str) {
+            assert_eq!(mv.pickup(&[]), out_err(0, "", &format!("factory.py: pickup skips the stop of 042-sample-export {project}: {reason}\n")));
+            assert!(mv.puts().is_empty());
+            assert!(mv.mv().get("stopped").is_none());
+            assert_eq!(mv.pickup(&["--dry-run"]), out_err(0, &format!("skip stop 042-sample-export {project}: {reason}\nhost {DEVICE}: would launch 0\n"), ""));
+        }
+
+        #[test]
+        fn test_unlisted_host_leaves_the_stop_queued() {
+            let mv = Mv::new();
+            mv.view("alpha", 200, effective("alpha", Some(json!({"pickup": {"enabled": true, "hosts": ["other-host"]}})), None));
+            mv.moved(json!({}));
+            fs::create_dir_all(&mv.wt).unwrap();
+            assert_stop_left_queued(&mv, "alpha", &format!("pickup does not list host {DEVICE}"));
+        }
+
+        #[test]
+        fn test_pickup_off_leaves_the_stop_queued() {
+            let mv = Mv::new();
+            mv.view("alpha", 200, effective("alpha", Some(json!({"pickup": {"enabled": false, "hosts": [DEVICE]}})), None));
+            mv.moved(json!({}));
+            fs::create_dir_all(&mv.wt).unwrap();
+            assert_stop_left_queued(&mv, "alpha", "pickup off");
+        }
+
+        #[test]
+        fn test_no_checkout_leaves_the_stop_queued() {
+            let mv = Mv::new();
+            let mut job = mv.moved(json!({}));
+            job["project"] = "zulu".into();
+            mv.jobs(json!([job]));
+            assert_stop_left_queued(&mv, "zulu", "no checkout on this host");
+        }
+
+        #[test]
+        fn test_unsafe_checkout_leaves_the_stop_queued() {
+            let mv = Mv::new();
+            let line = format!("unsafe checkout: {} main has root a1b2c3d4e5f6, which origin/main lacks", mv.repo_a.display());
+            let shown = line.clone();
+            mv.set_fakes(|f| f.checkout_problem = Some(Rc::new(move |_, _, _| Ok(Some(shown.clone())))));
+            mv.moved(json!({}));
+            assert_eq!(mv.pickup(&[]), out_err(0, "", &format!("factory.py: pickup skips alpha: {line}\nfactory.py: pickup skips the stop of 042-sample-export alpha: {line}\n")));
+            assert!(mv.puts().is_empty());
+            assert!(mv.mv().get("stopped").is_none());
+            assert_eq!(mv.pickup(&["--dry-run"]), out_err(0, &format!("skip stop 042-sample-export alpha: {line}\nhost {DEVICE}: would launch 0\n"), ""));
+        }
+
+        #[test]
+        fn test_earlier_host_stops_after_a_second_move() {
+            let mv = Mv::new();
+            mv.moved(json!({"from": "studio-mac", "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": MOVE_AT}]}));
+            mv.gate();
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out, "stopped 042-sample-export alpha: moved to cloud-box\n");
+            let m = mv.mv();
+            assert!(m.get("stopped").is_none());
+            let entry = &m["earlier"][0];
+            assert!(entry.get("stopped").is_some());
+            assert_eq!((&entry["from"], &entry["session"], &entry["at"]), (&json!(DEVICE), &json!("a1b2c3"), &json!(MOVE_AT)));
+            mv.clear_calls();
+            assert_eq!(mv.pickup(&[]), out_err(0, "", ""));
+            assert!(mv.puts().is_empty());
+        }
+
+        #[test]
+        fn test_one_stop_for_two_entries_on_one_host() {
+            let mv = Mv::new();
+            mv.moved(json!({"from": DEVICE, "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": MOVE_AT}, {"from": "lab-linux", "session": "x", "at": MOVE_AT}]}));
+            mv.gate();
+            assert_eq!(mv.pickup(&[]).1, "stopped 042-sample-export alpha: moved to cloud-box\n");
+            let m = mv.mv();
+            assert!(m.get("stopped").is_some());
+            assert!(m["earlier"][0].get("stopped").is_some());
+            assert!(m["earlier"][1].get("stopped").is_none());
+        }
+
+        #[test]
+        fn test_no_worktree_still_records_the_stop() {
+            let mv = Mv::new();
+            mv.moved(json!({}));
+            assert_eq!(mv.pickup(&[]), out_err(0, "stopped 042-sample-export alpha: moved to studio-mac\n", ""));
+            assert!(mv.mv().get("stopped").is_some());
+        }
+
+        #[test]
+        fn test_survivors_leave_stopped_unset_for_a_retry() {
+            let mv = Mv::new();
+            mv.moved(json!({}));
+            mv.gate();
+            assert!(mv.mv().get("stopped").is_none());
+        }
+
+        #[test]
+        fn test_unchecked_processes_leave_stopped_unset() {
+            let mv = Mv::new();
+            mv.moved(json!({}));
+            mv.gate();
+            assert!(mv.puts().is_empty());
+        }
+
+        #[test]
+        fn test_dry_run_prints_would_stop() {
+            let mv = Mv::new();
+            mv.moved(json!({}));
+            fs::create_dir_all(&mv.wt).unwrap();
+            let (code, out, err) = mv.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out, format!("would stop 042-sample-export alpha: moved to studio-mac\nhost {DEVICE}: would launch 0\n"));
+            assert!(mv.puts().is_empty());
+        }
+
+        #[test]
+        fn test_a_newer_move_is_not_marked_stopped() {
+            let mv = Mv::new();
+            mv.moved(json!({}));
+            mv.gate();
+            let state = mv.state.clone();
+            // The pass reads the board, then its stop write reads it again: the move changes between.
+            let reads = Rc::new(RefCell::new(0));
+            mv.state.borrow_mut().extra = Some(Rc::new(move |method, path, _| {
+                if (method, path) == ("GET", "/api/board") {
+                    *reads.borrow_mut() += 1;
+                }
+                if *reads.borrow() == 2 {
+                    state.borrow_mut().board["jobs"][0]["move"]["at"] = "2026-11-08T11:00:00Z".into();
+                }
+                None
+            }));
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
+            assert!(mv.puts().is_empty());
+            assert!(mv.mv().get("stopped").is_none());
+        }
+
+        #[test]
+        fn test_target_claims_once_and_recovers() {
+            let mv = Mv::new();
+            mv.state.borrow_mut().hosts = Some(json!([host(DEVICE, json!(2))]));
+            mv.moved(json!({"from": "lab-linux", "to": DEVICE}));
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let job = mv.job("042-sample-export");
+            let tag = job["claim"]["session"].as_str().unwrap().to_string();
+            assert_eq!(out, format!("launched 042-sample-export alpha on primary session {tag}\n"));
+            assert_eq!(job["claim"]["device"], DEVICE);
+            assert_eq!(job["move"]["claimed"], job["claim"]["since"]);
+            assert_eq!((&job["move"]["from"], &job["move"]["at"]), (&json!("lab-linux"), &json!(MOVE_AT)));
+            let records = mv.launched();
+            assert_eq!(records[0].env("FACTORY_PROMPT"), format!("/factory recover 042-sample-export --session {tag}\n\n{UNATTENDED}"));
+            mv.state.borrow_mut().board["jobs"][0].as_object_mut().unwrap().shift_remove("claim");
+            mv.clear_calls();
+            assert_eq!(mv.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(mv.launched().len(), 1);
+        }
+
+        #[test]
+        fn test_other_hosts_and_done_stages_skip_the_move() {
+            let mv = Mv::new();
+            fs::create_dir_all(&mv.wt).unwrap();
+            for (m, stage) in [(json!({"from": "lab-linux", "to": "studio-mac"}), "build"), (json!({"from": "lab-linux", "to": DEVICE}), "pr-open"), (json!({"from": "lab-linux", "to": DEVICE, "claimed": MOVE_AT}), "build")] {
+                let mut job = mv.moved(m);
+                job["stage"] = stage.into();
+                mv.jobs(json!([job]));
+                mv.clear_calls();
+                mv.assert_silent(mv.pickup(&[]));
+            }
+        }
+    }
+
+    mod move_entry_shape_test {
+        use super::*;
+
+        #[test]
+        fn test_null_stopped_still_runs_the_stop() {
+            let mv = Mv::new();
+            mv.moved(json!({"stopped": null}));
+            let mut job = mv.job("042-sample-export");
+            job["move"]["stopped"] = Value::Null;
+            mv.jobs(json!([job]));
+            mv.gate();
+            assert_eq!(mv.pickup(&[]), out_err(0, "stopped 042-sample-export alpha: moved to studio-mac\n", ""));
+            assert!(is_stamp(&mv.mv()["stopped"]));
+        }
+
+        #[test]
+        fn test_non_string_at_and_agent_stop_once() {
+            let mv = Mv::new();
+            mv.moved(json!({"from": DEVICE, "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": ["T1"], "agent": {"id": "x"}}]}));
+            let mut job = mv.job("042-sample-export");
+            job["move"]["stopped"] = Value::Null;
+            mv.jobs(json!([job]));
+            mv.gate();
+            assert_eq!(mv.pickup(&[]), out_err(0, "stopped 042-sample-export alpha: moved to cloud-box\n", ""));
+            let m = mv.mv();
+            assert!(m["stopped"].is_string());
+            assert!(m["earlier"][0]["stopped"].is_string());
+            assert!(m["earlier"][0].get("archived").is_none());
+            mv.clear_calls();
+            assert_eq!(mv.pickup(&[]), out_err(0, "", ""));
+            assert!(mv.puts().is_empty());
+        }
+
+        #[test]
+        fn test_list_at_on_the_top_level_entry_stops_once() {
+            let mv = Mv::new();
+            mv.moved(json!({"at": ["T1"]}));
+            let mut job = mv.job("042-sample-export");
+            job["move"]["stopped"] = Value::Null;
+            mv.jobs(json!([job]));
+            mv.gate();
+            assert_eq!(mv.pickup(&[]), out_err(0, "stopped 042-sample-export alpha: moved to studio-mac\n", ""));
+            let m = mv.mv();
+            assert!(m["stopped"].is_string());
+            assert_eq!(m["at"], json!(["T1"]));
+            mv.clear_calls();
+            assert_eq!(mv.pickup(&[]), out_err(0, "", ""));
+            assert!(mv.puts().is_empty());
+        }
+    }
+
+    mod rerun_test {
+        use super::*;
+
+        fn rerun() -> Mv {
+            let mv = Mv::new();
+            mv.state.borrow_mut().hosts = Some(json!([host(DEVICE, json!(2))]));
+            mv
+        }
+
+        #[test]
+        fn test_one_run_stops_then_recovers() {
+            let mv = rerun();
+            mv.moved(json!({"to": DEVICE}));
+            mv.gate();
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let job = mv.job("042-sample-export");
+            let tag = job["claim"]["session"].as_str().unwrap().to_string();
+            assert_eq!(out, format!("stopped 042-sample-export alpha: rerun on {DEVICE}\nlaunched 042-sample-export alpha on primary session {tag}\n"));
+            assert_eq!(job["claim"]["device"], DEVICE);
+            assert!(job["move"].get("stopped").is_some());
+            assert_eq!(job["move"]["claimed"], job["claim"]["since"]);
+            assert_eq!(mv.launched()[0].env("FACTORY_PROMPT"), format!("/factory recover 042-sample-export --session {tag}\n\n{UNATTENDED}"));
+        }
+
+        #[test]
+        fn test_null_stopped_rerun_stops_before_the_claim() {
+            let mv = rerun();
+            mv.moved(json!({"to": DEVICE}));
+            let mut job = mv.job("042-sample-export");
+            job["move"]["stopped"] = Value::Null;
+            mv.jobs(json!([job]));
+            mv.gate();
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let job = mv.job("042-sample-export");
+            let tag = job["claim"]["session"].as_str().unwrap().to_string();
+            assert_eq!(out, format!("stopped 042-sample-export alpha: rerun on {DEVICE}\nlaunched 042-sample-export alpha on primary session {tag}\n"));
+            assert!(job["move"]["stopped"].is_string());
+        }
+
+        #[test]
+        fn test_survivors_block_the_claim() {
+            let mv = rerun();
+            mv.moved(json!({"to": DEVICE}));
+            mv.gate();
+            assert!(mv.launched().is_empty());
+            assert!(mv.job("042-sample-export").get("claim").is_none());
+        }
+
+        #[test]
+        fn test_dry_run_prints_would_stop() {
+            let mv = rerun();
+            mv.moved(json!({"to": DEVICE}));
+            fs::create_dir_all(&mv.wt).unwrap();
+            let (code, out, err) = mv.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out, format!("would stop 042-sample-export alpha: rerun on {DEVICE}\nhost {DEVICE}: would launch 0\n"));
+            assert!(mv.puts().is_empty());
+        }
+    }
+
+    mod move_archive_test {
+        use super::*;
+
+        fn archive() -> Mv {
+            let mv = Mv::new();
+            mv.archive_server();
+            mv
+        }
+
+        #[test]
+        fn test_archives_then_stops_then_records_both() {
+            let mv = archive();
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": AGENT, "server": "srv-lab"}));
+            mv.gate();
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out, format!("archived session {AGENT} and stopped 042-sample-export alpha: moved to studio-mac\n"));
+            assert_eq!(mv.archives(), calls(&[&["archive", AGENT, "--force"]]));
+            let m = mv.mv();
+            assert!(m.get("stopped").is_some() && m.get("archived").is_some());
+            assert_eq!((&m["agent"], &m["server"]), (&json!(AGENT), &json!("srv-lab")));
+            assert!(!mv.home.join("paseo-claims/042-sample-export").exists());
+            mv.clear_calls();
+            assert_eq!(mv.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(mv.archives().len(), 1);
+        }
+
+        #[test]
+        fn test_earlier_entry_archives_then_stamps_itself() {
+            let mv = archive();
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"from": "studio-mac", "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                "earlier": [{"from": DEVICE, "session": "a1b2c3", "agent": AGENT, "server": "srv-lab", "at": MOVE_AT}]}));
+            mv.gate();
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out, format!("archived session {AGENT} and stopped 042-sample-export alpha: moved to cloud-box\n"));
+            assert_eq!(mv.archives(), calls(&[&["archive", AGENT, "--force"]]));
+            let m = mv.mv();
+            assert!(m.get("stopped").is_none());
+            assert!(m["earlier"][0].get("stopped").is_some() && m["earlier"][0].get("archived").is_some());
+        }
+
+        #[test]
+        fn test_no_adapter_call_when_a_guard_fails() {
+            let mv = archive();
+            let cases = [
+                ("no stalls file", json!({"agent": AGENT, "server": "srv-lab"}), "gone"),
+                ("other server", json!({"agent": AGENT, "server": "srv-other"}), ""),
+                ("no agent", json!({"server": "srv-lab"}), ""),
+                ("no server", json!({"agent": AGENT}), ""),
+                ("this process", json!({"agent": AGENT, "server": "srv-lab"}), "self"),
+                ("bad agent", json!({"agent": "-bad", "server": "srv-lab"}), ""),
+                ("not claimed here", json!({"agent": AGENT, "server": "srv-lab"}), "unclaimed"),
+                ("other session", json!({"agent": OTHER, "server": "srv-lab"}), ""),
+                ("non-hex agent", json!({"agent": "ab_cd", "server": "srv-lab"}), ""),
+                ("short agent", json!({"agent": "abc", "server": "srv-lab"}), ""),
+                ("non-hex other server", json!({"agent": "ab_cd", "server": "srv-other"}), ""),
+                ("unsafe agent", json!({"agent": "ab\u{1b}[2Jcd", "server": "srv-lab"}), ""),
+            ];
+            for (name, m, special) in cases {
+                mv.claim_marker("042-sample-export", AGENT);
+                if special == "unclaimed" {
+                    forget_paseo_claim(&mv.home, "042-sample-export", AGENT);
+                }
+                mv.set_stalls(json!({}));
+                mv.set_adapter(Vec::new(), 0, 0);
+                mv.clear_calls();
+                mv.moved(m);
+                if special == "gone" {
+                    fs::remove_file(mv.home.join("stalls.json")).unwrap();
+                }
+                if special == "self" {
+                    std::env::set_var("PASEO_AGENT_ID", AGENT);
+                }
+                let (code, out, err) = mv.pickup(&[]);
+                std::env::remove_var("PASEO_AGENT_ID");
+                let hint = match name {
+                    "not claimed here" => mv.hint(AGENT),
+                    "other session" => mv.hint(OTHER),
+                    "bad agent" => mv.skipped("-bad", None),
+                    "non-hex agent" => mv.skipped("ab_cd", Some("ab_cd")),
+                    "short agent" => mv.skipped("abc", Some("abc")),
+                    "unsafe agent" => mv.skipped("'ab\\x1b[2Jcd'", None),
+                    _ => String::new(),
+                };
+                assert_eq!((code, err), (0, hint), "{name}");
+                assert_eq!(out, "stopped 042-sample-export alpha: moved to studio-mac\n", "{name}");
+                assert!(mv.archives().is_empty(), "{name}");
+                assert!(mv.mv().get("archived").is_none(), "{name}");
+            }
+        }
+
+        #[test]
+        fn test_marker_for_another_job_does_not_archive() {
+            let mv = archive();
+            forget_paseo_claim(&mv.home, "042-sample-export", AGENT);
+            mv.claim_marker("041-other-job", AGENT);
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": AGENT, "server": "srv-lab"}));
+            mv.gate();
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, err), (0, mv.hint(AGENT)));
+            assert_eq!(out, "stopped 042-sample-export alpha: moved to studio-mac\n");
+            assert!(mv.archives().is_empty());
+            assert!(mv.mv().get("archived").is_none());
+        }
+
+        #[test]
+        fn test_unclaimed_session_hints_once() {
+            let mv = archive();
+            forget_paseo_claim(&mv.home, "042-sample-export", AGENT);
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": OTHER, "server": "srv-lab"}));
+            assert_eq!(mv.pickup(&[]), out_err(0, "stopped 042-sample-export alpha: moved to studio-mac\n", &mv.hint(OTHER)));
+            assert!(mv.archives().is_empty());
+            assert_eq!(mv.pickup(&[]), out_err(0, "", ""));
+        }
+
+        #[test]
+        fn test_agent_guard_matches_the_adapter_id_rule() {
+            let source = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../skills/factory/runtime/paseo_stalls.py")).unwrap();
+            let line = source.lines().find(|l| l.starts_with("ID_RE = ")).unwrap();
+            assert!(line.contains(r#""[0-9a-fA-F][0-9a-fA-F-]{7,63}""#), "{line}");
+            assert!(ADAPTER_ID.is_full(AGENT) && !ADAPTER_ID.is_full("ab_cd"));
+        }
+
+        #[test]
+        fn test_hint_names_paseo_home() {
+            let mv = archive();
+            forget_paseo_claim(&mv.home, "042-sample-export", AGENT);
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": OTHER, "server": "srv-lab"}));
+            let home = mv.root.join("paseo home");
+            mv.set_env("PASEO_HOME", &home);
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, out.as_str()), (0, "stopped 042-sample-export alpha: moved to studio-mac\n"));
+            assert_eq!(err, mv.hint(OTHER).replace("paseo archive", &format!("paseo --home '{}' archive", home.display())));
+        }
+
+        #[test]
+        fn test_hint_leaves_out_unprintable_paseo_home() {
+            let mv = archive();
+            forget_paseo_claim(&mv.home, "042-sample-export", AGENT);
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": OTHER, "server": "srv-lab"}));
+            mv.set_env("PASEO_HOME", mv.root.join("paseo\u{1b}home"));
+            assert_eq!(mv.pickup(&[]), out_err(0, "stopped 042-sample-export alpha: moved to studio-mac\n", &mv.hint(OTHER).replace(": paseo archive", &format!("{LEFT_OUT}: paseo archive"))));
+        }
+
+        #[test]
+        fn test_skipped_hint_leaves_out_unprintable_paseo_home() {
+            let mv = archive();
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": "ab_cd", "server": "srv-lab"}));
+            mv.set_env("PASEO_HOME", mv.root.join("paseo\u{1b}home"));
+            assert_eq!(mv.pickup(&[]), out_err(0, "stopped 042-sample-export alpha: moved to studio-mac\n", &mv.skipped("ab_cd", Some("ab_cd")).replace(": paseo archive", &format!("{LEFT_OUT}: paseo archive"))));
+            assert!(mv.archives().is_empty());
+        }
+
+        #[test]
+        fn test_non_hex_agent_stops_once() {
+            let mv = archive();
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": "ab_cd", "server": "srv-lab"}));
+            assert_eq!(mv.pickup(&[]), out_err(0, "stopped 042-sample-export alpha: moved to studio-mac\n", &mv.skipped("ab_cd", Some("ab_cd"))));
+            assert!(mv.archives().is_empty());
+            let m = mv.mv();
+            assert!(m.get("stopped").is_some() && m.get("archived").is_none());
+            assert_eq!(mv.pickup(&[]), out_err(0, "", ""));
+        }
+
+        #[test]
+        fn test_failed_archive_prints_and_retries() {
+            let mv = archive();
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": AGENT, "server": "srv-lab"}));
+            mv.set_adapter(Vec::new(), 0, 1);
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, out.as_str()), (0, ""));
+            assert_eq!(err, format!("factory.py: pickup could not archive session {AGENT} of 042-sample-export: exit 1\n"));
+            assert!(mv.puts().is_empty());
+            assert!(mv.mv().get("stopped").is_none());
+            mv.set_adapter(Vec::new(), 0, 0);
+            assert!(mv.pickup(&[]).1.contains("archived session"));
+            assert!(mv.mv().get("archived").is_some());
+        }
+
+        #[test]
+        fn test_dry_run_prints_would_archive_and_calls_nothing() {
+            let mv = archive();
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": AGENT, "server": "srv-lab"}));
+            let (code, out, err) = mv.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out, format!("would archive session {AGENT} and stop 042-sample-export alpha: moved to studio-mac\nhost {DEVICE}: would take over 0\nhost {DEVICE}: would launch 0\n"));
+            assert!(mv.archives().is_empty() && mv.puts().is_empty());
+        }
+
+        fn two_agents(mv: &Mv) {
+            mv.claim_marker("042-sample-export", AGENT2);
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": AGENT2, "server": "srv-lab", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                "earlier": [{"from": DEVICE, "session": "a1b2c3", "agent": AGENT, "server": "srv-lab", "at": MOVE_AT}]}));
+        }
+
+        #[test]
+        fn test_dry_run_names_every_agent() {
+            let mv = archive();
+            two_agents(&mv);
+            let (code, out, err) = mv.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out, format!("would archive sessions {AGENT}, {AGENT2} and stop 042-sample-export alpha: moved to cloud-box\nhost {DEVICE}: would take over 0\nhost {DEVICE}: would launch 0\n"));
+            assert!(mv.archives().is_empty() && mv.puts().is_empty());
+        }
+
+        #[test]
+        fn test_archives_every_agent_and_names_them() {
+            let mv = archive();
+            two_agents(&mv);
+            mv.gate();
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(out, format!("archived sessions {AGENT}, {AGENT2} and stopped 042-sample-export alpha: moved to cloud-box\n"));
+            assert_eq!(mv.archives(), calls(&[&["archive", AGENT, "--force"], &["archive", AGENT2, "--force"]]));
+            assert!(!mv.home.join("paseo-claims/042-sample-export").exists());
+        }
+
+        #[test]
+        fn test_skipped_stop_keeps_the_marker() {
+            let mv = archive();
+            mv.view("alpha", 200, effective("alpha", Some(json!({"pickup": {"enabled": false, "hosts": [DEVICE]}})), None));
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": AGENT, "server": "srv-lab"}));
+            assert_eq!(mv.pickup(&[]), out_err(0, "", "factory.py: pickup skips the stop of 042-sample-export alpha: pickup off\n"));
+            assert!(mv.archives().is_empty());
+            assert!(mv.home.join("paseo-claims/042-sample-export").join(AGENT).is_file());
+        }
+
+        #[test]
+        fn test_one_marker_archives_only_that_agent() {
+            let mv = archive();
+            mv.set_stalls(json!({}));
+            mv.moved(json!({"agent": AGENT2, "server": "srv-lab", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
+                "earlier": [{"from": DEVICE, "session": "a1b2c3", "agent": AGENT, "server": "srv-lab", "at": MOVE_AT}]}));
+            mv.gate();
+            let (code, out, err) = mv.pickup(&[]);
+            assert_eq!(code, 0);
+            assert_eq!(out, format!("archived session {AGENT} and stopped 042-sample-export alpha: moved to cloud-box\n"));
+            assert_eq!(err, mv.hint(AGENT2));
+            assert_eq!(mv.archives(), calls(&[&["archive", AGENT, "--force"]]));
+            let m = mv.mv();
+            assert!(m["earlier"][0].get("archived").is_some() && m.get("archived").is_none());
+            assert!(!mv.home.join("paseo-claims/042-sample-export").join(AGENT).is_file());
         }
     }
 }
