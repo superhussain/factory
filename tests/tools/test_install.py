@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -376,12 +377,15 @@ class InstallTest(IsolatedTestCase):
         binary = target / "runtime/factory"
         self.assertEqual(binary.read_bytes(), b"stub")
         self.assertEqual(stat.S_IMODE(binary.stat().st_mode), 0o755)
-        rust = source.parents[1] / "rust"
+        src = self.root / ".cache/huss-skills/factory/build-src"
         cache = self.root / ".cache/huss-skills/factory/cargo-target"
         self.assertEqual(stat.S_IMODE(cache.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(src.stat().st_mode), 0o700)
         self.assertEqual((cache / "args").read_text().splitlines(),
-                         [str(rust), "build", "--profile", "host", "--locked", "--manifest-path", str(rust / "Cargo.toml")])
-        self.assertFalse((rust / "target").exists())
+                         [str(src / "rust"), "build", "--profile", "host", "--locked", "--manifest-path",
+                          str(src / "rust/Cargo.toml")])
+        self.assertEqual((src / "rust/Cargo.toml").read_text(), "[workspace]\n")
+        self.assertFalse((source.parents[1] / "rust/target").exists())
         self.assertEqual(bundle["entry"], ["runtime/factory"])
         self.assertEqual(bundle["binary_sha256"], hashlib.sha256(b"stub").hexdigest())
         files = self.installer.tree(target)[0]
@@ -398,6 +402,67 @@ class InstallTest(IsolatedTestCase):
             target, _ = self.install(replace=True, source=source)
         self.assertEqual((target / "runtime/factory").read_bytes(), b"stub2")
         self.assertTrue((self.root / "own-target/args").is_file())
+
+    def test_sync_rewrites_only_changed_files_and_drops_vanished_ones(self):
+        root = self.root / "src"
+        files = {"rust/a.rs": b"a", "rust/b.rs": b"b", "skills/factory/agents/x.md": b"x"}
+        self.installer.sync(files, root)
+        (root / self.installer.LOCK).write_text("")
+        os.utime(root / "rust/a.rs", ns=(1, 1))
+        os.utime(root / "rust/b.rs", ns=(1, 1))
+        del files["skills/factory/agents/x.md"]
+        files["rust/b.rs"] = b"b2"
+        self.installer.sync(files, root)
+        self.assertEqual((root / "rust/a.rs").stat().st_mtime_ns, 1)
+        self.assertEqual((root / "rust/b.rs").read_bytes(), b"b2")
+        self.assertNotEqual((root / "rust/b.rs").stat().st_mtime_ns, 1)
+        self.assertFalse((root / "skills/factory/agents/x.md").exists())
+        self.assertTrue((root / self.installer.LOCK).exists())
+
+    def test_build_inputs_hold_every_file_the_crate_embeds(self):
+        files = self.installer.build_inputs(ROOT)
+        embedded = 0
+        for rel in [rel for rel in files if rel.endswith(".rs")]:
+            text = files[rel].decode()
+            # An include the scan cannot read, such as include_str!(concat!(...)), fails here.
+            self.assertEqual(len(re.findall(r"include_(?:str|bytes)!", text)), len(self.installer.EMBED.findall(text)), rel)
+            for path in self.installer.EMBED.findall(text):
+                self.assertIn(Path(os.path.normpath(Path(rel).parent / path)).as_posix(), files, rel)
+                embedded += 1
+        self.assertIn("skills/factory/agents/factory-builder.md", files)
+        self.assertIn("skills/factory/templates/config.md", files)
+        self.assertGreater(embedded, 10)
+        self.assertFalse(any(rel.startswith("rust/target/") for rel in files))
+
+    @unittest.skipIf(os.name == "nt", "modes and owners are POSIX")
+    def test_build_folder_must_be_private(self):
+        folder = self.root / "build-src"
+        self.assertEqual(self.installer.private_dir(folder), folder)
+        self.assertEqual(stat.S_IMODE(folder.stat().st_mode), 0o700)
+        folder.chmod(0o755)
+        with self.assertRaises(OSError):
+            self.installer.private_dir(folder)
+        (self.root / "link").symlink_to(self.root / "elsewhere", target_is_directory=True)
+        (self.root / "elsewhere").mkdir(mode=0o700)
+        with self.assertRaises(OSError):
+            self.installer.private_dir(self.root / "link")
+
+    @unittest.skipIf(os.name == "nt", "the fake cargo is a shell script")
+    def test_a_held_build_lock_makes_the_next_build_wait(self):
+        del os.environ["FACTORY_RUNTIME"]
+        os.environ.pop("CARGO_TARGET_DIR", None)
+        source = self.checkout('touch "$HOME/ran" && mkdir -p "$CARGO_TARGET_DIR/host" && printf lock > "$CARGO_TARGET_DIR/host/factory"\n')
+        src = self.installer.private_dir(self.root / ".cache/huss-skills/factory/build-src")
+        results = []
+        with open(src / self.installer.LOCK, "a") as lock:
+            self.installer.hold(lock)
+            thread = threading.Thread(target=lambda: results.append(self.installer.rust_binary(source.parents[1])))
+            thread.start()
+            thread.join(0.5)
+            self.assertTrue(thread.is_alive())
+            self.assertFalse((self.root / "ran").exists())
+        thread.join()
+        self.assertEqual(results, [b"lock"])
 
     @unittest.skipIf(os.name == "nt", "the fake cargo is a shell script")
     def test_failed_build_keeps_the_python_runtime(self):

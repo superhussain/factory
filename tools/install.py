@@ -28,6 +28,9 @@ REQUIRED = (
 
 LEGACY = "huss-factory"
 BINARY = "runtime/factory.exe" if os.name == "nt" else "runtime/factory"
+LOCK = ".build.lock"
+# A literal include_str! or include_bytes! path, relative to the .rs file that holds it.
+EMBED = re.compile(r'include_(?:str|bytes)!\(\s*"([^"]+)"\s*\)')
 
 
 def fail(message):
@@ -50,24 +53,92 @@ def rust_binary(checkout):
     if cargo is None:
         print("install: cargo not found, keeping the Python runtime", file=sys.stderr)
         return None
+    cache = (Path(os.environ["LOCALAPPDATA"], "huss-skills", "factory") if os.name == "nt"
+             else Path.home() / ".cache" / "huss-skills" / "factory")
     # A per-user target folder keeps dependencies compiled across catch-up's fresh source worktrees.
-    target = Path(os.environ.get("CARGO_TARGET_DIR") or (
-        Path(os.environ["LOCALAPPDATA"], "huss-skills", "factory", "cargo-target") if os.name == "nt"
-        else Path.home() / ".cache" / "huss-skills" / "factory" / "cargo-target"))
+    target = Path(os.environ.get("CARGO_TARGET_DIR") or cache / "cargo-target")
     try:
+        files = build_inputs(checkout)
         os.makedirs(target, mode=0o700, exist_ok=True)
-        # cwd is the workspace so rustup reads its rust-toolchain.toml.
-        r = subprocess.run([cargo, "build", "--profile", "host", "--locked", "--manifest-path", str(manifest)],
-                           cwd=str(manifest.parent), env=dict(os.environ, CARGO_TARGET_DIR=str(target)),
-                           stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace")
-        if not r.returncode:
+        # One stable source path keeps cargo's incremental artifacts valid from one checkout to the next.
+        src = private_dir(cache / "build-src")
+        with open(src / LOCK, "a") as lock:
+            hold(lock)
+            sync(files, src)
+            # cwd is the workspace so rustup reads its rust-toolchain.toml.
+            run([cargo, "build", "--profile", "host", "--locked", "--manifest-path", str(src / "rust" / "Cargo.toml")],
+                src / "rust", dict(os.environ, CARGO_TARGET_DIR=str(target)))
             return (target / "host" / Path(BINARY).name).read_bytes()
+    except (OSError, ValueError) as e:
+        print("install: Rust build failed, keeping the Python runtime (" + str(e) + ")", file=sys.stderr)
+        return None
+
+
+def run(args, cwd, env=None):
+    """args' stdout, or OSError carrying the last line it wrote to stderr."""
+    r = subprocess.run(args, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                       errors="replace")
+    if r.returncode:
         lines = [line for line in r.stderr.splitlines() if line.strip()] or ["exit " + str(r.returncode)]
-        reason = lines[-1].strip()
-    except OSError as e:
-        reason = str(e)
-    print("install: Rust build failed, keeping the Python runtime (" + reason + ")", file=sys.stderr)
-    return None
+        raise OSError(lines[-1].strip())
+    return r.stdout
+
+
+def build_inputs(checkout):
+    """The bytes of every file under rust/ but target/, and of every file outside it the crate embeds,
+    by checkout-relative path."""
+    rust = checkout / "rust"
+    files = {}
+    for directory, dirs, names in os.walk(rust):
+        if Path(directory) == rust and "target" in dirs:
+            dirs.remove("target")
+        for name in names:
+            path = Path(directory, name)
+            files[path.relative_to(checkout).as_posix()] = path.read_bytes()
+    for rel in [rel for rel in files if rel.endswith(".rs")]:
+        for embedded in EMBED.findall(files[rel].decode("utf-8", "replace")):
+            path = Path(os.path.normpath(checkout / Path(rel).parent / embedded))
+            files[path.relative_to(checkout).as_posix()] = path.read_bytes()
+    return files
+
+
+def private_dir(path):
+    """path, created 0700, refused when it is a link, not a folder, another user's or open to others."""
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or os.name != "nt" and (info.st_uid != os.getuid() or info.st_mode & 0o077):
+        raise OSError(str(path) + " is not a private folder")
+    return path
+
+
+def hold(lock):
+    """Block until this process holds lock, an open file; closing it releases the lock."""
+    if os.name == "nt":
+        import msvcrt
+        while True:
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+                return
+            except OSError:
+                pass  # LK_LOCK gives up after 10 s; a build takes longer.
+    import fcntl
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+
+
+def sync(files, root):
+    """Make root hold exactly files beside its lock, writing only files whose bytes differ so the
+    unchanged ones keep the mtimes cargo's fingerprints recorded."""
+    for rel, data in files.items():
+        path = root / rel
+        if not path.is_file() or path.read_bytes() != data:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+    for directory, _, names in os.walk(root):
+        for name in names:
+            path = Path(directory, name)
+            rel = path.relative_to(root).as_posix()
+            if rel != LOCK and rel not in files:
+                path.unlink()
 
 
 def linked(path):
