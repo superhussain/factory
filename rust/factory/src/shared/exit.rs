@@ -27,16 +27,28 @@ pub type Res<T> = Result<T, Exit>;
 
 /// Python's `fail(msg, code)`.
 pub fn fail(msg: impl std::fmt::Display, code: i32) -> Exit {
-    Exit { code, stderr: format!("factory.py: {msg}\n"), status: None }
+    Exit {
+        code,
+        stderr: format!("factory.py: {msg}\n"),
+        status: None,
+    }
 }
 
 /// Python's `sys.exit(code)`.
 pub fn exit(code: i32) -> Exit {
-    Exit { code, stderr: String::new(), status: None }
+    Exit {
+        code,
+        stderr: String::new(),
+        status: None,
+    }
 }
 
 impl Exit {
     pub fn raw(code: i32, stderr: impl Into<String>) -> Exit {
-        Exit { code, stderr: stderr.into(), status: None }
+        Exit {
+            code,
+            stderr: stderr.into(),
+            status: None,
+        }
     }
 }
