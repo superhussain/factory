@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "push/new-spec",
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
+      "home": "job",
+      "stubs": {},
+      "routes": {
+        "GET /api/jobs/sample/001-test/?etags=1": [200, []],
+        "PUT /api/jobs/sample/001-test/spec.md": [200, ""],
+        "GET /api/board": [
+          200,
+          "{\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":1,\"rounds\":[{\"code\":\"CHANGES\"}],\"claim\":{\"device\":\"test\",\"session\":\"sender\",\"since\":\"2026-01-02T12:00:00Z\",\"seen\":\"2026-01-02T12:00:00Z\"},\"updated\":\"2026-01-02T12:00:00Z\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_push_records_spec_goal"
+    },
+    {
+      "id": "push/conflict",
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
+      "home": "job",
+      "stubs": {},
+      "routes": {
+        "GET /api/jobs/sample/001-test/?etags=1": [200, []],
+        "PUT /api/jobs/sample/001-test/spec.md": [412, ""],
+        "GET /api/jobs/sample/001-test/spec.md": [
+          200,
+          "# Spec: 001-test\n\n## Goal\n\nNewer remote goal.\n"
+        ]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_push_keeps_goal_pending_when_remote_spec_is_newer"
+    },
+    {
+      "id": "push/bad-target",
+      "argv": ["--home", "{home}", "push", "sample/../001-test"],
+      "home": "job",
+      "stubs": {},
+      "routes": {},
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_push_records_spec_goal"
+    }
+  ]
+}

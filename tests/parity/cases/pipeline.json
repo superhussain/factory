@@ -6,6 +6,242 @@
       "argv": ["--home", "{home}", "pipeline", "a/b"],
       "home": "minimal",
       "stubs": {}
+    },
+    {
+      "id": "pipeline/view",
+      "argv": ["--home", "{home}", "pipeline", "sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/effective/sample": [
+          200,
+          {
+            "project": "sample",
+            "merge": "human",
+            "review_rounds": 1,
+            "reviewers": ["security", "ux", "ui", "code"],
+            "gates": ["spec-approval"],
+            "stage_notes": {
+              "build": [
+                {
+                  "source": "pipeline:global@3",
+                  "text": "Prefer small commits."
+                },
+                {
+                  "source": "pipeline:sample@2",
+                  "text": "Keep tests focused."
+                }
+              ]
+            },
+            "versions": {
+              "global": 3,
+              "project": 2
+            },
+            "floors": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11"]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pipeline.py::PipelineTest.test_prints_the_view_with_wrapped_notes_and_writes_nothing"
+    },
+    {
+      "id": "pipeline/babysit-note",
+      "argv": ["--home", "{home}", "pipeline", "sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/effective/sample": [
+          200,
+          {
+            "project": "sample",
+            "merge": "human",
+            "review_rounds": 1,
+            "reviewers": ["security", "ux", "ui", "code"],
+            "gates": ["spec-approval"],
+            "stage_notes": {
+              "build": [
+                {
+                  "source": "pipeline:global@3",
+                  "text": "Prefer small commits."
+                },
+                {
+                  "source": "pipeline:sample@2",
+                  "text": "Keep tests focused."
+                }
+              ],
+              "babysit": [
+                {
+                  "source": "pipeline:global@3",
+                  "text": "On fix-ci, fix the failing check and push."
+                },
+                {
+                  "source": "pipeline:sample@2",
+                  "text": "On merge, queue the PR."
+                }
+              ]
+            },
+            "versions": {
+              "global": 3,
+              "project": 2
+            },
+            "floors": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11"]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pipeline.py::PipelineTest.test_wraps_a_babysit_note"
+    },
+    {
+      "id": "pipeline/five-rounds",
+      "argv": ["--home", "{home}", "pipeline", "sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/effective/sample": [
+          200,
+          {
+            "project": "sample",
+            "merge": "human",
+            "review_rounds": 5,
+            "reviewers": ["security", "ux", "ui", "code"],
+            "gates": ["spec-approval"],
+            "stage_notes": {
+              "build": [
+                {
+                  "source": "pipeline:global@3",
+                  "text": "Prefer small commits."
+                },
+                {
+                  "source": "pipeline:sample@2",
+                  "text": "Keep tests focused."
+                }
+              ]
+            },
+            "versions": {
+              "global": 3,
+              "project": 2
+            },
+            "floors": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11"]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pipeline.py::PipelineTest.test_accepts_five_review_rounds"
+    },
+    {
+      "id": "pipeline/board-flag",
+      "argv": ["--home", "{home}", "pipeline", "sample", "--board"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/effective/sample": [
+          200,
+          {
+            "project": "sample",
+            "merge": "human",
+            "review_rounds": 1,
+            "reviewers": ["security", "ux", "ui", "code"],
+            "gates": ["spec-approval"],
+            "stage_notes": {
+              "build": [
+                {
+                  "source": "pipeline:global@3",
+                  "text": "Prefer small commits."
+                },
+                {
+                  "source": "pipeline:sample@2",
+                  "text": "Keep tests focused."
+                }
+              ]
+            },
+            "versions": {
+              "global": 3,
+              "project": 2
+            },
+            "floors": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11"]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pipeline.py::PipelineTest.test_board_flag_prints_the_patch"
+    },
+    {
+      "id": "pipeline/missing-view",
+      "argv": ["--home", "{home}", "pipeline", "sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/effective/sample": [404, "not found"]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_pipeline.py::PipelineTest.test_missing_view_exits_4"
+    },
+    {
+      "id": "pipeline/conflict-409",
+      "argv": ["--home", "{home}", "pipeline", "sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/effective/sample": [
+          409,
+          "stored pipeline configuration no longer validates"
+        ]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_pipeline.py::PipelineTest.test_failures_exit_5_with_empty_stdout"
+    },
+    {
+      "id": "pipeline/bad-body",
+      "argv": ["--home", "{home}", "pipeline", "sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/effective/sample": [200, "{"]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_pipeline.py::PipelineTest.test_failures_exit_5_with_empty_stdout"
+    },
+    {
+      "id": "pipeline/link-note",
+      "argv": ["--home", "{home}", "pipeline", "sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/effective/sample": [
+          200,
+          {
+            "project": "sample",
+            "merge": "human",
+            "review_rounds": 1,
+            "reviewers": ["security", "ux", "ui", "code"],
+            "gates": ["spec-approval"],
+            "stage_notes": {
+              "build": [
+                {
+                  "source": "pipeline:global@3",
+                  "text": "see evil.example/x"
+                }
+              ]
+            },
+            "versions": {
+              "global": 3,
+              "project": 2
+            },
+            "floors": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11"]
+          }
+        ]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_pipeline.py::PipelineTest.test_failures_exit_5_with_empty_stdout"
+    },
+    {
+      "id": "pipeline/unknown-flag",
+      "argv": ["--home", "{home}", "pipeline", "sample", "--json"],
+      "home": null,
+      "stubs": {},
+      "routes": {},
+      "exit": 2,
+      "from": "tests/cli/test_pipeline.py::PipelineTest.test_unknown_flag_exits_2"
     }
   ]
 }
