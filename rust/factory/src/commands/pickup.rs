@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -15,12 +15,13 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job};
+use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, riders_of};
 use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::{
-    BACKLOG_LINE, BACKPRESSURE_NEEDS_YOU, HOLD_MAX_HOURS, HOLD_MIN_IDEAS, IDEA, IN_FLIGHT, JOB_ID,
-    MAX_RIDERS, NOTE_INVISIBLE, REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL, SLUG, TERMINAL,
-    UNATTENDED, WINDOWS,
+    tag_lookalike, ADAPTER_ID, BACKLOG_LINE, BACKLOG_NOTES_TAG, BACKPRESSURE_NEEDS_YOU,
+    HOLD_MAX_HOURS, HOLD_MIN_IDEAS, IDEA, IN_FLIGHT, JOB_ID, MAX_RIDERS, NOTE_INVISIBLE, NOTE_LINK,
+    NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, PASEO_ID, REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL,
+    SLUG, TERMINAL, UNATTENDED, WINDOWS,
 };
 use crate::shared::exit::{exit, fail, Exit, Res};
 use crate::shared::fs::{is_link, read_text, regular_metadata, resolve, write_atomic};
@@ -32,6 +33,7 @@ use crate::shared::py::{is_space, os_error, printable_line, repr, splitlines, st
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Flags as Re, Pattern};
 use crate::shared::time::{format_stamp, now, parse_stamp, unix_now};
+use crate::shared::unicode::nfkc;
 
 pub(crate) struct Io<'a> {
     pub out: &'a mut dyn Write,
@@ -127,6 +129,13 @@ struct Fakes {
     retro_catchup_due: Option<Rc<dyn Fn(&Path, &Local) -> bool>>,
     daily_tokens: Option<Rc<dyn Fn(i64) -> Result<i64, String>>>,
     record_agent: Option<Rc<dyn Fn(&Path, &str, &Value) -> Res<Option<Value>>>>,
+    paseo_server: Option<Rc<dyn Fn() -> Option<String>>>,
+    paseo_statuses: Option<Rc<dyn Fn() -> Option<Vec<(Value, Value)>>>>,
+    paseo_send: Option<Rc<dyn Fn(&str, &str) -> bool>>,
+    awaits_permission: Option<Rc<dyn Fn(&str) -> Option<bool>>>,
+    usage_totals: Option<Rc<dyn Fn(&Path, &str, &str) -> Result<Value, String>>>,
+    auto_babysit_pass: Option<Rc<dyn Fn(&mut Io, &Path) -> Res<()>>>,
+    auto_babysit_limit: Option<usize>,
     pickup_scheduler: Option<&'static str>,
     launch_wait_seconds: Option<f64>,
     exe: Option<String>,
@@ -2690,33 +2699,32 @@ fn tracer_build_pass(io: &mut Io, home: &Path, jobs: Option<&Value>) -> Res<bool
     if let Some(f) = fake!(tracer_build_pass) {
         return f(home, jobs);
     }
-    if lexists(&home.join("tracer.json")) {
-        return Err(deferred("tracer build pass"));
+    if !lexists(&home.join("tracer.json")) {
+        let read;
+        let jobs = match jobs {
+            Some(jobs) => jobs,
+            None => match read_board(home) {
+                Ok(board) => {
+                    read = board["jobs"].clone();
+                    &read
+                }
+                Err(e) => {
+                    let reason = words(&e.stderr).join(" ").replacen("factory.py: ", "", 1);
+                    let reason = if reason.is_empty() {
+                        "unknown error"
+                    } else {
+                        &reason
+                    };
+                    errln!(io, "factory.py: warning: Tracer build check failed: {}. Unchecked jobs keep their Building in Tracer mark.", reason.trim_end_matches('.'));
+                    return Ok(false);
+                }
+            },
+        };
+        if !jobs.as_array().into_iter().flatten().any(tracer_building) {
+            return Ok(false);
+        }
     }
-    let read;
-    let jobs = match jobs {
-        Some(jobs) => jobs,
-        None => match read_board(home) {
-            Ok(board) => {
-                read = board["jobs"].clone();
-                &read
-            }
-            Err(e) => {
-                let reason = words(&e.stderr).join(" ").replacen("factory.py: ", "", 1);
-                let reason = if reason.is_empty() {
-                    "unknown error"
-                } else {
-                    &reason
-                };
-                errln!(io, "factory.py: warning: Tracer build check failed: {}. Unchecked jobs keep their Building in Tracer mark.", reason.trim_end_matches('.'));
-                return Ok(false);
-            }
-        },
-    };
-    if jobs.as_array().into_iter().flatten().any(tracer_building) {
-        return Err(deferred("tracer build pass"));
-    }
-    Ok(false)
+    Err(deferred("tracer build pass"))
 }
 
 /// The backlog lines this host already has a final triage verdict for.
@@ -5149,146 +5157,344 @@ fn record_launch(io: &mut Io, home: &Path, job_id: &str, row: Value) {
 
 type Cache = HashMap<String, Settings>;
 
+const ADAPTER_TIMEOUT_SECONDS: u64 = 120;
+const TAKEOVER_MINUTES: i64 = 30;
+const SESSION_STOP_CLOSED_HOURS: i64 = 24;
+const SYNC_STAGES: [&str; 2] = ["pr-open", "needs-human"];
+const PR_SYNC_LIMIT: usize = 100;
+const AUTO_BABYSIT_LIMIT: usize = 20;
+const PRIORITY_NUDGE: &str = "The owner prioritized factory job {id}. If your turn ended while work on it is still owed, continue with the next step now.";
+const IDLE_NUDGE_MINUTES: i64 = 20;
+const IDLE_NUDGE: &str = "Factory job {id} shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory.py hold for the job with your --session tag, then keep waiting.";
+const PERMISSION_NOTE: &str = "permission: agent {agent} has waited at a permission dialog for {minutes} minutes; answer it in Paseo";
+const TOKEN_WARN_PERCENT: i64 = 80;
+const AUTONOMY_DAYS: i64 = 90;
+const AUTONOMY_CLASSES: [&str; 2] = ["internal", "visible"];
+const AUTONOMY_HOLD_NOTE: &str = "earned autonomy hold: a person reviews and merges";
+static CLOSE_REASON: Pattern = Pattern::new(r"[^\x00-\x1f\x7f-\x9f  ]{1,200}", Re::NONE);
+static GH_PR_PARTS: Pattern = Pattern::new(
+    r"https://github\.com/([\w.-]+)/([\w.-]+)/pull/(\d{1,9})",
+    Re::ASCII,
+);
+static AUTO_BABYSIT: Pattern = Pattern::new("[1-9]", Re::NONE);
+
+fn auto_babysit_limit() -> usize {
+    #[cfg(test)]
+    if let Some(n) = FAKES.with(|f| f.borrow().auto_babysit_limit) {
+        return n;
+    }
+    AUTO_BABYSIT_LIMIT
+}
+
+/// This host's Paseo server id, else None. Never fails, since most hosts may lack Paseo.
+fn paseo_server() -> Option<String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(paseo_server) {
+        return f();
+    }
+    let home = std::env::var_os("PASEO_HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::home_dir().map(|h| h.join(".paseo")))?;
+    let text = fs::read_to_string(home.join("server-id")).ok()?;
+    let server = strip(&text);
+    PASEO_ID.is_full(server).then(|| server.to_string())
+}
+
+/// The end of an archive-by-hand hint for agent: "" when agent is unsafe to print as an argument.
+fn paseo_archive_tail(agent: &str) -> String {
+    if !PASEO_ID.is_full(agent) || agent.starts_with('-') {
+        return String::new();
+    }
+    let home = std::env::var("PASEO_HOME").unwrap_or_default();
+    if !home.is_empty() && !home.chars().all(crate::shared::py::is_printable) {
+        return format!(" (left out --home because PASEO_HOME has unprintable characters): paseo archive --force {agent}");
+    }
+    let flag = if home.is_empty() {
+        String::new()
+    } else {
+        format!("--home {} ", shlex_quote(&home))
+    };
+    format!(": paseo {flag}archive --force {agent}")
+}
+
+/// <home>/paseo-claims/<job-id>/<agent>, the marker that this host's Paseo session claimed the job.
+fn paseo_claim_path(home: &Path, job_id: &str, agent: &str) -> Option<PathBuf> {
+    (JOB_ID.is_full(job_id)
+        && !job_id.contains("..")
+        && PASEO_ID.is_full(agent)
+        && !agent.starts_with('-'))
+    .then(|| home.join("paseo-claims").join(job_id).join(agent))
+}
+
+fn paseo_claimed(home: &Path, job_id: &str, agent: &str) -> bool {
+    paseo_claim_path(home, job_id, agent).is_some_and(|p| p.is_file())
+}
+
+fn forget_paseo_claim(home: &Path, job_id: &str, agent: &str) {
+    if let Some(path) = paseo_claim_path(home, job_id, agent) {
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(path.parent().unwrap());
+    }
+}
+
+/// Whether text holds an operator-preferences tag as written or once NFKC and the look-alike fold apply.
+fn has_envelope_tag(text: &str) -> bool {
+    let folded: String = nfkc(text).chars().map(tag_lookalike).collect();
+    NOTE_TAG.search(text).is_some() || NOTE_TAG.search(&folded).is_some()
+}
+
+/// The reason for the first admission rule text breaks, or None.
+fn check_untrusted(text: &str) -> Option<String> {
+    if NOTE_INVISIBLE.search(text).is_some() {
+        return Some("contains control, invisible or bidirectional characters".into());
+    }
+    if has_envelope_tag(text) {
+        return Some("contains the reserved envelope tag".into());
+    }
+    if NOTE_LINK.search(text).is_some() {
+        return Some("links are not allowed".into());
+    }
+    if NOTE_SECRETS.iter().any(|p| p.search(text).is_some()) {
+        return Some("looks like a secret".into());
+    }
+    NOTE_PHRASES
+        .iter()
+        .find(|(_, p)| p.search(text).is_some())
+        .map(|(rule, _)| format!("reads like an instruction to override factory rules ({rule})"))
+}
+
+fn stamp_of(v: Option<&Value>) -> Option<i64> {
+    v.and_then(Value::as_str).and_then(parse_stamp)
+}
+
+/// None when stalls.json is absent, else (adapter argv resolved, takeover_minutes).
 fn read_stalls(home: &Path) -> Res<Option<(Vec<String>, i64)>> {
-    // group C placeholder
-    let _ = home;
-    Ok(None)
+    let path = home.join("stalls.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let doc = read_text(&path).ok().and_then(|t| loads(&t).ok());
+    let parsed = doc.as_ref().and_then(|doc| {
+        let map = doc.as_object()?;
+        let keys_ok = map.contains_key("version")
+            && map.contains_key("adapter")
+            && map
+                .keys()
+                .all(|k| ["version", "adapter", "takeover_minutes"].contains(&k.as_str()));
+        if !keys_ok || int_of(map.get("version")) != Some(1) {
+            return None;
+        }
+        let adapter = map["adapter"].as_array()?;
+        if !(1..=16).contains(&adapter.len()) {
+            return None;
+        }
+        let adapter = adapter
+            .iter()
+            .map(|a| {
+                a.as_str()
+                    .filter(|a| (1..=4096).contains(&a.chars().count()) && !a.contains('\0'))
+                    .map(String::from)
+            })
+            .collect::<Option<Vec<String>>>()?;
+        let minutes = match map.get("takeover_minutes") {
+            None => TAKEOVER_MINUTES,
+            Some(m) => int_of(Some(m)).filter(|m| (1..=1440).contains(m))?,
+        };
+        Some((adapter, minutes))
+    });
+    let Some((mut adapter, minutes)) = parsed else {
+        return Err(fail(format!("cannot read {}: use {{\"version\": 1, \"adapter\": [\"<program>\", \"<arg>\", ...], \"takeover_minutes\": 30}}", path.display()), 2));
+    };
+    if !Path::new(&adapter[0]).is_absolute() {
+        let Some(program) = which(&adapter[0]) else {
+            return Err(fail(
+                format!(
+                    "stall adapter {} in {} is not on PATH",
+                    adapter[0],
+                    path.display()
+                ),
+                2,
+            ));
+        };
+        adapter[0] = program.to_string_lossy().into_owned();
+    }
+    Ok(Some((adapter, minutes)))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn move_stop_pass(
+/// True when one adapter stall entry holds exactly the documented fields.
+fn stall_shape(s: &Value) -> bool {
+    let Some(map) = s.as_object() else {
+        return false;
+    };
+    map.len() == 4
+        && ["session", "reset", "provider", "model"]
+            .iter()
+            .all(|k| map.contains_key(*k))
+        && stamp_of(map.get("reset")).is_some()
+        && get_str(s, "session").is_some_and(|v| PASEO_ID.is_full(v))
+        && get_str(s, "provider").is_some_and(|v| SLUG.is_full(v))
+        && get_str(s, "model").is_some_and(|m| m.is_empty() || ROUTE_MODEL.is_full(m))
+}
+
+/// Run the stall adapter with extra arguments.
+fn adapter_run(adapter: &[String], extra: &[&str]) -> io::Result<Out> {
+    let argv: Vec<&str> = adapter
+        .iter()
+        .map(String::as_str)
+        .chain(extra.iter().copied())
+        .collect();
+    capture(
+        &argv,
+        None,
+        &[],
+        Some(Duration::from_secs(ADAPTER_TIMEOUT_SECONDS)),
+    )
+}
+
+/// The stalls from one adapter list call, or the reason it gave none.
+fn list_stalls(adapter: &[String]) -> Result<Vec<Value>, String> {
+    let p = match adapter_run(adapter, &["list"]) {
+        Err(e) if e.kind() == io::ErrorKind::TimedOut => {
+            return Err("stall adapter timed out".into())
+        }
+        Err(e) => return Err(os_error(&e, Some(Path::new(&adapter[0])))),
+        Ok(p) => p,
+    };
+    if p.code != 0 {
+        return Err(format!("stall adapter exit {}", p.code));
+    }
+    let doc = loads(&p.stdout).ok();
+    let stalls = doc.as_ref().and_then(Value::as_object).and_then(|d| {
+        if d.len() != 2 || int_of(d.get("version")) != Some(1) {
+            return None;
+        }
+        let stalls = d.get("stalls")?.as_array()?;
+        stalls.iter().all(stall_shape).then(|| stalls.clone())
+    });
+    stalls.ok_or_else(|| "stall adapter malformed output".into())
+}
+
+fn job_index(data: &Value, job_id: &str) -> Option<usize> {
+    jobs_of(data)
+        .iter()
+        .position(|j| get_str(j, "id") == Some(job_id))
+}
+
+/// Takeover's job rule: an idea, an in-flight job, or an automerging pr-open job not escalated.
+fn resumable(job: &Value) -> bool {
+    let stage = get_str(job, "stage");
+    stage == Some(IDEA)
+        || stage.is_some_and(|s| IN_FLIGHT.contains(&s))
+        || stage == Some("pr-open")
+            && job.get("automerge") == Some(&Value::Bool(true))
+            && !escalated(job)
+}
+
+/// One CAS: replace job_id's claim with (device, tag) and drop its paseo link, after re-checking
+/// the takeover job rules. (old claim, old paseo), or None when a rule failed.
+fn claim_stalled(
+    home: &Path,
+    job_id: &str,
+    session_id: &str,
+    device: &str,
+    tag: &str,
+) -> Res<Option<(Value, Value)>> {
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let empty = json!({});
+        let at = job_index(&data, job_id);
+        let job = at.map_or(&empty, |i| &data["jobs"][i]);
+        let claim = job
+            .get("claim")
+            .filter(|c| truthy(Some(c)))
+            .cloned()
+            .unwrap_or(json!({}));
+        let paseo = job.get("paseo").filter(|p| p.is_object()).cloned();
+        let ok = paseo
+            .as_ref()
+            .is_some_and(|p| get_str(p, "agent") == Some(session_id))
+            && get_str(&claim, "device") == Some(device)
+            && resumable(job)
+            && !gated(job)
+            && !paused(job)
+            && !closing(job);
+        let (Some(i), Some(paseo), true) = (at, paseo, ok) else {
+            return Ok((None, None));
+        };
+        data["jobs"][i]
+            .as_object_mut()
+            .unwrap()
+            .shift_remove("claim");
+        patch_job(&mut data, job_id, &json!({"claim": new_claim(device, tag)}));
+        data["jobs"][i]
+            .as_object_mut()
+            .unwrap()
+            .shift_remove("paseo");
+        Ok((Some(dump_board(&data)), Some((claim, paseo))))
+    })
+}
+
+/// One CAS: put back old_claim and old_paseo while the claim is still (device, tag).
+fn restore_claim(
+    home: &Path,
+    job_id: &str,
+    device: &str,
+    tag: &str,
+    old: &(Value, Value),
+) -> Res<()> {
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(i) = job_index(&data, job_id) else {
+            return Ok((None, ()));
+        };
+        let claim = data["jobs"][i].get("claim").cloned().unwrap_or(json!({}));
+        if !(get_str(&claim, "device") == Some(device) && get_str(&claim, "session") == Some(tag)) {
+            return Ok((None, ()));
+        }
+        data["jobs"][i]["claim"] = old.0.clone();
+        data["jobs"][i]["paseo"] = old.1.clone();
+        Ok((Some(dump_board(&data)), ()))
+    })
+}
+
+/// pickup_settings, cached per project, with the stderr line a fresh reason costs outside a dry run.
+fn cached_settings(
     io: &mut Io,
     home: &Path,
-    data: &mut Value,
-    device: &str,
-    paths: &[(String, String)],
+    project: &str,
+    repo: &str,
     settings: &mut Cache,
-    dry: bool,
-    adapter: Option<&[String]>,
-) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, paths, settings, dry, adapter);
-    Ok(())
-}
-
-fn session_stop_pass(
-    io: &mut Io,
-    home: &Path,
-    data: &mut Value,
     device: &str,
     dry: bool,
-) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, dry);
-    Ok(())
+) -> Res<Settings> {
+    if !settings.contains_key(project) {
+        let found = pickup_settings(home, project, repo, device)?;
+        if let (Some(reason), false) = (&found.reason, dry) {
+            errln!(io, "factory.py: pickup skips {project}: {reason}");
+        }
+        settings.insert(project.to_string(), found);
+    }
+    Ok(settings[project].clone())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn pr_sync_pass(
-    io: &mut Io,
-    home: &Path,
-    data: &mut Value,
-    device: &str,
-    minutes: u32,
-    paths: &[(String, String)],
-    settings: &mut Cache,
-    dry: bool,
-) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, minutes, paths, settings, dry);
-    Ok(())
+/// Why settings keep pickup from acting on a project on this host, or None.
+fn settings_reason(s: &Settings, device: &str) -> Option<String> {
+    if let Some(why) = &s.reason {
+        return Some(why.clone());
+    }
+    if s.lists(device) {
+        return None;
+    }
+    Some(if s.enabled != Some(true) {
+        "pickup off".into()
+    } else {
+        format!("pickup does not list host {device}")
+    })
 }
 
-fn autonomy_hold_pass(io: &mut Io, home: &Path, data: &mut Value, dry: bool) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, dry);
-    Ok(())
-}
-
-fn close_pass(
-    io: &mut Io,
-    home: &Path,
-    data: &mut Value,
-    device: &str,
-    minutes: u32,
-    dry: bool,
-) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, minutes, dry);
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn close_cleanup_pass(
-    io: &mut Io,
-    home: &Path,
-    data: &mut Value,
-    device: &str,
-    paths: &[(String, String)],
-    settings: &mut Cache,
-    dry: bool,
-) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, paths, settings, dry);
-    Ok(())
-}
-
-fn priority_nudge_pass(
-    io: &mut Io,
-    home: &Path,
-    data: &mut Value,
-    device: &str,
-    dry: bool,
-) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, dry);
-    Ok(())
-}
-
-fn idle_watch_pass(io: &mut Io, home: &Path, data: &mut Value, device: &str, dry: bool) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, dry);
-    Ok(())
-}
-
-fn token_cap_pass(io: &mut Io, home: &Path, data: &mut Value, device: &str, dry: bool) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, dry);
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn auto_babysit_pass(
-    io: &mut Io,
-    home: &Path,
-    data: &mut Value,
-    device: &str,
-    minutes: u32,
-    paths: &[(String, String)],
-    settings: &mut Cache,
-    dry: bool,
-) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, minutes, paths, settings, dry);
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn babysit_pass(
-    io: &mut Io,
-    home: &Path,
-    data: &mut Value,
-    device: &str,
-    minutes: u32,
-    paths: &[(String, String)],
-    settings: &mut Cache,
-    dry: bool,
-) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, minutes, paths, settings, dry);
-    Ok(())
-}
-
+/// Take over at most one stalled session whose usage limit is far off: 1 when a takeover
+/// launched, else 0.
 #[allow(clippy::too_many_arguments)]
 fn takeover(
     io: &mut Io,
@@ -5300,11 +5506,503 @@ fn takeover(
     settings: &mut Cache,
     dry: bool,
 ) -> Res<usize> {
-    // group C placeholder
-    let _ = (io, home, data, device, minutes, paths, settings, dry);
+    let _ = minutes;
+    let Some((adapter, threshold)) = read_stalls(home)? else {
+        return Ok(0);
+    };
+    let mut stalls = match list_stalls(&adapter) {
+        Ok(stalls) => stalls,
+        Err(reason) => {
+            if dry {
+                outln!(io, "skip takeover: {reason}");
+            } else {
+                errln!(io, "factory.py: pickup skips takeover: {reason}");
+            }
+            return Ok(0);
+        }
+    };
+    let host_cap = if stalls.is_empty() {
+        None
+    } else {
+        host_max_inflight(home, device)?
+    };
+    let routes = read_routes(home)?;
+    let stamp = now();
+    let limited: Vec<String> = read_limits(home)?
+        .into_iter()
+        .filter(|(_, u)| *u > stamp)
+        .map(|(n, _)| n)
+        .collect();
+    let skipped = |io: &mut Io, session: &str, job_id: &str, line: &str| {
+        if dry {
+            if job_id.is_empty() {
+                outln!(io, "skip stall {session}: {line}");
+            } else {
+                outln!(io, "skip stall {session} {job_id}: {line}");
+            }
+        }
+    };
+    stalls.sort_by(|a, b| get_str(b, "reset").cmp(&get_str(a, "reset")));
+    for stall in &stalls {
+        let session = get_str(stall, "session").unwrap();
+        let seconds = stamp_of(stall.get("reset")).unwrap() - unix_now();
+        if seconds.div_euclid(60) <= threshold {
+            let line = format!(
+                "resets in {} min, within {threshold}; left to the limit-resume sweep",
+                seconds.div_euclid(60)
+            );
+            skipped(io, session, "", &line);
+            continue;
+        }
+        let job = jobs_of(data).iter().find(|j| {
+            safe_id(j).is_some()
+                && j.get("paseo")
+                    .filter(|p| p.is_object())
+                    .and_then(|p| get_str(p, "agent"))
+                    == Some(session)
+        });
+        let Some(job) = job.cloned() else {
+            skipped(io, session, "", "no job links this session");
+            continue;
+        };
+        let job_id = safe_id(&job).unwrap().to_string();
+        let slug = get_str(&job, "project").map(String::from);
+        let claim = job.get("claim").filter(|c| truthy(Some(c))).cloned();
+        if claim.as_ref().and_then(|c| get_str(c, "device")) != Some(device) {
+            let line = claim.as_ref().map_or("unclaimed".into(), claimed_by);
+            skipped(io, session, &job_id, &line);
+            continue;
+        }
+        if !resumable(&job) {
+            let line = format!("stage {} is not resumable", text_of(job.get("stage")));
+            skipped(io, session, &job_id, &line);
+            continue;
+        }
+        let rule = if gated(&job) {
+            Some("waiting on a human")
+        } else if paused(&job) {
+            Some("paused")
+        } else if closing(&job) {
+            Some("closing")
+        } else if tracer_building(&job) {
+            Some("building in Tracer")
+        } else {
+            None
+        };
+        if let Some(line) = rule {
+            skipped(io, session, &job_id, line);
+            continue;
+        }
+        let Some((slug, repo)) = slug
+            .and_then(|s| Some((s.clone(), lookup(paths, &s)?.to_string())))
+            .filter(|(_, r)| is_dir(r))
+        else {
+            skipped(io, session, &job_id, "no checkout on this host");
+            continue;
+        };
+        let s = cached_settings(io, home, &slug, &repo, settings, device, true)?;
+        if let Some(line) = settings_reason(&s, device) {
+            skipped(io, session, &job_id, &line);
+            continue;
+        }
+        if host_cap == Some(0) {
+            skipped(
+                io,
+                session,
+                &job_id,
+                &format!("host {device} paused (max in flight 0)"),
+            );
+            continue;
+        }
+        let stalled = routes.iter().find(|r| {
+            Some(r.provider.as_str()) == get_str(stall, "provider")
+                && Some(r.model.as_str()) == get_str(stall, "model")
+        });
+        let Some(stalled) = stalled else {
+            skipped(io, session, &job_id, "runs no route in routes.md");
+            continue;
+        };
+        let fallback = routes
+            .iter()
+            .find(|r| r.name != stalled.name && !limited.contains(&r.name));
+        let Some(fallback) = fallback else {
+            skipped(io, session, &job_id, "no fallback route");
+            continue;
+        };
+        let verb = if get_str(&job, "stage") == Some(IDEA) {
+            "idea"
+        } else {
+            "recover"
+        };
+        let prompt = format!("/factory {verb} {job_id} --session ");
+        if dry {
+            let entry = Entry {
+                id: job_id.clone(),
+                project: slug.clone(),
+                repo_path: repo.clone(),
+                session: "<session>".into(),
+            };
+            let given = Given::new(
+                &entry,
+                route_values(fallback),
+                launch_prompt(&format!("{prompt}<session>")),
+            );
+            let template = route_launcher(home, fallback)?;
+            outln!(
+                io,
+                "would take over {job_id} {slug} from {session} on {}: {}",
+                fallback.name,
+                shlex_join(&launcher_argv(&template, &given))
+            );
+            return Ok(1);
+        }
+        let until = limit_route(
+            home,
+            &stalled.name,
+            (-(-seconds).div_euclid(60)).clamp(1, 1440),
+        )?
+        .0;
+        outln!(io, "limited {} until {until}", stalled.name);
+        let Some(live) = pick_route(home)? else {
+            return Ok(0);
+        };
+        let template = route_launcher(home, &live)?;
+        let tag = token_hex3();
+        let Some(old) = claim_stalled(home, &job_id, session, device, &tag)? else {
+            return Ok(0);
+        };
+        let entry = Entry {
+            id: job_id.clone(),
+            project: slug.clone(),
+            repo_path: repo.clone(),
+            session: tag.clone(),
+        };
+        let given = Given::new(
+            &entry,
+            route_values(&live),
+            launch_prompt(&format!("{prompt}{tag}")),
+        );
+        let (code, detail) = match adapter_run(&adapter, &["archive", session]) {
+            Ok(p) => (Some(p.code), None),
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => (None, Some("timed out".to_string())),
+            Err(e) => (None, Some(os_error(&e, Some(Path::new(&adapter[0]))))),
+        };
+        if code == Some(3) {
+            restore_claim(home, &job_id, device, &tag, &old)?;
+            outln!(io, "kept {job_id}: session {session} is no longer stalled");
+            return Ok(0);
+        }
+        if code != Some(0) {
+            restore_claim(home, &job_id, device, &tag, &old)?;
+            let why = detail.unwrap_or_else(|| format!("exit {}", code.unwrap()));
+            return Err(fail(
+                format!("takeover of {job_id} undone: archive of {session} failed: {why}"),
+                1,
+            ));
+        }
+        let argv = launcher_argv(&template, &given);
+        let env = launch_env(&given, &given.provider, &given.model);
+        let (ok, why, log_path) = launch_idea(home, &entry, &live.name, &argv, &env)?;
+        if ok {
+            outln!(
+                io,
+                "took over {job_id} {slug} from {session} on {} session {tag}",
+                live.name
+            );
+            record_launch(io, home, &job_id, launch_row(&given, &argv, &tag));
+            return Ok(1);
+        }
+        let tail = log_tail(&log_path)?;
+        if LIMIT_TEXT.search(&tail).is_some() {
+            let until = limit_route(home, &live.name, limit_minutes(&tail, unix_now()))?.0;
+            outln!(io, "limited {} until {until}", live.name);
+        }
+        if get_str(&job, "stage") == Some(IDEA) {
+            release_claim(home, &job_id, device, &tag)?;
+            outln!(io, "released {job_id}");
+        }
+        return Err(fail(
+            format!(
+                "takeover launch of {job_id} on {} failed: {}; see {}",
+                live.name,
+                why.unwrap_or_default(),
+                log_path.display()
+            ),
+            1,
+        ));
+    }
     Ok(0)
 }
 
+/// True when a closed, denied job carries notes nobody has read yet.
+fn deny_notes_due(j: &Value) -> bool {
+    let Some(backlog) = j.get("backlog").filter(|b| b.is_object()) else {
+        return false;
+    };
+    get_str(j, "stage") == Some("closed")
+        && get_str(backlog, "decision") == Some("denied")
+        && get_str(backlog, "notes").is_some_and(|n| !strip(n).is_empty())
+        && backlog.get("notes_read").is_none()
+}
+
+/// Why a due job's notes may not reach a session, or None.
+fn deny_notes_problem(j: &Value) -> Option<String> {
+    let backlog = &j["backlog"];
+    let notes = get_str(backlog, "notes").unwrap();
+    if notes.chars().count() > 2000 {
+        return Some("over 2000 characters".into());
+    }
+    let Some(line) = get_str(backlog, "line")
+        .filter(|l| l.chars().count() <= 2000 && NOTE_INVISIBLE.search(l).is_none())
+    else {
+        return Some("has a malformed backlog line".into());
+    };
+    if BACKLOG_NOTES_TAG.search(line).is_some() || BACKLOG_NOTES_TAG.search(notes).is_some() {
+        return Some("contains the reserved envelope tag".into());
+    }
+    if let Some(problem) = check_untrusted(notes) {
+        return Some(problem);
+    }
+    check_untrusted(line).map(|p| format!("has an unsafe backlog line ({p})"))
+}
+
+fn has_checkout(paths: &[(String, String)], project: Option<&str>) -> bool {
+    project.and_then(|p| lookup(paths, p)).is_some_and(is_dir)
+}
+
+/// Claim a job for one session in one board write when rule still holds on the fresh board, and
+/// return the new tag, else None. Only the claim and the updated stamps change.
+fn claim_for(
+    home: &Path,
+    job_id: &str,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    rule: &dyn Fn(&Value) -> bool,
+) -> Res<Option<String>> {
+    let tag = token_hex3();
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(i) = job_index(&data, job_id) else {
+            return Ok((None, None));
+        };
+        let j = &data["jobs"][i];
+        if !rule(j)
+            || gated(j)
+            || !has_checkout(paths, get_str(j, "project"))
+            || blocking(j, device, "", minutes).is_some()
+        {
+            return Ok((None, None));
+        }
+        let stamp = now();
+        data["jobs"][i]["claim"] = new_claim(device, &tag);
+        data["jobs"][i]["updated"] = Value::from(stamp.clone());
+        data["updated"] = Value::from(stamp);
+        Ok((Some(dump_board(&data)), Some(tag.clone())))
+    })
+}
+
+fn claim_deny_notes(
+    home: &Path,
+    job_id: &str,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+) -> Res<Option<String>> {
+    claim_for(home, job_id, device, minutes, paths, &|j| {
+        deny_notes_due(j) && deny_notes_problem(j).is_none()
+    })
+}
+
+/// Drop this session's claim on a job after a failed launch, so the next pickup may try again.
+fn release_pickup_claim(home: &Path, job_id: &str, device: &str, session: &str) -> Res<Parked> {
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(i) = job_index(&data, job_id) else {
+            return Ok((None, None));
+        };
+        if !mine(
+            data["jobs"][i].get("claim").unwrap_or(&json!({})),
+            device,
+            session,
+        ) {
+            return Ok((None, None));
+        }
+        let stamp = now();
+        data["jobs"][i]
+            .as_object_mut()
+            .unwrap()
+            .shift_remove("claim");
+        data["jobs"][i]["updated"] = Value::from(stamp.clone());
+        data["updated"] = Value::from(stamp);
+        Ok((Some(dump_board(&data)), None))
+    })
+}
+
+/// A pass that launches at most one session per run: deny notes or resolve.
+struct OneLaunch<'a> {
+    noun: &'a str,
+    jobs: Vec<Value>,
+    skip: &'a dyn Fn(&mut Io, &Value, &mut Cache) -> Res<Option<String>>,
+    command: &'a dyn Fn(&Value) -> String,
+    claim: &'a dyn Fn(&str) -> Res<Option<String>>,
+}
+
+fn one_launch_pass(
+    io: &mut Io,
+    home: &Path,
+    device: &str,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+    pass: OneLaunch,
+) -> Res<()> {
+    let noun = pass.noun;
+    let values = |j: &Value, session: &str, route: &Route| {
+        let id = get_str(j, "id").unwrap();
+        let project = get_str(j, "project").unwrap();
+        let entry = Entry {
+            id: id.into(),
+            project: project.into(),
+            repo_path: lookup(paths, project).unwrap().into(),
+            session: session.into(),
+        };
+        Given::new(
+            &entry,
+            route_values(route),
+            launch_prompt(&format!(
+                "/factory {} {id} --session {session}",
+                (pass.command)(j)
+            )),
+        )
+    };
+    let mut ready = false;
+    for j in &pass.jobs {
+        let id = get_str(j, "id").unwrap();
+        let mut line = (pass.skip)(io, j, settings)?;
+        if line.is_none() && ready {
+            line = Some(format!(
+                "wait {noun} {id} {}: one {noun} launch per run",
+                text_of(j.get("project"))
+            ));
+        } else if line.is_none() {
+            ready = true;
+            let route = pick_route(home)?;
+            let Some(route) = route else {
+                if !dry {
+                    return Ok(());
+                }
+                outln!(io, "{}", no_route_line(home)?);
+                continue;
+            };
+            let template = route_launcher(home, &route)?;
+            let project = get_str(j, "project").unwrap();
+            if dry {
+                outln!(
+                    io,
+                    "would launch {noun} {id} {project} on {}: {}",
+                    route.name,
+                    shlex_join(&launcher_argv(&template, &values(j, "<session>", &route)))
+                );
+                continue;
+            }
+            let Some(tag) = (pass.claim)(id)? else {
+                return Ok(());
+            };
+            let given = values(j, &tag, &route);
+            let argv = launcher_argv(&template, &given);
+            let env = launch_env(&given, &route.provider, &route.model);
+            let (ok, detail, log_path) =
+                launch_idea(home, &given_entry(&given), &route.name, &argv, &env)?;
+            if ok {
+                outln!(
+                    io,
+                    "launched {noun} {id} {project} on {} session {tag}",
+                    route.name
+                );
+            } else {
+                let mut release = || release_pickup_claim(home, id, device, &tag);
+                launch_failed(
+                    io,
+                    home,
+                    &route.name,
+                    id,
+                    &detail.unwrap_or_default(),
+                    &log_path,
+                    &mut release,
+                    false,
+                    false,
+                    None,
+                )?;
+            }
+            return Ok(());
+        }
+        if dry {
+            outln!(io, "{}", line.unwrap());
+        }
+    }
+    Ok(())
+}
+
+fn given_entry(given: &Given) -> Entry {
+    Entry {
+        id: given.id.clone(),
+        project: given.project.clone(),
+        repo_path: given.repo_path.clone(),
+        session: given.session.clone(),
+    }
+}
+
+/// The skip line shared by the one-launch passes: no project, no checkout, a gate, a fresh claim.
+fn one_launch_skip(
+    io: &mut Io,
+    home: &Path,
+    j: &Value,
+    noun: &str,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+    pause_and_close: bool,
+    problem: Option<String>,
+) -> Res<Option<String>> {
+    let id = get_str(j, "id").unwrap();
+    let Some(project) = get_str(j, "project").filter(|p| !p.is_empty()) else {
+        return Ok(Some(format!("skip {noun} {id}: no project")));
+    };
+    let head = format!("skip {noun} {id} {project}");
+    if !has_checkout(paths, Some(project)) {
+        return Ok(Some(format!("{head}: no checkout on this host")));
+    }
+    if gated(j) {
+        return Ok(Some(format!("{head}: waiting on a human")));
+    }
+    if pause_and_close && paused(j) {
+        return Ok(Some(format!("{head}: paused")));
+    }
+    if pause_and_close && closing(j) {
+        return Ok(Some(format!("{head}: closing")));
+    }
+    if let Some(c) = blocking(j, device, "", minutes) {
+        return Ok(Some(format!("{head}: {}", claimed_by(&c))));
+    }
+    if let Some(problem) = problem {
+        return Ok(Some(format!("{head}: {problem}")));
+    }
+    let s = cached_settings(
+        io,
+        home,
+        project,
+        lookup(paths, project).unwrap(),
+        settings,
+        device,
+        dry,
+    )?;
+    Ok(settings_reason(&s, device).map(|r| format!("{head}: {r}")))
+}
+
+/// Launch at most one session for a denied job whose notes nobody has read yet.
 #[allow(clippy::too_many_arguments)]
 fn deny_notes_pass(
     io: &mut Io,
@@ -5316,11 +6014,63 @@ fn deny_notes_pass(
     settings: &mut Cache,
     dry: bool,
 ) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, minutes, paths, settings, dry);
-    Ok(())
+    let jobs: Vec<Value> = jobs_of(data)
+        .iter()
+        .filter(|j| deny_notes_due(j) && safe_id(j).is_some())
+        .cloned()
+        .collect();
+    let skip = |io: &mut Io, j: &Value, settings: &mut Cache| {
+        let problem = deny_notes_problem(j).map(|p| format!("deny notes {p}"));
+        one_launch_skip(
+            io,
+            home,
+            j,
+            "deny notes",
+            device,
+            minutes,
+            paths,
+            settings,
+            dry,
+            false,
+            problem,
+        )
+    };
+    let claim = |id: &str| claim_deny_notes(home, id, device, minutes, paths);
+    one_launch_pass(
+        io,
+        home,
+        device,
+        paths,
+        settings,
+        dry,
+        OneLaunch {
+            noun: "deny notes",
+            jobs,
+            skip: &skip,
+            command: &|_| "deny-notes".into(),
+            claim: &claim,
+        },
+    )
 }
 
+/// True when a needs-human job carries a dashboard Rework or Approve as is press.
+fn resolve_due(j: &Value) -> bool {
+    get_str(j, "stage") == Some("needs-human") && dated(j, "resolve") && safe_id(j).is_some()
+}
+
+/// Why a due job's resolve may not reach a session, or None.
+fn resolve_problem(j: &Value) -> Option<String> {
+    let r = &j["resolve"];
+    let action = get_str(r, "action").filter(|a| ["rework", "approve"].contains(a));
+    let Some(action) = action else {
+        return Some("action must be rework or approve".into());
+    };
+    let note_ok =
+        get_str(r, "note").is_some_and(|n| (1..=2000).contains(&strip(n).chars().count()));
+    (action == "rework" && !note_ok).then(|| "rework note must be 1 to 2000 characters".into())
+}
+
+/// Launch at most one /factory rework or approve session for a dashboard Rework or Approve as is press.
 #[allow(clippy::too_many_arguments)]
 fn resolve_pass(
     io: &mut Io,
@@ -5332,8 +6082,1866 @@ fn resolve_pass(
     settings: &mut Cache,
     dry: bool,
 ) -> Res<()> {
-    // group C placeholder
-    let _ = (io, home, data, device, minutes, paths, settings, dry);
+    let jobs: Vec<Value> = jobs_of(data)
+        .iter()
+        .filter(|j| resolve_due(j))
+        .cloned()
+        .collect();
+    let skip = |io: &mut Io, j: &Value, settings: &mut Cache| {
+        one_launch_skip(
+            io,
+            home,
+            j,
+            "resolve",
+            device,
+            minutes,
+            paths,
+            settings,
+            dry,
+            true,
+            resolve_problem(j),
+        )
+    };
+    let claim = |id: &str| {
+        claim_for(home, id, device, minutes, paths, &|j| {
+            resolve_due(j) && resolve_problem(j).is_none()
+        })
+    };
+    let command = |j: &Value| get_str(&j["resolve"], "action").unwrap().to_string();
+    one_launch_pass(
+        io,
+        home,
+        device,
+        paths,
+        settings,
+        dry,
+        OneLaunch {
+            noun: "resolve",
+            jobs,
+            skip: &skip,
+            command: &command,
+            claim: &claim,
+        },
+    )
+}
+
+/// True when a pr-open job carries a dashboard Babysit PR click.
+fn babysit_due(j: &Value) -> bool {
+    get_str(j, "stage") == Some("pr-open") && babysitting(j) && safe_id(j).is_some()
+}
+
+fn claim_babysit(
+    home: &Path,
+    job_id: &str,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+) -> Res<Option<String>> {
+    claim_for(home, job_id, device, minutes, paths, &|j| {
+        babysit_due(j) && !paused(j) && !closing(j)
+    })
+}
+
+/// argv with a workspace slug babysit-<id> and a title babysit <id>.
+fn babysit_argv(argv: Vec<String>, job_id: &str) -> Vec<String> {
+    let mut argv = argv;
+    for (flag, value) in [
+        ("--worktree-slug", format!("babysit-{job_id}")),
+        ("--title", format!("babysit {job_id}")),
+    ] {
+        if let Some(at) = argv[..argv.len() - 1].iter().position(|a| a == flag) {
+            argv[at + 1] = value;
+        }
+    }
+    let has = |a: &str| argv.iter().any(|x| x == a);
+    if basename(&argv[0]) == "paseo"
+        && has("--new-workspace")
+        && !has("--worktree-slug")
+        && has("run")
+    {
+        let at = argv.iter().position(|a| a == "run").unwrap() + 1;
+        argv.splice(
+            at..at,
+            ["--worktree-slug".to_string(), format!("babysit-{job_id}")],
+        );
+    }
+    argv
+}
+
+/// Why pickup on this host may not act on project, or None when it may.
+fn pickup_reason(
+    io: &mut Io,
+    home: &Path,
+    project: &str,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    device: &str,
+    dry: bool,
+) -> Res<Option<String>> {
+    if !has_checkout(paths, Some(project)) {
+        return Ok(Some("no checkout on this host".into()));
+    }
+    let s = cached_settings(
+        io,
+        home,
+        project,
+        lookup(paths, project).unwrap(),
+        settings,
+        device,
+        dry,
+    )?;
+    Ok(settings_reason(&s, device))
+}
+
+/// The agents' status from this host's Paseo daemon, or None when paseo can't answer.
+fn paseo_statuses() -> Option<Vec<(Value, Value)>> {
+    #[cfg(test)]
+    if let Some(f) = fake!(paseo_statuses) {
+        return f();
+    }
+    let exe = which("paseo")?.to_string_lossy().into_owned();
+    let home = std::env::var("PASEO_HOME").unwrap_or_default();
+    let mut argv = vec![exe.as_str(), "ls", "-a", "-g", "--json"];
+    if !home.is_empty() {
+        argv.extend(["--home", home.as_str()]);
+    }
+    let r = capture(&argv, None, &[], Some(Duration::from_secs(20))).ok()?;
+    let agents = loads(&r.stdout).ok().filter(|_| r.code == 0)?;
+    Some(
+        agents
+            .as_array()?
+            .iter()
+            .filter(|a| a.is_object())
+            .map(|a| {
+                (
+                    a.get("id").cloned().unwrap_or(Value::Null),
+                    a.get("status").cloned().unwrap_or(Value::Null),
+                )
+            })
+            .collect(),
+    )
+}
+
+/// An agent's status in a statuses list; Python's dict keeps the last of a repeated id.
+fn status_of(statuses: &[(Value, Value)], agent: &str) -> Option<String> {
+    statuses
+        .iter()
+        .rev()
+        .find(|(id, _)| id.as_str() == Some(agent))
+        .and_then(|(_, s)| (!s.is_null()).then(|| text_of(Some(s))))
+}
+
+/// True when paseo inspect lists pending permission requests for agent, False when it lists
+/// none, None when the answer is anything else.
+fn awaits_permission(agent: &str) -> Option<bool> {
+    #[cfg(test)]
+    if let Some(f) = fake!(awaits_permission) {
+        return f(agent);
+    }
+    let (code, out) = paseo_run(&["inspect", agent, "--json"]);
+    if code != 0 {
+        return None;
+    }
+    let pending = loads(&out)
+        .ok()?
+        .as_object()?
+        .get("PendingPermissions")?
+        .clone();
+    pending.as_array().map(|p| !p.is_empty())
+}
+
+/// Send one message to a Paseo agent without waiting for its turn. True when paseo accepted it.
+fn paseo_send(agent: &str, message: &str) -> bool {
+    #[cfg(test)]
+    if let Some(f) = fake!(paseo_send) {
+        return f(agent, message);
+    }
+    let Some(exe) = which("paseo") else {
+        return false;
+    };
+    let exe = exe.to_string_lossy().into_owned();
+    let home = std::env::var("PASEO_HOME").unwrap_or_default();
+    let mut argv = vec![exe.as_str(), "send", "--no-wait"];
+    if !home.is_empty() {
+        argv.extend(["--home", home.as_str()]);
+    }
+    argv.extend([agent, message]);
+    capture(&argv, None, &[], Some(Duration::from_secs(20))).is_ok_and(|o| o.code == 0)
+}
+
+/// The babysit row for a babysit sent to the job's own Paseo agent.
+fn sent_row(job: &Value, tag: &str) -> Value {
+    let link = json!({"server": job["paseo"]["server"], "agent": job["paseo"]["agent"]});
+    let prior = job
+        .get("agents")
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.iter().rev().find(|r| r.get("paseo") == Some(&link)));
+    let mut row = json!({"role": "babysit"});
+    for k in ["harness", "model", "effort"] {
+        if let Some(v) = prior.and_then(|p| p.get(k)).filter(|v| v.is_string()) {
+            row[k] = v.clone();
+        }
+    }
+    row["via"] = "paseo".into();
+    row["session"] = tag.into();
+    row["paseo"] = link;
+    row
+}
+
+/// The PASEO_AGENT_ID of the session pickup itself runs in, if any.
+fn own_agent() -> Option<String> {
+    std::env::var("PASEO_AGENT_ID").ok()
+}
+
+fn paseo_agent(j: &Value) -> Option<String> {
+    get_str(j.get("paseo")?, "agent")
+        .filter(|a| PASEO_ID.is_full(a) && !a.starts_with('-'))
+        .map(String::from)
+}
+
+/// Run at most one /factory babysit for a job the dashboard handed to one: in the job's own
+/// Paseo agent when it has one, else in a new session.
+#[allow(clippy::too_many_arguments)]
+fn babysit_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+) -> Res<()> {
+    let mut statuses: Option<Option<Vec<(Value, Value)>>> = None;
+    let mut job_agent = |j: &Value| -> (Option<String>, Option<String>) {
+        let Some(agent) = paseo_agent(j) else {
+            return (None, None);
+        };
+        let same = match (j["paseo"].get("server"), paseo_server()) {
+            (None | Some(Value::Null), None) => true,
+            (Some(Value::String(s)), Some(here)) => *s == here,
+            _ => false,
+        };
+        if !same {
+            return (Some(agent), Some("foreign".into()));
+        }
+        let known = statuses.get_or_insert_with(paseo_statuses);
+        let state = match known {
+            None => Some("unanswered".into()),
+            Some(list) => status_of(list, &agent),
+        };
+        (Some(agent), state)
+    };
+    let launch = |io: &mut Io, j: &Value, tag: &str, route: &Option<Route>| -> Res<()> {
+        let id = get_str(j, "id").unwrap();
+        let Some(route) = route else {
+            errln!(
+                io,
+                "factory.py: pickup could not launch babysit {id}: no available route"
+            );
+            release_pickup_claim(home, id, device, tag)?;
+            return Ok(());
+        };
+        let template = route_launcher(home, route)?;
+        let project = get_str(j, "project").unwrap();
+        let entry = Entry {
+            id: id.into(),
+            project: project.into(),
+            repo_path: lookup(paths, project).unwrap().into(),
+            session: tag.into(),
+        };
+        let given = Given::new(
+            &entry,
+            route_values(route),
+            launch_prompt(&format!("/factory babysit {id} --session {tag}")),
+        );
+        let argv = babysit_argv(launcher_argv(&template, &given), id);
+        let env = launch_env(&given, &route.provider, &route.model);
+        let (ok, detail, log_path) = launch_idea(home, &entry, &route.name, &argv, &env)?;
+        if ok {
+            outln!(
+                io,
+                "launched babysit {id} {project} on {} session {tag}",
+                route.name
+            );
+            let mut row = launch_row(&given, &argv, tag);
+            row["role"] = "babysit".into();
+            record_launch(io, home, id, row);
+        } else {
+            let mut release = || release_pickup_claim(home, id, device, tag);
+            launch_failed(
+                io,
+                home,
+                &route.name,
+                id,
+                &detail.unwrap_or_default(),
+                &log_path,
+                &mut release,
+                false,
+                false,
+                None,
+            )?;
+        }
+        Ok(())
+    };
+    let jobs: Vec<Value> = jobs_of(data)
+        .iter()
+        .filter(|j| babysit_due(j))
+        .cloned()
+        .collect();
+    let mut ready = false;
+    for j in &jobs {
+        let id = get_str(j, "id").unwrap();
+        let project_text = text_of(j.get("project"));
+        let mut line;
+        match get_str(j, "project").filter(|p| !p.is_empty()) {
+            None => line = Some(format!("skip babysit {id}: no project")),
+            Some(project) => {
+                let head = format!("skip babysit {id} {project}");
+                if gated(j) {
+                    line = Some(format!("{head}: waiting on a human"));
+                } else if paused(j) {
+                    line = Some(format!("{head}: paused"));
+                } else if closing(j) {
+                    line = Some(format!("{head}: closing"));
+                } else if let Some(c) = blocking(j, device, "", minutes) {
+                    line = Some(format!("{head}: {}", claimed_by(&c)));
+                } else {
+                    let (agent, state) = job_agent(j);
+                    let agent = agent.unwrap_or_default();
+                    line = match state.as_deref() {
+                        Some("foreign") => Some(format!(
+                            "{head}: agent {agent} lives on server {}",
+                            text_of(j["paseo"].get("server"))
+                        )),
+                        Some("unanswered") => Some(format!("{head}: paseo ls failed")),
+                        None | Some("idle") | Some("closed") => {
+                            pickup_reason(io, home, project, paths, settings, device, dry)?
+                                .map(|r| format!("{head}: {r}"))
+                        }
+                        Some(other) => Some(format!("{head}: agent {agent} is {other}")),
+                    };
+                }
+            }
+        }
+        if line.is_none() && ready {
+            line = Some(format!(
+                "wait babysit {id} {project_text}: one babysit launch per run"
+            ));
+        } else if line.is_none() {
+            let (agent, state) = job_agent(j);
+            let agent = agent.unwrap_or_default();
+            let waits = if state.as_deref() == Some("idle") {
+                awaits_permission(&agent)
+            } else {
+                Some(false)
+            };
+            if waits != Some(false) {
+                let why = if waits == Some(true) {
+                    "waits at a permission dialog"
+                } else {
+                    "permission state unknown"
+                };
+                outln!(io, "skip babysit {id} {project_text}: agent {agent} {why}");
+                continue;
+            }
+            ready = true;
+            let route = pick_route(home)?;
+            if matches!(state.as_deref(), Some("idle") | Some("closed")) {
+                if dry {
+                    line = Some(format!(
+                        "would send babysit {id} {project_text} to agent {agent}"
+                    ));
+                } else {
+                    let Some(tag) = claim_babysit(home, id, device, minutes, paths)? else {
+                        return Ok(());
+                    };
+                    if paseo_send(
+                        &agent,
+                        &launch_prompt(&format!("/factory babysit {id} --session {tag}")),
+                    ) {
+                        outln!(
+                            io,
+                            "sent babysit {id} {project_text} to agent {agent} session {tag}"
+                        );
+                        record_launch(io, home, id, sent_row(j, &tag));
+                        return Ok(());
+                    }
+                    if state.as_deref() == Some("idle") {
+                        errln!(io, "factory.py: pickup could not send babysit {id} to agent {agent}: paseo send failed; the next run retries");
+                        release_pickup_claim(home, id, device, &tag)?;
+                        return Ok(());
+                    }
+                    errln!(io, "factory.py: pickup could not send babysit {id} to agent {agent}: paseo send failed; launching a new session");
+                    return launch(io, j, &tag, &route);
+                }
+            } else if route.is_none() && !dry {
+                return Ok(());
+            } else if route.is_none() {
+                line = Some(no_route_line(home)?);
+            } else if dry {
+                let route = route.as_ref().unwrap();
+                let project = get_str(j, "project").unwrap();
+                let entry = Entry {
+                    id: id.into(),
+                    project: project.into(),
+                    repo_path: lookup(paths, project).unwrap().into(),
+                    session: "<session>".into(),
+                };
+                let given = Given::new(
+                    &entry,
+                    route_values(route),
+                    launch_prompt(&format!("/factory babysit {id} --session <session>")),
+                );
+                let argv = babysit_argv(launcher_argv(&route_launcher(home, route)?, &given), id);
+                line = Some(format!(
+                    "would launch babysit {id} {project} on {}: {}",
+                    route.name,
+                    shlex_join(&argv)
+                ));
+            } else {
+                let Some(tag) = claim_babysit(home, id, device, minutes, paths)? else {
+                    return Ok(());
+                };
+                return launch(io, j, &tag, &route);
+            }
+        }
+        if dry {
+            outln!(io, "{}", line.unwrap());
+        }
+    }
+    Ok(())
+}
+
+/// Archive the Paseo sessions of, and stop the worktree of, each job the dashboard moved away
+/// from this host, and record it. Only when the project's pickup is on and lists this host.
+#[allow(clippy::too_many_arguments)]
+fn move_stop_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+    adapter: Option<&[String]>,
+) -> Res<()> {
+    for i in 0..jobs_of(data).len() {
+        let j = data["jobs"][i].clone();
+        let m = j.get("move");
+        let mine: Vec<Value> = queued_stops(m)
+            .into_iter()
+            .filter(|x| get_str(x, "from") == Some(device))
+            .cloned()
+            .collect();
+        let (Some(job_id), Some(project)) = (
+            safe_id(&j),
+            get_str(&j, "project").filter(|p| SLUG.is_full(p)),
+        ) else {
+            continue;
+        };
+        if mine.is_empty() {
+            continue;
+        }
+        let m = m.unwrap();
+        let to = get_str(m, "to");
+        let line = if to == Some(device) {
+            format!("{job_id} {project}: rerun on {device}")
+        } else {
+            format!("{job_id} {project}: moved to {}", text_of(m.get("to")))
+        };
+        if let Some(reason) = pickup_reason(io, home, project, paths, settings, device, dry)? {
+            if dry {
+                outln!(io, "skip stop {job_id} {project}: {reason}");
+            } else {
+                errln!(
+                    io,
+                    "factory.py: pickup skips the stop of {job_id} {project}: {reason}"
+                );
+            }
+            continue;
+        }
+        let (mut archives, mut kept, mut refused): (Vec<String>, Vec<String>, Vec<String>) =
+            Default::default();
+        let server = paseo_server();
+        for x in &mine {
+            let agent = get_str(x, "agent").filter(|a| !a.is_empty());
+            let same_server = server.is_some() && get_str(x, "server").map(String::from) == server;
+            let (Some(agent), true, true) = (
+                agent,
+                adapter.is_some() && same_server,
+                own_agent().as_deref() != agent,
+            ) else {
+                continue;
+            };
+            let list = if !ADAPTER_ID.is_full(agent) {
+                &mut refused
+            } else if paseo_claimed(home, job_id, agent) {
+                &mut archives
+            } else {
+                &mut kept
+            };
+            if !list.iter().any(|a| a == agent) {
+                list.push(agent.to_string());
+            }
+        }
+        let names = archives.join(", ");
+        let noun = if archives.len() > 1 {
+            "sessions"
+        } else {
+            "session"
+        };
+        if dry {
+            if archives.is_empty() {
+                outln!(io, "would stop {line}");
+            } else {
+                outln!(io, "would archive {noun} {names} and stop {line}");
+            }
+            continue;
+        }
+        let mut failure = None;
+        for a in &archives {
+            let why = match adapter_run(adapter.unwrap(), &["archive", a, "--force"]) {
+                Ok(p) if p.code != 0 => Some(format!("exit {}", p.code)),
+                Ok(_) => None,
+                Err(e) if e.kind() == io::ErrorKind::TimedOut => Some("timed out".into()),
+                Err(e) => Some(os_error(&e, Some(Path::new(&adapter.unwrap()[0])))),
+            };
+            if let Some(why) = why {
+                failure = Some((a.clone(), why));
+                break;
+            }
+        }
+        if home.join("worktrees").join(project).join(job_id).exists() {
+            return Err(deferred("worktree stop"));
+        }
+        if let Some((agent, why)) = failure {
+            errln!(
+                io,
+                "factory.py: pickup could not archive session {agent} of {job_id}: {why}"
+            );
+            continue;
+        }
+        let ats: Vec<Option<Value>> = mine.iter().map(|x| x.get("at").cloned()).collect();
+        let done = cas(home, "/api/board", |text| {
+            let mut board = load_board(text)?;
+            let Some(at) = job_index(&board, job_id) else {
+                return Ok((None, false));
+            };
+            let stamp = now();
+            let mut hit = false;
+            let job = &mut board["jobs"][at];
+            let Some(m) = job.get_mut("move").filter(|m| m.is_object()) else {
+                return Ok((None, false));
+            };
+            let mut stop = |x: &mut Value| {
+                if x.is_object()
+                    && truthy(x.get("from"))
+                    && !move_stopped(x)
+                    && get_str(x, "from") == Some(device)
+                    && ats.contains(&x.get("at").cloned())
+                {
+                    x["stopped"] = stamp.clone().into();
+                    if get_str(x, "agent").is_some_and(|a| archives.iter().any(|b| b == a)) {
+                        x["archived"] = stamp.clone().into();
+                    }
+                    hit = true;
+                }
+            };
+            if let Some(earlier) = m.get_mut("earlier").and_then(Value::as_array_mut) {
+                earlier.iter_mut().for_each(&mut stop);
+            }
+            stop(m);
+            if !hit {
+                return Ok((None, false));
+            }
+            patch_job(&mut board, job_id, &json!({}));
+            Ok((Some(dump_board(&board)), true))
+        })?;
+        if done {
+            for a in &archives {
+                forget_paseo_claim(home, job_id, a);
+            }
+            let stamp = now();
+            if let Some(m) = data["jobs"][i].get_mut("move") {
+                let mut stop = |x: &mut Value| {
+                    if x.is_object()
+                        && truthy(x.get("from"))
+                        && !move_stopped(x)
+                        && get_str(x, "from") == Some(device)
+                    {
+                        x["stopped"] = stamp.clone().into();
+                    }
+                };
+                if let Some(earlier) = m.get_mut("earlier").and_then(Value::as_array_mut) {
+                    earlier.iter_mut().for_each(&mut stop);
+                }
+                stop(m);
+            }
+            if archives.is_empty() {
+                outln!(io, "stopped {line}");
+            } else {
+                outln!(io, "archived {noun} {names} and stopped {line}");
+            }
+            for a in &kept {
+                errln!(io, "factory.py: pickup kept session {a} of {job_id}: no claim recorded on this host, archive it by hand if it still runs{}", paseo_archive_tail(a));
+            }
+            for a in &refused {
+                let shown = if PASEO_ID.is_full(a) {
+                    a.clone()
+                } else {
+                    ascii(&a.chars().take(64).collect::<String>())
+                };
+                errln!(io, "factory.py: pickup skipped archive of session {shown} of {job_id}: not an id the stall adapter accepts, archive it by hand if it still runs{}", paseo_archive_tail(a));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Python's `ascii(s)`: repr with every non-ASCII character escaped.
+fn ascii(s: &str) -> String {
+    let r = repr(s);
+    let mut out = String::new();
+    for c in r.chars() {
+        match c as u32 {
+            0..=0x7f => out.push(c),
+            n @ 0x80..=0xff => out.push_str(&format!("\\x{n:02x}")),
+            n @ 0x100..=0xffff => out.push_str(&format!("\\u{n:04x}")),
+            n => out.push_str(&format!("\\U{n:08x}")),
+        }
+    }
+    out
+}
+
+/// (board key, why) when the dashboard closed or paused this job and its session should stop.
+fn session_stop_reason(j: &Value, cutoff: &str) -> Option<(&'static str, &'static str)> {
+    let stage = get_str(j, "stage");
+    let terminal = stage.is_some_and(|s| TERMINAL.contains(&s));
+    if closing(j) && !terminal {
+        return Some(("close", "the job is closing"));
+    }
+    let closed = j.get("close").and_then(|c| get_str(c, "closed"));
+    if stage == Some("closed") && closed.is_some_and(|c| c >= cutoff) {
+        return Some(("close", "the job is closed"));
+    }
+    if paused(j) && !terminal {
+        return Some(("paused", "the job is paused"));
+    }
+    None
+}
+
+/// Stop this host's linked Paseo agent of each job the dashboard closed or paused, once per host.
+fn session_stop_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    dry: bool,
+) -> Res<()> {
+    let server = paseo_server();
+    let cutoff = format_stamp(unix_now() - SESSION_STOP_CLOSED_HOURS * 3600);
+    let stopped_here = |entry: Option<&Value>| {
+        entry
+            .and_then(|e| e.get("session_stop"))
+            .is_some_and(|s| s.as_object().is_some_and(|s| s.contains_key(device)))
+    };
+    let due = |j: &Value| {
+        let Some((key, _)) = session_stop_reason(j, &cutoff) else {
+            return false;
+        };
+        let link = j.get("paseo").filter(|l| l.is_object());
+        let c = j.get("claim");
+        server.is_some()
+            && link.is_some_and(|l| get_str(l, "server").map(String::from) == server)
+            && paseo_agent(j).is_some_and(|a| Some(&a) != own_agent().as_ref())
+            && c.is_none_or(|c| c.is_null() || get_str(c, "device") == Some(device))
+            && lead_of(j).is_none()
+            && !stopped_here(j.get(key))
+            && safe_id(j).is_some()
+            && get_str(j, "project").is_some_and(|p| SLUG.is_full(p))
+    };
+    let due_ids: Vec<usize> = (0..jobs_of(data).len())
+        .filter(|&i| due(&data["jobs"][i]))
+        .collect();
+    if due_ids.is_empty() {
+        return Ok(());
+    }
+    let Some(statuses) = paseo_statuses() else {
+        errln!(
+            io,
+            "factory.py: pickup skips session stops: paseo did not answer"
+        );
+        return Ok(());
+    };
+    for i in due_ids {
+        let j = data["jobs"][i].clone();
+        let (job_id, project, agent) = (
+            get_str(&j, "id").unwrap(),
+            get_str(&j, "project").unwrap(),
+            paseo_agent(&j).unwrap(),
+        );
+        let (key, why) = session_stop_reason(&j, &cutoff).unwrap();
+        if matches!(
+            status_of(&statuses, &agent).as_deref(),
+            None | Some("closed")
+        ) {
+            continue;
+        }
+        let line = format!("session {agent} of {job_id} {project}: {why}");
+        if dry {
+            outln!(io, "would stop {line}");
+            continue;
+        }
+        if paseo_run(&["stop", &agent]).0 != 0 {
+            errln!(
+                io,
+                "factory.py: pickup could not stop agent {agent} of {job_id}: paseo stop failed"
+            );
+            continue;
+        }
+        let at = j[key].get("at").cloned();
+        let done = cas(home, "/api/board", |text| {
+            let mut board = load_board(text)?;
+            let Some(b) = job_index(&board, job_id) else {
+                return Ok((None, false));
+            };
+            let found = &board["jobs"][b];
+            let entry = found.get(key).filter(|e| e.is_object());
+            if entry.is_none_or(|e| e.get("at").cloned() != at) || stopped_here(entry) {
+                return Ok((None, false));
+            }
+            let mut patch = json!({key: {"session_stop": {device: {"agent": agent, "at": now()}}}});
+            if key == "close"
+                && found.get("claim").and_then(|c| get_str(c, "device")) == Some(device)
+                && found["claim"].is_object()
+            {
+                patch["claim"] = Value::Null;
+            }
+            patch_job(&mut board, job_id, &patch);
+            Ok((Some(dump_board(&board)), true))
+        })?;
+        if done {
+            if key == "close" {
+                data["jobs"][i]
+                    .as_object_mut()
+                    .unwrap()
+                    .shift_remove("claim");
+            }
+            outln!(io, "stopped {line}");
+        }
+    }
+    Ok(())
+}
+
+/// The queued close's reason when it is one line of 1 to 200 characters, else None.
+fn close_reason(j: &Value) -> Option<String> {
+    let r = j
+        .get("close")
+        .and_then(|c| get_str(c, "reason"))
+        .map(strip)
+        .unwrap_or("");
+    CLOSE_REASON.is_full(r).then(|| r.to_string())
+}
+
+/// Hosts the board records as holding the job: its claim and each move's from, sorted.
+fn recorded_holders(j: &Value) -> Vec<String> {
+    let mut found: Vec<&Value> = Vec::new();
+    if let Some(c) = j.get("claim").filter(|c| c.is_object()) {
+        found.extend(c.get("device"));
+    }
+    if let Some(m) = j.get("move").filter(|m| m.is_object()) {
+        let mut all = earlier_moves(m);
+        all.push(m);
+        found.extend(all.into_iter().filter_map(|x| x.get("from")));
+    }
+    let mut hosts: Vec<String> = found
+        .into_iter()
+        .filter_map(Value::as_str)
+        .filter(|h| HOST_NAME.is_full(h))
+        .map(String::from)
+        .collect();
+    hosts.sort();
+    hosts.dedup();
+    hosts
+}
+
+/// The stacked riders of lead_id that still have a PR.
+fn open_stacked(data: &Value, lead_id: &str) -> Vec<String> {
+    riders_of(data, lead_id)
+        .into_iter()
+        .filter_map(|id| {
+            jobs_of(data)
+                .iter()
+                .find(|j| get_str(j, "id") == Some(id.as_str()))
+        })
+        .filter(|r| {
+            r.get("stacked") == Some(&Value::Bool(true))
+                && get_str(r, "pr").is_some_and(|p| !p.is_empty())
+                && get_str(r, "project").is_some_and(|p| SLUG.is_full(p))
+                && !get_str(r, "stage").is_some_and(|s| TERMINAL.contains(&s))
+        })
+        .map(|r| get_str(r, "pr").unwrap().to_string())
+        .collect()
+}
+
+/// decision.md for a job closed from the dashboard or by a GitHub close.
+fn close_decision(
+    j: &Value,
+    reason: &str,
+    device: &str,
+    earlier: Option<&str>,
+    outcome: bool,
+    pickup: &Settings,
+) -> String {
+    let at = text_of(j["close"].get("at"));
+    let stage = text_of(j.get("stage"));
+    let pr = text_of(j.get("pr"));
+    let holders = recorded_holders(j);
+    let uncovered: Vec<&String> = holders.iter().filter(|h| !pickup.lists(h)).collect();
+    let (project, id) = (text_of(j.get("project")), text_of(j.get("id")));
+    let task = format!("`factory.py cleanup {project}/{id}`");
+    let quoted = |hosts: &[&String]| {
+        hosts
+            .iter()
+            .map(|h| format!("`{h}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let manual = if let (false, Some(unread)) = (holders.is_empty(), &pickup.reason) {
+        let all: Vec<&String> = holders.iter().collect();
+        format!("- The board records {} as holding this job, but {device} could not read the project's pickup hosts: {unread}. Run {task} by hand on each of those hosts that pickup does not cover.\n", quoted(&all))
+    } else if !uncovered.is_empty() {
+        let one = uncovered.len() == 1;
+        let them = if one { "it" } else { "them" };
+        let state = if pickup.enabled == Some(false) {
+            "is off".to_string()
+        } else {
+            format!("does not list {them}")
+        };
+        format!("- {} {task} run by hand: {}. The board records {them} as holding this job, and the project's pickup {state}.\n", if one { "Host that needs" } else { "Hosts that need" }, quoted(&uncovered))
+    } else {
+        String::new()
+    };
+    let github = get_str(&j["close"], "via") == Some("github");
+    let (summary, requested, unreviewed) = if github {
+        (
+            format!("GitHub reported pull request {pr} closed without merging, so factory.py pickup closed the job at {at} while at stage `{stage}`."),
+            format!("GitHub reported the pull request closed. Pickup queued the close at {at}."),
+            "No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` ref if the work is still wanted.".to_string(),
+        )
+    } else {
+        (
+            format!("Closed from the dashboard at {at} while at stage `{stage}`. The owner's reason: {reason}."),
+            format!("Close requested from the dashboard at {at}."),
+            "No agent reviewed this close. The reason is the owner's own words.".to_string(),
+        )
+    };
+    let round = j.get("round").map_or("0".to_string(), |r| text_of(Some(r)));
+    let branch = get_str(j, "branch")
+        .filter(|b| !b.is_empty())
+        .unwrap_or("none");
+    let shown_pr = if outcome {
+        format!("{pr}, already closed")
+    } else {
+        "none".into()
+    };
+    let text = format!("CLOSED: {reason}\n\n**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- {requested}\n- Stage when closed: `{stage}`, round {round}.\n- Branch: `{branch}`.\n- Pull request: {shown_pr}.\n- Written by factory.py pickup on {device}.\n\n## Left out\n\n- {unreviewed}\n- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup {project}/{id}` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup {project}/{id}` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n{manual}");
+    match earlier {
+        Some(e) if !e.is_empty() => format!("{text}\n## Earlier decision\n\n{e}"),
+        _ => text,
+    }
+}
+
+/// Close each job the dashboard queued a close for: decision.md first, then the stage.
+fn close_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    minutes: u32,
+    dry: bool,
+) -> Res<()> {
+    let mut configs: Cache = HashMap::new();
+    for i in 0..jobs_of(data).len() {
+        let j = data["jobs"][i].clone();
+        let terminal = get_str(&j, "stage").is_some_and(|s| TERMINAL.contains(&s));
+        let (Some(job_id), Some(project)) = (
+            safe_id(&j),
+            get_str(&j, "project").filter(|p| SLUG.is_full(p)),
+        ) else {
+            continue;
+        };
+        if !closing(&j) || terminal {
+            continue;
+        }
+        let Some(reason) = close_reason(&j) else {
+            errln!(io, "factory.py: pickup skips the close of {job_id}: its reason must be 1 to 200 characters, with no line breaks or control characters");
+            continue;
+        };
+        if let Some(c) = blocking(&j, device, "", minutes) {
+            if dry {
+                outln!(io, "skip close {job_id} {project}: {}", claimed_by(&c));
+            }
+            continue;
+        }
+        let pr = get_str(&j, "pr").filter(|p| !p.is_empty());
+        let stacked = open_stacked(data, job_id);
+        if dry {
+            let mut line = format!("would close {job_id} {project}");
+            if let Some(pr) = pr {
+                line += &format!(" and pull request {pr}");
+            }
+            for r in &stacked {
+                line += &format!(" and stacked pull request {r}");
+            }
+            outln!(io, "{line}");
+            continue;
+        }
+        let github = get_str(&j["close"], "via") == Some("github");
+        if pr.is_some() && !github || !stacked.is_empty() {
+            return Err(deferred("PR close"));
+        }
+        if !configs.contains_key(project) {
+            configs.insert(project.to_string(), pickup_config(home, project)?);
+        }
+        let config = configs[project].clone();
+        cas(
+            home,
+            &format!("/api/jobs/{project}/{job_id}/decision.md"),
+            |text| {
+                if text.is_some_and(|t| t.starts_with("CLOSED:")) {
+                    return Ok((None, ()));
+                }
+                Ok((
+                    Some(close_decision(&j, &reason, device, text, github, &config)),
+                    (),
+                ))
+            },
+        )?;
+        let at = j["close"].get("at").cloned();
+        let done = cas(home, "/api/board", |text| {
+            let mut board = load_board(text)?;
+            let Some(b) = job_index(&board, job_id) else {
+                return Ok((None, false));
+            };
+            let found = &board["jobs"][b];
+            if !closing(found)
+                || found["close"].get("at").cloned() != at
+                || get_str(found, "stage").is_some_and(|s| TERMINAL.contains(&s))
+                || blocking(found, device, "", minutes).is_some()
+            {
+                return Ok((None, false));
+            }
+            board["jobs"][b]
+                .as_object_mut()
+                .unwrap()
+                .shift_remove("claim");
+            patch_job(
+                &mut board,
+                job_id,
+                &json!({"stage": "closed", "note": reason, "needs": null, "close": {"closed": now()}}),
+            );
+            Ok((Some(dump_board(&board)), true))
+        })?;
+        if done {
+            outln!(io, "closed {job_id} {project}");
+        }
+    }
+    Ok(())
+}
+
+/// Run cleanup once per host on each closed or merged job whose worktree or branch this host
+/// still holds. Cleanup itself waits on the worktree slice.
+#[allow(clippy::too_many_arguments)]
+fn close_cleanup_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+) -> Res<()> {
+    for j in jobs_of(data).to_vec() {
+        let stage = get_str(&j, "stage");
+        let (key, field) = if stage == Some("merged") {
+            ("github", "merged")
+        } else {
+            ("close", "closed")
+        };
+        let c = j.get(key).filter(|c| c.is_object());
+        let (Some(job_id), Some(project), Some(_)) = (
+            safe_id(&j),
+            get_str(&j, "project").filter(|p| SLUG.is_full(p)),
+            c.and_then(|c| get_str(c, field)),
+        ) else {
+            continue;
+        };
+        if !stage.is_some_and(|s| TERMINAL.contains(&s)) {
+            continue;
+        }
+        let cleaned = c
+            .unwrap()
+            .get("cleanup")
+            .and_then(Value::as_object)
+            .is_some_and(|d| d.contains_key(device));
+        if cleaned || !has_checkout(paths, Some(project)) {
+            continue;
+        }
+        let repo = Path::new(lookup(paths, project).unwrap());
+        let wt = home.join("worktrees").join(project).join(job_id);
+        let branch = format!("refs/heads/factory/{job_id}");
+        if !wt.exists() && git(repo, &["rev-parse", "--verify", "-q", &branch]).is_empty() {
+            continue;
+        }
+        if let Some(reason) = pickup_reason(io, home, project, paths, settings, device, dry)? {
+            if dry {
+                outln!(io, "skip cleanup {job_id} {project}: {reason}");
+            }
+            continue;
+        }
+        if dry {
+            outln!(io, "would clean up {job_id} {project}");
+            continue;
+        }
+        return Err(deferred("close cleanup"));
+    }
+    Ok(())
+}
+
+/// The jobs dict of <home>/idle-watch.json, {} when the file is missing or malformed.
+fn read_idle_watch(home: &Path) -> Map<String, Value> {
+    read_json(&home.join("idle-watch.json"))
+        .filter(|d| d.is_object() && eq_int(d.get("version"), 1))
+        .and_then(|d| d.get("jobs").and_then(Value::as_object).cloned())
+        .unwrap_or_default()
+}
+
+/// Nudge the live Paseo agent of each job prioritized after its session was claimed, once.
+fn priority_nudge_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    dry: bool,
+) -> Res<()> {
+    let _ = device;
+    let server = paseo_server();
+    let due = |j: &Value| {
+        let stage = get_str(j, "stage");
+        let p = j.get("priority");
+        let since = j
+            .get("claim")
+            .filter(|c| c.is_object())
+            .and_then(|c| get_str(c, "since"));
+        prioritized(j)
+            && p.is_some_and(|p| p.get("nudged").is_none())
+            && (stage == Some(IDEA) || stage.is_some_and(|s| IN_FLIGHT.contains(&s)))
+            && !gated(j)
+            && !paused(j)
+            && !closing(j)
+            && safe_id(j).is_some()
+            && server.is_some()
+            && j.get("paseo")
+                .filter(|l| l.is_object())
+                .and_then(|l| get_str(l, "server"))
+                .map(String::from)
+                == server
+            && since.is_some_and(|s| get_str(&j["priority"], "at").unwrap() > s)
+    };
+    let jobs: Vec<Value> = jobs_of(data).iter().filter(|j| due(j)).cloned().collect();
+    if jobs.is_empty() {
+        return Ok(());
+    }
+    let Some(statuses) = paseo_statuses() else {
+        errln!(
+            io,
+            "factory.py: pickup skips priority nudges: paseo did not answer"
+        );
+        return Ok(());
+    };
+    for j in &jobs {
+        let job_id = get_str(j, "id").unwrap();
+        let agent_value = j["paseo"].get("agent");
+        let agent = text_of(agent_value);
+        let status = agent_value
+            .and_then(Value::as_str)
+            .and_then(|a| status_of(&statuses, a));
+        if matches!(status.as_deref(), None | Some("closed")) {
+            if dry {
+                outln!(
+                    io,
+                    "skip nudge {job_id}: agent {agent} is {}",
+                    status.as_deref().unwrap_or("missing")
+                );
+            }
+            continue;
+        }
+        let line = format!("{job_id} {}: agent {agent}", text_of(j.get("project")));
+        let waits = awaits_permission(&agent);
+        if waits != Some(false) {
+            let why = if waits == Some(true) {
+                "waits at a permission dialog"
+            } else {
+                "permission state unknown"
+            };
+            outln!(io, "skip nudge {line} {why}");
+            continue;
+        }
+        if dry {
+            outln!(io, "would nudge {line}");
+            continue;
+        }
+        if !paseo_send(&agent, &PRIORITY_NUDGE.replace("{id}", job_id)) {
+            errln!(
+                io,
+                "factory.py: pickup could not nudge {job_id}: paseo send failed"
+            );
+            continue;
+        }
+        let at = j["priority"]["at"].clone();
+        let done = cas(home, "/api/board", |text| {
+            let mut board = load_board(text)?;
+            let p =
+                job_index(&board, job_id).and_then(|b| board["jobs"][b].get("priority").cloned());
+            if !p.as_ref().is_some_and(|p| {
+                p.is_object() && p.get("at") == Some(&at) && p.get("nudged").is_none()
+            }) {
+                return Ok((None, false));
+            }
+            patch_job(&mut board, job_id, &json!({"priority": {"nudged": now()}}));
+            Ok((Some(dump_board(&board)), true))
+        })?;
+        if done {
+            outln!(io, "nudged {line}");
+        }
+    }
+    Ok(())
+}
+
+/// The job when it is in flight, claimed on this host and still its own: the idle and token checks.
+fn claimed_here(j: &Value, device: &str) -> bool {
+    get_str(j, "stage").is_some_and(|s| IN_FLIGHT.contains(&s))
+        && j.get("claim")
+            .filter(|c| c.is_object())
+            .and_then(|c| get_str(c, "device"))
+            == Some(device)
+        && safe_id(j).is_some()
+        && get_str(j, "project").is_some_and(|p| SLUG.is_full(p))
+}
+
+/// Nudge the idle Paseo agent of an in-flight job claimed on this host once its worktree and
+/// board job sit unchanged for IDLE_NUDGE_MINUTES, and move it to needs-human when they stay
+/// unchanged that long again.
+fn idle_watch_pass(io: &mut Io, home: &Path, data: &mut Value, device: &str, dry: bool) -> Res<()> {
+    let server = paseo_server();
+    let due = |j: &Value| {
+        claimed_here(j, device)
+            && server.is_some()
+            && j.get("paseo")
+                .filter(|l| l.is_object())
+                .and_then(|l| get_str(l, "server"))
+                .map(String::from)
+                == server
+            && !gated(j)
+            && !paused(j)
+            && !closing(j)
+            && lead_of(j).is_none()
+    };
+    let old = read_idle_watch(home);
+    let mut watch = Map::new();
+    let jobs: Vec<Value> = jobs_of(data).iter().filter(|j| due(j)).cloned().collect();
+    let statuses = if jobs.is_empty() {
+        Some(Vec::new())
+    } else {
+        paseo_statuses()
+    };
+    let Some(statuses) = statuses else {
+        errln!(
+            io,
+            "factory.py: pickup skips idle checks: paseo did not answer"
+        );
+        return Ok(());
+    };
+    let cutoff = format_stamp(unix_now() - IDLE_NUDGE_MINUTES * 60);
+    for j in &jobs {
+        let (job_id, project) = (get_str(j, "id").unwrap(), get_str(j, "project").unwrap());
+        let agent_value = j["paseo"].get("agent").cloned().unwrap_or(Value::Null);
+        let agent = text_of(Some(&agent_value));
+        let prev = old
+            .get(job_id)
+            .filter(|p| p.is_object())
+            .cloned()
+            .unwrap_or(json!({}));
+        let idle = agent_value
+            .as_str()
+            .and_then(|a| status_of(&statuses, a))
+            .as_deref()
+            == Some("idle");
+        if !idle {
+            if prev.as_object().is_some_and(|p| !p.is_empty()) {
+                watch.insert(job_id.into(), prev);
+            }
+            continue;
+        }
+        let wt = home.join("worktrees").join(project).join(job_id);
+        let there = wt.exists();
+        let (head, tree) = if there {
+            let status = git(&wt, &["status", "--porcelain"]);
+            (
+                git(&wt, &["rev-parse", "HEAD"]),
+                crate::shared::project::sha(status.as_bytes())[..12].to_string(),
+            )
+        } else {
+            (String::new(), String::new())
+        };
+        let sig =
+            json!({"agent": agent_value, "head": head, "tree": tree, "updated": j.get("updated")});
+        let changed = sig
+            .as_object()
+            .unwrap()
+            .iter()
+            .any(|(k, v)| prev.get(k).unwrap_or(&Value::Null) != v);
+        if changed || !prev.get("since").is_some_and(Value::is_string) {
+            let mut entry = sig;
+            entry["since"] = now().into();
+            watch.insert(job_id.into(), entry);
+            continue;
+        }
+        let mut entry = prev.clone();
+        let line = format!("{job_id} {project}: agent {agent}");
+        if entry.get("nudged").is_none() {
+            if get_str(&entry, "since").unwrap() >= cutoff.as_str() {
+                watch.insert(job_id.into(), entry);
+                continue;
+            }
+            let waits = awaits_permission(&agent);
+            if waits != Some(false) {
+                let why = if waits == Some(true) {
+                    "waits at a permission dialog"
+                } else {
+                    "permission state unknown"
+                };
+                outln!(io, "skip idle nudge {line} {why}");
+                if waits == Some(true) && entry.get("surfaced").is_none() {
+                    let note = PERMISSION_NOTE
+                        .replace("{agent}", &agent)
+                        .replace("{minutes}", &IDLE_NUDGE_MINUTES.to_string());
+                    if dry {
+                        outln!(io, "would surface {job_id} {project}: {note}");
+                        watch.insert(job_id.into(), entry);
+                        continue;
+                    }
+                    let stage = j.get("stage").cloned();
+                    let updated = cas(home, "/api/board", |text| {
+                        let mut board = load_board(text)?;
+                        let Some(b) = job_index(&board, job_id) else {
+                            return Ok((None, None));
+                        };
+                        let found = &board["jobs"][b];
+                        if found.get("stage").cloned() != stage
+                            || found
+                                .get("claim")
+                                .filter(|c| c.is_object())
+                                .and_then(|c| get_str(c, "device"))
+                                != Some(device)
+                        {
+                            return Ok((None, None));
+                        }
+                        if get_str(found, "note") == Some(note.as_str()) {
+                            return Ok((None, found.get("updated").cloned()));
+                        }
+                        let row = patch_job(&mut board, job_id, &json!({"note": note}));
+                        Ok((Some(dump_board(&board)), row.get("updated").cloned()))
+                    })?;
+                    if let Some(updated) = updated.filter(|u| truthy(Some(u))) {
+                        entry["surfaced"] = now().into();
+                        entry["updated"] = updated;
+                        outln!(io, "surfaced {job_id} {project}: {note}");
+                    }
+                }
+            } else if dry {
+                outln!(io, "would nudge idle {line}");
+            } else if !paseo_send(&agent, &IDLE_NUDGE.replace("{id}", job_id)) {
+                errln!(
+                    io,
+                    "factory.py: pickup could not nudge idle {job_id}: paseo send failed"
+                );
+            } else {
+                entry["nudged"] = now().into();
+                outln!(io, "nudged idle {line}");
+            }
+            watch.insert(job_id.into(), entry);
+            continue;
+        }
+        watch.insert(job_id.into(), entry.clone());
+        if !get_str(&entry, "nudged").is_some_and(|n| n < cutoff.as_str()) {
+            continue;
+        }
+        let note = format!(
+            "idle: no progress {IDLE_NUDGE_MINUTES} minutes after a nudge to agent {agent}"
+        );
+        if dry {
+            outln!(io, "would move needs-human {job_id} {project}: {note}");
+            continue;
+        }
+        let (stage, updated) = (j.get("stage").cloned(), j.get("updated").cloned());
+        let done = cas(home, "/api/board", |text| {
+            let mut board = load_board(text)?;
+            let Some(b) = job_index(&board, job_id) else {
+                return Ok((None, false));
+            };
+            let found = &board["jobs"][b];
+            if found.get("stage").cloned() != stage
+                || found.get("updated").cloned() != updated
+                || found
+                    .get("claim")
+                    .filter(|c| c.is_object())
+                    .and_then(|c| get_str(c, "device"))
+                    != Some(device)
+            {
+                return Ok((None, false));
+            }
+            patch_job(
+                &mut board,
+                job_id,
+                &json!({"stage": "needs-human", "note": note, "claim": null}),
+            );
+            Ok((Some(dump_board(&board)), true))
+        })?;
+        if done {
+            outln!(io, "needs-human {job_id} {project}: {note}");
+        }
+        watch.shift_remove(job_id);
+    }
+    if !dry && watch != old {
+        write_file(
+            &home.join("idle-watch.json"),
+            &(dumps(&json!({"version": 1, "jobs": watch}), INDENT2) + "\n"),
+        )?;
+    }
+    Ok(())
+}
+
+/// {"transcripts": n, "models": {model: {kind: tokens}}} summed over the job's transcripts here.
+fn usage_totals(io: &mut Io, home: &Path, slug: &str, job_id: &str) -> Result<Value, String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(usage_totals) {
+        return f(home, slug, job_id);
+    }
+    let mut totals: BTreeMap<String, [i64; 4]> = BTreeMap::new();
+    let mut read = 0;
+    for (path, main) in usage_transcripts(home, slug, job_id) {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let Ok((models, bad)) = usage_scan(&path, main, None) else {
+            errln!(io, "factory.py: usage: cannot read {name}");
+            continue;
+        };
+        read += 1;
+        if bad > 0 {
+            errln!(
+                io,
+                "factory.py: usage: {bad} unreadable line{} in {name}",
+                if bad == 1 { "" } else { "s" }
+            );
+        }
+        for (model, counts) in models {
+            let total = totals.entry(model).or_default();
+            for (k, (kind, _)) in USAGE_TOKENS.iter().enumerate() {
+                total[k] += int_of(counts.get(*kind)).unwrap_or(0);
+            }
+        }
+    }
+    let models: Map<String, Value> = totals
+        .iter()
+        .map(|(m, c)| (m.clone(), counts_value(c)))
+        .collect();
+    Ok(json!({"transcripts": read, "models": models}))
+}
+
+/// Warn once when an in-flight job claimed on this host passes TOKEN_WARN_PERCENT of config.md's
+/// job_token_cap, and park it at needs-human and stop its Paseo agent when it reaches the cap.
+fn token_cap_pass(io: &mut Io, home: &Path, data: &mut Value, device: &str, dry: bool) -> Res<()> {
+    let Some(cap) = token_cap(io, home, "job_token_cap")? else {
+        return Ok(());
+    };
+    let jobs: Vec<Value> = jobs_of(data)
+        .iter()
+        .filter(|j| claimed_here(j, device) && !closing(j))
+        .cloned()
+        .collect();
+    for j in &jobs {
+        let (job_id, project) = (get_str(j, "id").unwrap(), get_str(j, "project").unwrap());
+        let fresh = match usage_totals(io, home, project, job_id) {
+            Ok(fresh) => fresh,
+            Err(kind) => {
+                errln!(
+                    io,
+                    "factory.py: pickup skips the token cap of {job_id}: scan failed ({kind})"
+                );
+                continue;
+            }
+        };
+        let others: i64 = j
+            .get("tokens")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+            .filter(|(host, e)| *host != device && e.get("models").is_some_and(Value::is_object))
+            .map(|(_, e)| token_count(&e["models"]))
+            .sum();
+        let total = token_count(&fresh["models"]) + others;
+        let state = j
+            .get("token_cap")
+            .filter(|s| s.is_object())
+            .cloned()
+            .unwrap_or(json!({}));
+        let base = int_of(state.get("base")).unwrap_or(0);
+        let used = total - base;
+        let park = used >= cap;
+        let (patch, line, dry_line);
+        if park {
+            let note = format!(
+                "tokens: {} reached the {} job cap on {device}; a resumed session gets another {}",
+                commas(used),
+                commas(cap),
+                commas(cap)
+            );
+            patch = json!({"stage": "needs-human", "note": note, "claim": null, "token_cap": {"base": total, "warned": null}});
+            line = format!("needs-human {job_id} {project}: {note}");
+            dry_line = format!("would move {line}");
+        } else if used * 100 >= cap * TOKEN_WARN_PERCENT && state.get("warned").is_none() {
+            let note = format!(
+                "tokens: {} of the {} job cap ({}%) on {device}",
+                commas(used),
+                commas(cap),
+                (used * 100).div_euclid(cap)
+            );
+            patch = json!({"note": note, "token_cap": {"base": base, "warned": now()}});
+            line = format!("token warning {job_id} {project}: {note}");
+            dry_line = format!("would warn tokens {job_id} {project}: {note}");
+        } else {
+            continue;
+        }
+        if dry {
+            outln!(io, "{dry_line}");
+            continue;
+        }
+        let stage = j.get("stage").cloned();
+        let done = cas(home, "/api/board", |text| {
+            let mut board = load_board(text)?;
+            let Some(b) = job_index(&board, job_id) else {
+                return Ok((None, false));
+            };
+            let found = &board["jobs"][b];
+            if found.get("stage").cloned() != stage
+                || found
+                    .get("claim")
+                    .filter(|c| c.is_object())
+                    .and_then(|c| get_str(c, "device"))
+                    != Some(device)
+            {
+                return Ok((None, false));
+            }
+            patch_job(&mut board, job_id, &patch);
+            let found = &mut board["jobs"][b];
+            let mut tokens = found
+                .get("tokens")
+                .filter(|t| t.is_object())
+                .cloned()
+                .unwrap_or(json!({}));
+            let mut entry = json!({"at": found["updated"]});
+            for (k, v) in fresh.as_object().unwrap() {
+                entry[k] = v.clone();
+            }
+            tokens[device] = entry;
+            found["tokens"] = tokens;
+            Ok((Some(dump_board(&board)), true))
+        })?;
+        if !done {
+            continue;
+        }
+        outln!(io, "{line}");
+        let link = j.get("paseo").filter(|l| l.is_object());
+        let server = paseo_server();
+        if park
+            && server.is_some()
+            && link.and_then(|l| get_str(l, "server")).map(String::from) == server
+        {
+            if let Some(agent) = paseo_agent(j) {
+                if paseo_run(&["stop", &agent]).0 != 0 {
+                    errln!(io, "factory.py: pickup could not stop agent {agent} of {job_id}: paseo stop failed");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The PR URL parts of a job pickup may sync: pr-open or needs-human, not closing, not a rider.
+fn sync_match(j: &Value) -> Option<(String, String)> {
+    let stage = get_str(j, "stage")?;
+    if !SYNC_STAGES.contains(&stage)
+        || closing(j)
+        || lead_of(j).is_some()
+        || safe_id(j).is_none()
+        || !get_str(j, "project").is_some_and(|p| SLUG.is_full(p))
+    {
+        return None;
+    }
+    let m = GH_PR_PARTS.fullmatch(get_str(j, "pr")?)?;
+    Some((
+        format!("{}/{}", &m[1], &m[2]).to_lowercase(),
+        m[3].to_string(),
+    ))
+}
+
+/// The project file's repo, cached per project.
+fn project_repo(home: &Path, project: &str, repos: &mut HashMap<String, String>) -> Res<String> {
+    if !repos.contains_key(project) {
+        let md = project_files(home, project)?.0;
+        let repo = lookup(&meta(&md)?, "repo").unwrap_or("").to_string();
+        repos.insert(project.to_string(), repo);
+    }
+    Ok(repos[project].to_lowercase())
+}
+
+/// Move each pr-open or needs-human job GitHub reports merged to merged, and queue a close for
+/// each it reports closed. Reading the PR states waits on the checks slice.
+#[allow(clippy::too_many_arguments)]
+fn pr_sync_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+) -> Res<()> {
+    let mut repos = HashMap::new();
+    let mut groups: Vec<(String, usize)> = Vec::new();
+    for j in jobs_of(data).to_vec() {
+        let Some((repo, _)) = sync_match(&j) else {
+            continue;
+        };
+        let (job_id, project) = (get_str(&j, "id").unwrap(), get_str(&j, "project").unwrap());
+        if let Some(c) = blocking(&j, device, "", minutes) {
+            if dry {
+                outln!(io, "skip sync {job_id} {project}: {}", claimed_by(&c));
+            }
+            continue;
+        }
+        if project_repo(home, project, &mut repos)? != repo {
+            continue;
+        }
+        if let Some(reason) = pickup_reason(io, home, project, paths, settings, device, dry)? {
+            if dry {
+                outln!(io, "skip sync {job_id} {project}: {reason}");
+            }
+            continue;
+        }
+        match groups.iter_mut().find(|(r, _)| *r == repo) {
+            Some(slot) => slot.1 += 1,
+            None => groups.push((repo, 1)),
+        }
+    }
+    if let Some((repo, n)) = groups.first() {
+        if *n > PR_SYNC_LIMIT {
+            errln!(
+                io,
+                "factory.py: pickup syncs the first {PR_SYNC_LIMIT} of {n} pull requests in {repo}"
+            );
+        }
+        return Err(deferred("PR state sync"));
+    }
+    Ok(())
+}
+
+/// The project file's auto_babysit as an int from 1 to 9, else 0.
+fn auto_babysit_cap(home: &Path, slug: &str) -> Res<i64> {
+    let md = project_files(home, slug)?.0;
+    let value = lookup(&meta(&md)?, "auto_babysit")
+        .unwrap_or("")
+        .to_string();
+    Ok(if AUTO_BABYSIT.is_full(&value) {
+        value.parse().unwrap()
+    } else {
+        0
+    })
+}
+
+/// True when the project's effective pipeline has a Babysit stage note.
+fn babysit_noted(home: &Path, slug: &str) -> Res<bool> {
+    let notes = view_field(home, slug, "stage_notes")?;
+    Ok(notes
+        .and_then(|n| n.get("babysit").cloned())
+        .and_then(|b| b.as_array().map(|b| !b.is_empty()))
+        .unwrap_or(false))
+}
+
+/// The PR URL parts of a pr-open job pickup may babysit on its own, else None.
+fn auto_babysit_match(j: &Value) -> Option<(String, String)> {
+    if get_str(j, "stage") != Some("pr-open")
+        || safe_id(j).is_none()
+        || !get_str(j, "project").is_some_and(|p| SLUG.is_full(p))
+        || babysitting(j)
+        || gated(j)
+        || paused(j)
+        || closing(j)
+        || escalated(j)
+        || lead_of(j).is_some()
+    {
+        return None;
+    }
+    let m = GH_PR_PARTS.fullmatch(get_str(j, "pr")?)?;
+    Some((
+        format!("{}/{}", &m[1], &m[2]).to_lowercase(),
+        m[3].to_string(),
+    ))
+}
+
+/// The count of the job's automatic babysits so far.
+fn auto_babysit_record(j: &Value) -> i64 {
+    j.get("auto_babysit")
+        .filter(|a| a.is_object())
+        .and_then(|a| int_of(a.get("count")))
+        .unwrap_or(0)
+}
+
+/// Set babysit on each pr-open job whose PR needs it, in projects whose project file sets
+/// auto_babysit. Reading the PR signals waits on the checks slice.
+#[allow(clippy::too_many_arguments)]
+fn auto_babysit_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    minutes: u32,
+    paths: &[(String, String)],
+    settings: &mut Cache,
+    dry: bool,
+) -> Res<()> {
+    #[cfg(test)]
+    if let Some(f) = fake!(auto_babysit_pass) {
+        return f(io, home);
+    }
+    let (mut caps, mut repos, mut noted) = (HashMap::new(), HashMap::new(), HashMap::new());
+    let mut groups: Vec<(String, usize)> = Vec::new();
+    for j in jobs_of(data).to_vec() {
+        let Some((repo, _)) = auto_babysit_match(&j) else {
+            continue;
+        };
+        let (job_id, project) = (get_str(&j, "id").unwrap(), get_str(&j, "project").unwrap());
+        if !caps.contains_key(project) {
+            caps.insert(project.to_string(), auto_babysit_cap(home, project)?);
+        }
+        let cap = caps[project];
+        if cap == 0 {
+            continue;
+        }
+        let head = format!("skip auto-babysit {job_id} {project}");
+        if let Some(c) = blocking(&j, device, "", minutes) {
+            if dry {
+                outln!(io, "{head}: {}", claimed_by(&c));
+            }
+            continue;
+        }
+        if project_repo(home, project, &mut repos)? != repo {
+            continue;
+        }
+        if let Some(reason) = pickup_reason(io, home, project, paths, settings, device, dry)? {
+            if dry {
+                outln!(io, "{head}: {reason}");
+            }
+            continue;
+        }
+        if !noted.contains_key(project) {
+            noted.insert(project.to_string(), babysit_noted(home, project)?);
+        }
+        if !noted[project] {
+            if dry {
+                outln!(io, "{head}: no Babysit note");
+            }
+            continue;
+        }
+        if auto_babysit_record(&j) >= cap {
+            if dry {
+                outln!(io, "{head}: {cap} of {cap} automatic babysits used");
+            }
+            continue;
+        }
+        match groups.iter_mut().find(|(r, _)| *r == repo) {
+            Some(slot) => slot.1 += 1,
+            None => groups.push((repo, 1)),
+        }
+    }
+    if let Some((repo, n)) = groups.first() {
+        let limit = auto_babysit_limit();
+        if *n > limit {
+            errln!(io, "factory.py: pickup checks {limit} of {n} auto-babysit candidates for {repo} this run, oldest automatic babysit first");
+        }
+        return Err(deferred("auto-babysit PR signals"));
+    }
+    Ok(())
+}
+
+/// internal when review-plan skipped ux and ui in the first round, visible otherwise, None with no rounds.
+fn job_class(job: &Value) -> Option<&'static str> {
+    let first = job.get("rounds")?.as_array()?.first()?.as_object()?;
+    let skipped = first.get("ux") == first.get("ui")
+        && first.get("ui").and_then(Value::as_str) == Some("SKIPPED");
+    Some(if skipped { "internal" } else { "visible" })
+}
+
+/// The board's well-formed {"<slug>/<class>": "<UTC time>"} restores.
+fn autonomy_restored(data: &Value) -> Map<String, Value> {
+    let restored = data
+        .get("autonomy")
+        .filter(|r| r.is_object())
+        .and_then(|r| r.get("restored"))
+        .and_then(Value::as_object);
+    restored
+        .into_iter()
+        .flatten()
+        .filter(|(k, v)| {
+            k.matches('/').count() == 1
+                && k.split_once('/').is_some_and(|(slug, cls)| {
+                    SLUG.is_full(slug) && AUTONOMY_CLASSES.contains(&cls)
+                })
+                && stamp_of(Some(v)).is_some()
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
+/// {(project, class): sorted reverted job ids} for each class with a revert after its last restore.
+fn autonomy_holds(data: &Value) -> Vec<((String, &'static str), Vec<String>)> {
+    let cutoff = unix_now() - AUTONOMY_DAYS * 86_400;
+    let restored = autonomy_restored(data);
+    let mut holds: Vec<((String, &'static str), Vec<String>)> = Vec::new();
+    for j in jobs_of(data) {
+        let (Some(project), Some(cls)) = (
+            get_str(j, "project").filter(|p| !p.is_empty()),
+            job_class(j),
+        ) else {
+            continue;
+        };
+        let outcome = j.get("outcome").filter(|o| o.is_object());
+        let recent = stamp_of(j.get("done")).is_none_or(|d| d > cutoff);
+        if get_str(j, "stage") != Some("merged")
+            || !recent
+            || outcome.and_then(|o| get_str(o, "result")) != Some("reverted")
+        {
+            continue;
+        }
+        let lifted = stamp_of(restored.get(&format!("{project}/{cls}")));
+        let at = stamp_of(outcome.unwrap().get("at"));
+        if lifted.is_some_and(|l| !at.is_some_and(|a| a > l)) {
+            continue;
+        }
+        let key = (project.to_string(), cls);
+        let id = text_of(j.get("id"));
+        match holds.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, ids)) => ids.push(id),
+            None => holds.push((key, vec![id])),
+        }
+    }
+    for (_, ids) in &mut holds {
+        ids.sort();
+    }
+    holds
+}
+
+/// Why earned autonomy holds the job's project and class from an agent merge, or None.
+fn autonomy_hold(data: &Value, job: &Value) -> Option<String> {
+    let (project, cls) = (get_str(job, "project")?, job_class(job)?);
+    let holds = autonomy_holds(data);
+    let (_, held) = holds.iter().find(|((p, c), _)| p == project && *c == cls)?;
+    Some(format!("earned autonomy holds {project} {cls} PRs after reverted {}; a person lifts it with factory.py autonomy restore {project} {cls}", held.join(", ")))
+}
+
+/// Set automerge false and needs on a held pr-open job. The needs line, or None with no write.
+fn autonomy_hold_write(home: &Path, job_id: &str) -> Res<Option<String>> {
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(job) = jobs_of(&data)
+            .iter()
+            .find(|j| get_str(j, "id") == Some(job_id))
+            .cloned()
+        else {
+            return Ok((None, None));
+        };
+        let held = get_str(&job, "stage") == Some("pr-open")
+            && job.get("automerge") == Some(&Value::Bool(true))
+            && !escalated(&job);
+        let why = if held {
+            autonomy_hold(&data, &job)
+        } else {
+            None
+        };
+        let number = get_str(&job, "pr")
+            .and_then(|p| GH_PR_PARTS.fullmatch(p))
+            .map(|m| m[3].to_string());
+        let (Some(why), Some(number)) = (why, number) else {
+            return Ok((None, None));
+        };
+        let needs = format!("review and merge PR #{number}: {why}");
+        patch_job(
+            &mut data,
+            job_id,
+            &json!({"automerge": false, "needs": needs, "note": AUTONOMY_HOLD_NOTE}),
+        );
+        Ok((Some(dump_board(&data)), Some(needs)))
+    })
+}
+
+/// Hold each automerging pr-open job whose project and class earned autonomy holds after a revert.
+fn autonomy_hold_pass(io: &mut Io, home: &Path, data: &mut Value, dry: bool) -> Res<()> {
+    let holds = autonomy_holds(data);
+    if holds.is_empty() {
+        return Ok(());
+    }
+    for i in 0..jobs_of(data).len() {
+        let j = &data["jobs"][i];
+        let number = get_str(j, "pr")
+            .and_then(|p| GH_PR_PARTS.fullmatch(p))
+            .map(|m| m[3].to_string());
+        let key = (get_str(j, "project").unwrap_or_default(), job_class(j));
+        let held = holds
+            .iter()
+            .any(|((p, c), _)| key.0 == p && key.1 == Some(*c));
+        let (Some(number), Some(job_id), true) = (
+            number,
+            get_str(j, "id").map(String::from),
+            get_str(j, "stage") == Some("pr-open")
+                && j.get("automerge") == Some(&Value::Bool(true))
+                && !escalated(j)
+                && held,
+        ) else {
+            continue;
+        };
+        let line = format!(
+            "{job_id} {} PR #{number} for a person",
+            text_of(j.get("project"))
+        );
+        if dry {
+            outln!(io, "would hold {line}");
+            continue;
+        }
+        if let Some(needs) = autonomy_hold_write(home, &job_id)? {
+            let j = &mut data["jobs"][i];
+            j["automerge"] = false.into();
+            j["needs"] = needs.into();
+            j["note"] = AUTONOMY_HOLD_NOTE.into();
+            outln!(io, "held {line}");
+        }
+    }
     Ok(())
 }
 
