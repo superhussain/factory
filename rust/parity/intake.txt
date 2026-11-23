@@ -1,0 +1,21 @@
+# Case ids the factory binary must pass for the intake commands.
+intake/halt-*
+intake/inbox-counts-jobs-and-backlog-lines
+intake/inbox-missing-backlog-counts-as-empty
+intake/inbox-api-failure-exits-5
+intake/inbox-jobs-need-a-string-id-and-default-to-empty-text
+intake/inbox-rows-are-cut-*
+# intake/inbox-a-lone-surrogate-in-a-title-is-dropped stays out: serde_json refuses lone surrogates (README, Known divergences).
+intake/unclaim-*
+intake/deny-notes-*
+intake/idea-files-*
+intake/idea-images-*
+intake/needs-*
+intake/control-*
+intake/autonomy-*
+intake/suggest-*
+intake/triage-*
+intake/stuck-*
+intake/ideas-*
+intake/next-*
+intake/backlog-*

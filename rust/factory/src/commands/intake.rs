@@ -5874,6 +5874,114 @@ mod tests {
     }
 
     #[test]
+    fn inference_helpers() {
+        assert_eq!(
+            record_decider(&json!({"decider": "model", "by": "wsl"})),
+            "model"
+        );
+        assert_eq!(record_decider(&json!({"by": "triage"})), "model");
+        assert_eq!(record_decider(&json!({"by": "wsl"})), "person");
+        assert_eq!(record_decider(&json!({})), "person");
+        assert_eq!(
+            verdict_decider(&json!({"decider": "rule", "confidence": 80})),
+            "rule"
+        );
+        assert_eq!(
+            verdict_decider(&json!({"confidence": null, "reason": "x"})),
+            "rule"
+        );
+        assert_eq!(
+            verdict_decider(
+                &json!({"confidence": 64, "reason": "it asks questions a person must answer"})
+            ),
+            "rule"
+        );
+        assert_eq!(
+            verdict_decider(&json!({"confidence": 72, "reason": "x"})),
+            "model"
+        );
+    }
+
+    #[test]
+    fn backlog_key_hashes_the_line() {
+        assert_eq!(
+            backlog_key(
+                "- [ ] factory: Add CSV export to the board (sub-job-of 204-factory-backlog-cards)"
+            ),
+            "85abcd967ecb"
+        );
+        assert_eq!(
+            backlog_key("- [ ] factory: Café menu on the board"),
+            "f3b20e9cae86"
+        );
+    }
+
+    #[test]
+    fn error_example_is_a_valid_context() {
+        let example = BACKLOG_CONTEXT_EXAMPLE.split_once('\n').unwrap().1;
+        assert_eq!(backlog_context_error(example), None);
+    }
+
+    #[test]
+    fn idea_limit_counts_utf16_units() {
+        let idea = idea_with_context("a", Some(&"\u{1F600}".repeat(2100)), "b");
+        assert_eq!(
+            idea,
+            format!(
+                "a\n\nContext from the backlog:\n{}\n[context cut to fit the 4000-character idea limit]b",
+                "\u{1F600}".repeat(1959)
+            )
+        );
+        assert_eq!(utf16_len(&idea), 3999);
+        assert_eq!(
+            idea_with_context("a", Some(&"x".repeat(4000)), &"b".repeat(3950)),
+            format!("a{}", "b".repeat(3950))
+        );
+        assert_eq!(idea_with_context("a", None, "b"), "ab");
+    }
+
+    #[test]
+    fn questions_count_utf16_units() {
+        let context = |reasons: &str, header: &str| {
+            format!("Recommend: approve\n{reasons}\n\n## Question: {header}\nHow should the alias be guarded?\nPick: one\n- Interactive only (recommended): Alias ls only in interactive shells\n- Drop the alias: Remove it\n")
+        };
+        assert!(backlog_questions(&context("Guard it.", &"\u{1F600}".repeat(31))).is_empty());
+        assert!(
+            backlog_questions(&context(&"\u{1F600}".repeat(2990), "Guard the ls alias")).is_empty()
+        );
+        let found = backlog_questions(&context(&"a".repeat(2990), "Guard the ls alias"));
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            (
+                found[0].header.as_str(),
+                found[0].pick.as_str(),
+                found[0].labels.clone()
+            ),
+            (
+                "Guard the ls alias",
+                "one",
+                vec!["Interactive only".to_string(), "Drop the alias".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn suffix_guard_is_ascii() {
+        assert!(BACKLOG_SUFFIX.search("Add (rework-of 001-x)").is_some());
+        assert!(BACKLOG_SUFFIX
+            .search("Add (rework-of 001-\u{e9})")
+            .is_none());
+    }
+
+    #[test]
+    fn suffix_takes_depends_on() {
+        assert_eq!(
+            suffix_refs("sample: Add CSV button (depends-on 201-sample-csv-api)"),
+            vec![json!({"id": "201-sample-csv-api", "kind": "depends-on"})]
+        );
+    }
+
+    #[test]
     fn empty_board() {
         assert_eq!(inbox_count(&[], ""), 0);
     }
