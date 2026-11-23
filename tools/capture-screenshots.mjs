@@ -3,8 +3,8 @@
 // fixtures style, frozen clock, request guard) with an owned ephemeral loopback port, light
 // theme, and no reference page. Never part of CI: run manually with
 // `node tools/capture-screenshots.mjs` to rewrite docs/screenshots/{board,idea-entry,
-// project-settings,inbox,notifications,retros-red-flags,retros-spend,retros-spend-phone,
-// settings-notifications,settings-display,settings-hosts,settings-pipeline,board-phone,
+// project-settings,inbox,notifications,retros-red-flags,retros-red-flags-phone,retros-spend,
+// retros-spend-phone,settings-notifications,settings-display,settings-hosts,settings-pipeline,board-phone,
 // idea-attachment}.png.
 import { readFileSync } from "node:fs";
 import { mkdir, rm, stat, writeFile } from "node:fs/promises";
@@ -332,6 +332,19 @@ async function capture() {
           ),
       );
     });
+    await view(
+      "retros-red-flags-phone",
+      async (page) => {
+        await go(page, "#/retros");
+        await page.waitForSelector("#audit-flags-wrap:not([hidden])");
+        await page.evaluate(() =>
+          document
+            .querySelector("#audit-flags-rows tr:nth-child(2)")
+            .scrollIntoView({ block: "start" }),
+        );
+      },
+      { width: 390, height: 844 },
+    );
     for (const [name, viewport] of [
       ["retros-spend", undefined],
       ["retros-spend-phone", { width: 390, height: 844 }],
