@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "doctor/extra",
+      "argv": ["doctor", "extra"],
+      "home": null,
+      "stubs": {}
+    }
+  ]
+}

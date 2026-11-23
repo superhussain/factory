@@ -1,0 +1,1123 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "bench/score",
+      "from": "tests/cli/test_bench.py BenchScoreTest.test_running_example",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/cases.json",
+        "{home}/bench/opus-medium",
+        "{home}/bench/sonnet-low"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "bench/score-reversed",
+      "from": "tests/cli/test_bench.py BenchScoreTest.test_arms_print_in_argument_order",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/cases.json",
+        "{home}/bench/sonnet-low",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "bench/matching",
+      "from": "tests/cli/test_bench.py BenchScoreTest.test_matching_rows",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/one-case.json",
+        "{home}/bench/match-0",
+        "{home}/bench/match-1",
+        "{home}/bench/match-2",
+        "{home}/bench/match-3",
+        "{home}/bench/match-4",
+        "{home}/bench/match-5"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "bench/missing-case",
+      "from": "tests/cli/test_bench.py BenchScoreTest.test_missing_case_folder_misses_every_defect",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/cases.json",
+        "{home}/bench/partial"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "bench/bad-run",
+      "from": "tests/cli/test_bench.py BenchScoreTest.test_invalid_run_json_counts_as_no_run",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/cases.json",
+        "{home}/bench/run-text",
+        "{home}/bench/run-inf",
+        "{home}/bench/run-nan"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "bench/review-folder",
+      "from": "tests/cli/test_bench.py BenchScoreTest.test_review_folder_is_skipped",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/cases.json",
+        "{home}/bench/review-dir"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "bench/usage-none",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_wrong_args",
+      "argv": ["--home", "{home}", "bench"],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/usage-score",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_wrong_args",
+      "argv": ["--home", "{home}", "bench", "score"],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/usage-score-one",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_wrong_args",
+      "argv": ["--home", "{home}", "bench", "score", "{home}/bench/cases.json"],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/usage-rank",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_wrong_args",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "rank",
+        "{home}/bench/cases.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/no-cases-file",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_no_cases_file",
+      "argv": ["--home", "{home}", "bench", "score", "{home}/bench/absent.json", "{home}/bench"],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 4
+    },
+    {
+      "id": "bench/not-cases-1",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_not_a_cases_file",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/not-cases-1.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/not-cases-2",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_not_a_cases_file",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/not-cases-2.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/not-cases-3",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_not_a_cases_file",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/not-cases-3.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/not-cases-4",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_not_a_cases_file",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/not-cases-4.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/not-cases-5",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_not_a_cases_file",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/not-cases-5.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-01",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/01.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-02",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/02.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-03",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/03.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-04",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/04.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-05",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/05.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-06",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/06.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-07",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/07.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-08",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/08.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-09",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/09.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-10",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/10.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-11",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/11.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-12",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/12.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-13",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/13.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-14",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/14.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-15",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/15.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-16",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/16.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-17",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/17.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-18",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/18.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/reason-19",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_case_reasons",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/reasons/19.json",
+        "{home}/bench/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/no-arm",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_no_arm_folder",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/cases.json",
+        "{home}/bench/opus-medium",
+        "{home}/bench/absent"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 4
+    },
+    {
+      "id": "bench/arm-space",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_bad_arm_names",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/cases.json",
+        "{home}/bench/opus-medium",
+        "{home}/bench/odd name"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/arm-dup",
+      "from": "tests/cli/test_bench.py BenchErrorTest.test_bad_arm_names",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "score",
+        "{home}/bench/cases.json",
+        "{home}/bench/opus-medium",
+        "{home}/bench/other/opus-medium"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-args-1",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_bad_args",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/replay-arm"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-args-2",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_bad_args",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/replay-arm",
+        "--role"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-args-3",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_bad_args",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/replay-arm",
+        "--model",
+        "claude-opus-5-5"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-args-4",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_bad_args",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "review-code",
+        "--role",
+        "review-code"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-args-5",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_bad_args",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "review-code",
+        "--effort",
+        "high"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-args-6",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_bad_args",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "review-code",
+        "extra"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-one-arg",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_bad_args",
+      "argv": ["--home", "{home}", "bench", "replay", "{home}/bench/replay-cases.json"],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-role",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_role_not_a_reviewer",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "build"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-model-space",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_bad_model",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "review-code",
+        "--model",
+        "claude opus"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-model-empty",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_bad_model",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "review-code",
+        "--model",
+        ""
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-model-long",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_bad_model",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "review-code",
+        "--model",
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-arm-name",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_arm_name",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/odd name",
+        "--role",
+        "review-code"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-arm-file",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_arm_path_is_a_file",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/replay-cases.json",
+        "{home}/bench/arm-file",
+        "--role",
+        "review-code"
+      ],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/replay-plan-1",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_no_job_folder",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/plan-1.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "review-code"
+      ],
+      "home": "audit-bench",
+      "stubs": {}
+    },
+    {
+      "id": "bench/replay-plan-2",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_two_job_folders",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/plan-2.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "review-code"
+      ],
+      "home": "audit-bench",
+      "stubs": {}
+    },
+    {
+      "id": "bench/replay-plan-3",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_repo_mismatch",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/plan-3.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "review-code"
+      ],
+      "home": "audit-bench",
+      "stubs": {}
+    },
+    {
+      "id": "bench/replay-plan-4",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_project_without_repo",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/plan-4.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "review-code"
+      ],
+      "home": "audit-bench",
+      "stubs": {}
+    },
+    {
+      "id": "bench/replay-plan-5",
+      "from": "tests/cli/test_bench.py BenchReplayErrorTest.test_no_checkout",
+      "argv": [
+        "--home",
+        "{home}",
+        "bench",
+        "replay",
+        "{home}/bench/plan-5.json",
+        "{home}/bench/replay-arm",
+        "--role",
+        "review-code"
+      ],
+      "home": "audit-bench",
+      "stubs": {}
+    },
+    {
+      "id": "bench/cases-none",
+      "from": "tests/cli/test_bench.py BenchDraftTest.test_errors",
+      "argv": ["--home", "{home}", "bench", "cases", "alpha"],
+      "home": "audit-bench",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1020-add-w",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/20",
+                "outcome": {
+                  "result": "reworked",
+                  "at": "2026-01-09T12:00:00Z",
+                  "evidence": []
+                }
+              },
+              {
+                "id": "1017-add-x",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/17",
+                "outcome": {
+                  "result": "held",
+                  "at": "2026-01-09T12:00:00Z",
+                  "evidence": []
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 3
+    },
+    {
+      "id": "bench/cases-no-slug",
+      "from": "tests/cli/test_bench.py BenchDraftTest.test_errors",
+      "argv": ["--home", "{home}", "bench", "cases"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/cases-two",
+      "from": "tests/cli/test_bench.py BenchDraftTest.test_errors",
+      "argv": ["--home", "{home}", "bench", "cases", "alpha", "beta"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/cases-bad-slug",
+      "from": "tests/cli/test_bench.py BenchDraftTest.test_errors",
+      "argv": ["--home", "{home}", "bench", "cases", "al pha"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "bench/cases-no-project",
+      "from": "tests/cli/test_bench.py BenchDraftTest.test_errors",
+      "argv": ["--home", "{home}", "bench", "cases", "beta"],
+      "home": "audit-bench",
+      "stubs": {},
+      "exit": 4
+    },
+    {
+      "id": "bench/cases-drafts-heads",
+      "argv": ["--home", "{home}", "bench", "cases", "alpha"],
+      "home": "audit-bench",
+      "stubs": {
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"example\", name: \"alpha\") { p8: pullRequest(number: 8) { state headRefOid } p9: pullRequest(number: 9) { state headRefOid } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p8\": {\"state\": \"MERGED\", \"headRefOid\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"p9\": {\"state\": \"MERGED\", \"headRefOid\": \"not-a-sha\"}}}}",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1018-add-y",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/8",
+                "outcome": { "result": "reworked", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              },
+              {
+                "id": "1019-add-z",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/9",
+                "outcome": { "result": "reverted", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              },
+              {
+                "id": "1020-add-w",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/20",
+                "outcome": { "result": "reworked", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              },
+              {
+                "id": "1017-add-x",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/7",
+                "outcome": { "result": "held", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "bench/cases-gh-fails",
+      "argv": ["--home", "{home}", "bench", "cases", "alpha"],
+      "home": "audit-bench",
+      "stubs": {
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"example\", name: \"alpha\") { p8: pullRequest(number: 8) { state headRefOid } p9: pullRequest(number: 9) { state headRefOid } } }"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1018-add-y",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/8",
+                "outcome": { "result": "reworked", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              },
+              {
+                "id": "1019-add-z",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/9",
+                "outcome": { "result": "reverted", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              },
+              {
+                "id": "1020-add-w",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/20",
+                "outcome": { "result": "reworked", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              },
+              {
+                "id": "1017-add-x",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/7",
+                "outcome": { "result": "held", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 5
+    },
+    {
+      "id": "bench/cases-no-heads",
+      "argv": ["--home", "{home}", "bench", "cases", "alpha"],
+      "home": "audit-bench",
+      "stubs": {
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"example\", name: \"alpha\") { p8: pullRequest(number: 8) { state headRefOid } p9: pullRequest(number: 9) { state headRefOid } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p8\": null, \"p9\": null}}}",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1018-add-y",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/8",
+                "outcome": { "result": "reworked", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              },
+              {
+                "id": "1019-add-z",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/9",
+                "outcome": { "result": "reverted", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              },
+              {
+                "id": "1020-add-w",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/20",
+                "outcome": { "result": "reworked", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              },
+              {
+                "id": "1017-add-x",
+                "project": "alpha",
+                "stage": "merged",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/7",
+                "outcome": { "result": "held", "at": "2026-01-09T12:00:00Z", "evidence": [] }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 3
+    }
+  ]
+}

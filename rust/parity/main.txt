@@ -1,0 +1,6 @@
+main/no-args
+main/unknown-command
+main/home-relative
+main/home-twice
+main/bad-session
+main/init-bad-agents

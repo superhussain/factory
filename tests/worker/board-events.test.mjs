@@ -116,6 +116,86 @@ test("no BoardEvents binding gets 404", async () => {
   assert.equal(response.status, 404);
 });
 
+const HOST = ORIGIN + "/events/host";
+const hostConnect = (
+  env,
+  { method = "GET", headers = { Upgrade: "websocket" }, principal = device } = {},
+) => serveFactory(new Request(HOST, { method, headers }), env, principal);
+
+// A bucket holding host mac-a in `state`, bound to `token`.
+async function hostBucket(state = "active", token = device.client_id) {
+  const bucket = memoryBucket();
+  await bucket.put("hosts/mac-a.json", JSON.stringify({ id: "mac-a", token, state }));
+  return bucket;
+}
+
+test("a device's upgrade to /events/host reaches the room with no expiry", async () => {
+  const events = fakeEvents();
+  await hostConnect(
+    { BUCKET: await hostBucket(), BoardEvents: events },
+    {
+      headers: {
+        Upgrade: "websocket",
+        "Sec-WebSocket-Key": NONCE,
+        "Sec-WebSocket-Version": "13",
+        "X-Factory-Exp": "4102444800",
+      },
+    },
+  );
+  assert.equal(events.fetches().length, 1);
+  const [forwarded] = events.requests;
+  assert.deepEqual([...forwarded.headers].sort(), [
+    ["sec-websocket-key", NONCE],
+    ["sec-websocket-version", "13"],
+    ["upgrade", "websocket"],
+  ]);
+});
+
+for (const [name, options] of [
+  ["a person", { principal: person }],
+  ["POST", { method: "POST" }],
+  ["GET without Upgrade", { headers: {} }],
+]) {
+  test(`${name} on /events/host gets 404 and never reaches the room`, async () => {
+    const events = fakeEvents();
+    const response = await hostConnect(
+      { BUCKET: await hostBucket(), BoardEvents: events },
+      options,
+    );
+    assert.equal(response.status, 404);
+    assert.deepEqual(events.calls, []);
+  });
+}
+
+test("/events/host with no BoardEvents binding gets 404", async () => {
+  const response = await hostConnect({ BUCKET: await hostBucket() });
+  assert.equal(response.status, 404);
+});
+
+for (const [name, bucket] of [
+  ["no host record", () => memoryBucket()],
+  ["a retired host", () => hostBucket("retired")],
+  ["a pending host", () => hostBucket("pending")],
+  ["another host's token", () => hostBucket("active", "client-bbbb")],
+]) {
+  test(`/events/host with ${name} gets 403 and never reaches the room`, async () => {
+    const events = fakeEvents();
+    const response = await hostConnect({ BUCKET: await bucket(), BoardEvents: events });
+    assert.equal(response.status, 403);
+    assert.deepEqual(events.fetches(), []);
+  });
+}
+
+test("/events/host with no verified principal gets 403", async () => {
+  const events = fakeEvents();
+  const response = await hostConnect(
+    { BUCKET: memoryBucket(), BoardEvents: events },
+    { principal: { verified: false } },
+  );
+  assert.equal(response.status, 403);
+  assert.deepEqual(events.calls, []);
+});
+
 const writes = [
   ["/api/board", "board.json", JSON.stringify({ jobs: [] }), "application/json"],
   ["/api/backlog", "backlog.md", "# Backlog\n", "text/markdown"],

@@ -11,14 +11,19 @@ from test_autonomy_report import VISIBLE, VISIBLE_CHANGES, merged
 
 factory = load_runtime()
 NOW = "2026-11-22T10:00:00Z"
+REVERT_DONE = "2026-10-22T10:00:00Z"
+MERGED_DONE = "2026-11-21T10:00:00Z"
 PROMPT = "Type alpha visible to promote alpha visible so its APPROVE PRs merge without a person: "
 
 
 def board(scanned=20, reverted_at="2026-10-23T10:00:00Z", rounds=(VISIBLE,), **autonomy):
-    """alpha visible held by 1019-add-z, reverted at reverted_at, then scanned held visible jobs merged."""
+    """alpha visible held by 1019-add-z, done REVERT_DONE and reverted at reverted_at, then scanned held visible jobs
+    done MERGED_DONE."""
     revert = merged("1019-add-z", [VISIBLE], "reverted", days_ago=31)
     revert["outcome"]["at"] = reverted_at
-    data = {"updated": NOW, "jobs": [revert, *(merged(f"20{n:02}-v", list(rounds)) for n in range(scanned))]}
+    revert["done"] = REVERT_DONE
+    data = {"updated": NOW, "jobs": [revert, *({**merged(f"20{n:02}-v", list(rounds)), "done": MERGED_DONE}
+                                               for n in range(scanned))]}
     if autonomy:
         data["autonomy"] = {"paused": True, "projects": [], "self": [], **autonomy}
     return data

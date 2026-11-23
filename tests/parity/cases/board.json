@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "board/empty-stdin",
+      "argv": ["--home", "{home}", "board", "{home}", "412-fix-login"],
+      "home": null,
+      "stubs": {},
+      "stdin": "",
+      "env": {
+        "FACTORY_SESSION": "tag"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"412-fix-login\",\"project\":\"sample\",\"stage\":\"build\"}]}\n"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_board_ids.py::BoardIdTest.test_refuses_empty_stdin"
+    },
+    {
+      "id": "board/malformed-id",
+      "argv": ["--home", "{home}", "board", "{home}", "412-Fix"],
+      "home": null,
+      "stubs": {},
+      "stdin": "{\"stage\": \"closed\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "tag"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"412-fix-login\",\"project\":\"sample\",\"stage\":\"build\"}]}\n"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_board_ids.py::BoardIdTest.test_refuses_a_malformed_new_id"
+    },
+    {
+      "id": "board/id-key",
+      "argv": ["--home", "{home}", "board", "{home}", "412-fix-login"],
+      "home": null,
+      "stubs": {},
+      "stdin": "{\"id\": \"999-renamed\"}",
+      "env": {
+        "FACTORY_SESSION": "tag"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"412-fix-login\",\"project\":\"sample\",\"stage\":\"build\"}]}\n"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_board_ids.py::BoardIdTest.test_refuses_an_id_key_in_the_patch"
+    },
+    {
+      "id": "board/archived-id",
+      "argv": ["--home", "{home}", "board", "{home}", "412-fix-login"],
+      "home": null,
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "tag"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"414-retry-sync\",\"project\":\"sample\",\"stage\":\"closed\"},{\"id\":\"415-add-export\",\"project\":\"sample\",\"stage\":\"merged\"}],\"archived\":{\"max_id\":416,\"fingerprints\":{}}}\n"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_board_ids.py::ArchiveFloorTest.test_board_refuses_an_archived_id"
+    },
+    {
+      "id": "board/malformed-pipeline",
+      "argv": ["--home", "{home}", "board", "{home}", "121-x"],
+      "home": null,
+      "stubs": {},
+      "stdin": "{\"pipeline\": {\"global\": 1}}",
+      "env": {
+        "FACTORY_SESSION": "tag"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"412-fix-login\",\"project\":\"sample\",\"stage\":\"build\"}]}\n"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_pipeline.py::PipelineTest.test_board_rejects_a_malformed_pipeline_before_any_request"
+    },
+    {
+      "id": "board/note",
+      "argv": ["--home", "{home}", "board", "{home}", "412-fix-login"],
+      "home": null,
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "tag"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"412-fix-login\",\"project\":\"sample\",\"stage\":\"build\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_board_ids.py::BoardIdTest.test_patches_an_existing_row_whatever_its_id"
+    }
+  ]
+}
