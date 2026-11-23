@@ -315,6 +315,7 @@ class RolesTest(IsolatedTestCase):
             lines = [line for line in schedule.splitlines() if never in line]
             self.assertEqual(len(lines), 1)
             self.assertTrue(lines[0].startswith("Never "))
+            self.assertNotIn("when a person asks", lines[0])
 
     def test_retro_push_launchd_times(self):
         schedules = (SKILL / "references/schedules.md").read_text(encoding="utf-8")
