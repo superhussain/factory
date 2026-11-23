@@ -70,7 +70,6 @@ thread_local! {
 }
 
 /// `PROJECT_FETCH_URL.format(repo=repo)`.
-#[allow(dead_code)]
 fn project_fetch_url(repo: &str) -> String {
     #[cfg(test)]
     if let Some(url) = FETCH_URL.with(|u| u.borrow().clone()) {
@@ -80,7 +79,6 @@ fn project_fetch_url(repo: &str) -> String {
 }
 
 /// `PRE_REVIEW_TIMEOUT`, in seconds.
-#[allow(dead_code)]
 fn check_timeout() -> u64 {
     #[cfg(test)]
     if let Some(seconds) = CHECK_TIMEOUT.with(std::cell::Cell::get) {
@@ -90,7 +88,6 @@ fn check_timeout() -> u64 {
 }
 
 /// `fnmatch.fnmatchcase`: `*` matches any run, slashes included.
-#[allow(dead_code)]
 fn fnmatch(name: &str, pat: &str) -> bool {
     let name: Vec<char> = name.chars().collect();
     let pat: Vec<char> = pat.chars().collect();
@@ -176,7 +173,6 @@ fn fnmatch(name: &str, pat: &str) -> bool {
 }
 
 /// `statistics.median`.
-#[allow(dead_code)]
 fn median(v: &mut Vec<f64>) -> f64 {
     v.sort_by(f64::total_cmp);
     let n = v.len();
@@ -188,7 +184,6 @@ fn median(v: &mut Vec<f64>) -> f64 {
 }
 
 /// Arm "b" when the job id's stable hash bucket falls under percent, else "a".
-#[allow(dead_code)]
 fn experiment_arm(id: &str, percent: u32) -> &'static str {
     let digest = Sha256::digest(id.as_bytes());
     let bucket = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) % 100;
@@ -242,7 +237,6 @@ fn check_untrusted(text: &str) -> Option<String> {
 }
 
 /// The first rule `check_text` finds broken in value, or None.
-#[allow(dead_code)]
 fn check_text(value: Option<&str>, lo: usize, hi: usize, multiline: bool) -> Option<String> {
     let Some(value) = value.filter(|v| (lo..=hi).contains(&v.chars().count())) else {
         return Some(format!("must be a string of {lo}-{hi} characters"));
@@ -2624,7 +2618,12 @@ fn review_plan(home: &Path, slug: &str, job_id: &str, round_text: &str, o: &mut 
     } else {
         String::new()
     };
-    let n: usize = round_text.parse().unwrap();
+    let n: usize = round_text.parse().map_err(|_| {
+        fail(
+            format!("round must be a positive integer. {REVIEW_PLAN_USAGE}"),
+            2,
+        )
+    })?;
     let head = if wt.is_dir() {
         git_run(&wt, &["rev-parse", "HEAD"], &[], None)
             .filter(|o| o.code == 0)
@@ -3047,7 +3046,7 @@ fn run_check(argv: &[String], cwd: &Path, log: &Path, timeout: u64) -> Res<(Chec
         Ok(child) => child,
         Err(_) => {
             use std::io::Write;
-            let _ = write!(out, "missing program: {}\n", argv[0]);
+            let _ = writeln!(out, "missing program: {}", argv[0]);
             return Ok((CheckExit::Missing, seconds(start)));
         }
     };
@@ -3083,14 +3082,13 @@ fn run_check(argv: &[String], cwd: &Path, log: &Path, timeout: u64) -> Res<(Chec
 
 /// A check result's class: None on a pass, else budget, structural, canceled, transient or deterministic.
 fn failure_class(code: &CheckExit, log: &Path) -> Option<&'static str> {
-    let code = match code {
+    match code {
         CheckExit::Code(0) => return None,
         CheckExit::Timeout => return Some("budget"),
         CheckExit::Missing | CheckExit::Code(126 | 127) => return Some("structural"),
         CheckExit::Code(c) if *c < 0 || *c == 130 || *c == 143 => return Some("canceled"),
-        CheckExit::Code(c) => *c,
-    };
-    let _ = code;
+        CheckExit::Code(_) => {}
+    }
     let bytes = std::fs::read(log).unwrap_or_default();
     let tail = &bytes[bytes.len().saturating_sub(65536)..];
     if TRANSIENT_LOG
@@ -4275,8 +4273,7 @@ fn batch_problem(
         return Some("marked for rework".into());
     }
     if let Some(held) = claims::blocking(Some(j), device, session, minutes)
-        .ok()
-        .flatten()
+        .unwrap_or_else(|_| j.get("claim").cloned())
     {
         return Some(format!(
             "held by {} session {}",
@@ -8476,6 +8473,46 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(50));
             assert!(seen.lock().unwrap().iter().all(|r| r.method == "GET"));
+        }
+
+        #[test]
+        fn a_claim_with_no_readable_seen_counts_as_held() {
+            for claim in [
+                json!({"device": "other", "session": "x", "since": NOW, "seen": "garbage"}),
+                json!({"device": "other", "session": "x", "since": NOW}),
+                json!("a hand-edited claim"),
+            ] {
+                let lead = json!({"device": "test", "session": "", "since": NOW, "seen": NOW});
+                let jobs = json!([{"id": LEAD, "project": "sample", "stage": "spec", "claim": lead},
+                                  idea("091-sample-typo", json!({"claim": claim}))]);
+                let board: &'static str = Box::leak(
+                    json!({"updated": "", "jobs": jobs})
+                        .to_string()
+                        .into_boxed_str(),
+                );
+                let (origin, seen) = serve(vec![
+                    (404, "", vec![]),
+                    (200, board, vec![("ETag", "\"e1\"")]),
+                ]);
+                let home = temp_dir("batch-bad-seen");
+                fs::write(
+                    home.join("config.md"),
+                    format!("---\napi_url: {origin}\ndevice: test\n---\n"),
+                )
+                .unwrap();
+                let mut o = Out::default();
+                let e =
+                    batch(&home, "sample", LEAD, &["091-sample-typo".into()], &mut o).unwrap_err();
+                assert_eq!(e.code, 2, "{claim}");
+                assert!(
+                    e.stderr
+                        .starts_with("factory.py: cannot batch 091-sample-typo: held by "),
+                    "{}",
+                    e.stderr
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                assert!(seen.lock().unwrap().iter().all(|r| r.method == "GET"));
+            }
         }
 
         #[test]
