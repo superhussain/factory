@@ -152,6 +152,7 @@ test("the rust job builds linux-x64, checks darwin-arm64 and windows-x64, and ru
     rust.steps.slice(1).map((step) => step.run.trim()),
     [
       "rustup toolchain install\nrustup target add aarch64-apple-darwin x86_64-pc-windows-gnu",
+      "cargo fmt --check",
       "cargo build --release --locked\ncargo test --locked",
       "cargo check --locked --target aarch64-apple-darwin",
       "cargo check --locked --target x86_64-pc-windows-gnu",

@@ -15,11 +15,28 @@ pub struct Flags {
 }
 
 impl Flags {
-    pub const NONE: Flags = Flags { ascii: false, ignore_case: false, multiline: false, dotall: false };
-    pub const ASCII: Flags = Flags { ascii: true, ..Flags::NONE };
-    pub const I: Flags = Flags { ignore_case: true, ..Flags::NONE };
-    pub const M: Flags = Flags { multiline: true, ..Flags::NONE };
-    pub const S: Flags = Flags { dotall: true, ..Flags::NONE };
+    pub const NONE: Flags = Flags {
+        ascii: false,
+        ignore_case: false,
+        multiline: false,
+        dotall: false,
+    };
+    pub const ASCII: Flags = Flags {
+        ascii: true,
+        ..Flags::NONE
+    };
+    pub const I: Flags = Flags {
+        ignore_case: true,
+        ..Flags::NONE
+    };
+    pub const M: Flags = Flags {
+        multiline: true,
+        ..Flags::NONE
+    };
+    pub const S: Flags = Flags {
+        dotall: true,
+        ..Flags::NONE
+    };
 }
 
 /// A Python pattern, compiled on first use.
@@ -35,7 +52,13 @@ const BACKTRACK: &str = "regex backtrack limit";
 
 impl Pattern {
     pub const fn new(src: &'static str, flags: Flags) -> Pattern {
-        Pattern { src, flags, search: OnceLock::new(), start: OnceLock::new(), full: OnceLock::new() }
+        Pattern {
+            src,
+            flags,
+            search: OnceLock::new(),
+            start: OnceLock::new(),
+            full: OnceLock::new(),
+        }
     }
 
     fn compiled(&self, cell: &'static str) -> &Regex {
@@ -45,7 +68,11 @@ impl Pattern {
             _ => (&self.search, "", ""),
         };
         lock.get_or_init(|| {
-            let source = format!("{}{before}{}{after}", prefix(self.flags), body(self.src, self.flags));
+            let source = format!(
+                "{}{before}{}{after}",
+                prefix(self.flags),
+                body(self.src, self.flags)
+            );
             Regex::new(&source).unwrap_or_else(|e| panic!("bad pattern {:?}: {e}", self.src))
         })
     }
@@ -70,19 +97,33 @@ impl Pattern {
     }
 
     /// `re.finditer`, as matches.
-    pub fn find_iter<'r, 't>(&'r self, s: &'t str) -> impl Iterator<Item = fancy_regex::Match<'t>> + use<'r, 't> {
-        self.compiled("search").find_iter(s).map(|m| m.expect(BACKTRACK))
+    pub fn find_iter<'r, 't>(
+        &'r self,
+        s: &'t str,
+    ) -> impl Iterator<Item = fancy_regex::Match<'t>> + use<'r, 't> {
+        self.compiled("search")
+            .find_iter(s)
+            .map(|m| m.expect(BACKTRACK))
     }
 
     /// `re.sub` with a function.
     pub fn replace_all(&self, s: &str, f: impl FnMut(&Captures) -> String) -> String {
-        self.compiled("search").try_replacen(s, 0, f).expect(BACKTRACK).into_owned()
+        self.compiled("search")
+            .try_replacen(s, 0, f)
+            .expect(BACKTRACK)
+            .into_owned()
     }
 }
 
 fn prefix(flags: Flags) -> String {
     let mut out = String::new();
-    for (on, flag) in [(flags.ignore_case, "(?i)"), (flags.multiline, "(?m)"), (flags.dotall, "(?s)")] {
+    // ASCII ignore-case folds letters in body() instead, since (?i) also folds Unicode look-alikes.
+    let unicode_case = flags.ignore_case && !flags.ascii;
+    for (on, flag) in [
+        (unicode_case, "(?i)"),
+        (flags.multiline, "(?m)"),
+        (flags.dotall, "(?s)"),
+    ] {
         if on {
             out.push_str(flag);
         }
@@ -96,10 +137,26 @@ pub fn translate(src: &str, flags: Flags) -> String {
 }
 
 fn body(src: &str, flags: Flags) -> String {
-    let word = if flags.ascii { "0-9A-Za-z_" } else { "\\p{L}\\p{N}_" };
-    let space = if flags.ascii { "\\t\\n\\x0B\\x0C\\r " } else { "\\s\\x1C-\\x1F" };
+    let word = if flags.ascii {
+        "0-9A-Za-z_"
+    } else {
+        "\\p{L}\\p{N}_"
+    };
+    let space = if flags.ascii {
+        "\\t\\n\\x0B\\x0C\\r "
+    } else {
+        "\\s\\x1C-\\x1F"
+    };
     let digit = if flags.ascii { "0-9" } else { "\\d" };
     let w = format!("[{word}]");
+    let fold = flags.ascii && flags.ignore_case;
+    let swap = |c: char| {
+        if c.is_ascii_lowercase() {
+            c.to_ascii_uppercase()
+        } else {
+            c.to_ascii_lowercase()
+        }
+    };
     let mut out = String::with_capacity(src.len());
     let mut chars = src.chars().peekable();
     let mut in_class = false;
@@ -121,7 +178,22 @@ fn body(src: &str, flags: Flags) -> String {
                         _ => {
                             out.push('\\');
                             out.push(e);
+                            match copy_escape_tail(e, &mut chars, &mut out) {
+                                Some(c) if fold && c.is_ascii_alphabetic() => out.push(swap(c)),
+                                _ => {}
+                            }
                         }
+                    }
+                }
+                c if fold && c.is_ascii_alphabetic() => {
+                    let mut ahead = chars.clone();
+                    match (ahead.next(), ahead.next()) {
+                        (Some('-'), Some(d)) if d.is_ascii_alphabetic() => {
+                            chars.next();
+                            chars.next();
+                            out.extend([c, '-', d, swap(c), '-', swap(d)]);
+                        }
+                        _ => out.extend([c, swap(c)]),
                     }
                 }
                 _ => out.push(c),
@@ -154,15 +226,68 @@ fn body(src: &str, flags: Flags) -> String {
                     'b' => out.push_str(&format!("(?:(?<={w})(?!{w})|(?<!{w})(?={w}))")),
                     'B' => out.push_str(&format!("(?:(?<={w})(?={w})|(?<!{w})(?!{w}))")),
                     _ => {
+                        let start = out.len();
                         out.push('\\');
                         out.push(e);
+                        match copy_escape_tail(e, &mut chars, &mut out) {
+                            Some(c) if fold && c.is_ascii_alphabetic() => {
+                                out.truncate(start);
+                                out.extend(['[', c, swap(c), ']']);
+                            }
+                            _ => {}
+                        }
                     }
                 }
             }
+            '(' if chars.peek() == Some(&'?') => {
+                out.push('(');
+                out.push(chars.next().unwrap());
+                // Group names and inline flags are not pattern text, so they are copied unfolded.
+                if chars.peek().is_some_and(char::is_ascii_alphabetic) {
+                    for n in chars.by_ref() {
+                        out.push(n);
+                        if matches!(n, '>' | ')' | ':') {
+                            break;
+                        }
+                    }
+                }
+            }
+            c if fold && c.is_ascii_alphabetic() => out.extend(['[', c, swap(c), ']']),
             _ => out.push(c),
         }
     }
     out
+}
+
+/// Copies the hex digits of `\x`, `\u` and `\U` and the braces of `\p{..}`, so folding never touches
+/// them. Returns the character a hex escape stands for.
+fn copy_escape_tail(
+    e: char,
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+    out: &mut String,
+) -> Option<char> {
+    let count = match e {
+        'x' => 2,
+        'u' => 4,
+        'U' => 8,
+        'p' | 'P' if chars.peek() == Some(&'{') => {
+            for n in chars.by_ref() {
+                out.push(n);
+                if n == '}' {
+                    break;
+                }
+            }
+            return None;
+        }
+        'p' | 'P' => 1,
+        _ => return None,
+    };
+    let hex: String = chars.by_ref().take(count).collect();
+    out.push_str(&hex);
+    if e == 'p' || e == 'P' {
+        return None;
+    }
+    u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
 }
 
 #[cfg(test)]
@@ -214,7 +339,44 @@ mod tests {
             translate(r"\s$", Flags::ASCII),
             "[\\t\\n\\x0B\\x0C\\r ](?=\\n?\\z)"
         );
-        assert_eq!(translate(r"a", Flags { ignore_case: true, multiline: true, ..Flags::NONE }), "(?i)(?m)a");
+        assert_eq!(
+            translate(
+                r"a",
+                Flags {
+                    ignore_case: true,
+                    multiline: true,
+                    ..Flags::NONE
+                }
+            ),
+            "(?i)(?m)a"
+        );
+    }
+
+    #[test]
+    fn ascii_ignore_case_folds_ascii_only() {
+        static ROLE: Pattern = Pattern::new(
+            r"\b(?:system prompt)\b",
+            Flags {
+                ascii: true,
+                ignore_case: true,
+                ..Flags::NONE
+            },
+        );
+        assert!(ROLE.search("SYSTEM Prompt").is_some());
+        assert!(ROLE.search("\u{17f}ystem prompt").is_none());
+        static CLASS: Pattern = Pattern::new(
+            r"\b[a-z0-9-]+\.[a-z]{2,}/[^.\n]\x41(?P<Name>k)",
+            Flags {
+                ascii: true,
+                ignore_case: true,
+                ..Flags::NONE
+            },
+        );
+        assert!(CLASS.search("Ab-1.CoM/xak").is_some());
+        assert!(CLASS.search("ab.c\u{212a}/xak").is_none());
+        assert!(CLASS.search("ab.co/xA\u{212a}").is_none());
+        static UNICODE: Pattern = Pattern::new("s", Flags::I);
+        assert!(UNICODE.search("\u{17f}").is_some());
     }
 
     #[test]
