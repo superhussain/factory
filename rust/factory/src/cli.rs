@@ -273,8 +273,10 @@ mod tests {
                 )
             })
             .collect();
+        // pr-merge is Rust-only: its spec rules out a Python command.
         let rust: Vec<(String, usize, usize)> = COMMANDS
             .iter()
+            .filter(|(n, ..)| *n != "pr-merge")
             .map(|(n, _, lo, hi)| (n.to_string(), *lo, *hi))
             .collect();
         assert_eq!(python.len(), 69);
