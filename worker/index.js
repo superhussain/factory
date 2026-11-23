@@ -3582,7 +3582,14 @@ async function api(request, env, path, principal, ctx) {
   if (path === "/api/board" || path === "/api/backlog") {
     const [key, type] =
       path === "/api/board" ? ["board.json", "application/json"] : ["backlog.md", "text/markdown"];
-    if (method === "GET") return getFile(env, key, type);
+    // Accept-Patch tells a device client it may write the board as row PATCHes.
+    if (method === "GET")
+      return getFile(
+        env,
+        key,
+        type,
+        key === "board.json" ? { "Accept-Patch": "application/json" } : {},
+      );
     if (method === "PUT") return casPut(request, env, key, type, principal, ctx);
     if (method === "PATCH" && key === "board.json") return boardPatch(request, env, principal, ctx);
     return notFound();
@@ -3695,7 +3702,8 @@ export async function serveFactory(request, env, principal, ctx) {
     return connectEvents(request, env, principal.exp);
   }
   if (path === HOST_EVENTS_PATH) {
-    // A device's service token upgrades here; without exp the room sends it only "changed".
+    // A device's service token upgrades here; the room marks the socket as a host's and
+    // sends it rows frames.
     if (
       request.method !== "GET" ||
       request.headers.get("Upgrade")?.toLowerCase() !== "websocket" ||
@@ -3705,7 +3713,7 @@ export async function serveFactory(request, env, principal, ctx) {
       return notFound();
     // Only a paired or active host's token may take one of the room's shared slots.
     if (!(await boundHost(env, principal))) return reply("forbidden", 403);
-    return connectEvents(request, env);
+    return connectEvents(request, env, undefined, true);
   }
   if (path.startsWith("/api/")) return api(request, env, path, principal, ctx);
   if (request.method !== "GET") return notFound();

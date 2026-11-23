@@ -1,6 +1,7 @@
 // Live board events: one Durable Object room on the WebSocket Hibernation API.
-// It stores nothing. A board write's rows frame goes only to sockets whose Access
-// sign-in has not expired; every other socket, and every backlog write, gets "changed".
+// It stores nothing. A board write's rows frame goes to bound host sockets and to sockets
+// whose Access sign-in has not expired; every other socket, and every backlog write, gets
+// "changed".
 export const EVENTS_PATH = "/events/board";
 export const HOST_EVENTS_PATH = "/events/host";
 const KEYS = ["board.json", "backlog.md"];
@@ -21,7 +22,11 @@ export class BoardEvents {
       const [client, server] = Object.values(new WebSocketPair());
       this.ctx.acceptWebSocket(server);
       const exp = Number(request.headers.get("X-Factory-Exp"));
-      server.serializeAttachment({ exp: Number.isFinite(exp) ? exp : 0 });
+      server.serializeAttachment(
+        request.headers.get("X-Factory-Host") === "1"
+          ? { host: true }
+          : { exp: Number.isFinite(exp) ? exp : 0 },
+      );
       return new Response(null, { status: 101, webSocket: client });
     }
     const url = new URL(request.url);
@@ -32,7 +37,8 @@ export class BoardEvents {
     const rows = key === "board.json" ? await request.text() : "";
     for (const socket of this.ctx.getWebSockets()) {
       try {
-        socket.send(rows && socket.deserializeAttachment()?.exp > Date.now() / 1000 ? rows : frame);
+        const seat = socket.deserializeAttachment();
+        socket.send(rows && (seat?.host || seat?.exp > Date.now() / 1000) ? rows : frame);
       } catch {}
     }
     return new Response(null, { status: 204 });
@@ -50,7 +56,8 @@ export class BoardEvents {
 const room = (env) => env.BoardEvents.get(env.BoardEvents.idFromName("main"));
 
 // The write is already committed, so a failed announcement only delays the fallback poll.
-// A non-empty frame is the rows frame, sent to sockets whose sign-in has not expired.
+// A non-empty frame is the rows frame, sent to host sockets and sockets whose sign-in has
+// not expired.
 export async function announce(env, key, frame = "") {
   if (!env.BoardEvents) return;
   try {
@@ -62,11 +69,12 @@ export async function announce(env, key, frame = "") {
 }
 
 // The room sees only the upgrade itself, never the browser's query or other headers,
-// plus the sign-in expiry the Worker verified.
-export function connectEvents(request, env, exp) {
+// plus the sign-in expiry the Worker verified, or that the Worker admitted a bound host.
+export function connectEvents(request, env, exp, host = false) {
   const headers = new Headers();
   for (const [name, value] of request.headers)
     if (name === "upgrade" || name.startsWith("sec-websocket-")) headers.set(name, value);
   if (Number.isFinite(exp)) headers.set("X-Factory-Exp", String(exp));
+  if (host) headers.set("X-Factory-Host", "1");
   return room(env).fetch(new URL(EVENTS_PATH, request.url), { headers });
 }

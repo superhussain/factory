@@ -238,8 +238,9 @@ test("room", async () => {
   const fresh = socket({ exp: now + 3600 });
   const expired = socket({ exp: now - 1 });
   const unattached = socket(null);
+  const host = socket({ host: true });
   const room = new BoardEvents(
-    { getWebSockets: () => [fresh, expired, unattached], setWebSocketAutoResponse() {} },
+    { getWebSockets: () => [fresh, expired, unattached, host], setWebSocketAutoResponse() {} },
     {},
   );
   const frame = JSON.stringify({ type: "rows", etag: '"e2"', prev: '"e1"', rows: [IDEA] });
@@ -256,6 +257,7 @@ test("room", async () => {
   assert.deepEqual(fresh.sent, [frame, changed("backlog.md")]);
   assert.deepEqual(expired.sent, [changed("board.json"), changed("backlog.md")]);
   assert.deepEqual(unattached.sent, [changed("board.json"), changed("backlog.md")]);
+  assert.deepEqual(host.sent, [frame, changed("backlog.md")]);
 });
 
 test("exp header", async () => {
@@ -269,7 +271,12 @@ test("exp header", async () => {
       ),
     }),
   };
-  const headers = { Upgrade: "websocket", Origin: ORIGIN, "X-Factory-Exp": "9999999999" };
+  const headers = {
+    Upgrade: "websocket",
+    Origin: ORIGIN,
+    "X-Factory-Exp": "9999999999",
+    "X-Factory-Host": "1",
+  };
   for (const principal of [person, { ...person, exp: undefined }])
     await serveFactory(
       new Request(ORIGIN + "/events/board", { headers }),
@@ -279,5 +286,10 @@ test("exp header", async () => {
   assert.deepEqual(
     forwarded.map((r) => r.headers.get("X-Factory-Exp")),
     ["4102444800", null],
+  );
+  // A browser cannot mark its own socket as a host's.
+  assert.deepEqual(
+    forwarded.map((r) => r.headers.get("X-Factory-Host")),
+    [null, null],
   );
 });

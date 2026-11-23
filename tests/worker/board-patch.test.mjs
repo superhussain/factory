@@ -357,3 +357,17 @@ test("shape", async () => {
     404,
   );
 });
+
+// A device client writes rows only when its board read advertised PATCH.
+test("a board read advertises Accept-Patch and a backlog read does not", async () => {
+  const s = setup();
+  s.bucket.objects.set("backlog.md", {
+    key: "backlog.md",
+    bytes: Buffer.from("# Backlog\n"),
+    httpEtag: '"backlog-seed"',
+  });
+  const get = (path) =>
+    serveFactory(new Request("http://local" + path), { BUCKET: s.bucket }, person, {});
+  assert.equal((await get("/api/board")).headers.get("Accept-Patch"), "application/json");
+  assert.equal((await get("/api/backlog")).headers.get("Accept-Patch"), null);
+});

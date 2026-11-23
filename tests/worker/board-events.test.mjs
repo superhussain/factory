@@ -129,7 +129,7 @@ async function hostBucket(state = "active", token = device.client_id) {
   return bucket;
 }
 
-test("a device's upgrade to /events/host reaches the room with no expiry", async () => {
+test("a device's upgrade to /events/host reaches the room marked as a host, with no expiry", async () => {
   const events = fakeEvents();
   await hostConnect(
     { BUCKET: await hostBucket(), BoardEvents: events },
@@ -148,6 +148,7 @@ test("a device's upgrade to /events/host reaches the room with no expiry", async
     ["sec-websocket-key", NONCE],
     ["sec-websocket-version", "13"],
     ["upgrade", "websocket"],
+    ["x-factory-host", "1"],
   ]);
 });
 
