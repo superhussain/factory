@@ -83,7 +83,7 @@ fn timer_installed(scheduler: &str) -> bool {
     if let Some(t) = fake!(timer_installed) {
         return t;
     }
-    pickup::timer_installed(scheduler).0
+    pickup::timer_installed(scheduler, &pickup::PICKUP).0
 }
 
 /// `bool(timer_drift(scheduler, timer_values(home)))`.
@@ -92,7 +92,8 @@ fn timer_drift(scheduler: &str, home: &Path) -> bool {
     if let Some(d) = fake!(timer_drift) {
         return d.is_some_and(|s| !s.is_empty());
     }
-    pickup::timer_drift(scheduler, &pickup::timer_values(home)).is_some_and(|s| !s.is_empty())
+    pickup::timer_drift(scheduler, &pickup::timer_values(home, &pickup::PICKUP))
+        .is_some_and(|s| !s.is_empty())
 }
 
 fn setup_run(argv: &[&str]) -> (i32, String) {

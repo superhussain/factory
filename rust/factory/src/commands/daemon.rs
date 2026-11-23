@@ -109,8 +109,15 @@ fn catch_stop_signals() {
     }
 }
 
-pub fn daemon(_call: &Call) -> Res<()> {
-    run(&factory_home()?)
+pub fn daemon(call: &Call) -> Res<()> {
+    match call.args.first().map(String::as_str) {
+        None => run(&factory_home()?),
+        Some("setup") => crate::commands::pickup::daemon_setup_cmd(&call.args[1..]),
+        Some(_) => Err(fail(
+            "usage: daemon | daemon setup [--install | --uninstall]",
+            2,
+        )),
+    }
 }
 
 /// The daemon for home. Returns Ok once a stop signal has closed the socket and any pickup child
@@ -529,8 +536,8 @@ fn lock_dir(home: &Path) -> std::path::PathBuf {
     home.join("logs").join("daemon")
 }
 
-/// The daemon lock, or None when another copy holds it.
-fn take_lock(home: &Path) -> Res<Option<File>> {
+/// The daemon lock, with this process's pid written beside it, or None when another copy holds it.
+pub(crate) fn take_lock(home: &Path) -> Res<Option<File>> {
     let dir = lock_dir(home);
     let path = dir.join("daemon.lock");
     let file = std::fs::create_dir_all(&dir)
@@ -543,10 +550,41 @@ fn take_lock(home: &Path) -> Res<Option<File>> {
         })
         .map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
     match file.try_lock() {
-        Ok(()) => Ok(Some(file)),
+        Ok(()) => {
+            let pid = dir.join("daemon.pid");
+            std::fs::write(&pid, format!("{}\n", std::process::id()))
+                .map_err(|e| fail(os_error(&e, Some(&pid)), 1))?;
+            Ok(Some(file))
+        }
         Err(TryLockError::WouldBlock) => Ok(None),
         Err(TryLockError::Error(e)) => Err(fail(os_error(&e, Some(&path)), 1)),
     }
+}
+
+/// Whether a daemon holds the lock for home; None when that cannot be checked.
+pub(crate) fn running(home: &Path) -> Option<bool> {
+    let file = match OpenOptions::new()
+        .write(true)
+        .open(lock_dir(home).join("daemon.lock"))
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Some(false),
+        Err(_) => return None,
+    };
+    match file.try_lock() {
+        Ok(()) => Some(false),
+        Err(TryLockError::WouldBlock) => Some(true),
+        Err(TryLockError::Error(_)) => None,
+    }
+}
+
+/// The pid the daemon that holds the lock wrote.
+pub(crate) fn pid(home: &Path) -> Option<u32> {
+    std::fs::read_to_string(lock_dir(home).join("daemon.pid"))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
 }
 
 #[cfg(test)]
@@ -852,6 +890,16 @@ mod tests {
         assert_eq!(run(&home, &origin, 1), ["connect"]);
         let message = access_message(&home.join(".env"));
         assert!(log_text(&home).contains(&format!("connect failed: {message}; retry in ")));
+    }
+
+    #[test]
+    fn lock_reports_running_and_pid() {
+        let home = temp_dir("daemon-lock");
+        assert_eq!(running(&home), Some(false));
+        let _first = take_lock(&home).unwrap().unwrap();
+        assert!(take_lock(&home).unwrap().is_none());
+        assert_eq!(running(&home), Some(true));
+        assert_eq!(pid(&home), Some(std::process::id()));
     }
 
     /// A second daemon for the same home, as a service restart or the cron line starts, returns
