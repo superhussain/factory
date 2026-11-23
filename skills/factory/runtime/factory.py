@@ -48,7 +48,7 @@
                                             pipeline lists this host, through launchers.json; silent
                                             when there is nothing to do. The backlog triage sweep
                                             runs at most every 30 minutes; --triage-now runs it now
-  factory.py pickup setup [--install]      check every pickup prerequisite on this host and print each fix; --install writes and loads the 5 minute timer
+  factory.py pickup setup [--install]       check every pickup prerequisite on this host and print each fix; --install writes and loads the 5 minute timer
   factory.py catch-up                       bring this host to origin's skill, pickup timer and Worker, backing up first
   factory.py host pair <id> <code>          pair this device with a host added in Settings and set
                                             device: <id> in config.md
@@ -5788,9 +5788,17 @@ def catch_up_cmd():
     if current and not stale:
         print("pickup timer: current" if timer else "pickup timer: none on this host, left alone")
     else:
-        print(f"backup: {catch_up_backup(home, skill)}")
-        wrote, ok = True, True
-        if not current:
+        try:
+            backup = catch_up_backup(home, skill)
+        except OSError as e:
+            backup = None
+            failed += 1
+            print(f"backup: {e}")
+        else:
+            wrote = True
+            print(f"backup: {backup}")
+        ok = backup is not None
+        if ok and not current:
             tmp = tempfile.mkdtemp(prefix="factory-catch-up-")
             src = Path(tmp, "src")
             try:
@@ -5810,7 +5818,9 @@ def catch_up_cmd():
             else:
                 failed += 1
                 print(f"skill: {(r.stderr or r.stdout).strip()}")
-        if ok and not timer:
+        if backup and not ok and timer:
+            print("pickup timer: skipped, skill install failed")
+        elif ok and not timer:
             print("pickup timer: none on this host, left alone")
         elif ok:
             argv = catch_up_entry(skill) + ["--home", str(home), "pickup", "setup", "--install"]
@@ -5822,6 +5832,8 @@ def catch_up_cmd():
             # pickup setup --install exits 3 after installing the timer while another pickup check is missing.
             if code in (0, 3):
                 print("pickup timer: " + out.partition("\n")[0])
+                if code == 3:
+                    print("pickup timer: some pickup checks are missing; run factory.py pickup setup to see them")
             else:
                 failed += 1
                 print(f"pickup timer: {out}")
@@ -5836,7 +5848,10 @@ def catch_up_cmd():
     else:
         code, out = catch_up_gh(found.group(1), "run", "list", "--workflow", "deploy-main.yml", "--commit", head,
                                 "--json", "databaseId,status,conclusion,attempt,url", "--limit", "1")
-        runs = json.loads(out) if not code else None
+        try:
+            runs = json.loads(out) if not code else None
+        except ValueError:
+            code = 1
         if code == 127:
             print(f"worker: skipped, gh did not run: {out.strip()}")
         elif code:

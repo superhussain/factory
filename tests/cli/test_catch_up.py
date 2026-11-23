@@ -215,7 +215,9 @@ class CatchUpTest(IsolatedTestCase):
         tail = ["--home", str(self.home), "pickup", "setup", "--install"]
         code, out, _ = self.call()
         self.assertEqual(code, 0)
-        self.assertIn("pickup timer: installed cron timer: crontab", out.splitlines())
+        self.assertEqual(out.splitlines()[-4:-2], [
+            "pickup timer: installed cron timer: crontab",
+            "pickup timer: some pickup checks are missing; run factory.py pickup setup to see them"])
         self.assertEqual(calls, [[sys.executable, str(self.skill / "runtime" / "factory.py")] + tail])
 
         with patch.object(self.runtime, "timer_drift", Mock(return_value=None)):
@@ -248,6 +250,23 @@ class CatchUpTest(IsolatedTestCase):
         self.assertIn("pickup timer: none on this host, left alone", out.splitlines())
         self.assertEqual(calls, [])
 
+    def test_failed_timer_and_fast_forward(self):
+        self.timer.return_value = (True, "")
+        calls = self.timer_calls(out="could not install the cron timer: synthetic", code=1)
+        (self.checkout / "local.txt").write_text("synthetic\n")
+        git(self.checkout, "add", "local.txt")
+        git(self.checkout, "commit", "-q", "-m", "local")
+        local = git(self.checkout, "rev-parse", "HEAD")
+        code, out, _ = self.call()
+        lines = out.splitlines()
+        self.assertEqual(code, 1)
+        self.assertTrue(lines[1].startswith("checkout: fatal: "), lines[1])
+        self.assertIn("pickup timer: could not install the cron timer: synthetic", lines)
+        self.assertEqual(lines[-1], "catch-up: 2 step(s) failed")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(git(self.checkout, "rev-parse", "HEAD"), local)
+        self.assertEqual(self.installed(), self.b)
+
     def test_worker_states(self):
         self.assertEqual(self.call()[0], 0)
         b7 = self.b[:7]
@@ -266,6 +285,10 @@ class CatchUpTest(IsolatedTestCase):
              "catch-up: 1 step(s) failed"),
             ([(127, "No such file or directory: 'gh'")], "worker: skipped, gh did not run: No such file or directory: 'gh'",
              0, "catch-up: nothing new"),
+            ([(1, "synthetic gh error")], "worker: synthetic gh error", 1, "catch-up: 1 step(s) failed"),
+            ([(0, "not json")], "worker: not json", 1, "catch-up: 1 step(s) failed"),
+            ([runs(conclusion="failure"), (1, "synthetic rerun error")], "worker: synthetic rerun error", 1,
+             "catch-up: 1 step(s) failed"),
         ]
         for replies, line, exit_code, last in cases:
             with self.subTest(line):
@@ -297,9 +320,22 @@ class CatchUpTest(IsolatedTestCase):
         lines = out.splitlines()
         self.assertIn("skill: install.py: synthetic failure", lines)
         self.assertEqual(lines[-1], "catch-up: 1 step(s) failed")
-        self.assertFalse(any(line.startswith("pickup timer:") for line in lines))
+        self.assertIn("pickup timer: skipped, skill install failed", lines)
         self.assertEqual(calls, [])
         [backup] = self.backups()
         self.assertTrue((backup / "skill" / "factory" / "SKILL.md").is_file())
         self.assertEqual(self.installed(), self.a)
         self.assertEqual(self.worktrees().count("worktree "), 1)
+
+    def test_failed_backup_skips_install_and_timer(self):
+        self.timer.return_value = (True, "")
+        calls = self.timer_calls()
+        with patch.object(self.runtime, "catch_up_backup", Mock(side_effect=OSError("synthetic disk full"))):
+            code, out, err = self.call()
+        lines = out.splitlines()
+        self.assertEqual((code, err), (1, ""))
+        self.assertIn("backup: synthetic disk full", lines)
+        self.assertFalse(any(line.startswith(("skill: installed", "pickup timer:")) for line in lines), lines)
+        self.assertEqual(lines[-1], "catch-up: 1 step(s) failed")
+        self.assertEqual(calls, [])
+        self.assertEqual(self.installed(), self.a)
