@@ -164,6 +164,30 @@ const SENSITIVE_PATHS: &[&str] = &[
     ".npmrc",
 ];
 const SPEC_APPROVED_NOTES: &[&str] = &["spec approved in Tracer", "spec approved on the dashboard"];
+pub(crate) const COMMAND_APPROVED_NOTE: &str = "spec approved";
+/// The spec_approval via each approval note, or the note recover leaves after it, implies.
+const SPEC_APPROVAL_VIA: &[(&str, &str)] = &[
+    ("spec approved on the dashboard", "dashboard"),
+    ("building after dashboard approval", "dashboard"),
+    ("spec approved in Tracer", "tracer"),
+    ("building after Tracer approval", "tracer"),
+    (COMMAND_APPROVED_NOTE, "command"),
+];
+
+/// The spec_approval value a person's approval writes beside its note.
+pub(crate) fn spec_approval_record(via: &str, at: &Value) -> Value {
+    json!({"decider": "person", "via": via, "at": at})
+}
+
+/// The spec_approval a row without one implies from its approval note, else None. The note gives no time.
+pub(crate) fn inferred_spec_approval(j: &Value) -> Option<Value> {
+    if j.get("spec_approval").is_some() {
+        return None;
+    }
+    let note = j.get("note").and_then(Value::as_str)?;
+    let (_, via) = SPEC_APPROVAL_VIA.iter().find(|(n, _)| *n == note)?;
+    Some(json!({"decider": "person", "via": via, "inferred": true}))
+}
 const STOP_CHECKS_FILE: &str = "stop-checks.json";
 pub(crate) const SUGGESTION_SCHEMA: &str = "factory.suggestions/1";
 const SUGGEST_APPROVE_USAGE: &str = "usage: suggest approve <job-id> <A|B|C> [--chat-file <file>]";
@@ -6071,6 +6095,28 @@ mod tests {
         );
         assert!(skipped.contains(&format!("- [ ] {STORE}")));
         assert_eq!(reads, 0);
+    }
+
+    #[test]
+    fn job_infers_spec_approval() {
+        for (note, via) in [
+            ("spec approved on the dashboard", "dashboard"),
+            ("building after dashboard approval", "dashboard"),
+            ("spec approved in Tracer", "tracer"),
+            ("building after Tracer approval", "tracer"),
+            ("spec approved", "command"),
+        ] {
+            assert_eq!(
+                inferred_spec_approval(&json!({"id": "001-test", "note": note})),
+                Some(json!({"decider": "person", "via": via, "inferred": true})),
+                "{note}"
+            );
+        }
+        let stored = json!({"decider": "person", "via": "dashboard", "at": "2026-11-23T15:00:00Z"});
+        let row = json!({"note": "building after Tracer approval", "spec_approval": stored});
+        assert_eq!(inferred_spec_approval(&row), None);
+        assert_eq!(inferred_spec_approval(&json!({"note": "x"})), None);
+        assert_eq!(inferred_spec_approval(&json!({})), None);
     }
 
     #[test]

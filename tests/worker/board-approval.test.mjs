@@ -443,3 +443,85 @@ test("a person's PATCH cannot add steer to a rider", async () => {
     'a board write cannot add steer to "114-steer-export": it is batched into "113-export-core" and follows its lead. Act on the lead instead. Nothing was written.',
   );
 });
+
+// spec_approval records who passed 042-sample-export's spec-approval gate, beside the note
+// that approval writes. Only a signed-in person writes via dashboard.
+const COMMAND = "spec approved";
+const AT = "2026-11-23T15:00:00Z";
+const record = (via, at = AT) => ({ decider: "person", via, at });
+const deviceDashboardRefusal =
+  'a board write from a device cannot set spec_approval via dashboard on "042-sample-export": only a signed-in person approves a spec on the dashboard. Nothing was written.';
+const noteRefusal = (via, note) =>
+  `spec_approval via ${via} on "042-sample-export" needs the note "${note}" in the same write. Nothing was written.`;
+const approvalShapeRefusal =
+  'spec_approval on "042-sample-export" must be {decider: "person", via: "dashboard", "tracer" or "command", at}. Nothing was written.';
+
+test("a person's PATCH stores spec_approval via dashboard", async () => {
+  const next = { ...approved(DASHBOARD), spec_approval: record("dashboard") };
+  assert.equal((await setup().patch(next, person)).status, 200);
+});
+
+test("a device PUT cannot set spec_approval via dashboard", async () => {
+  const s = setup(approved(DASHBOARD));
+  const next = { ...approved(DASHBOARD), spec_approval: record("dashboard") };
+  await refused(s, () => s.put(next), deviceDashboardRefusal);
+});
+
+test("a device PATCH cannot set spec_approval via dashboard", async () => {
+  const s = setup(approved(DASHBOARD));
+  const next = { ...approved(DASHBOARD), spec_approval: record("dashboard") };
+  await refused(s, () => s.patch(next, device), deviceDashboardRefusal);
+});
+
+test("a device PUT stores spec_approval via tracer with the Tracer note", async () => {
+  const next = { ...withReceipt(await signed()), spec_approval: record("tracer") };
+  assert.equal((await setup().put(next)).status, 200);
+});
+
+test("a device and a person store spec_approval via command with its note", async () => {
+  const next = { ...approved(COMMAND), spec_approval: record("command") };
+  assert.equal((await setup().put(next)).status, 200);
+  assert.equal((await setup().patch(next, person)).status, 200);
+});
+
+test("spec_approval without its via's note is refused", async () => {
+  const s = setup();
+  await refused(
+    s,
+    () => s.put({ ...approved(COMMAND), spec_approval: record("tracer") }),
+    noteRefusal("tracer", TRACER),
+  );
+  await refused(
+    s,
+    () => s.patch({ ...approved(COMMAND), spec_approval: record("dashboard") }, person),
+    noteRefusal("dashboard", DASHBOARD),
+  );
+});
+
+test("a malformed spec_approval is refused", async () => {
+  for (const bad of [
+    { decider: "agent", via: "command", at: AT },
+    { decider: "person", via: "chat", at: AT },
+    { decider: "person", via: "toString", at: AT },
+    { decider: "person", via: "command" },
+    { decider: "person", via: "command", at: "2026-11-23 15:00" },
+    { ...record("command"), extra: true },
+    "command",
+    null,
+  ]) {
+    const s = setup();
+    await refused(
+      s,
+      () => s.patch({ ...approved(COMMAND), spec_approval: bad }, person),
+      approvalShapeRefusal,
+    );
+  }
+});
+
+test("a device keeps or removes a stored spec_approval", async () => {
+  const stored = { ...approved(DASHBOARD), spec_approval: record("dashboard") };
+  const kept = { ...stored, note: "building after dashboard approval" };
+  assert.equal((await setup(stored).put(kept)).status, 200);
+  const { spec_approval: _approval, ...removed } = stored;
+  assert.equal((await setup(stored).put(removed)).status, 200);
+});

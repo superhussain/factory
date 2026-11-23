@@ -12,6 +12,7 @@ use serde_json::{json, Map, Value};
 
 use crate::cli::Call;
 use crate::commands::checks::close_stacked_prs;
+use crate::commands::intake::{spec_approval_record, COMMAND_APPROVED_NOTE};
 use crate::commands::sync::{conflict_exit, pull_job, push_target, sync_problems, sync_state};
 use crate::commands::tracer::{tracer_after_board, SPEC_APPROVED_NOTES};
 use crate::shared::board::{batch_refs, dump_board, lead_of, load_board, patch_job, read_board};
@@ -244,6 +245,7 @@ const REFUSED: &[(&str, bool, &str)] = &[
     ("launch_failure", false, "only factory.py pickup sets launch_failure. Nothing was written."),
     ("repeated", false, "only factory.py repeats sets repeated. Nothing was written."),
     ("handled", false, "only factory.py pr-handled sets handled. Nothing was written."),
+    ("spec_approval", false, "only factory.py and the dashboard set spec_approval. Nothing was written."),
 ];
 
 fn get_str<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
@@ -1030,9 +1032,18 @@ pub(crate) fn board_write(
                 or_null(priority.unwrap().get("at")),
                 or_null(babysit.unwrap().get("at")),
             );
+        let approving = found.is_some_and(|f| {
+            get_str(f, "stage") == Some("needs-human")
+                && get_str(f, "note") == Some("gate: spec-approval")
+        }) && is_one_of(patch.get("stage"), &["build"])
+            && is_one_of(patch.get("note"), &[COMMAND_APPROVED_NOTE]);
         patch_job(&mut data, job_id, &Value::Object(patch.clone()));
         let i = index(&data).unwrap();
         let job = data["jobs"][i].as_object_mut().unwrap();
+        if approving {
+            let record = spec_approval_record("command", &job["updated"]);
+            job.insert("spec_approval".into(), record);
+        }
         if pressed {
             job.shift_remove("priority");
         }
@@ -1071,6 +1082,8 @@ pub(crate) fn board_write(
                 job.insert("stage".into(), Value::from("build"));
                 job.insert("note".into(), Value::from(TRACER_APPROVED_NOTE));
                 job.shift_remove("needs");
+                let record = spec_approval_record("tracer", &job["updated"]);
+                job.insert("spec_approval".into(), record);
                 sent.push(job_id.to_string());
             } else {
                 let feature = match tracer.get("feature").filter(|f| truthy(Some(*f))) {

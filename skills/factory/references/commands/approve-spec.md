@@ -8,3 +8,4 @@ report which check failed and stop. Run
 `factory pipeline "$SLUG"` as Rules describes, patch
 `{"stage": "build", "needs": null, "note": "spec approved"}`, then spawn the builder
 as loop step 3 describes without its gate check, and continue the loop.
+factory.py records `spec_approval` with `via: "command"` on that patch.

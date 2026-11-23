@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use crate::cli::Call;
+use crate::commands::intake::inferred_spec_approval;
 use crate::shared::board::{escalated, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::IN_FLIGHT;
@@ -165,18 +166,23 @@ pub fn where_cmd(call: &Call) -> Res<()> {
 }
 
 pub fn job(call: &Call) -> Res<()> {
-    let job_id = &call.args[0];
-    let home = factory_home()?;
-    let board = read_board(&home)?;
+    let found = job_row(&factory_home()?, &call.args[0])?;
+    println!("{}", dumps(&found, INDENT2));
+    Ok(())
+}
+
+/// The board or archive row job prints, with an inferred spec_approval on an old row.
+fn job_row(home: &Path, job_id: &str) -> Res<Value> {
+    let board = read_board(home)?;
     let found = board["jobs"].as_array().and_then(|jobs| {
         jobs.iter()
             .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
     });
-    let found = match found {
+    let mut found = match found {
         Some(j) => j.clone(),
         None => {
             let r = api(
-                &home,
+                home,
                 "GET",
                 &format!("/api/board/archive?id={}", quote(job_id)),
                 None,
@@ -196,8 +202,10 @@ pub fn job(call: &Call) -> Res<()> {
                 .ok_or_else(|| fail(format!("the archive answered with no job for {job_id}"), 1))?
         }
     };
-    println!("{}", dumps(&found, INDENT2));
-    Ok(())
+    if let Some(inferred) = inferred_spec_approval(&found) {
+        found["spec_approval"] = inferred;
+    }
+    Ok(found)
 }
 
 pub fn builds(call: &Call) -> Res<()> {
@@ -255,4 +263,35 @@ pub fn builds(call: &Call) -> Res<()> {
     let out = json!({"queued": queued, "in_flight": flight, "stale": stale, "running": running, "due": due});
     println!("{}", dumps(&out, INDENT2));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::http::tests::{home_for, serve};
+
+    fn row_on(name: &str, board: &'static str) -> Value {
+        let (origin, _) = serve(vec![(200, board, vec![])]);
+        job_row(&home_for(name, &origin), "042-sample-export").unwrap()
+    }
+
+    #[test]
+    fn job_infers_spec_approval_and_keeps_a_stored_one() {
+        let old = row_on(
+            "lookup-job-old",
+            r#"{"jobs": [{"id": "042-sample-export", "note": "building after dashboard approval"}]}"#,
+        );
+        assert_eq!(
+            old["spec_approval"],
+            json!({"decider": "person", "via": "dashboard", "inferred": true})
+        );
+        let stored = row_on(
+            "lookup-job-stored",
+            r#"{"jobs": [{"id": "042-sample-export", "note": "building after Tracer approval", "spec_approval": {"decider": "person", "via": "dashboard", "at": "2026-11-23T15:00:00Z"}}]}"#,
+        );
+        assert_eq!(
+            stored["spec_approval"],
+            json!({"decider": "person", "via": "dashboard", "at": "2026-11-23T15:00:00Z"})
+        );
+    }
 }
