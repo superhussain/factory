@@ -54,6 +54,7 @@ struct Fakes {
     timer_drift: Option<Option<String>>,
     daemon_service: Option<Option<&'static str>>,
     daemon_drift: Option<bool>,
+    remove_timer: Option<Rc<dyn Fn(&str) -> Result<(), String>>>,
     gh: Option<Rc<dyn Fn(&str, &[&str]) -> (i32, String)>>,
     setup_run: Option<Rc<dyn Fn(&[&str]) -> (i32, String)>>,
     backup: Option<Rc<dyn Fn() -> Result<PathBuf, String>>>,
@@ -99,6 +100,17 @@ fn timer_drift(scheduler: &str, home: &Path) -> bool {
     }
     pickup::timer_drift(scheduler, &pickup::timer_values(home, &pickup::PICKUP))
         .is_some_and(|s| !s.is_empty())
+}
+
+/// Removes the pickup timer, through the same code `daemon setup --install` uses.
+fn remove_timer(scheduler: &str, home: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(remove_timer) {
+        return f(scheduler);
+    }
+    pickup::uninstall_timer(home, scheduler, &pickup::PICKUP)
+        .map(|_| ())
+        .map_err(|e| strip(e.stderr.trim_start_matches("factory.py: ")).to_string())
 }
 
 /// Restarts the installed daemon service with the scheduler's own commands, so it runs the binary
@@ -590,7 +602,10 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
     // One crontab read serves both checks, so a host without a daemon reads it as before.
     let (timer, daemon) =
         pickup::with_crontab_memo(|| (timer_installed(scheduler), daemon_service()));
-    let stale = timer && (!current || timer_drift(scheduler, home));
+    // The daemon service runs pickup, so a pickup timer beside it is a leftover to remove, after
+    // the backup. Catch-up never installs the daemon itself.
+    let leftover = timer && daemon.is_some();
+    let stale = timer && (leftover || !current || timer_drift(scheduler, home));
     // Only drift reinstalls the daemon: a new skill keeps its binary path, so the unit still matches.
     let daemon_stale = daemon.is_some_and(|s| daemon_drift(s, home));
     if current {
@@ -691,6 +706,14 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             outln!(out, "pickup timer: skipped, skill install failed");
         } else if ok && !timer {
             outln!(out, "pickup timer: none on this host, left alone");
+        } else if ok && leftover {
+            match remove_timer(scheduler, home) {
+                Ok(()) => outln!(out, "pickup timer: replaced by the daemon"),
+                Err(e) => {
+                    failed += 1;
+                    outln!(out, "pickup timer: {e}");
+                }
+            }
         } else if ok && current && !stale {
             outln!(out, "pickup timer: current");
         } else if ok {
@@ -1051,6 +1074,7 @@ mod tests {
                     timer_installed: Some(false),
                     timer_drift: Some(Some("synthetic drift".into())),
                     daemon_service: Some(None),
+                    remove_timer: Some(Rc::new(|_| panic!("a test reached remove_timer unfaked"))),
                     gh: Some(Rc::new(move |slug, args| {
                         let call = std::iter::once(slug)
                             .chain(args.iter().copied())
@@ -1666,7 +1690,8 @@ mod tests {
     #[test]
     fn daemon_service_reinstalled_only_when_it_drifted() {
         let t = T::new("daemon-drift");
-        t.timer(true);
+        // A daemon host has no pickup timer; a leftover one is removed, as tested below.
+        t.timer(false);
         t.drift(None);
         let (reply, reply_code) = default_timer_reply();
         t.timer_calls(reply, reply_code);
@@ -1687,7 +1712,10 @@ mod tests {
         assert_eq!(code, 0);
         assert_eq!(
             lines[3..5],
-            ["pickup timer: current", "daemon service: current"]
+            [
+                "pickup timer: none on this host, left alone",
+                "daemon service: current"
+            ]
         );
         assert!(calls.borrow().is_empty());
         let backups = t.backups().len();
@@ -1699,7 +1727,7 @@ mod tests {
         assert_eq!(
             lines[4..6],
             [
-                "pickup timer: current",
+                "pickup timer: none on this host, left alone",
                 "daemon service: installed launchd service: /synthetic/factory.daemon.plist"
             ]
         );
@@ -1740,6 +1768,59 @@ mod tests {
         let (code, lines) = t.lines();
         assert_eq!((code, calls.borrow().len()), (0, 1));
         assert!(!lines.iter().any(|l| l.starts_with("daemon service:")));
+    }
+
+    /// With the daemon service installed, a leftover pickup timer is removed after the backup, and
+    /// catch-up never installs the daemon on a host without it.
+    #[test]
+    fn daemon_host_removes_a_leftover_pickup_timer() {
+        let t = T::new("leftover-timer");
+        t.timer(true);
+        t.drift(None);
+        let (reply, reply_code) = default_timer_reply();
+        let timer_calls = t.timer_calls(reply, reply_code);
+        let daemon_calls = t.daemon_calls("installed cron service: crontab\n", 0);
+        t.lines();
+        let timer_runs = timer_calls.borrow().len();
+        assert!(daemon_calls.borrow().is_empty(), "no daemon was installed");
+
+        t.daemon(Some("cron"), false);
+        t.service_calls(0, "", false);
+        let removed: Calls = Rc::default();
+        let seen = removed.clone();
+        FAKES.with(|f| {
+            f.borrow_mut().remove_timer = Some(Rc::new(move |scheduler| {
+                seen.borrow_mut().push(vec![scheduler.to_string()]);
+                Ok(())
+            }))
+        });
+        let backups = t.backups().len();
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"pickup timer: replaced by the daemon".to_string()),
+            "{lines:?}"
+        );
+        assert_eq!(
+            t.backups().len(),
+            backups + 1,
+            "the crontab is backed up first"
+        );
+        assert_eq!(*removed.borrow(), [vec!["cron".to_string()]]);
+        assert_eq!(timer_calls.borrow().len(), timer_runs, "no timer reinstall");
+        assert!(daemon_calls.borrow().is_empty());
+
+        FAKES.with(|f| {
+            f.borrow_mut().remove_timer = Some(Rc::new(|_| {
+                Err("could not remove the cron timer: synthetic".into())
+            }))
+        });
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1);
+        assert!(
+            lines.contains(&"pickup timer: could not remove the cron timer: synthetic".to_string()),
+            "{lines:?}"
+        );
     }
 
     #[test]
