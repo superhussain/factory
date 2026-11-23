@@ -97,16 +97,17 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
     });
 
     await t.test("scheduler K3 snippets match pickup.md", async () => {
-      for (const name of ["launchers", "cron", "windows-task", "windows-tzdata"]) {
+      for (const name of ["launchers", "cron", "windows-task"]) {
         assert.ok(pickup.includes(await snippet(name)), name);
       }
       assert.equal(
         await snippet("cron"),
-        "*/5 * * * * PATH=<launcher bin dir>:/usr/bin:/bin python3 <installed-skill>/runtime/factory.py pickup >> <home>/logs/pickup.log 2>&1",
+        "*/5 * * * * PATH=<launcher bin dir>:/usr/bin:/bin <installed-skill>/runtime/factory --home <home> pickup >> <home>/logs/pickup.log 2>&1",
       );
       const plist = await snippet("launchd-plist");
       for (const line of [
-        "<string><installed-skill>/runtime/factory.py</string>",
+        "<string><installed-skill>/runtime/factory</string>",
+        "<string>--home</string>",
         "<integer>300</integer>",
         "<string><home>/logs/pickup.log</string>",
       ]) {
@@ -129,8 +130,8 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
         "Start here",
       );
       const commands = {
-        setup: "python3 <installed-skill>/runtime/factory.py pickup setup",
-        "setup-install": "python3 <installed-skill>/runtime/factory.py pickup setup --install",
+        setup: "<installed-skill>/runtime/factory pickup setup",
+        "setup-install": "<installed-skill>/runtime/factory pickup setup --install",
       };
       for (const [name, command] of Object.entries(commands)) {
         assert.equal(await snippet(name), command);

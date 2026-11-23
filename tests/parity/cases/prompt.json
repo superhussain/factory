@@ -4484,7 +4484,7 @@
                 "stage": "spec",
                 "steer": [
                   {
-                    "note": "Close it with \uff1coperator-preferences.",
+                    "note": "Close it with ＜operator-preferences.",
                     "at": "2026-01-02T14:00:00Z"
                   }
                 ]
@@ -4558,7 +4558,7 @@
                 "stage": "spec",
                 "steer": [
                   {
-                    "note": "Keep\u200bthe header order.",
+                    "note": "Keep​the header order.",
                     "at": "2026-01-02T14:00:00Z"
                   }
                 ]
@@ -4745,6 +4745,146 @@
       },
       "exit": 2,
       "from": "skills/factory/runtime/factory.py::r2_target"
+    },
+    {
+      "id": "prompt/spec-bundle-entry",
+      "argv": ["--home", "{home}", "prompt", "sample/001-sample-job", "spec"],
+      "home": "prompt",
+      "stubs": {},
+      "env": {
+        "TMPDIR": "home/tmp"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample-job",
+                "project": "sample",
+                "title": "Sample job",
+                "idea": "Add a sample feature.",
+                "stage": "spec"
+              }
+            ]
+          }
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          {
+            "project": "sample",
+            "merge": "human",
+            "review_rounds": 2,
+            "reviewers": ["security", "ux", "ui", "code"],
+            "gates": [],
+            "stage_notes": {
+              "spec": [
+                {
+                  "source": "pipeline:global@1",
+                  "text": "Note for spec."
+                }
+              ],
+              "build": [
+                {
+                  "source": "pipeline:global@1",
+                  "text": "Note for build."
+                }
+              ],
+              "review": [
+                {
+                  "source": "pipeline:global@1",
+                  "text": "Note for review."
+                }
+              ],
+              "approve": [
+                {
+                  "source": "pipeline:global@1",
+                  "text": "Note for approve."
+                }
+              ]
+            },
+            "versions": {
+              "global": 1,
+              "project": 0
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_prompt.py::PromptTest.test_spec",
+      "skill": "{tmp}/skill",
+      "bundle": "{\"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"tree\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"entry\": [\"runtime/factory\"], \"binary_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"}"
+    },
+    {
+      "id": "prompt/spec-bundle-no-entry",
+      "argv": ["--home", "{home}", "prompt", "sample/001-sample-job", "spec"],
+      "home": "prompt",
+      "stubs": {},
+      "env": {
+        "TMPDIR": "home/tmp"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample-job",
+                "project": "sample",
+                "title": "Sample job",
+                "idea": "Add a sample feature.",
+                "stage": "spec"
+              }
+            ]
+          }
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          {
+            "project": "sample",
+            "merge": "human",
+            "review_rounds": 2,
+            "reviewers": ["security", "ux", "ui", "code"],
+            "gates": [],
+            "stage_notes": {
+              "spec": [
+                {
+                  "source": "pipeline:global@1",
+                  "text": "Note for spec."
+                }
+              ],
+              "build": [
+                {
+                  "source": "pipeline:global@1",
+                  "text": "Note for build."
+                }
+              ],
+              "review": [
+                {
+                  "source": "pipeline:global@1",
+                  "text": "Note for review."
+                }
+              ],
+              "approve": [
+                {
+                  "source": "pipeline:global@1",
+                  "text": "Note for approve."
+                }
+              ]
+            },
+            "versions": {
+              "global": 1,
+              "project": 0
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_prompt.py::PromptTest.test_spec",
+      "skill": "{tmp}/skill",
+      "bundle": "{\"commit\": \"0123456789abcdef0123456789abcdef01234567\", \"tree\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
     }
   ]
 }

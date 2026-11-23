@@ -97,7 +97,7 @@ at least one `--checkout`. It is safe to re-run: an existing `archive` remote
 is kept, branches already under `archive/` are not renamed again, and a re-run
 clears any upstream they still have. The renamed branches still hold private
 history; push them only to `archive`. Resume autonomy and pickup once every
-host is repointed. Until a host is repointed, pickup and `factory.py worktree`
+host is repointed. Until a host is repointed, pickup and `factory worktree`
 refuse it with an `unsafe checkout` line, so it claims, launches and recovers
 nothing.
 
@@ -116,7 +116,7 @@ now opens a new pull request or a 404. Point them at the archive in this order:
    links, and an older Worker rejects the `archive:` line.
 2. Add `archive: OWNER/factory-private` to the frontmatter of
    `<home>/projects/factory.md`, then push it:
-   `FACTORY_HOME=<factory-home> python3 <installed-skill>/runtime/factory.py push factory`.
+   `FACTORY_HOME=<factory-home> <installed-skill>/runtime/factory push factory`.
 3. Dry run, and save the output. It lists every old URL, so it is also the undo
    record:
 
@@ -153,7 +153,7 @@ this section. Ctrl-C or Ctrl-D at the `done` prompt stops before the push.
   then push the project:
 
   ```sh
-  FACTORY_HOME=<factory-home> python3 <installed-skill>/runtime/factory.py push <project>
+  FACTORY_HOME=<factory-home> <installed-skill>/runtime/factory push <project>
   ```
 
   Check the deploy with `gh run list -R OWNER/factory --workflow deploy-main.yml`.

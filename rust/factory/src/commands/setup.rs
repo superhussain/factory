@@ -3,7 +3,7 @@
 use std::collections::hash_map::RandomState;
 use std::fs;
 use std::hash::{BuildHasher, Hasher};
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 use crate::cli::Call;
 use crate::commands::lookup::{main_checkout, remotes};
+use crate::commands::pickup;
 use crate::shared::board::read_board;
 use crate::shared::conf::{
     closed_frontmatter, fm_get, frontmatter, read_conf, read_env_ordered, unquote,
@@ -788,6 +789,10 @@ pub fn doctor_cmd(_call: &Call) -> Res<()> {
         report_status(&home, cached_status(&home), Some(&report));
     }
     println!("{}", dumps(&report, DEFAULT));
+    let stderr = io::stderr();
+    daemon_line(&mut stderr.lock(), stderr.is_terminal(), || {
+        pickup::daemon_state(&home)
+    });
     if failed(&checks[..3]) {
         return Err(exit(2));
     }
@@ -795,6 +800,15 @@ pub fn doctor_cmd(_call: &Call) -> Res<()> {
         return Err(exit(5));
     }
     Ok(())
+}
+
+/// `daemon: <running|stopped|installed|not installed>` for a person at a terminal. factory.py has
+/// no daemon and its doctor prints only the JSON report, so the line stays out of the report and
+/// off pipes, where agents and the parity runs read doctor's output.
+fn daemon_line(err: &mut dyn Write, terminal: bool, state: impl FnOnce() -> &'static str) {
+    if terminal {
+        let _ = writeln!(err, "daemon: {}", state());
+    }
 }
 
 /// True when s is a UTC stamp `strptime` reads and `strftime` writes back unchanged.
@@ -1494,6 +1508,18 @@ pub fn with_cloudflare_cmd(call: &Call) -> Res<()> {
 mod tests {
     use super::*;
     use crate::shared::fs::temp_dir;
+
+    /// The daemon line goes only to a terminal, so piped doctor output stays factory.py's.
+    #[test]
+    fn doctor_daemon_line_only_on_a_terminal() {
+        let mut err = Vec::new();
+        daemon_line(&mut err, false, || {
+            unreachable!("piped doctor checks no daemon")
+        });
+        assert!(err.is_empty());
+        daemon_line(&mut err, true, || "running");
+        assert_eq!(String::from_utf8(err).unwrap(), "daemon: running\n");
+    }
 
     #[test]
     fn set_api_url_keeps_crlf() {

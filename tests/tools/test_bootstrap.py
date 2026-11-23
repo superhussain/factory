@@ -832,9 +832,10 @@ class DeviceTokenDocTest(unittest.TestCase):
         doc = (ROOT / "docs" / "cloudflare.md").read_text(encoding="utf-8")
         step = doc.split("3. Use it.", 1)[1].split("\n4. ", 1)[0]
         block = step.split("```sh\n", 1)[1].split("```", 1)[0].strip()
-        self.assertEqual(block, "python3 <installed-skill>/runtime/factory.py with-cloudflare -- "
+        self.assertEqual(block, "<installed-skill>/runtime/factory with-cloudflare -- "
                                 "mise exec -- python3 tools/bootstrap.py up")
-        self.assertIn("On Windows use `py -3` for both.", step)
+        self.assertIn("On Windows run `<installed-skill>\\runtime\\factory.exe` for the first part and use `py -3` "
+                      "for `tools/bootstrap.py`.", step)
         self.assertNotIn("```powershell", step)
         self.assertNotIn("sed -n", step)
 

@@ -1,7 +1,7 @@
 # `/factory init`
 
 Sets up the selected device home, then registers the current repo only when
-configured. Run `python3 <installed-skill>/runtime/factory.py init [<repo-path>]`.
+configured. Run `<installed-skill>/runtime/factory init [<repo-path>]`.
 It seeds absent config and private `.env` only, preserves existing bytes and modes,
 and reports missing endpoint/token without network access. Enter credentials
 manually in that private file, never in chat or arguments. Import an endpoint with

@@ -336,6 +336,13 @@ extern "C" {
     fn getuid() -> u32;
 }
 
+/// `os.getuid()`.
+#[cfg(unix)]
+pub(crate) fn uid() -> u32 {
+    // SAFETY: getuid takes no arguments, cannot fail and touches no memory.
+    unsafe { getuid() }
+}
+
 #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
 const O_DIRECTORY_NOFOLLOW: i32 = 0o40000 | 0o100000;
 #[cfg(all(

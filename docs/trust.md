@@ -20,7 +20,7 @@ can raise to 5. The dashboard shows this table, the gate catalog and each projec
 | Id | Floor | Config effect |
 | --- | --- | --- |
 | F1 | Never push to the base or force-push. Every change lands as a PR from `factory/<id>`. | none |
-| F2 | Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. Security and code always run. ux and ui are SKIPPED only by factory.py review-plan when a round changes nothing a person sees, and the approver checks each skip. | none |
+| F2 | Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. Security and code always run. ux and ui are SKIPPED only by factory review-plan when a round changes nothing a person sees, and the approver checks each skip. | none |
 | F3 | At most 2 review rounds per build cycle by default, then needs-human. | 1 to 5; only the all-projects scope can raise it above 2 |
 | F4 | Approver runs on every job. Only APPROVE merges. ESCALATE holds the PR. | none |
 | F5 | APPROVE PRs merge after green checks. | tighten to `human`: every PR held for a person |
@@ -45,7 +45,7 @@ document may list catalog ids under `gates`, and the effective view returns the
 union of both scopes in catalog order, so a project cannot switch off a global
 gate. Unknown ids are rejected with their index, never echoed. Gates only add a
 hold for a person; no stored value removes a loop stage or adds one outside the
-catalog. `factory.py pipeline` rejects a view whose `gates` is missing or not in
+catalog. `factory pipeline` rejects a view whose `gates` is missing or not in
 catalog order.
 
 | Id | Gate |
@@ -54,7 +54,7 @@ catalog order.
 
 ## Pre-review checks
 
-`factory.py pre-review` runs the commands in `.factory/checks.json` as read from
+`factory pre-review` runs the commands in `.factory/checks.json` as read from
 `origin/<base>`, where `<base>` comes from the project file. It fetches `<base>`
 from `https://github.com/<repo>.git`, never from the `origin` remote, and refuses
 a worktree whose own git config sets `url.*` or `http.*` keys. It never reads the
@@ -92,7 +92,7 @@ it. Move a harmless key you need, such as `http.postBuffer`, to
 `review-plan` picks the review tier from spec.md's `Tier:` line and decision.md's
 `## Full review` heading, and a builder can edit both between rounds. So the job
 folder keeps `review-floor.json`, such as `{"tier": "medium", "full_review": true}`.
-`factory.py review-floor` writes it before the first build and after each approver
+`factory review-floor` writes it before the first build and after each approver
 CHANGES, and `review-plan` rewrites it each round it records a plan. Each write keeps
 the higher of the recorded tier and the spec's tier, and keeps `full_review` once
 either the record or decision.md sets it. `review-plan` then rates the round at least
@@ -105,7 +105,7 @@ still bounds that gap.
 
 ## Review citation check
 
-`factory.py grounding` reads each review file of a round and checks every
+`factory grounding` reads each review file of a round and checks every
 `path:line` it cites against the job worktree: the file exists, the line is
 inside it, and for review-code the line is within 10 lines of a change on the
 branch. Citations that fail go in `round-N/grounding.md` and the round's board
@@ -143,7 +143,7 @@ profile. `PUT /api/projects/<slug>.md` runs it with the field `project document`
 after the structural checks, so frontmatter errors still win.
 `PUT /api/project-documents/<slug>/<name>` runs the same profile with the same
 field after its control-character check. Saves stay open to
-service tokens, so `factory.py push` keeps working.
+service tokens, so `factory push` keeps working.
 
 | Rule | `"note"` | `"document"` |
 | --- | --- | --- |
@@ -171,7 +171,7 @@ A service-token holder can still write plain-language instructions or links into
 a project file. Project saves do not record which person made them yet; that
 identity work is still to be built. Stored files are not re-checked.
 
-`factory.py documents <slug>` reads `notes.md`, `decisions.md` and `runbook.md` and applies the `"document"` profile to each one. It wraps each document in an envelope whose source is `document:<slug>/<name>` and writes them to `projects/<slug>.documents.md`. A failing document stops the job at needs-human. The Worker applies the same profile when these documents are saved. Documents stored before that are not re-checked, so this read-time check stays.
+`factory documents <slug>` reads `notes.md`, `decisions.md` and `runbook.md` and applies the `"document"` profile to each one. It wraps each document in an envelope whose source is `document:<slug>/<name>` and writes them to `projects/<slug>.documents.md`. A failing document stops the job at needs-human. The Worker applies the same profile when these documents are saved. Documents stored before that are not re-checked, so this read-time check stays.
 
 ## The operator-preferences envelope
 
@@ -202,7 +202,7 @@ Admission rule 4 keeps stored text from closing the envelope early.
 
 ### How agents receive it
 
-`factory.py pipeline <slug>` reads the effective view. It re-checks every note
+`factory pipeline <slug>` reads the effective view. It re-checks every note
 against rules 1–5, checks each `source`, and builds the envelopes and the fixed
 sentence itself. Every role definition carries the same sentence. A failing note,
 a 409 or a network failure stops the job at needs-human, and nothing falls back to
@@ -211,7 +211,7 @@ defaults. The history list shows `saved_by` only to a signed-in person.
 ## Agent-proposed work
 
 Agent-proposed work does not go through this module. It shipped device-side as
-`factory.py suggest admit`, with its own schema, caps, allowlist and kill switch.
+`factory suggest admit`, with its own schema, caps, allowlist and kill switch.
 Every suggestion string also passes rules 3 to 7 above through `check_untrusted`,
 which copies the `SECRETS` and `PHRASES` patterns from this module. A test pins
 the copies to the JavaScript source. See [autonomy.md](autonomy.md). Admitted
