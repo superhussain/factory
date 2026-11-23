@@ -1,0 +1,200 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "audit/running-example",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_running_example",
+      "argv": ["--home", "{home}", "audit", "1017-add-x"],
+      "home": "audit",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "audit/no-calls",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_session_without_calls",
+      "argv": ["--home", "{home}", "audit", "1099-empty-job"],
+      "home": "audit",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "audit/one-call",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_one_call",
+      "argv": ["--home", "{home}", "audit", "1022-one-call"],
+      "home": "audit",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "audit/agent-calls",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_pr_merge_flag_by_agent and test_control_characters_print_as_question_marks",
+      "argv": ["--home", "{home}", "audit", "1020-odd-calls"],
+      "home": "audit",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "audit/flag-table",
+      "from": "tests/cli/test_audit.py AuditFlagsTest test_each_flag, test_near_misses, test_secret_file_*, test_raw_targets, test_target_redacts_and_folds_home",
+      "argv": ["--home", "{home}", "audit", "1021-flag-table"],
+      "home": "audit",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "audit/bad-id-short",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_errors",
+      "argv": ["--home", "{home}", "audit", "1017"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "audit/bad-id-case",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_errors",
+      "argv": ["--home", "{home}", "audit", "1017-Add-x"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "audit/bad-id-dots",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_errors",
+      "argv": ["--home", "{home}", "audit", "../1017-add-x"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "audit/push-bad-id",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_errors",
+      "argv": ["--home", "{home}", "audit", "push", "1017"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "audit/bad-verb",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_errors",
+      "argv": ["--home", "{home}", "audit", "x", "1017-add-x"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "audit/extra",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_errors",
+      "argv": ["--home", "{home}", "audit", "1017-add-x", "extra"],
+      "home": null,
+      "stubs": {},
+      "exit": 2
+    },
+    {
+      "id": "audit/no-session",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_errors",
+      "argv": ["--home", "{home}", "audit", "1018-add-x"],
+      "home": "audit",
+      "stubs": {},
+      "exit": 4
+    },
+    {
+      "id": "audit/prefix-only",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_errors",
+      "argv": ["--home", "{home}", "audit", "1017-add-xy"],
+      "home": "audit",
+      "stubs": {},
+      "exit": 4
+    },
+    {
+      "id": "audit/no-transcripts",
+      "from": "tests/cli/test_audit.py AuditCommandTest.test_errors",
+      "argv": ["--home", "{home}", "audit", "1017-add-x"],
+      "home": "audit",
+      "stubs": {},
+      "env": {
+        "CLAUDE_CONFIG_DIR": "/nonexistent-parity-claude"
+      },
+      "exit": 4
+    },
+    {
+      "id": "audit/push",
+      "from": "tests/cli/test_audit.py AuditPushTest.test_push_puts_rows",
+      "argv": ["--home", "{home}", "audit", "push", "1017-add-x"],
+      "home": "audit",
+      "stubs": {},
+      "routes": {
+        "PUT /api/audit/1017-add-x/parity.jsonl": [200, "ok"]
+      },
+      "env": {
+        "PASEO_HOME": "/nonexistent-parity-paseo"
+      },
+      "exit": 0
+    },
+    {
+      "id": "audit/push-paseo",
+      "from": "tests/cli/test_audit.py AuditPushTest.test_push_links_paseo_session",
+      "argv": ["--home", "{home}", "audit", "push", "1017-add-x"],
+      "home": "audit",
+      "stubs": {},
+      "routes": {
+        "PUT /api/audit/1017-add-x/parity.jsonl": [200, "ok"]
+      },
+      "exit": 0
+    },
+    {
+      "id": "audit/push-one-call",
+      "from": "tests/cli/test_audit.py AuditPushTest.test_push_one_call",
+      "argv": ["--home", "{home}", "audit", "push", "1022-one-call"],
+      "home": "audit",
+      "stubs": {},
+      "routes": {
+        "PUT /api/audit/1022-one-call/parity.jsonl": [200, "ok"]
+      },
+      "exit": 0
+    },
+    {
+      "id": "audit/push-no-calls",
+      "from": "tests/cli/test_audit.py AuditPushTest.test_push_puts_rows",
+      "argv": ["--home", "{home}", "audit", "push", "1099-empty-job"],
+      "home": "audit",
+      "stubs": {},
+      "routes": {
+        "PUT /api/audit/1099-empty-job/parity.jsonl": [200, "ok"]
+      },
+      "exit": 0
+    },
+    {
+      "id": "audit/push-write-only",
+      "from": "tests/cli/test_audit.py AuditPushTest.test_push_errors",
+      "argv": ["--home", "{home}", "audit", "push", "1017-add-x"],
+      "home": "audit",
+      "stubs": {},
+      "routes": {
+        "PUT /api/audit/1017-add-x/parity.jsonl": [
+          403,
+          "audit rows are written only by the host's bound service token"
+        ]
+      },
+      "exit": 2
+    },
+    {
+      "id": "audit/push-forbidden",
+      "from": "tests/cli/test_audit.py AuditPushTest.test_push_errors",
+      "argv": ["--home", "{home}", "audit", "push", "1017-add-x"],
+      "home": "audit",
+      "stubs": {},
+      "routes": {
+        "PUT /api/audit/1017-add-x/parity.jsonl": [403, "Forbidden"]
+      },
+      "exit": 5
+    },
+    {
+      "id": "audit/push-no-device",
+      "from": "tests/cli/test_audit.py AuditPushTest.test_push_errors",
+      "argv": ["--home", "{home}", "audit", "push", "1017-add-x"],
+      "home": "audit-bad-device",
+      "stubs": {},
+      "exit": 2
+    }
+  ]
+}

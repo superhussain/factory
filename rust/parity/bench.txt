@@ -1,0 +1,2 @@
+# bench cases the Rust binary passes (2187 sub-job 13)
+bench/*

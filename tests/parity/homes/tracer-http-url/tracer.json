@@ -1,0 +1,1 @@
+{"version": 1, "projects": {"sample": {"url": "http://tracer.example.invalid", "token_file": "/nonexistent/parity-tracer-token", "service": "sample"}}}

@@ -1,0 +1,27 @@
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": [{"type": "text", "text": "ship it"}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": "plain words"}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": [{"type": "text", "text": "[Request interrupted by user]"}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": "<command-name>/clear</command-name>"}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "isMeta": true, "message": {"content": "meta"}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": [{"type": "text", "text": ""}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "assistant", "message": {"id": "h1", "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": [{"type": "tool_use", "id": "h1-0", "name": "Bash", "input": {"command": "ls"}}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "h1-0", "is_error": false, "content": "fine"}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "assistant", "message": {"id": "d0", "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": [{"type": "tool_use", "id": "d0-0", "name": "Bash", "input": {"command": "ls"}}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "d0-0", "is_error": true, "content": "Permission to use Bash has been denied by the Claude Code auto mode classifier."}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "assistant", "message": {"id": "d1", "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": [{"type": "tool_use", "id": "d1-0", "name": "Bash", "input": {"command": "ls"}}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "d1-0", "is_error": true, "content": "The user doesn't want to proceed with this tool use."}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "assistant", "message": {"id": "d2", "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": [{"type": "tool_use", "id": "d2-0", "name": "Bash", "input": {"command": "ls"}}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "d2-0", "is_error": true, "content": "Blocked: sleep 30 is not allowed"}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "assistant", "message": {"id": "d3", "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": [{"type": "tool_use", "id": "d3-0", "name": "Bash", "input": {"command": "ls"}}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "d3-0", "is_error": true, "content": "Exit code 1 Permission denied"}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "assistant", "message": {"id": "z", "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": [{"type": "tool_use", "id": "z-0", "name": "Bash", "input": {"command": "ls"}}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "z-0", "is_error": false, "content": "ok"}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "assistant", "message": {"id": "c0", "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": [{"type": "tool_use", "id": "c0-0", "name": "Bash", "input": {"command": "FOO=1 git status"}}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "assistant", "message": {"id": "c1", "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": [{"type": "tool_use", "id": "c1-0", "name": "Bash", "input": {"command": "git status"}}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "assistant", "message": {"id": "c2", "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": [{"type": "tool_use", "id": "c2-0", "name": "Bash", "input": {"command": "A='x y' B=2 git status"}}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "assistant", "message": {"id": "c3", "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": [{"type": "tool_use", "id": "c3-0", "name": "Bash", "input": {"command": "git log"}}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "attachment", "attachment": {"type": "skill_listing", "content": "x"}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "assistant", "message": {"id": "m1", "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": [{"type": "tool_use", "id": "m1-0", "name": "Bash", "input": {"command": "until [ -f /tmp/done ]; do sleep 5; done"}}, {"type": "tool_use", "id": "m1-1", "name": "Read", "input": {"file_path": "/tmp/tasks/b7-x.output"}}, {"type": "tool_use", "id": "m1-2", "name": "Bash", "input": {"command": "stat -c %Y round-2/review.md"}}, {"type": "tool_use", "id": "m1-3", "name": "Read", "input": {"file_path": "jobs/round-3/review.md"}}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "attachment", "attachment": {"type": "late", "content": "y"}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "m1-0", "is_error": true, "content": "zsh: command not found: foo\nNode.js v24.0.0"}]}}
+{"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "m1-1", "is_error": true, "content": "zsh: no matches found: *.png"}]}}

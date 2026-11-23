@@ -1,0 +1,684 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "setup/init-offline",
+      "argv": ["--home", "{home}", "init"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_setup.py::SetupTest.test_clean_offline_setup_exact_copy_no_roles_git_or_network"
+    },
+    {
+      "id": "setup/init-connection",
+      "argv": ["--home", "{home}", "init", "--connection", "{home}/good.json"],
+      "home": "setup-init",
+      "stubs": {},
+      "from": "tests/cli/test_setup.py::SetupTest.test_absent_endpoint_key_and_equivalent_trailing_slash"
+    },
+    {
+      "id": "setup/init-connection-invalid",
+      "argv": ["--home", "{home}", "init", "--connection", "{home}/bad.json"],
+      "home": "setup-init",
+      "stubs": {},
+      "from": "tests/cli/test_setup.py::SetupTest.test_connection_validation_and_disagreement_make_no_writes"
+    },
+    {
+      "id": "setup/init-connection-disagrees",
+      "argv": ["--home", "{home}", "init", "--connection", "{home}/other.json", "--agents", "both"],
+      "home": "setup-configured",
+      "stubs": {},
+      "from": "tests/cli/test_setup.py::SetupTest.test_connection_validation_and_disagreement_make_no_writes"
+    },
+    {
+      "id": "setup/init-bad-config",
+      "argv": ["--home", "{home}", "init"],
+      "home": "setup-bad-config",
+      "stubs": {},
+      "from": "tests/cli/test_setup.py::SetupTest.test_connection_validation_and_disagreement_make_no_writes"
+    },
+    {
+      "id": "setup/init-unknown-option",
+      "argv": ["--home", "{home}", "init", "--unknown"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_setup.py::SetupTest.test_setup_options_are_explicit_and_preflighted"
+    },
+    {
+      "id": "setup/init-agents-twice",
+      "argv": ["--home", "{home}", "init", "--agents", "none", "--agents", "both"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_setup.py::SetupTest.test_setup_options_are_explicit_and_preflighted"
+    },
+    {
+      "id": "setup/init-agents-both",
+      "argv": ["--home", "{home}", "init", "--agents", "both"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_factory.py::AgentInstallTest.test_init_installs_without_credentials_and_leaves_unrelated_files"
+    },
+    {
+      "id": "setup/init-agents-keep-header",
+      "argv": ["--home", "{home}", "init", "--agents", "claude"],
+      "home": "setup-agents",
+      "stubs": {},
+      "from": "tests/cli/test_factory.py::AgentInstallTest.test_repeated_init_preserves_native_header_and_refreshes_body"
+    },
+    {
+      "id": "setup/init-register",
+      "argv": ["--home", "{home}", "init", "/srv/sample"],
+      "home": null,
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "/srv/sample", "rev-parse", "--git-common-dir"],
+            "stdout": ".git\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/srv/sample", "remote", "-v"],
+            "stdout": "origin\tgit@github.com:octo/sample.git (fetch)\norigin\tgit@github.com:octo/sample.git (push)\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/projects/sample.md": [404, "missing"],
+        "PUT /api/projects/sample.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_setup.py::SetupTest.test_configured_init_continues_registration_with_opaque_credentials"
+    },
+    {
+      "id": "setup/init-register-412",
+      "argv": ["--home", "{home}", "init", "/srv/sample"],
+      "home": null,
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "/srv/sample", "rev-parse", "--git-common-dir"],
+            "stdout": ".git\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/srv/sample", "remote", "-v"],
+            "stdout": "origin\tgit@github.com:octo/sample.git (fetch)\norigin\tgit@github.com:octo/sample.git (push)\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/projects/sample.md": [404, "missing"],
+        "PUT /api/projects/sample.md": [412, ""]
+      },
+      "exit": 6
+    },
+    {
+      "id": "setup/init-registered-elsewhere",
+      "argv": ["--home", "{home}", "init", "/srv/sample"],
+      "home": null,
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "/srv/sample", "rev-parse", "--git-common-dir"],
+            "stdout": ".git\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "/srv/sample", "remote", "-v"],
+            "stdout": "origin\tgit@github.com:octo/sample.git (fetch)\norigin\tgit@github.com:octo/sample.git (push)\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/projects/sample.md": [200, "---\nrepo: octo/sample\nbase: main\n---\n# Sample\n"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_setup.py::SetupTest.test_configured_init_continues_registration_with_opaque_credentials"
+    },
+    {
+      "id": "setup/init-not-a-repo",
+      "argv": ["--home", "{home}", "init", "/srv/sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {},
+      "exit": 0
+    },
+    {
+      "id": "setup/adopt-home",
+      "argv": ["adopt-home", "{home}/state"],
+      "home": "setup-adopt",
+      "stubs": {},
+      "from": "tests/cli/test_contract.py::ContractTest.test_adoption_prints_only_canonical_path"
+    },
+    {
+      "id": "setup/adopt-home-relative",
+      "argv": ["adopt-home", "state"],
+      "home": "setup-adopt",
+      "stubs": {}
+    },
+    {
+      "id": "setup/adopt-home-invalid",
+      "argv": ["adopt-home", "{home}"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_location.py::LocationTest.test_bad_home_says_nothing_was_written"
+    },
+    {
+      "id": "setup/adopt-home-bad-pointer",
+      "argv": ["adopt-home", "{home}/state"],
+      "home": "setup-adopt-bad-pointer",
+      "stubs": {},
+      "from": "tests/cli/test_location.py::LocationTest.test_malformed_pointer_never_falls_back"
+    },
+    {
+      "id": "setup/adopt-home-home-flag",
+      "argv": ["--home", "{home}", "adopt-home", "{home}"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_location.py::LocationTest.test_global_options_preflight_scope_and_positional_authority"
+    },
+    {
+      "id": "setup/doctor-ok",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, []],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_hosts.py::DoctorHeartbeatTest.test_doctor_sends_one_status_after_its_two_gets_and_changes_nothing"
+    },
+    {
+      "id": "setup/doctor-board-absent",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, []],
+        "GET /api/board": [404, ""],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_success_and_absent_board_are_two_read_only_requests"
+    },
+    {
+      "id": "setup/doctor-status-routes",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": "setup-status",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, []],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_hosts.py::StatusTest.test_body_has_the_seven_keys_and_follows_each_rule"
+    },
+    {
+      "id": "setup/doctor-projects-302",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [302, "synthetic-secret"],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_redirect_auth_and_malformed_responses_do_not_leak_or_follow"
+    },
+    {
+      "id": "setup/doctor-projects-not-json",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, "not json"],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_redirect_auth_and_malformed_responses_do_not_leak_or_follow"
+    },
+    {
+      "id": "setup/doctor-projects-object",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, {}],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_redirect_auth_and_malformed_responses_do_not_leak_or_follow"
+    },
+    {
+      "id": "setup/doctor-board-jobs-object",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [200, []],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": {}
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_redirect_auth_and_malformed_responses_do_not_leak_or_follow"
+    },
+    {
+      "id": "setup/doctor-no-credentials",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": "setup-configured",
+      "stubs": {},
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_missing_or_invalid_local_configuration_short_circuits"
+    },
+    {
+      "id": "setup/doctor-no-config",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_missing_or_invalid_local_configuration_short_circuits"
+    },
+    {
+      "id": "setup/doctor-bad-metadata",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": "setup-bad-config",
+      "stubs": {},
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_invalid_metadata_and_pointer_are_sanitized"
+    },
+    {
+      "id": "setup/doctor-bad-pointer",
+      "argv": ["doctor"],
+      "home": "setup-bad-pointer",
+      "stubs": {},
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_invalid_metadata_and_pointer_are_sanitized"
+    },
+    {
+      "id": "setup/host-pair",
+      "argv": ["--home", "{home}", "host", "pair", "parity", "ABCDE-23456"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [200, "paired"],
+        "GET /projects.json": [200, []],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_hosts.py::PairTest.test_pair_sets_device_sends_one_post_and_one_status"
+    },
+    {
+      "id": "setup/host-wrong-code",
+      "argv": ["--home", "{home}", "host", "pair", "parity", "ABCDE-23456"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [403, "pairing code is wrong, used or expired"],
+        "GET /projects.json": [200, []],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_hosts.py::PairTest.test_refusals_leave_config_alone_and_send_no_status"
+    },
+    {
+      "id": "setup/host-bound",
+      "argv": ["--home", "{home}", "host", "pair", "parity", "ABCDE-23456"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [409, "bound"],
+        "GET /projects.json": [200, []],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_hosts.py::PairTest.test_refusals_leave_config_alone_and_send_no_status"
+    },
+    {
+      "id": "setup/host-forbidden",
+      "argv": ["--home", "{home}", "host", "pair", "parity", "ABCDE-23456"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [403, "Forbidden"],
+        "GET /projects.json": [200, []],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_hosts.py::PairTest.test_refusals_leave_config_alone_and_send_no_status"
+    },
+    {
+      "id": "setup/host-401",
+      "argv": ["--home", "{home}", "host", "pair", "parity", "ABCDE-23456"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [401, ""],
+        "GET /projects.json": [200, []],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_hosts.py::PairTest.test_refusals_leave_config_alone_and_send_no_status"
+    },
+    {
+      "id": "setup/host-500",
+      "argv": ["--home", "{home}", "host", "pair", "parity", "ABCDE-23456"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [500, "boom\u001b[2Jdone"],
+        "GET /projects.json": [200, []],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_hosts.py::PairTest.test_refusals_leave_config_alone_and_send_no_status"
+    },
+    {
+      "id": "setup/host-bad-sub",
+      "argv": ["--home", "{home}", "host", "bind", "parity", "ABCDE-23456"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [200, "paired"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_hosts.py::PairTest.test_bad_input_exits_2_before_any_request"
+    },
+    {
+      "id": "setup/host-bad-id",
+      "argv": ["--home", "{home}", "host", "pair", "-host", "ABCDE-23456"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [200, "paired"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_hosts.py::PairTest.test_bad_input_exits_2_before_any_request"
+    },
+    {
+      "id": "setup/host-bad-code",
+      "argv": ["--home", "{home}", "host", "pair", "parity", "ABCD"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [200, "paired"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_hosts.py::PairTest.test_bad_input_exits_2_before_any_request"
+    },
+    {
+      "id": "setup/host-other-device",
+      "argv": ["--home", "{home}", "host", "pair", "host-b", "ABCDE-23456"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [200, "paired"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_hosts.py::PairTest.test_bad_input_exits_2_before_any_request"
+    },
+    {
+      "id": "setup/cloudflare-bare",
+      "argv": ["with-cloudflare"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_with_cloudflare.py::WithCloudflareTest.test_usage"
+    },
+    {
+      "id": "setup/cloudflare-no-separator",
+      "argv": ["--home", "{home}", "with-cloudflare", "sh"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_with_cloudflare.py::WithCloudflareTest.test_usage"
+    },
+    {
+      "id": "setup/cloudflare-no-env",
+      "argv": ["--home", "{home}", "with-cloudflare", "--", "sh", "-c", "exit 9"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_with_cloudflare.py::WithCloudflareTest.test_no_env_file"
+    },
+    {
+      "id": "setup/cloudflare-no-token",
+      "argv": ["--home", "{home}", "with-cloudflare", "--", "sh", "-c", "exit 9"],
+      "home": null,
+      "stubs": {},
+      "routes": {},
+      "exit": 5,
+      "from": "tests/cli/test_with_cloudflare.py::WithCloudflareTest.test_no_token"
+    },
+    {
+      "id": "setup/explore-bad-slug",
+      "argv": ["--home", "{home}", "explore", "bad slug"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_explore.py::ExploreTest.test_explore_done"
+    },
+    {
+      "id": "setup/explore-done-usage",
+      "argv": ["--home", "{home}", "explore", "sample", "done", "a b"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_explore.py::ExploreTest.test_explore_done"
+    },
+    {
+      "id": "setup/explore-done-extra",
+      "argv": ["--home", "{home}", "explore", "sample", "gone", "run"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_explore.py::ExploreTest.test_explore_done"
+    },
+    {
+      "id": "setup/explore-done",
+      "argv": ["--home", "{home}", "explore", "sample", "done", "run-1"],
+      "home": "setup-explore",
+      "stubs": {},
+      "from": "tests/cli/test_explore.py::ExploreTest.test_explore_done"
+    },
+    {
+      "id": "setup/explore-done-missing",
+      "argv": ["--home", "{home}", "explore", "sample", "done", "run-2"],
+      "home": "setup-explore",
+      "stubs": {},
+      "from": "tests/cli/test_explore.py::ExploreTest.test_explore_done"
+    },
+    {
+      "id": "setup/explore-paused",
+      "argv": ["--home", "{home}", "explore", "sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "jobs": [],
+            "autonomy": {
+              "paused": true,
+              "projects": ["sample"],
+              "self": []
+            }
+          }
+        ]
+      },
+      "exit": 3,
+      "from": "tests/cli/test_explore.py::ExploreTest.test_explore_refuses"
+    },
+    {
+      "id": "setup/explore-not-allowed",
+      "argv": ["--home", "{home}", "explore", "other"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["sample"],
+              "self": []
+            }
+          }
+        ]
+      },
+      "exit": 3,
+      "from": "tests/cli/test_explore.py::ExploreTest.test_explore_refuses"
+    },
+    {
+      "id": "setup/explore-malformed-autonomy",
+      "argv": ["--home", "{home}", "explore", "sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "jobs": [],
+            "autonomy": {
+              "paused": "no"
+            }
+          }
+        ]
+      },
+      "exit": 3
+    },
+    {
+      "id": "setup/explore-no-path",
+      "argv": ["--home", "{home}", "explore", "sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["sample"],
+              "self": []
+            }
+          }
+        ]
+      },
+      "exit": 4
+    },
+    {
+      "id": "setup/explore-bad-base",
+      "argv": ["--home", "{home}", "explore", "sample"],
+      "home": "setup-explore",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["sample"],
+              "self": []
+            }
+          }
+        ],
+        "GET /api/projects/sample.md": [200, "---\nrepo: octo/sample\nbase: -x\n---\n# Sample\n"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_explore.py::ExploreTest.test_explore_bad_base"
+    },
+    {
+      "id": "setup/explore-fetch-fails",
+      "argv": ["--home", "{home}", "explore", "sample"],
+      "home": "setup-explore",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "jobs": [],
+            "autonomy": {
+              "paused": false,
+              "projects": ["sample"],
+              "self": []
+            }
+          }
+        ],
+        "GET /api/projects/sample.md": [200, "---\nrepo: octo/sample\nbase: main\n---\n# Sample\n"]
+      },
+      "exit": 5
+    }
+  ]
+}

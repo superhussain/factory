@@ -1,0 +1,1 @@
+- Revoke scope: Yes, Log each revoke

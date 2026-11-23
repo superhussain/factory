@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "main/no-args",
+      "argv": [],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "main/unknown-command",
+      "argv": ["nope"],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "main/home-relative",
+      "argv": ["--home", "relative", "where"],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "main/home-twice",
+      "argv": ["--home", "{home}", "--home", "{home}", "where"],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "main/bad-session",
+      "argv": ["--session", "bad tag", "where"],
+      "home": null,
+      "stubs": {}
+    },
+    {
+      "id": "main/init-bad-agents",
+      "argv": ["init", "--agents", "emacs"],
+      "home": null,
+      "stubs": {}
+    }
+  ]
+}

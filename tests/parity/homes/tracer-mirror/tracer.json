@@ -1,0 +1,1 @@
+{"version": 1, "projects": {"sample": {"url": "{api}", "token_file": "{home}/tracer-token", "service": "sample", "language": "Python"}}}

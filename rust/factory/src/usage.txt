@@ -47,7 +47,8 @@ factory.py: usage:
                                             pipeline lists this host, through launchers.json; silent
                                             when there is nothing to do. The backlog triage sweep
                                             runs at most every 30 minutes; --triage-now runs it now
-  factory.py pickup setup [--install]      check every pickup prerequisite on this host and print each fix; --install writes and loads the 5 minute timer
+  factory.py pickup setup [--install]       check every pickup prerequisite on this host and print each fix; --install writes and loads the 5 minute timer
+  factory.py catch-up                       bring this host to origin's skill, pickup timer and Worker, backing up first
   factory.py host pair <id> <code>          pair this device with a host added in Settings and set
                                             device: <id> in config.md
   factory.py pipeline <project-slug> [--board]
