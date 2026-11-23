@@ -111,6 +111,9 @@ def run_side(case, command):
         for tool, entries in case["stubs"].items():
             (stub_dir / f"{tool}.json").write_text(json.dumps(entries), encoding="utf-8")
         env = isolated_env(home)
+        # A side gets only the fake token from home/.env, so a real one never reaches the fixture or a diff.
+        env.pop("FACTORY_ACCESS_CLIENT_ID", None)
+        env.pop("FACTORY_ACCESS_CLIENT_SECRET", None)
         env.update(case.get("env", {}))
         env.update(PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""), FACTORY_STUB_DIR=str(stub_dir),
                    PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
@@ -167,7 +170,7 @@ def main(argv):
         print("parity: POSIX hosts only in phase 0", file=sys.stderr)
         return 2
     if args.ids and not Path(args.ids).exists():
-        print(f"parity: no such file {args.ids}", file=sys.stderr)
+        print(f"parity: no such file or folder {args.ids}", file=sys.stderr)
         return 2
     binary = args.bin or FACTORY_BIN
     if binary and not (os.path.isfile(binary) and os.access(binary, os.X_OK)):
