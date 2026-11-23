@@ -10028,4 +10028,647 @@ exit "$archive_code"
             assert!(!mv.home.join("paseo-claims/042-sample-export").join(AGENT).is_file());
         }
     }
+
+    /// Faked Paseo for the nudge, idle and babysit passes: statuses, sends and the server id.
+    pub(super) struct Paseo {
+        pub statuses: Rc<RefCell<Option<Vec<(Value, Value)>>>>,
+        pub sent: Rc<RefCell<Vec<(String, String)>>>,
+        pub send_ok: Rc<RefCell<bool>>,
+    }
+
+    pub(super) fn agents(pairs: &[(&str, &str)]) -> Option<Vec<(Value, Value)>> {
+        Some(pairs.iter().map(|(a, s)| (json!(a), json!(s))).collect())
+    }
+
+    impl Paseo {
+        pub fn install(fx: &Fx, statuses: Option<Vec<(Value, Value)>>) -> Paseo {
+            let p = Paseo {
+                statuses: Rc::new(RefCell::new(statuses)),
+                sent: Rc::new(RefCell::new(Vec::new())),
+                send_ok: Rc::new(RefCell::new(true)),
+            };
+            let (statuses, sent, send_ok) = (p.statuses.clone(), p.sent.clone(), p.send_ok.clone());
+            fx.set_fakes(|f| {
+                f.paseo_server = Some(Rc::new(|| Some("synthetic-server".into())));
+                f.paseo_statuses = Some(Rc::new(move || statuses.borrow().clone()));
+                f.paseo_send = Some(Rc::new(move |agent, message| {
+                    sent.borrow_mut().push((agent.into(), message.into()));
+                    *send_ok.borrow()
+                }));
+                f.awaits_permission = Some(Rc::new(|_| Some(false)));
+            });
+            p
+        }
+
+        pub fn sent(&self) -> Vec<(String, String)> {
+            self.sent.borrow().clone()
+        }
+    }
+
+    mod priority_test {
+        use super::*;
+
+        const AT: &str = "2026-01-02T12:00:00Z";
+        const NUDGE: &str = "The owner prioritized factory job 042-sample-export. If your turn ended while work on it is still owed, continue with the next step now.";
+
+        fn setup() -> (Fx, Paseo) {
+            let fx = Fx::new();
+            for slug in ["alpha", "beta"] {
+                fx.view(slug, 200, effective(slug, Some(json!({"pickup": on()})), None));
+            }
+            let p = Paseo::install(&fx, agents(&[("synthetic-agent", "idle")]));
+            (fx, p)
+        }
+
+        fn export(fx: &Fx, extra: Value) {
+            fx.jobs(json!([with(json!({"id": "042-sample-export", "stage": "build", "project": "alpha", "updated": "2026-01-01T00:00:00Z",
+                "claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"},
+                "paseo": {"server": "synthetic-server", "agent": "synthetic-agent"}, "priority": {"at": AT}}), extra)]));
+        }
+
+        #[test]
+        fn test_prioritized_idea_launches_first() {
+            let (fx, _p) = setup();
+            fx.jobs(json!([idea("100-sample-idea", "alpha", json!({})), idea("101-sample-urgent", "alpha", json!({"updated": "2026-01-02T00:00:00Z", "priority": {"at": AT}}))]));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(matches("launched 101-sample-urgent alpha on primary session [0-9a-f]{6}\n", &out));
+            assert!(fx.job("100-sample-idea").get("claim").is_none());
+        }
+
+        #[test]
+        fn test_prioritized_idea_in_a_later_project_launches_first() {
+            let (fx, _p) = setup();
+            fx.jobs(json!([idea("100-sample-idea", "alpha", json!({})), idea("101-sample-urgent", "beta", json!({"priority": {"at": AT}}))]));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(matches("launched 101-sample-urgent beta on primary session [0-9a-f]{6}\n", &out));
+            assert!(fx.job("100-sample-idea").get("claim").is_none());
+        }
+
+        #[test]
+        fn test_nudges_a_live_agent_once() {
+            let (fx, p) = setup();
+            export(&fx, json!({}));
+            assert_eq!(fx.pickup(&[]), out_err(0, "nudged 042-sample-export alpha: agent synthetic-agent\n", ""));
+            assert_eq!(p.sent(), [("synthetic-agent".to_string(), NUDGE.to_string())]);
+            let priority = fx.job("042-sample-export")["priority"].clone();
+            assert_eq!(priority["at"], AT);
+            assert!(is_stamp(&priority["nudged"]));
+            fx.clear_calls();
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!((p.sent().len(), fx.puts().len()), (1, 0));
+        }
+
+        #[test]
+        fn test_dry_run_prints_would_nudge() {
+            let (fx, p) = setup();
+            export(&fx, json!({}));
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("would nudge 042-sample-export alpha: agent synthetic-agent\nhost {DEVICE}: would launch 0\n"), ""));
+            assert!(p.sent().is_empty() && fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_a_session_claimed_after_the_priority_is_not_nudged() {
+            let (fx, p) = setup();
+            export(&fx, json!({"claim": {"device": DEVICE, "session": "d4e5f6", "since": "2026-01-02T13:00:00Z"}}));
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert!(p.sent().is_empty() && fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_closed_or_missing_agent_is_skipped() {
+            let (fx, p) = setup();
+            for (statuses, reason) in [(agents(&[("synthetic-agent", "closed")]), "closed"), (agents(&[]), "missing")] {
+                *p.statuses.borrow_mut() = statuses;
+                export(&fx, json!({}));
+                assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+                assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("skip nudge 042-sample-export: agent synthetic-agent is {reason}\nhost {DEVICE}: would launch 0\n"), ""));
+                assert!(p.sent().is_empty() && fx.puts().is_empty());
+            }
+        }
+
+        #[test]
+        fn test_other_server_and_gated_jobs_are_not_nudged() {
+            let (fx, p) = setup();
+            for extra in [json!({"paseo": {"server": "other-server", "agent": "synthetic-agent"}}), json!({"needs": "Which option?"}), json!({"stage": "pr-open"})] {
+                export(&fx, extra);
+                assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+                assert!(p.sent().is_empty() && fx.puts().is_empty());
+            }
+        }
+
+        #[test]
+        fn test_silent_paseo_skips_nudges() {
+            let (fx, p) = setup();
+            *p.statuses.borrow_mut() = None;
+            export(&fx, json!({}));
+            assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: pickup skips priority nudges: paseo did not answer\nfactory.py: pickup skips idle checks: paseo did not answer\n"));
+            assert!(p.sent().is_empty() && fx.puts().is_empty());
+            assert!(!fx.home.join("idle-watch.json").exists());
+        }
+
+        #[test]
+        fn test_failed_send_retries_next_run() {
+            let (fx, p) = setup();
+            export(&fx, json!({}));
+            *p.send_ok.borrow_mut() = false;
+            assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: pickup could not nudge 042-sample-export: paseo send failed\n"));
+            assert!(fx.puts().is_empty());
+            assert!(fx.job("042-sample-export")["priority"].get("nudged").is_none());
+            *p.send_ok.borrow_mut() = true;
+            assert_eq!(fx.pickup(&[]).1, "nudged 042-sample-export alpha: agent synthetic-agent\n");
+            assert_eq!(p.sent().len(), 2);
+        }
+
+        #[test]
+        fn test_a_changed_priority_is_not_stamped() {
+            let (fx, _p) = setup();
+            export(&fx, json!({}));
+            let state = fx.state.clone();
+            fx.set_fakes(|f| f.paseo_send = Some(Rc::new(move |_, _| {
+                state.borrow_mut().board["jobs"][0]["priority"] = json!({"at": "2026-01-02T13:00:00Z"});
+                true
+            })));
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert!(fx.puts().is_empty());
+            assert!(fx.job("042-sample-export")["priority"].get("nudged").is_none());
+        }
+    }
+
+    pub(super) fn export_job(fx: &Fx, extra: Value) {
+        fx.jobs(json!([with(json!({"id": "042-sample-export", "stage": "build", "project": "alpha", "updated": "2026-01-01T10:00:00Z",
+            "claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"},
+            "paseo": {"server": "synthetic-server", "agent": "synthetic-agent"}}), extra)]));
+    }
+
+    mod idle_watch_test {
+        use super::*;
+
+        const NUDGE: &str = "Factory job 042-sample-export shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory.py hold for the job with your --session tag, then keep waiting.";
+        const NOTE: &str = "idle: no progress 20 minutes after a nudge to agent synthetic-agent";
+        const LINE: &str = "042-sample-export alpha: agent synthetic-agent";
+
+        fn setup() -> (Fx, Paseo) {
+            let fx = Fx::new();
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            let p = Paseo::install(&fx, agents(&[("synthetic-agent", "idle")]));
+            fx.set_fakes(|f| f.paseo_run = Some(Rc::new(|_| (0, String::new()))));
+            (fx, p)
+        }
+
+        fn watch(fx: &Fx) -> Value {
+            read_json(&fx.home.join("idle-watch.json")).unwrap()["jobs"].clone()
+        }
+
+        fn age(fx: &Fx, fields: &[&str]) {
+            let mut jobs = watch(fx);
+            for field in fields {
+                jobs["042-sample-export"][*field] = stamp(-21).into();
+            }
+            fs::write(fx.home.join("idle-watch.json"), json!({"version": 1, "jobs": jobs}).to_string()).unwrap();
+        }
+
+        fn nudged(fx: &Fx, p: &Paseo) {
+            export_job(fx, json!({}));
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            age(fx, &["since"]);
+            assert_eq!(fx.pickup(&[]), out_err(0, &format!("nudged idle {LINE}\n"), ""));
+            p.sent.borrow_mut().clear();
+        }
+
+        #[test]
+        fn test_first_idle_run_records_only() {
+            let (fx, p) = setup();
+            export_job(&fx, json!({}));
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert!(p.sent().is_empty() && fx.puts().is_empty());
+            let entry = watch(&fx)["042-sample-export"].clone();
+            for (k, v) in [("agent", "synthetic-agent"), ("head", ""), ("tree", ""), ("updated", "2026-01-01T10:00:00Z")] {
+                assert_eq!(entry[k], v);
+            }
+            assert!(is_stamp(&entry["since"]));
+            assert!(entry.get("nudged").is_none());
+        }
+
+        #[test]
+        fn test_nudges_once_after_twenty_minutes() {
+            let (fx, p) = setup();
+            export_job(&fx, json!({}));
+            fx.pickup(&[]);
+            age(&fx, &["since"]);
+            assert_eq!(fx.pickup(&[]), out_err(0, &format!("nudged idle {LINE}\n"), ""));
+            assert_eq!(p.sent(), [("synthetic-agent".to_string(), NUDGE.to_string())]);
+            assert!(fx.puts().is_empty());
+            assert!(watch(&fx)["042-sample-export"].get("nudged").is_some());
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(p.sent().len(), 1);
+        }
+
+        #[test]
+        fn test_dry_run_writes_nothing() {
+            let (fx, p) = setup();
+            export_job(&fx, json!({}));
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("host {DEVICE}: would launch 0\n"), ""));
+            assert!(!fx.home.join("idle-watch.json").exists());
+            fx.pickup(&[]);
+            age(&fx, &["since"]);
+            let before = fs::read_to_string(fx.home.join("idle-watch.json")).unwrap();
+            fx.clear_calls();
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("would nudge idle {LINE}\nhost {DEVICE}: would launch 0\n"), ""));
+            assert_eq!(fs::read_to_string(fx.home.join("idle-watch.json")).unwrap(), before);
+            assert!(p.sent().is_empty() && fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_change_resets_the_window() {
+            let (fx, p) = setup();
+            let wt = fx.home.join("worktrees/alpha/042-sample-export");
+            fs::create_dir_all(&wt).unwrap();
+            let w = wt.display().to_string();
+            let git_run = |args: &[&str]| assert!(Command::new("git").args(args).status().unwrap().success());
+            let commit = ["-C", w.as_str(), "-c", "user.name=Sample", "-c", "user.email=sample@example.test", "commit", "-q", "--allow-empty", "-m", "sample"];
+            git_run(&["init", "-q", &w]);
+            git_run(&commit);
+            for name in ["head", "tree", "updated"] {
+                export_job(&fx, json!({"updated": "2026-01-01T10:00:00Z"}));
+                fx.pickup(&[]);
+                age(&fx, &["since", "nudged"]);
+                let old = watch(&fx)["042-sample-export"].clone();
+                match name {
+                    "head" => git_run(&commit),
+                    "tree" => fs::write(wt.join("sample.txt"), "x").unwrap(),
+                    _ => fx.state.borrow_mut().board["jobs"][0]["updated"] = stamp(0).into(),
+                }
+                fx.clear_calls();
+                assert_eq!(fx.pickup(&[]), out_err(0, "", ""), "{name}");
+                let entry = watch(&fx)["042-sample-export"].clone();
+                assert_ne!(entry[name], old[name], "{name}");
+                assert!(entry["since"].as_str() > old["since"].as_str(), "{name}");
+                assert!(entry.get("nudged").is_none());
+                assert!(p.sent().is_empty() && fx.puts().is_empty());
+            }
+        }
+
+        #[test]
+        fn test_ineligible_jobs_are_left_alone() {
+            let (fx, p) = setup();
+            for (name, extra) in [("running", json!({})), ("other device", json!({"claim": {"device": "other-host", "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"}})), ("other server", json!({"paseo": {"server": "other-server", "agent": "synthetic-agent"}})), ("gated", json!({"needs": "Which option?"})), ("paused", json!({"paused": {"at": "2026-01-02T12:00:00Z"}})), ("pr-open", json!({"stage": "pr-open"}))] {
+                *p.statuses.borrow_mut() = agents(&[("synthetic-agent", if name == "running" { "running" } else { "idle" })]);
+                export_job(&fx, extra.clone());
+                fx.pickup(&[]);
+                fs::write(fx.home.join("idle-watch.json"), json!({"version": 1, "jobs": {"042-sample-export": {"agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z", "since": stamp(-41), "nudged": stamp(-21)}}}).to_string()).unwrap();
+                fx.clear_calls();
+                assert_eq!(fx.pickup(&[]), out_err(0, "", ""), "{name}");
+                assert!(p.sent().is_empty() && fx.puts().is_empty());
+                assert_eq!(fx.job("042-sample-export")["stage"], extra.get("stage").cloned().unwrap_or(json!("build")));
+            }
+        }
+
+        #[test]
+        fn test_dry_run_prints_the_needs_human_move() {
+            let (fx, p) = setup();
+            nudged(&fx, &p);
+            age(&fx, &["nudged"]);
+            let before = fs::read_to_string(fx.home.join("idle-watch.json")).unwrap();
+            fx.clear_calls();
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("would move needs-human 042-sample-export alpha: {NOTE}\nhost {DEVICE}: would launch 0\n"), ""));
+            assert_eq!(fs::read_to_string(fx.home.join("idle-watch.json")).unwrap(), before);
+            assert!(p.sent().is_empty() && fx.puts().is_empty());
+            assert_eq!(fx.job("042-sample-export")["stage"], "build");
+        }
+
+        #[test]
+        fn test_needs_human_after_the_second_window() {
+            let (fx, p) = setup();
+            nudged(&fx, &p);
+            age(&fx, &["nudged"]);
+            assert_eq!(fx.pickup(&[]), out_err(0, &format!("needs-human 042-sample-export alpha: {NOTE}\n"), ""));
+            let job = fx.job("042-sample-export");
+            assert_eq!((&job["stage"], &job["note"]), (&json!("needs-human"), &json!(NOTE)));
+            assert!(job.get("claim").is_none() && job.get("needs").is_none());
+            assert!(p.sent().is_empty());
+            assert_eq!(watch(&fx), json!({}));
+        }
+
+        #[test]
+        fn test_unsafe_project_is_never_watched() {
+            let (fx, p) = setup();
+            export_job(&fx, json!({"project": "../../elsewhere"}));
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert!(!fx.home.join("idle-watch.json").exists());
+            fs::write(fx.home.join("idle-watch.json"), json!({"version": 1, "jobs": {"042-sample-export": {"agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z", "since": stamp(-21)}}}).to_string()).unwrap();
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert!(p.sent().is_empty() && fx.puts().is_empty());
+            assert_eq!(watch(&fx), json!({}));
+        }
+
+        #[test]
+        fn test_board_change_wins_over_escalation() {
+            let (fx, p) = setup();
+            nudged(&fx, &p);
+            age(&fx, &["nudged"]);
+            let (state, statuses) = (fx.state.clone(), p.statuses.clone());
+            fx.set_fakes(|f| f.paseo_statuses = Some(Rc::new(move || {
+                state.borrow_mut().board["jobs"][0]["updated"] = stamp(0).into();
+                statuses.borrow().clone()
+            })));
+            fx.clear_calls();
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert!(fx.puts().is_empty());
+            assert_eq!(fx.job("042-sample-export")["stage"], "build");
+        }
+
+        #[test]
+        fn test_failed_send_retries() {
+            let (fx, p) = setup();
+            export_job(&fx, json!({}));
+            fx.pickup(&[]);
+            age(&fx, &["since"]);
+            *p.send_ok.borrow_mut() = false;
+            assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: pickup could not nudge idle 042-sample-export: paseo send failed\n"));
+            assert!(watch(&fx)["042-sample-export"].get("nudged").is_none());
+            *p.send_ok.borrow_mut() = true;
+            assert_eq!(fx.pickup(&[]), out_err(0, &format!("nudged idle {LINE}\n"), ""));
+            assert_eq!(p.sent().len(), 2);
+        }
+    }
+
+    mod token_cap_test {
+        use super::*;
+
+        const WARN: &str = "tokens: 1,640,000 of the 2,000,000 job cap (82%) on host-a";
+        const PARK: &str = "tokens: 2,050,000 reached the 2,000,000 job cap on host-a; a resumed session gets another 2,000,000";
+
+        fn host_b() -> Value {
+            json!({"at": "2026-01-01T09:00:00Z", "transcripts": 1, "models": {"model-b": {"input": 100000, "output": 200000, "cache_write": 0, "cache_read": 5000000}}})
+        }
+
+        struct Tc {
+            fx: Fx,
+            scan: Rc<RefCell<Value>>,
+            scans: Rc<RefCell<usize>>,
+            stops: Rc<RefCell<Vec<Vec<String>>>>,
+            stop_code: Rc<RefCell<i32>>,
+        }
+
+        fn setup() -> Tc {
+            let fx = Fx::new();
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            let tc = Tc {
+                fx,
+                scan: Rc::new(RefCell::new(json!({"transcripts": 2, "models": {"model-a": {"input": 40000, "output": 600000, "cache_write": 700000, "cache_read": 9000000}}}))),
+                scans: Rc::new(RefCell::new(0)),
+                stops: Rc::new(RefCell::new(Vec::new())),
+                stop_code: Rc::new(RefCell::new(0)),
+            };
+            let (scan, scans, stops, code) = (tc.scan.clone(), tc.scans.clone(), tc.stops.clone(), tc.stop_code.clone());
+            tc.fx.set_fakes(|f| {
+                f.usage_totals = Some(Rc::new(move |_, _, _| {
+                    *scans.borrow_mut() += 1;
+                    Ok(scan.borrow().clone())
+                }));
+                f.paseo_run = Some(Rc::new(move |args| {
+                    stops.borrow_mut().push(args.iter().map(|a| a.to_string()).collect());
+                    (*code.borrow(), String::new())
+                }));
+                f.paseo_server = Some(Rc::new(|| Some("synthetic-server".into())));
+                f.paseo_statuses = Some(Rc::new(|| agents(&[("synthetic-agent", "running")])));
+            });
+            tc
+        }
+
+        fn set_cap(fx: &Fx, value: &str) {
+            fs::write(fx.home.join("config.md"), format!("---\ndevice: {DEVICE}\njob_token_cap: {value}\n---\n")).unwrap();
+        }
+
+        fn output(tc: &Tc, n: i64) {
+            tc.scan.borrow_mut()["models"]["model-a"]["output"] = n.into();
+        }
+
+        fn mine(tc: &Tc, job: &Value) -> Value {
+            with(json!({"at": job["updated"]}), tc.scan.borrow().clone())
+        }
+
+        #[test]
+        fn test_off_without_cap() {
+            let tc = setup();
+            export_job(&tc.fx, json!({"tokens": {"host-b": host_b()}}));
+            output(&tc, 1010000);
+            assert_eq!(tc.fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*tc.scans.borrow(), 0);
+            assert!(tc.fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_warns_once_at_eighty_percent() {
+            let tc = setup();
+            set_cap(&tc.fx, "2000000");
+            export_job(&tc.fx, json!({"tokens": {"host-b": host_b()}}));
+            assert_eq!(tc.fx.pickup(&[]), out_err(0, &format!("token warning 042-sample-export alpha: {WARN}\n"), ""));
+            assert_eq!(tc.fx.puts().len(), 1);
+            let job = tc.fx.job("042-sample-export");
+            assert_eq!((&job["stage"], &job["note"], &job["claim"]["device"]), (&json!("build"), &json!(WARN), &json!(DEVICE)));
+            assert_eq!(job["token_cap"].as_object().unwrap().keys().collect::<Vec<_>>(), ["base", "warned"]);
+            assert_eq!(job["token_cap"]["base"], 0);
+            assert!(is_stamp(&job["token_cap"]["warned"]));
+            assert_eq!(job["tokens"], json!({"host-b": host_b(), DEVICE: mine(&tc, &job)}));
+            assert_eq!(tc.fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(tc.fx.puts().len(), 1);
+        }
+
+        #[test]
+        fn test_parks_at_cap() {
+            let tc = setup();
+            set_cap(&tc.fx, "2000000");
+            export_job(&tc.fx, json!({"tokens": {"host-b": host_b()}}));
+            output(&tc, 1010000);
+            assert_eq!(tc.fx.pickup(&[]), out_err(0, &format!("needs-human 042-sample-export alpha: {PARK}\n"), ""));
+            let job = tc.fx.job("042-sample-export");
+            assert_eq!((&job["stage"], &job["note"]), (&json!("needs-human"), &json!(PARK)));
+            assert!(job.get("claim").is_none());
+            assert_eq!(job["token_cap"], json!({"base": 2050000}));
+            assert_eq!(job["tokens"][DEVICE], mine(&tc, &job));
+            assert_eq!(*tc.stops.borrow(), vec![vec!["stop".to_string(), "synthetic-agent".to_string()]]);
+        }
+
+        #[test]
+        fn test_resumed_job_gets_a_fresh_cap() {
+            let tc = setup();
+            set_cap(&tc.fx, "2000000");
+            export_job(&tc.fx, json!({"tokens": {"host-b": host_b()}}));
+            output(&tc, 1010000);
+            tc.fx.pickup(&[]);
+            {
+                let mut s = tc.fx.state.borrow_mut();
+                let job = &mut s.board["jobs"][0];
+                job["stage"] = "build".into();
+                job["claim"] = json!({"device": DEVICE, "session": "d4e5f6", "since": stamp(0)});
+            }
+            output(&tc, 1060000);
+            tc.fx.clear_calls();
+            assert_eq!(tc.fx.pickup(&[]), out_err(0, "", ""));
+            assert!(tc.fx.puts().is_empty());
+            assert_eq!(tc.fx.job("042-sample-export")["stage"], "build");
+        }
+
+        #[test]
+        fn test_counts_other_hosts_without_cache_read() {
+            let tc = setup();
+            set_cap(&tc.fx, "2000000");
+            let stale = json!({"at": "2026-01-01T08:00:00Z", "transcripts": 9, "models": {"model-a": {"input": 0, "output": 5000000, "cache_write": 0, "cache_read": 0}}});
+            export_job(&tc.fx, json!({"tokens": {DEVICE: stale}}));
+            assert_eq!(tc.fx.pickup(&[]), out_err(0, "", ""));
+            assert!(tc.fx.puts().is_empty());
+            export_job(&tc.fx, json!({"tokens": {DEVICE: stale, "host-b": host_b()}}));
+            assert_eq!(tc.fx.pickup(&[]), out_err(0, &format!("token warning 042-sample-export alpha: {WARN}\n"), ""));
+        }
+
+        #[test]
+        fn test_dry_run_writes_nothing() {
+            let tc = setup();
+            set_cap(&tc.fx, "2000000");
+            export_job(&tc.fx, json!({"tokens": {"host-b": host_b()}}));
+            assert_eq!(tc.fx.pickup(&["--dry-run"]), out_err(0, &format!("would warn tokens 042-sample-export alpha: {WARN}\nhost {DEVICE}: would launch 0\n"), ""));
+            output(&tc, 1010000);
+            assert_eq!(tc.fx.pickup(&["--dry-run"]), out_err(0, &format!("would move needs-human 042-sample-export alpha: {PARK}\nhost {DEVICE}: would launch 0\n"), ""));
+            assert!(tc.fx.puts().is_empty());
+            assert!(tc.stops.borrow().is_empty());
+            assert!(tc.fx.job("042-sample-export").get("token_cap").is_none());
+        }
+
+        /// The board command belongs to the claims slice and is not ported yet, so it writes
+        /// nothing at all; pickup stays the only writer of token_cap.
+        #[test]
+        fn test_board_refuses_token_cap() {
+            let tc = setup();
+            export_job(&tc.fx, json!({}));
+            let home = tc.fx.home.display().to_string();
+            assert_eq!(crate::cli::main(vec!["board".into(), home.into(), "042-sample-export".into()]), 2);
+            assert!(tc.fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_invalid_cap_is_off() {
+            let tc = setup();
+            export_job(&tc.fx, json!({"tokens": {"host-b": host_b()}}));
+            output(&tc, 1010000);
+            let line = format!("factory.py: pickup ignores job_token_cap in {}: must be a whole number of at least 1\n", tc.fx.home.join("config.md").display());
+            for value in ["0", "abc", "1.5", "-3", "2e6"] {
+                set_cap(&tc.fx, value);
+                assert_eq!(tc.fx.pickup(&[]), out_err(0, "", &line), "{value}");
+            }
+            assert_eq!(*tc.scans.borrow(), 0);
+            assert!(tc.fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_negative_counts_are_skipped() {
+            let tc = setup();
+            set_cap(&tc.fx, "2000000");
+            export_job(&tc.fx, json!({"tokens": {"host-b": {"at": "2026-01-01T09:00:00Z", "transcripts": 1, "models": {"model-b": {"input": 0, "output": -300000, "cache_write": 0}}}}}));
+            output(&tc, 1310000);
+            assert_eq!(tc.fx.pickup(&[]), out_err(0, &format!("needs-human 042-sample-export alpha: {PARK}\n"), ""));
+        }
+
+        #[test]
+        fn test_scan_error_skips_the_job() {
+            let tc = setup();
+            set_cap(&tc.fx, "2000000");
+            export_job(&tc.fx, json!({"tokens": {"host-b": host_b()}}));
+            tc.fx.set_fakes(|f| f.usage_totals = Some(Rc::new(|_, _, _| Err("ValueError".into()))));
+            assert_eq!(tc.fx.pickup(&[]), out_err(0, "", "factory.py: pickup skips the token cap of 042-sample-export: scan failed (ValueError)\n"));
+            assert!(tc.fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_failed_stop_keeps_the_park() {
+            let tc = setup();
+            set_cap(&tc.fx, "2000000");
+            export_job(&tc.fx, json!({"tokens": {"host-b": host_b()}}));
+            output(&tc, 1010000);
+            *tc.stop_code.borrow_mut() = 1;
+            assert_eq!(tc.fx.pickup(&[]), out_err(0, &format!("needs-human 042-sample-export alpha: {PARK}\n"), "factory.py: pickup could not stop agent synthetic-agent of 042-sample-export: paseo stop failed\n"));
+            assert_eq!(tc.fx.job("042-sample-export")["stage"], "needs-human");
+        }
+    }
+
+    mod daily_token_cap_test {
+        use super::*;
+
+        const LAUNCHED: &str = "launched 100-sample-idea alpha on primary session [0-9a-f]{6}\n";
+        const REACHED: &str = "daily token cap reached (5,120,000/5,000,000 since local midnight)";
+
+        fn setup(used: Result<i64, String>) -> (Fx, Rc<RefCell<usize>>) {
+            let fx = Fx::new();
+            fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+            fx.jobs(json!([idea("100-sample-idea", "alpha", json!({}))]));
+            let count = Rc::new(RefCell::new(0));
+            let seen = count.clone();
+            fx.set_fakes(|f| f.daily_tokens = Some(Rc::new(move |_| {
+                *seen.borrow_mut() += 1;
+                used.clone()
+            })));
+            (fx, count)
+        }
+
+        fn set_cap(fx: &Fx, value: &str) {
+            fs::write(fx.home.join("config.md"), format!("---\ndevice: {DEVICE}\ndaily_token_cap: {value}\n---\n")).unwrap();
+        }
+
+        #[test]
+        fn test_off_without_cap() {
+            let (fx, count) = setup(Ok(5120000));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(matches(LAUNCHED, &out));
+            assert_eq!(*count.borrow(), 0);
+        }
+
+        #[test]
+        fn test_under_cap_launches() {
+            let (fx, _) = setup(Ok(4999999));
+            set_cap(&fx, "5000000");
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(matches(LAUNCHED, &out));
+        }
+
+        #[test]
+        fn test_dry_run_skip_line() {
+            let (fx, _) = setup(Ok(5120000));
+            set_cap(&fx, "5000000");
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(lines(&out)[0], format!("skip 100-sample-idea alpha: host {DEVICE} {REACHED}"));
+            assert!(fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_real_run_holds() {
+            let (fx, _) = setup(Ok(5120000));
+            set_cap(&fx, "5000000");
+            assert_eq!(fx.pickup(&[]), out_err(0, "", &format!("factory.py: pickup launches no new job on {DEVICE}: {REACHED}\n")));
+            assert!(fx.launched().is_empty());
+            assert!(fx.job("100-sample-idea").get("claim").is_none());
+        }
+
+        #[test]
+        fn test_bad_value_is_off() {
+            let (fx, _) = setup(Ok(5120000));
+            set_cap(&fx, "lots");
+            let (_, out, err) = fx.pickup(&[]);
+            assert!(err.contains(&format!("factory.py: pickup ignores daily_token_cap in {}/config.md: must be a whole number of at least 1", fx.home.display())));
+            assert!(matches(LAUNCHED, &out));
+        }
+
+        #[test]
+        fn test_scan_error_is_off() {
+            let (fx, _) = setup(Err("OSError".into()));
+            set_cap(&fx, "5000000");
+            let (_, out, err) = fx.pickup(&[]);
+            assert!(err.contains("factory.py: pickup skips the daily token cap: scan failed (OSError)"));
+            assert!(matches(LAUNCHED, &out));
+        }
+    }
 }
