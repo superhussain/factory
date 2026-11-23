@@ -1,0 +1,630 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "intake/halt-set-sends-one-put-and-prints-the-record",
+      "argv": ["--home", "{home}", "halt", "set", "--reason", "Runaway launches on wsl"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "PUT /api/halt": [
+          200,
+          "{\"halted\": true, \"reason\": \"Runaway launches on wsl\", \"by_kind\": \"host\", \"by\": \"wsl\", \"at\": \"2026-11-22T10:00:00Z\"}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_halt.py::HaltCommandTest.test_halt_set_sends_one_put_and_prints_the_record"
+    },
+    {
+      "id": "intake/halt-status-prints-the-record",
+      "argv": ["--home", "{home}", "halt", "status"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/halt": [
+          200,
+          "{\"halted\": true, \"reason\": \"Runaway launches on wsl\", \"by_kind\": \"host\", \"by\": \"wsl\", \"at\": \"2026-11-22T10:00:00Z\"}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_halt.py::HaltCommandTest.test_halt_status_prints_the_record"
+    },
+    {
+      "id": "intake/halt-status-without-the-route-exits-4",
+      "argv": ["--home", "{home}", "halt", "status"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {},
+      "exit": 4,
+      "from": "tests/cli/test_halt.py::HaltCommandTest.test_halt_status_without_the_route_exits_4"
+    },
+    {
+      "id": "intake/halt-bad-reason-and-resume-exit-2",
+      "argv": ["--home", "{home}", "halt", "set", "--reason", ""],
+      "home": "intake",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_halt.py::HaltCommandTest.test_bad_reason_and_resume_exit_2"
+    },
+    {
+      "id": "intake/halt-bad-reason-and-resume-exit-2-2",
+      "argv": ["--home", "{home}", "halt", "resume"],
+      "home": "intake",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_halt.py::HaltCommandTest.test_bad_reason_and_resume_exit_2"
+    },
+    {
+      "id": "intake/inbox-counts-jobs-and-backlog-lines",
+      "argv": ["--home", "{home}", "inbox"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"041-sample-old\",\"project\":\"sample\",\"title\":\"Synthetic 041-sample-old\",\"stage\":\"build\",\"updated\":\"2026-01-01T00:00:00Z\"},{\"id\":\"042-sample-links\",\"project\":\"sample\",\"title\":\"Synthetic 042-sample-links\",\"stage\":\"needs-human\",\"updated\":\"2026-01-01T00:00:00Z\"},{\"id\":\"043-sample-asked\",\"project\":\"sample\",\"title\":\"Synthetic 043-sample-asked\",\"stage\":\"build\",\"updated\":\"2026-01-01T00:00:00Z\",\"needs\":\"Pick A or B\"},{\"id\":\"044-sample-export\",\"project\":\"sample\",\"title\":\"Synthetic 044-sample-export\",\"stage\":\"pr-open\",\"updated\":\"2026-01-01T00:00:00Z\",\"escalated\":true},{\"id\":\"045-sample-legacy\",\"project\":\"sample\",\"title\":\"Synthetic 045-sample-legacy\",\"stage\":\"pr-open\",\"updated\":\"2026-01-01T00:00:00Z\",\"note\":\"Escalated: old note form\"},{\"id\":\"046-sample-blank\",\"project\":\"sample\",\"title\":\"Synthetic 046-sample-blank\",\"stage\":\"spec\",\"updated\":\"2026-01-01T00:00:00Z\",\"needs\":\"   \"},{\"id\":\"047-sample-done\",\"project\":\"sample\",\"title\":\"Synthetic 047-sample-done\",\"stage\":\"merged\",\"updated\":\"2026-01-01T00:00:00Z\",\"needs\":\"left over\"},{\"id\":\"048-sample-plain-pr\",\"project\":\"sample\",\"title\":\"Synthetic 048-sample-plain-pr\",\"stage\":\"pr-open\",\"updated\":\"2026-01-01T00:00:00Z\"}]}\n"
+        ],
+        "GET /api/backlog": [
+          200,
+          "# Backlog\n\n- [ ] sample: Cache the sample report\n  Recommend: approve\n\n  The sample report reloads on every visit.\n- [ ] sample: Trim the export columns\n- [x] sample: Ship the old report (040-sample-shipped)\n- [ ] café: Non-ASCII slug line\n- [ ]sample: missing space\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_inbox.py::InboxTest.test_counts_jobs_and_backlog_lines"
+    },
+    {
+      "id": "intake/inbox-missing-backlog-counts-as-empty",
+      "argv": ["--home", "{home}", "inbox"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"041-sample-old\",\"project\":\"sample\",\"title\":\"Synthetic 041-sample-old\",\"stage\":\"build\",\"updated\":\"2026-01-01T00:00:00Z\"},{\"id\":\"042-sample-links\",\"project\":\"sample\",\"title\":\"Synthetic 042-sample-links\",\"stage\":\"needs-human\",\"updated\":\"2026-01-01T00:00:00Z\"},{\"id\":\"043-sample-asked\",\"project\":\"sample\",\"title\":\"Synthetic 043-sample-asked\",\"stage\":\"build\",\"updated\":\"2026-01-01T00:00:00Z\",\"needs\":\"Pick A or B\"},{\"id\":\"044-sample-export\",\"project\":\"sample\",\"title\":\"Synthetic 044-sample-export\",\"stage\":\"pr-open\",\"updated\":\"2026-01-01T00:00:00Z\",\"escalated\":true},{\"id\":\"045-sample-legacy\",\"project\":\"sample\",\"title\":\"Synthetic 045-sample-legacy\",\"stage\":\"pr-open\",\"updated\":\"2026-01-01T00:00:00Z\",\"note\":\"Escalated: old note form\"},{\"id\":\"046-sample-blank\",\"project\":\"sample\",\"title\":\"Synthetic 046-sample-blank\",\"stage\":\"spec\",\"updated\":\"2026-01-01T00:00:00Z\",\"needs\":\"   \"},{\"id\":\"047-sample-done\",\"project\":\"sample\",\"title\":\"Synthetic 047-sample-done\",\"stage\":\"merged\",\"updated\":\"2026-01-01T00:00:00Z\",\"needs\":\"left over\"},{\"id\":\"048-sample-plain-pr\",\"project\":\"sample\",\"title\":\"Synthetic 048-sample-plain-pr\",\"stage\":\"pr-open\",\"updated\":\"2026-01-01T00:00:00Z\"}]}\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_inbox.py::InboxTest.test_missing_backlog_counts_as_empty"
+    },
+    {
+      "id": "intake/inbox-api-failure-exits-5",
+      "argv": ["--home", "{home}", "inbox"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"041-sample-old\",\"project\":\"sample\",\"title\":\"Synthetic 041-sample-old\",\"stage\":\"build\",\"updated\":\"2026-01-01T00:00:00Z\"},{\"id\":\"042-sample-links\",\"project\":\"sample\",\"title\":\"Synthetic 042-sample-links\",\"stage\":\"needs-human\",\"updated\":\"2026-01-01T00:00:00Z\"},{\"id\":\"043-sample-asked\",\"project\":\"sample\",\"title\":\"Synthetic 043-sample-asked\",\"stage\":\"build\",\"updated\":\"2026-01-01T00:00:00Z\",\"needs\":\"Pick A or B\"},{\"id\":\"044-sample-export\",\"project\":\"sample\",\"title\":\"Synthetic 044-sample-export\",\"stage\":\"pr-open\",\"updated\":\"2026-01-01T00:00:00Z\",\"escalated\":true},{\"id\":\"045-sample-legacy\",\"project\":\"sample\",\"title\":\"Synthetic 045-sample-legacy\",\"stage\":\"pr-open\",\"updated\":\"2026-01-01T00:00:00Z\",\"note\":\"Escalated: old note form\"},{\"id\":\"046-sample-blank\",\"project\":\"sample\",\"title\":\"Synthetic 046-sample-blank\",\"stage\":\"spec\",\"updated\":\"2026-01-01T00:00:00Z\",\"needs\":\"   \"},{\"id\":\"047-sample-done\",\"project\":\"sample\",\"title\":\"Synthetic 047-sample-done\",\"stage\":\"merged\",\"updated\":\"2026-01-01T00:00:00Z\",\"needs\":\"left over\"},{\"id\":\"048-sample-plain-pr\",\"project\":\"sample\",\"title\":\"Synthetic 048-sample-plain-pr\",\"stage\":\"pr-open\",\"updated\":\"2026-01-01T00:00:00Z\"}]}\n"
+        ],
+        "GET /api/backlog": [500, "boom"]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_inbox.py::InboxTest.test_api_failure_exits_5"
+    },
+    {
+      "id": "intake/inbox-jobs-need-a-string-id-and-default-to-empty-text",
+      "argv": ["--home", "{home}", "inbox"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"stage\":\"needs-human\"},{\"id\":\"043-asked\",\"stage\":\"spec\",\"needs\":\"pick A\"},{\"id\":\"044-odd\",\"stage\":\"needs-human\",\"project\":7,\"title\":[\"a\",null]}]}\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_inbox.py::InboxTest.test_jobs_need_a_string_id_and_default_to_empty_text"
+    },
+    {
+      "id": "intake/inbox-rows-are-cut-to-the-plugin-limits",
+      "argv": ["--home", "{home}", "inbox"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"043-asked\",\"stage\":\"needs-human\",\"title\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\",\"project\":\"pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp\"},{\"id\":\"bad id!\",\"stage\":\"needs-human\"}]}\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_inbox.py::InboxTest.test_rows_are_cut_to_the_plugin_limits"
+    },
+    {
+      "id": "intake/inbox-rows-are-cut-by-utf16-length-without-splitting-a-pair",
+      "argv": ["--home", "{home}", "inbox"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"043-asked\",\"stage\":\"needs-human\",\"title\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\"}]}\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_inbox.py::InboxTest.test_rows_are_cut_by_utf16_length_without_splitting_a_pair"
+    },
+    {
+      "id": "intake/inbox-a-lone-surrogate-in-a-title-is-dropped",
+      "argv": ["--home", "{home}", "inbox"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"043-asked\",\"stage\":\"needs-human\",\"title\":\"x\\ud800y\"}]}\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_inbox.py::InboxTest.test_a_lone_surrogate_in_a_title_is_dropped"
+    },
+    {
+      "id": "intake/unclaim-releases-only-the-claim",
+      "argv": ["--home", "{home}", "unclaim", "001-ready"],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "session"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-ready\",\"stage\":\"idea\",\"project\":\"sample\",\"idea\":\"ready\",\"origin\":{\"gate\":\"human\"},\"needs\":\"\",\"updated\":\"2026-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"session\",\"since\":\"2026-01-01T00:00:00Z\",\"seen\":\"2026-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::UnclaimTest.test_unclaim_releases_only_the_claim"
+    },
+    {
+      "id": "intake/unclaim-other-holder",
+      "argv": ["--home", "{home}", "unclaim", "001-ready"],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "session"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-ready\",\"stage\":\"idea\",\"project\":\"sample\",\"idea\":\"ready\",\"origin\":{\"gate\":\"human\"},\"needs\":\"\",\"updated\":\"2026-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"other\",\"since\":\"2026-01-01T00:00:00Z\",\"seen\":\"2026-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_routes.py::UnclaimTest.test_unclaim_other_holder"
+    },
+    {
+      "id": "intake/unclaim-other-holder-2",
+      "argv": ["--home", "{home}", "unclaim", "001-ready"],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "session"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-ready\",\"stage\":\"idea\",\"project\":\"sample\",\"idea\":\"ready\",\"origin\":{\"gate\":\"human\"},\"needs\":\"\",\"updated\":\"2026-01-01T00:00:00Z\",\"claim\":{\"device\":\"other\",\"session\":\"session\",\"since\":\"2026-01-01T00:00:00Z\",\"seen\":\"2026-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_routes.py::UnclaimTest.test_unclaim_other_holder"
+    },
+    {
+      "id": "intake/unclaim-other-holder-3",
+      "argv": ["--home", "{home}", "unclaim", "001-ready"],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "session"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-ready\",\"stage\":\"idea\",\"project\":\"sample\",\"idea\":\"ready\",\"origin\":{\"gate\":\"human\"},\"needs\":\"\",\"updated\":\"2026-01-01T00:00:00Z\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_routes.py::UnclaimTest.test_unclaim_other_holder"
+    },
+    {
+      "id": "intake/unclaim-not-idea",
+      "argv": ["--home", "{home}", "unclaim", "001-ready"],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "session"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-ready\",\"stage\":\"spec\",\"project\":\"sample\",\"idea\":\"ready\",\"origin\":{\"gate\":\"human\"},\"needs\":\"\",\"updated\":\"2026-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"session\",\"since\":\"2026-01-01T00:00:00Z\",\"seen\":\"2026-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_routes.py::UnclaimTest.test_unclaim_not_idea"
+    },
+    {
+      "id": "intake/unclaim-unknown-job",
+      "argv": ["--home", "{home}", "unclaim", "002-missing"],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "session"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-ready\",\"stage\":\"idea\",\"project\":\"sample\",\"idea\":\"ready\",\"origin\":{\"gate\":\"human\"},\"needs\":\"\",\"updated\":\"2026-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"session\",\"since\":\"2026-01-01T00:00:00Z\",\"seen\":\"2026-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_routes.py::UnclaimTest.test_unclaim_unknown_job"
+    },
+    {
+      "id": "intake/unclaim-no-session",
+      "argv": ["--home", "{home}", "unclaim", "001-ready"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-ready\",\"stage\":\"idea\",\"project\":\"sample\",\"idea\":\"ready\",\"origin\":{\"gate\":\"human\"},\"needs\":\"\",\"updated\":\"2026-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"session\",\"since\":\"2026-01-01T00:00:00Z\",\"seen\":\"2026-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::UnclaimTest.test_unclaim_no_session"
+    },
+    {
+      "id": "intake/unclaim-bad-id",
+      "argv": ["--home", "{home}", "unclaim", "../x"],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "session"
+      },
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::UnclaimTest.test_unclaim_bad_id"
+    },
+    {
+      "id": "intake/unclaim-bad-id-2",
+      "argv": ["--home", "{home}", "unclaim", "a..b"],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "session"
+      },
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::UnclaimTest.test_unclaim_bad_id"
+    },
+    {
+      "id": "intake/unclaim-bad-id-3",
+      "argv": ["--home", "{home}", "unclaim", "-x"],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "session"
+      },
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::UnclaimTest.test_unclaim_bad_id"
+    },
+    {
+      "id": "intake/unclaim-via-main-session-flag",
+      "argv": ["--home", "{home}", "unclaim", "001-ready", "--session", "session"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-ready\",\"stage\":\"idea\",\"project\":\"sample\",\"idea\":\"ready\",\"origin\":{\"gate\":\"human\"},\"needs\":\"\",\"updated\":\"2026-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"session\",\"since\":\"2026-01-01T00:00:00Z\",\"seen\":\"2026-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::UnclaimTest.test_unclaim_via_main_session_flag"
+    },
+    {
+      "id": "intake/deny-notes-command-prints-wrapped-prompt",
+      "argv": ["--home", "{home}", "deny-notes", "007-csv-export"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"007-csv-export\",\"project\":\"alpha\",\"title\":\"Export the board as CSV and PDF\",\"idea\":\"export the board as CSV and PDF\",\"stage\":\"closed\",\"updated\":\"2026-01-01T00:00:00Z\",\"done\":\"2026-01-01T00:00:00Z\",\"note\":\"denied from the backlog\",\"capture_id\":\"c007-csv-export\",\"backlog\":{\"line\":\"- [ ] alpha: export the board as CSV and PDF\",\"decision\":\"denied\",\"at\":\"2026-01-01T00:00:00Z\",\"notes\":\"Too big. Queue two items instead: CSV export of the board, then PDF export.\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::DenyNotesTest.test_command_prints_wrapped_prompt"
+    },
+    {
+      "id": "intake/deny-notes-done-sets-notes-read-and-releases",
+      "argv": ["--home", "{home}", "deny-notes", "007-csv-export", "done", "--session", "abc123"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"007-csv-export\",\"project\":\"alpha\",\"title\":\"Export the board as CSV and PDF\",\"idea\":\"export the board as CSV and PDF\",\"stage\":\"closed\",\"updated\":\"2026-01-01T00:00:00Z\",\"done\":\"2026-01-01T00:00:00Z\",\"note\":\"denied from the backlog\",\"capture_id\":\"c007-csv-export\",\"backlog\":{\"line\":\"- [ ] alpha: export the board as CSV and PDF\",\"decision\":\"denied\",\"at\":\"2026-01-01T00:00:00Z\",\"notes\":\"Too big. Queue two items instead: CSV export of the board, then PDF export.\"},\"claim\":{\"device\":\"parity\",\"session\":\"abc123\",\"since\":\"2026-01-01T00:00:00Z\",\"seen\":\"2026-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_pickup.py::DenyNotesTest.test_done_sets_notes_read_and_releases"
+    },
+    {
+      "id": "intake/deny-notes-done-sets-notes-read-and-releases-2",
+      "argv": ["--home", "{home}", "deny-notes", "007-csv-export", "done", "--session", "abc123"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"007-csv-export\",\"project\":\"alpha\",\"title\":\"Export the board as CSV and PDF\",\"idea\":\"export the board as CSV and PDF\",\"stage\":\"closed\",\"updated\":\"2026-01-01T00:00:00Z\",\"done\":\"2026-01-01T00:00:00Z\",\"note\":\"denied from the backlog\",\"capture_id\":\"c007-csv-export\",\"backlog\":{\"line\":\"- [ ] alpha: export the board as CSV and PDF\",\"decision\":\"denied\",\"at\":\"2026-01-01T00:00:00Z\",\"notes\":\"Too big. Queue two items instead: CSV export of the board, then PDF export.\",\"notes_read\":\"2026-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_pickup.py::DenyNotesTest.test_done_sets_notes_read_and_releases"
+    },
+    {
+      "id": "intake/deny-notes-done-refuses-other-live-claim",
+      "argv": ["--home", "{home}", "deny-notes", "007-csv-export", "done", "--session", "abc123"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"007-csv-export\",\"project\":\"alpha\",\"title\":\"Export the board as CSV and PDF\",\"idea\":\"export the board as CSV and PDF\",\"stage\":\"closed\",\"updated\":\"2026-01-01T00:00:00Z\",\"done\":\"2026-01-01T00:00:00Z\",\"note\":\"denied from the backlog\",\"capture_id\":\"c007-csv-export\",\"backlog\":{\"line\":\"- [ ] alpha: export the board as CSV and PDF\",\"decision\":\"denied\",\"at\":\"2026-01-01T00:00:00Z\",\"notes\":\"Too big. Queue two items instead: CSV export of the board, then PDF export.\"},\"claim\":{\"device\":\"other-host\",\"session\":\"s1\",\"since\":\"2999-01-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_pickup.py::DenyNotesTest.test_done_refuses_other_live_claim"
+    },
+    {
+      "id": "intake/idea-files-import-writes-both-files-byte-exact-without-pushing",
+      "argv": ["--home", "{home}", "idea-files", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Import the attached sales sheet.\",\"idea_files\":[\"14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf\",\"39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv\"]}]}\n"
+        ],
+        "GET /api/idea-files/14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf": [
+          200,
+          "%PDF-1.4\n%%EOF\n"
+        ],
+        "GET /api/idea-files/39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv": [
+          200,
+          "region,total\nnorth,12\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::IdeaFilesTest.test_import_writes_both_files_byte_exact_without_pushing"
+    },
+    {
+      "id": "intake/idea-files-job-without-files-writes-nothing",
+      "argv": ["--home", "{home}", "idea-files", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Import the attached sales sheet.\"}]}\n"
+        ],
+        "GET /api/idea-files/14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf": [
+          200,
+          "%PDF-1.4\n%%EOF\n"
+        ],
+        "GET /api/idea-files/39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv": [
+          200,
+          "region,total\nnorth,12\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::IdeaFilesTest.test_job_without_files_writes_nothing"
+    },
+    {
+      "id": "intake/idea-files-missing-or-corrupt-file-exits-5-and-writes-nothing",
+      "argv": ["--home", "{home}", "idea-files", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Import the attached sales sheet.\",\"idea_files\":[\"14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf\",\"39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv\"]}]}\n"
+        ],
+        "GET /api/idea-files/14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf": [
+          200,
+          "%PDF-1.4\n%%EOF\n"
+        ]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_factory.py::IdeaFilesTest.test_missing_or_corrupt_file_exits_5_and_writes_nothing"
+    },
+    {
+      "id": "intake/idea-files-missing-or-corrupt-file-exits-5-and-writes-nothing-2",
+      "argv": ["--home", "{home}", "idea-files", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Import the attached sales sheet.\",\"idea_files\":[\"14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf\",\"39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv\"]}]}\n"
+        ],
+        "GET /api/idea-files/14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf": [
+          200,
+          "%PDF-1.4\n%%EOF\n"
+        ],
+        "GET /api/idea-files/39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv": [
+          200,
+          "region,total\nnorth,12"
+        ]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_factory.py::IdeaFilesTest.test_missing_or_corrupt_file_exits_5_and_writes_nothing"
+    },
+    {
+      "id": "intake/idea-files-malformed-lists-exit-6-and-write-nothing",
+      "argv": ["--home", "{home}", "idea-files", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Import the attached sales sheet.\",\"idea_files\":[\"../escape.pdf\"]}]}\n"
+        ],
+        "GET /api/idea-files/14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf": [
+          200,
+          "%PDF-1.4\n%%EOF\n"
+        ],
+        "GET /api/idea-files/39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv": [
+          200,
+          "region,total\nnorth,12\n"
+        ]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::IdeaFilesTest.test_malformed_lists_exit_6_and_write_nothing"
+    },
+    {
+      "id": "intake/idea-files-malformed-lists-exit-6-and-write-nothing-2",
+      "argv": ["--home", "{home}", "idea-files", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Import the attached sales sheet.\",\"idea_files\":[\"x.exe\"]}]}\n"
+        ],
+        "GET /api/idea-files/14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf": [
+          200,
+          "%PDF-1.4\n%%EOF\n"
+        ],
+        "GET /api/idea-files/39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv": [
+          200,
+          "region,total\nnorth,12\n"
+        ]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::IdeaFilesTest.test_malformed_lists_exit_6_and_write_nothing"
+    },
+    {
+      "id": "intake/idea-files-malformed-lists-exit-6-and-write-nothing-3",
+      "argv": ["--home", "{home}", "idea-files", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Import the attached sales sheet.\",\"idea_files\":[\"14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf\",\"39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv\",\"6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d.txt\",\"4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a.txt\",\"dbc1b4c900ffe48d575b5da5c638040125f65db0fe3e24494b76ea986457d986.txt\"]}]}\n"
+        ],
+        "GET /api/idea-files/14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf": [
+          200,
+          "%PDF-1.4\n%%EOF\n"
+        ],
+        "GET /api/idea-files/39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv": [
+          200,
+          "region,total\nnorth,12\n"
+        ]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::IdeaFilesTest.test_malformed_lists_exit_6_and_write_nothing"
+    },
+    {
+      "id": "intake/idea-files-malformed-lists-exit-6-and-write-nothing-4",
+      "argv": ["--home", "{home}", "idea-files", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Import the attached sales sheet.\",\"idea_files\":[\"14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf\",\"14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf\"]}]}\n"
+        ],
+        "GET /api/idea-files/14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf": [
+          200,
+          "%PDF-1.4\n%%EOF\n"
+        ],
+        "GET /api/idea-files/39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv": [
+          200,
+          "region,total\nnorth,12\n"
+        ]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::IdeaFilesTest.test_malformed_lists_exit_6_and_write_nothing"
+    },
+    {
+      "id": "intake/idea-files-differing-local-copy-exits-6-and-keeps-its-bytes",
+      "argv": ["--home", "{home}", "idea-files", "sample/011-local"],
+      "home": "intake-local",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"011-local\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Import the attached sales sheet.\",\"idea_files\":[\"14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf\",\"39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv\"]}]}\n"
+        ],
+        "GET /api/idea-files/14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf": [
+          200,
+          "%PDF-1.4\n%%EOF\n"
+        ],
+        "GET /api/idea-files/39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv": [
+          200,
+          "region,total\nnorth,12\n"
+        ]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::IdeaFilesTest.test_differing_local_copy_exits_6_and_keeps_its_bytes"
+    },
+    {
+      "id": "intake/idea-files-rerun-with-identical-files-succeeds",
+      "argv": ["--home", "{home}", "idea-files", "sample/012-same"],
+      "home": "intake-local",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"012-same\",\"project\":\"sample\",\"stage\":\"idea\",\"idea\":\"Import the attached sales sheet.\",\"idea_files\":[\"14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf\",\"39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv\"]}]}\n"
+        ],
+        "GET /api/idea-files/14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf": [
+          200,
+          "%PDF-1.4\n%%EOF\n"
+        ],
+        "GET /api/idea-files/39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv": [
+          200,
+          "region,total\nnorth,12\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::IdeaFilesTest.test_rerun_with_identical_files_succeeds"
+    },
+    {
+      "id": "intake/idea-files-wrong-project-exits-2",
+      "argv": ["--home", "{home}", "idea-files", "sample/001-idea"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"project\":\"other\",\"stage\":\"idea\",\"idea\":\"Import the attached sales sheet.\",\"idea_files\":[\"14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf\",\"39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv\"]}]}\n"
+        ],
+        "GET /api/idea-files/14bcd090baf31edba64e9cbd8cdfc15f943344aa72cb3675ad8e91bfcbce03ad.pdf": [
+          200,
+          "%PDF-1.4\n%%EOF\n"
+        ],
+        "GET /api/idea-files/39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv": [
+          200,
+          "region,total\nnorth,12\n"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::IdeaFilesTest.test_wrong_project_exits_2"
+    }
+  ]
+}
