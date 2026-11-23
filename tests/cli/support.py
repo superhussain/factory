@@ -3,6 +3,8 @@ import importlib.util
 import io
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 import hashlib
@@ -16,6 +18,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / "skills" / "factory"
 RUNTIMES = []
+FACTORY_BIN = os.environ.get("FACTORY_BIN", "")
 
 
 def load_runtime():
@@ -26,6 +29,31 @@ def load_runtime():
     return module
 
 
+def isolated_env(home: Path) -> dict:
+    env = dict(os.environ)
+    for key in list(env):
+        if (key in ("FACTORY_HOME", "FACTORY_SESSION", "PASEO_HOME", "PASEO_AGENT_ID", "CLAUDE_CONFIG_DIR",
+                    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
+                or key.startswith("GIT_CONFIG_") or key.lower().endswith("_proxy")):
+            env.pop(key, None)
+    env.update(HOME=str(home), USERPROFILE=str(home), XDG_CONFIG_HOME=str(home / "config"),
+               NO_PROXY="localhost,127.0.0.1",
+               GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=str(home / "gitconfig"),
+               GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.invalid",
+               GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.invalid")
+    return env
+
+
+def factory_command() -> list:
+    return [FACTORY_BIN] if FACTORY_BIN else [sys.executable, "-B", str(SKILL / "runtime/factory.py")]
+
+
+def invoke_process(args, env, command=None):
+    result = subprocess.run((command or factory_command()) + list(args), env=env, stdin=subprocess.DEVNULL,
+                            capture_output=True, encoding="utf-8", errors="surrogateescape", timeout=120)
+    return result.returncode, result.stdout, result.stderr
+
+
 class IsolatedTestCase(unittest.TestCase):
     # Pickup's daily orphan scan reads real git, gh and paseo, so it is a no-op unless a test opts in.
     orphan_pickup_scan = False
@@ -34,18 +62,7 @@ class IsolatedTestCase(unittest.TestCase):
 
     def run(self, result=None):
         with tempfile.TemporaryDirectory() as temp:
-            home = Path(temp)
-            env = dict(os.environ)
-            for key in list(env):
-                if (key in ("FACTORY_HOME", "FACTORY_SESSION", "PASEO_HOME", "PASEO_AGENT_ID", "CLAUDE_CONFIG_DIR",
-                            "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
-                        or key.startswith("GIT_CONFIG_") or key.lower().endswith("_proxy")):
-                    env.pop(key, None)
-            env.update(HOME=temp, USERPROFILE=temp, XDG_CONFIG_HOME=str(home / "config"),
-                       NO_PROXY="localhost,127.0.0.1",
-                       GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=str(home / "gitconfig"),
-                       GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.invalid",
-                       GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.invalid")
+            env = isolated_env(Path(temp))
             with patch.dict(os.environ, env, clear=True), contextlib.ExitStack() as stack:
                 if not self.orphan_pickup_scan:
                     for module in RUNTIMES:
