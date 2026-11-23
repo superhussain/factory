@@ -16,8 +16,8 @@ use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::{
     tag_lookalike, BABYSIT_SENTENCE, BACKLOG_LINE, BACKLOG_PICK, BATCH_REF, IDEA, JOB_ID, JOB_REL,
     MAX_CANDIDATES, MAX_RIDERS, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG,
-    PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE, REVIEW_ROUTE_KEYS, ROUTE_EFFORTS,
-    ROUTE_MODEL, SLUG, TERMINAL,
+    PASEO_ID, PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE, REVIEW_ROUTE_KEYS,
+    ROUTE_EFFORTS, ROUTE_MODEL, SLUG, TERMINAL,
 };
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::{is_link, mkdir_private, read_text, resolve, write_atomic};
@@ -4672,14 +4672,571 @@ pub fn stack_cmd(call: &Call) -> Res<()> {
     flushed(|o| stack(&home, &slug, &lead_id, &call.args[1], o))
 }
 
-// ---- not ported yet ----
+// ---- lesson and agent ----
 
-pub fn lesson_cmd(_call: &Call) -> Res<()> {
+const LESSON_USAGE: &str = "usage: lesson <slug>/<job-id> --fact-file <file> [--why-file <file>]";
+const RETRO_DOC_EDIT_SCHEMA: &str = "factory.retro-doc-edit/1";
+const ENV_SECRET_MIN: usize = 12;
+static LESSON_TARGET: Pattern = Pattern::new(r"([\w-]+)/(\w[\w.-]{0,80})", Flags::ASCII);
+
+/// The first key in home/.env whose value, ENV_SECRET_MIN or more characters long, appears in text, or None.
+fn env_secret(home: &Path, text: &str) -> Res<Option<String>> {
+    let env_file = home.join(".env");
+    if !env_file.exists() {
+        return Ok(None);
+    }
+    let env = crate::shared::conf::read_env_ordered(&env_file)
+        .map_err(|e| fail(os_error(&e, Some(&env_file)), 1))?;
+    Ok(env
+        .into_iter()
+        .find(|(_, v)| v.chars().count() >= ENV_SECRET_MIN && text.contains(v.as_str()))
+        .map(|(k, _)| k))
+}
+
+/// The text of a file flag that carries person text, refused when it is a link, empty or not UTF-8.
+fn read_chat_file(path: &str, flag: &str) -> Res<String> {
+    let p = Path::new(path);
+    if is_link(p).map_err(|e| fail(os_error(&e, Some(p)), 1))? {
+        return Err(fail(
+            format!("{flag} {path} is a symlink or junction; nothing was changed"),
+            6,
+        ));
+    }
+    let unreadable = || {
+        fail(
+            format!("{flag} {path}: cannot read it as UTF-8 text; nothing was changed"),
+            2,
+        )
+    };
+    let bytes = std::fs::read(p).map_err(|_| unreadable())?;
+    let text = String::from_utf8(bytes)
+        .map_err(|_| unreadable())?
+        .replace("\r\n", "\n");
+    if strip(&text).is_empty() {
+        return Err(fail(
+            format!("{flag} {path} is empty; nothing was changed"),
+            2,
+        ));
+    }
+    Ok(text)
+}
+
+/// (slug, job) from <slug>/<job-id>, or exit 2 with usage.
+fn lesson_target(target: &str, usage: &str) -> Res<(String, String)> {
+    match LESSON_TARGET.fullmatch(target) {
+        Some(m) if !target.contains("..") => Ok((
+            m.get(1).unwrap().as_str().into(),
+            m.get(2).unwrap().as_str().into(),
+        )),
+        _ => Err(fail(usage, 2)),
+    }
+}
+
+/// The stripped text of a lesson file flag, or exit 2 when it is too long, holds a link or a device secret.
+fn lesson_text(home: &Path, path: &str, flag: &str, hi: usize) -> Res<String> {
+    let text = strip(&read_chat_file(path, flag)?).to_string();
+    if let Some(why) = check_text(Some(&text), 1, hi, false) {
+        return Err(fail(format!("{flag} {why}; nothing was written"), 2));
+    }
+    if let Some(key) = env_secret(home, &text)? {
+        return Err(fail(
+            format!("{flag} holds this device's {key}; nothing was written"),
+            2,
+        ));
+    }
+    Ok(text)
+}
+
+/// Queue a held lesson card: a backlog line only a person's dashboard approve turns into a notes.md bullet.
+fn queue_lesson(_slug: &str, _job: &str, _fact: &str, _why: &str, _o: &mut Out) -> Res<()> {
+    // Deferred to integration: 2205-port-intake
     Err(not_ported("lesson"))
 }
 
-pub fn agent_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("agent"))
+/// Append fact as one bullet to <slug>/notes.md through the retro route, or queue a lesson card.
+fn lesson_append(
+    home: &Path,
+    slug: &str,
+    job: &str,
+    fact: &str,
+    stamp: i64,
+    o: &mut Out,
+) -> Res<()> {
+    let file = format!("{slug}/notes.md");
+    let r = api(
+        home,
+        "GET",
+        &format!("/api/project-documents/{file}"),
+        None,
+        &[200, 404],
+        &[],
+    )?;
+    let text = if r.status == 200 {
+        r.text()?
+    } else {
+        String::new()
+    };
+    let lines: Vec<&str> = if r.status == 200 {
+        text.split('\n').collect()
+    } else {
+        Vec::new()
+    };
+    let r = api(
+        home,
+        "GET",
+        &format!("/api/project-history/{file}"),
+        None,
+        &[200, 404],
+        &[],
+    )?;
+    let versions = if r.status == 200 {
+        loads(&r.text()?).map_err(json_error)?
+    } else {
+        json!([])
+    };
+    let bullet_prefix = format!("- {fact} (");
+    if lines
+        .iter()
+        .any(|l| *l == format!("- {fact}") || l.starts_with(&bullet_prefix))
+    {
+        writeln!(o.out, "already in {file}: {fact}").unwrap();
+        return Ok(());
+    }
+    let filled: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|l| !strip(l).is_empty())
+        .collect();
+    let Some(last) = filled.last() else {
+        return queue_lesson(
+            slug,
+            job,
+            fact,
+            &format!("{file} is missing or empty, and only a person adds its first bullet."),
+            o,
+        );
+    };
+    let when = format_stamp(stamp);
+    let bullet = format!("- {fact} ({job}, {})", &when[..10]);
+    let run: String = when.chars().filter(|c| *c != '-' && *c != ':').collect();
+    let base = versions
+        .get(0)
+        .and_then(|v| v.get("version"))
+        .cloned()
+        .unwrap_or(json!(0));
+    let body = json!({"schema": RETRO_DOC_EDIT_SCHEMA, "run": format!("lesson-{run}"), "base_version": base,
+                      "find": last, "replace": format!("{last}\n{bullet}"), "summary": format!("Notes: lesson from {job}")});
+    let r = api(
+        home,
+        "PUT",
+        &format!("/api/project-retro/{file}"),
+        Some(dumps(&body, DEFAULT).as_bytes()),
+        &[200, 400, 403, 404, 409, 412, 413, 429],
+        &[("Content-Type", "application/json")],
+    )?;
+    if r.status == 200 {
+        writeln!(
+            o.out,
+            "added lesson to {file} version {}: {bullet}",
+            r.header("X-Project-Version").unwrap_or("")
+        )
+        .unwrap();
+        return Ok(());
+    }
+    let reason = format!(
+        "{} {}",
+        r.status,
+        printable_line(&String::from_utf8_lossy(&r.body), 200)
+    );
+    writeln!(o.out, "not appended: {reason}").unwrap();
+    queue_lesson(
+        slug,
+        job,
+        fact,
+        &printable_line(&format!("Not appended directly: {reason}"), 300),
+        o,
+    )
+}
+
+fn lesson(home: &Path, target: &str, rest: &[String], o: &mut Out) -> Res<()> {
+    let mut flags: Vec<(&str, &str)> = Vec::new();
+    for pair in rest.chunks(2) {
+        if let [k, v] = pair {
+            match flags.iter_mut().find(|(key, _)| key == k) {
+                Some(slot) => slot.1 = v,
+                None => flags.push((k, v)),
+            }
+        }
+    }
+    let flag = |k: &str| flags.iter().find(|(key, _)| *key == k).map(|(_, v)| *v);
+    if ![2, 4].contains(&rest.len())
+        || flags.len() != rest.len() / 2
+        || flag("--fact-file").is_none()
+        || flags
+            .iter()
+            .any(|(k, _)| *k != "--fact-file" && *k != "--why-file")
+    {
+        return Err(fail(LESSON_USAGE, 2));
+    }
+    let (slug, job) = lesson_target(target, LESSON_USAGE)?;
+    let fact = lesson_text(home, flag("--fact-file").unwrap(), "--fact-file", 200)?;
+    let why = match flag("--why-file") {
+        Some(path) => Some(lesson_text(home, path, "--why-file", 300)?),
+        None => None,
+    };
+    let listed = loads(&api(home, "GET", "/projects.json", None, &[200], &[])?.text()?)
+        .map_err(json_error)?;
+    let mut projects: Vec<String> = listed
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| p.get("slug").and_then(Value::as_str).map(String::from))
+        .collect();
+    projects.sort();
+    projects.dedup();
+    if !projects.contains(&slug) {
+        let known = if projects.is_empty() {
+            "none".to_string()
+        } else {
+            projects.join(", ")
+        };
+        return Err(fail(
+            format!("no factory project {slug}. Known projects: {known}"),
+            4,
+        ));
+    }
+    if let Some(why) = why.filter(|w| !w.is_empty()) {
+        return queue_lesson(&slug, &job, &fact, &why, o);
+    }
+    lesson_append(home, &slug, &job, &fact, unix_now(), o)
+}
+
+/// Record a lesson from a job: append it to notes.md, or queue a card for a person.
+pub fn lesson_cmd(call: &Call) -> Res<()> {
+    let rest = &call.args[1..];
+    if ![2, 4].contains(&rest.len()) {
+        return Err(fail(LESSON_USAGE, 2));
+    }
+    let home = factory_home()?;
+    flushed(|o| lesson(&home, &call.args[0], rest, o))
+}
+
+const AGENT_ROLES: [&str; 8] = [
+    "orchestrator",
+    "spec",
+    "build",
+    "review-security",
+    "review-ux",
+    "review-ui",
+    "review-code",
+    "approve",
+];
+const AGENT_VIAS: [&str; 5] = ["native", "paseo", "launcher", "general", "direct"];
+const AGENT_ROWS_MAX: usize = 32;
+const AGENT_STAGES: [&str; 9] = [
+    "idea",
+    "spec",
+    "build",
+    "review",
+    "approve",
+    "needs-human",
+    "pr-open",
+    "merged",
+    "closed",
+];
+const AGENT_RECORD_USAGE: &str =
+    "usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]";
+const AGENT_COLUMNS: [&str; 6] = ["stage", "role", "harness", "via", "model", "effort"];
+
+fn role_alias(role: &str) -> &str {
+    match role {
+        "builder" | "factory-builder" => "build",
+        "spec-writer" | "factory-spec-writer" => "spec",
+        "approver" | "factory-approver" => "approve",
+        "factory-review-security" => "review-security",
+        "factory-review-ux" => "review-ux",
+        "factory-review-ui" => "review-ui",
+        "factory-review-code" => "review-code",
+        other => other,
+    }
+}
+
+fn via_alias(via: &str) -> &str {
+    match via {
+        "subagent" | "agent" | "local" => "native",
+        other => other,
+    }
+}
+
+/// The first bad field of an agent record, in argument order, or None.
+fn agent_record_problem(
+    role: &str,
+    harness: &str,
+    via: &str,
+    model: &str,
+    effort: Option<&str>,
+) -> Option<String> {
+    if !AGENT_ROLES.contains(&role) {
+        return Some(format!(
+            "role \"{role}\" is not one of {}",
+            AGENT_ROLES.join(", ")
+        ));
+    }
+    if !SLUG.is_full(harness) || harness.chars().count() > 64 {
+        return Some(format!(
+            "harness \"{harness}\" must be 1 to 64 letters, digits, _ or -"
+        ));
+    }
+    if !AGENT_VIAS.contains(&via) {
+        return Some(format!(
+            "via \"{via}\" is not one of {}",
+            AGENT_VIAS.join(", ")
+        ));
+    }
+    if !ROUTE_MODEL.is_full(model) {
+        return Some(format!(
+            "model \"{model}\" must be 1 to 200 letters, digits or _ . / : @ [ ] -"
+        ));
+    }
+    if let Some(effort) = effort.filter(|e| !ROUTE_EFFORTS.contains(e)) {
+        return Some(format!(
+            "effort \"{effort}\" is not one of {}",
+            ROUTE_EFFORTS.join(", ")
+        ));
+    }
+    None
+}
+
+/// One CAS: append row, stamped with the board's stage, round and time, to job_id's agents.
+fn record_agent(
+    home: &Path,
+    job_id: &str,
+    row: &Value,
+    claimant: Option<(&str, &str)>,
+    project: Option<&str>,
+) -> Res<Option<Value>> {
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(job) = job_by(&data, job_id).cloned() else {
+            return Ok((None, None));
+        };
+        if let Some(project) = project.filter(|p| !p.is_empty()) {
+            if str_of(&job, "project") != Some(project) {
+                return Err(fail(
+                    format!(
+                        "{job_id} belongs to {}, not {project}",
+                        py_str(job.get("project"))
+                    ),
+                    2,
+                ));
+            }
+        }
+        if let Some((device, session)) = claimant {
+            let c = job.get("claim").filter(|c| truthy(Some(c)));
+            let Some(c) = c else {
+                return Err(fail(
+                    format!("{job_id} has no claim from this session; run hold first"),
+                    6,
+                ));
+            };
+            if !mine(c, device, session) {
+                return Err(fail(
+                    format!(
+                        "{job_id} is held by {} session {} since {}, last seen {}. Nothing was written. Pass --session <tag> if this session holds it, or take it over with hold <project>/<id> take",
+                        py_str(c.get("device")),
+                        py_str(c.get("session")),
+                        py_str(c.get("since")),
+                        py_str(c.get("seen"))
+                    ),
+                    6,
+                ));
+            }
+        }
+        let mut full =
+            json!({"at": now(), "stage": job.get("stage").cloned().unwrap_or(Value::Null)});
+        if str_of(&job, "stage") == Some("review") && job.get("round").is_some_and(|r| !r.is_null())
+        {
+            full["round"] = job["round"].clone();
+        }
+        for (k, v) in row.as_object().unwrap() {
+            full[k] = v.clone();
+        }
+        let mut rows = list_of(&job, "agents");
+        rows.push(full.clone());
+        if rows.len() > AGENT_ROWS_MAX {
+            rows.drain(..rows.len() - AGENT_ROWS_MAX);
+        }
+        patch_job(&mut data, job_id, &json!({"agents": rows}));
+        Ok((Some(dump_board(&data)), Some(full)))
+    })
+}
+
+/// This host's Paseo server id, else None.
+fn paseo_server() -> Option<String> {
+    let base = match std::env::var_os("PASEO_HOME").filter(|v| !v.is_empty()) {
+        Some(h) => PathBuf::from(h),
+        None => std::env::home_dir()?.join(".paseo"),
+    };
+    let text = std::fs::read(base.join("server-id")).ok()?;
+    let server = strip(&universal_newlines(String::from_utf8(text).ok()?)).to_string();
+    PASEO_ID.is_full(&server).then_some(server)
+}
+
+/// {"server", "agent"} of the Paseo session running this process, else None.
+fn paseo_session() -> Option<Value> {
+    let agent = std::env::var("PASEO_AGENT_ID").unwrap_or_default();
+    let agent = strip(&agent);
+    let server = paseo_server()?;
+    (PASEO_ID.is_full(agent) && !agent.starts_with('-'))
+        .then(|| json!({"server": server, "agent": agent}))
+}
+
+/// Set paseo on each of job's agents rows that session recorded and no session has linked yet.
+#[cfg_attr(not(test), allow(dead_code))]
+fn link_agent_rows(job: &mut Value, session: &str, paseo: &Value) {
+    let Some(rows) = job.get_mut("agents").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for row in rows.iter_mut().filter_map(Value::as_object_mut) {
+        if row.get("session").and_then(Value::as_str) == Some(session) && !row.contains_key("paseo")
+        {
+            row.insert("paseo".into(), paseo.clone());
+        }
+    }
+}
+
+fn agent(sub: &str, args: &[String], o: &mut Out) -> Res<()> {
+    let mut args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut worker: Option<&str> = None;
+    if sub == "record" && args.len() >= 2 && args[args.len() - 2] == "--paseo-agent" {
+        worker = Some(args[args.len() - 1]);
+        args.truncate(args.len() - 2);
+    }
+    if sub == "record" && (args.len() == 5 || args.len() == 6) {
+        let (target, role, harness, via, model) = (
+            args[0],
+            role_alias(args[1]),
+            args[2],
+            via_alias(args[3]),
+            args[4],
+        );
+        let effort = args.get(5).copied();
+        if let Some(problem) = agent_record_problem(role, harness, via, model, effort) {
+            return Err(fail(format!("{AGENT_RECORD_USAGE}: {problem}"), 2));
+        }
+        let mut server = None;
+        if let Some(worker) = worker {
+            if via != "paseo" {
+                return Err(fail("--paseo-agent is only for via paseo", 2));
+            }
+            if !PASEO_ID.is_full(worker) || worker.starts_with('-') {
+                return Err(fail(
+                    format!("--paseo-agent \"{worker}\" must be 1 to 64 letters, digits, _ or -, not starting with -"),
+                    2,
+                ));
+            }
+            server = paseo_server();
+            if server.is_none() {
+                return Err(fail(
+                    "--paseo-agent needs this host's Paseo server id; leave it out to link the row to this session",
+                    2,
+                ));
+            }
+        }
+        let (home, slug, job_id) = r2_target(target, true)?;
+        let (device, session, _) = holder(&home)?;
+        let mut row = json!({"role": role, "harness": harness, "via": via, "model": model});
+        if let Some(effort) = effort {
+            row["effort"] = json!(effort);
+        }
+        row["session"] = json!(session);
+        let paseo = match worker {
+            Some(w) => Some(json!({"server": server, "agent": w})),
+            None => paseo_session(),
+        };
+        if let Some(paseo) = paseo {
+            row["paseo"] = paseo;
+        }
+        let Some(saved) =
+            record_agent(&home, &job_id, &row, Some((&device, &session)), Some(&slug))?
+        else {
+            return Err(fail(
+                format!("no job {job_id} on the board. Nothing was written."),
+                4,
+            ));
+        };
+        writeln!(o.out, "{}", dumps(&saved, DEFAULT)).unwrap();
+        return Ok(());
+    }
+    if sub != "report" || args.len() > 1 || args.first().is_some_and(|a| !SLUG.is_full(a)) {
+        return Err(fail(
+            format!("{AGENT_RECORD_USAGE} | agent report [<project>]"),
+            2,
+        ));
+    }
+    let board = read_board(&factory_home()?)?;
+    let mut counts: Vec<(Vec<String>, usize)> = Vec::new();
+    for j in board["jobs"].as_array().into_iter().flatten() {
+        if let Some(project) = args.first() {
+            if j.get("project") != Some(&json!(project)) {
+                continue;
+            }
+        }
+        for row in list_of(j, "agents").iter().filter(|r| r.is_object()) {
+            let key: Vec<String> = AGENT_COLUMNS
+                .iter()
+                .map(|c| {
+                    let v = row.get(*c);
+                    if truthy(v) {
+                        py_str(v)
+                    } else {
+                        "-".into()
+                    }
+                })
+                .collect();
+            match counts.iter_mut().find(|(k, _)| *k == key) {
+                Some(slot) => slot.1 += 1,
+                None => counts.push((key, 1)),
+            }
+        }
+    }
+    if counts.is_empty() {
+        writeln!(o.out, "no agent records").unwrap();
+        return Ok(());
+    }
+    let order = |stage: &str| {
+        AGENT_STAGES
+            .iter()
+            .position(|s| *s == stage)
+            .unwrap_or(AGENT_STAGES.len())
+    };
+    counts.sort_by(|a, b| (order(&a.0[0]), &a.0).cmp(&(order(&b.0[0]), &b.0)));
+    let mut lines: Vec<Vec<String>> = vec![AGENT_COLUMNS
+        .iter()
+        .map(|c| c.to_string())
+        .chain(["count".to_string()])
+        .collect()];
+    lines.extend(counts.into_iter().map(|(mut k, n)| {
+        k.push(n.to_string());
+        k
+    }));
+    let widths: Vec<usize> = (0..lines[0].len())
+        .map(|i| lines.iter().map(|l| l[i].chars().count()).max().unwrap())
+        .collect();
+    for line in &lines {
+        let cells: Vec<String> = line
+            .iter()
+            .zip(&widths)
+            .map(|(cell, w)| format!("{cell}{}", " ".repeat(w - cell.chars().count())))
+            .collect();
+        writeln!(o.out, "{}", rstrip(&cells.join("  "))).unwrap();
+    }
+    Ok(())
+}
+
+/// Record which agent ran a job step, or report the recorded rows.
+pub fn agent_cmd(call: &Call) -> Res<()> {
+    flushed(|o| agent(&call.args[0], &call.args[1..], o))
 }
 
 #[cfg(test)]
@@ -7872,6 +8429,98 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(1100));
             patch_job(&mut data, LEAD, &json!({"needs": null}));
             assert_eq!(data["jobs"][1]["updated"], before);
+        }
+    }
+
+    mod lesson {
+        use super::super::*;
+        use crate::shared::http::tests::{home_for, serve};
+
+        #[test]
+        fn appends_a_clear_lesson() {
+            let fact = "Worker route changes run pnpm test:protocol; pnpm test skips them.";
+            let (origin, seen) = serve(vec![
+                (200, "# Notes\n\n- Run pnpm test.\n", vec![]),
+                (200, r#"[{"version": 7}, {"version": 6}]"#, vec![]),
+                (200, "", vec![("X-Project-Version", "8")]),
+            ]);
+            let home = home_for("lesson-append", &origin);
+            let mut o = Out::default();
+            let stamp = parse_stamp("2026-11-12T09:30:05Z").unwrap();
+            lesson_append(&home, "factory", "1712-export-csv", fact, stamp, &mut o).unwrap();
+            let bullet = format!("- {fact} (1712-export-csv, 2026-11-12)");
+            assert_eq!(
+                o.out,
+                format!("added lesson to factory/notes.md version 8: {bullet}\n")
+            );
+            let seen = seen.lock().unwrap();
+            assert_eq!(
+                (seen[2].method.as_str(), seen[2].path.as_str()),
+                ("PUT", "/api/project-retro/factory/notes.md")
+            );
+            assert_eq!(
+                loads(std::str::from_utf8(&seen[2].body).unwrap()).unwrap(),
+                json!({"schema": "factory.retro-doc-edit/1", "run": "lesson-20261112T093005Z", "base_version": 7,
+                       "find": "- Run pnpm test.", "replace": format!("- Run pnpm test.\n{bullet}"),
+                       "summary": "Notes: lesson from 1712-export-csv"})
+            );
+        }
+    }
+
+    mod agents {
+        use super::super::*;
+        use crate::shared::http::tests::{home_for, serve};
+
+        const JOB: &str = "501-retry-uploads";
+
+        fn spec_row(at: String) -> Value {
+            json!({"at": at, "stage": "spec", "role": "spec", "harness": "claude", "via": "native",
+                   "model": "claude-opus-5-5", "effort": "medium", "session": "a1b2c3"})
+        }
+
+        #[test]
+        fn caps_rows() {
+            let old: Vec<Value> = (0..32)
+                .map(|i| spec_row(format!("2026-01-01T09:{i:02}:00Z")))
+                .collect();
+            let board = json!({"updated": "", "jobs": [{"id": JOB, "stage": "review", "round": 1, "project": "alpha", "agents": old}]});
+            let board: &'static str = Box::leak(board.to_string().into_boxed_str());
+            let (origin, seen) = serve(vec![
+                (200, board, vec![("ETag", "\"e1\"")]),
+                (200, "", vec![]),
+                (200, board, vec![("ETag", "\"e1\"")]),
+            ]);
+            let home = home_for("agents-cap", &origin);
+            let row = json!({"role": "build", "harness": "opencode", "via": "native", "model": "glm-5.3-flash", "session": "d4e5f6"});
+            let saved = record_agent(&home, JOB, &row, None, None).unwrap().unwrap();
+            let put = loads(std::str::from_utf8(&seen.lock().unwrap()[1].body).unwrap()).unwrap();
+            let rows = put["jobs"][0]["agents"].as_array().unwrap();
+            assert_eq!(rows.len(), 32);
+            assert_eq!(rows[..31], old[1..]);
+            assert_eq!(rows[31], saved);
+            assert!(saved.get("effort").is_none());
+            assert!(
+                record_agent(&home, "999-missing", &json!({"role": "build"}), None, None)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+
+        #[test]
+        fn links_only_this_sessions_unlinked_rows() {
+            let paseo = json!({"server": "srv-a", "agent": "agent-orch"});
+            let other = json!({"server": "srv-a", "agent": "agent-old"});
+            let mut row1 = spec_row("2026-01-01T09:04:00Z".into());
+            row1["paseo"] = other.clone();
+            let mut row2 = spec_row("2026-01-01T10:10:00Z".into());
+            row2["session"] = json!("d4e5f6");
+            let mut job = json!({"agents": [spec_row("2026-01-01T09:00:00Z".into()), row1, row2, "a hand-edited row"]});
+            link_agent_rows(&mut job, "a1b2c3", &paseo);
+            assert_eq!(job["agents"][0]["paseo"], paseo);
+            assert_eq!(job["agents"][1]["paseo"], other);
+            assert!(job["agents"][2].get("paseo").is_none());
+            assert_eq!(job["agents"][3], "a hand-edited row");
+            link_agent_rows(&mut json!({}), "a1b2c3", &paseo);
         }
     }
 }

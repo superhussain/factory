@@ -12517,6 +12517,2045 @@
       },
       "exit": 0,
       "from": "tests/cli/test_batch.py::BatchTest.test_attaches_when_the_prerequisite_rides_with_the_lead_or_merged"
+    },
+    {
+      "id": "pipeline/agent-appends-row",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "review-code",
+        "opencode",
+        "native",
+        "gpt-6.1-sol",
+        "high",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_appends_row"
+    },
+    {
+      "id": "pipeline/agent-accepts-subagent-names",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "builder",
+        "claude",
+        "native",
+        "claude-opus-5-5",
+        "medium",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_accepts_subagent_names"
+    },
+    {
+      "id": "pipeline/agent-accepts-subagent-names-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "factory-review-code",
+        "claude",
+        "native",
+        "claude-opus-5-5",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                },
+                "agents": [
+                  {
+                    "at": "2999-01-01T00:00:00Z",
+                    "stage": "review",
+                    "round": 1,
+                    "role": "build",
+                    "harness": "claude",
+                    "via": "native",
+                    "model": "claude-opus-5-5",
+                    "effort": "medium",
+                    "session": "d4e5f6"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_accepts_subagent_names"
+    },
+    {
+      "id": "pipeline/agent-accepts-subagent-via",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "review-code",
+        "claude",
+        "subagent",
+        "claude-opus-5-5",
+        "medium",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_accepts_subagent_via"
+    },
+    {
+      "id": "pipeline/agent-accepts-subagent-via-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "review-code",
+        "claude",
+        "agent",
+        "claude-opus-5-5",
+        "medium",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_accepts_subagent_via"
+    },
+    {
+      "id": "pipeline/agent-accepts-subagent-via-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "review-code",
+        "claude",
+        "local",
+        "claude-opus-5-5",
+        "medium",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_accepts_subagent_via"
+    },
+    {
+      "id": "pipeline/agent-refuses",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "reviewer",
+        "opencode",
+        "native",
+        "gpt-6.1-sol",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses"
+    },
+    {
+      "id": "pipeline/agent-refuses-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "build",
+        "open code",
+        "native",
+        "gpt-6.1-sol",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses"
+    },
+    {
+      "id": "pipeline/agent-refuses-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "build",
+        "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+        "native",
+        "gpt-6.1-sol",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses"
+    },
+    {
+      "id": "pipeline/agent-refuses-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "build",
+        "opencode",
+        "native",
+        "gpt 6.1",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses"
+    },
+    {
+      "id": "pipeline/agent-refuses-5",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "build",
+        "opencode",
+        "native",
+        "gpt-6.1-sol",
+        "huge",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses"
+    },
+    {
+      "id": "pipeline/agent-refuses-6",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "build",
+        "opencode",
+        "native",
+        "gpt-6.1-sol",
+        "--session",
+        "other1"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses"
+    },
+    {
+      "id": "pipeline/agent-refuses-7",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "build",
+        "opencode",
+        "native",
+        "gpt-6.1-sol",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses"
+    },
+    {
+      "id": "pipeline/agent-refuses-another-projects-job",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "beta/501-retry-uploads",
+        "build",
+        "opencode",
+        "native",
+        "gpt-6.1-sol",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses_another_projects_job"
+    },
+    {
+      "id": "pipeline/agent-row-carries-paseo",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "review-code",
+        "opencode",
+        "native",
+        "gpt-6.1-sol",
+        "high",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-agent-row-carries-paseo",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "env": {
+        "PASEO_AGENT_ID": "agent-orch"
+      },
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_row_carries_paseo"
+    },
+    {
+      "id": "pipeline/agent-row-links-paseo-worker",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "build",
+        "claude",
+        "paseo",
+        "claude-opus-5-5",
+        "medium",
+        "--paseo-agent",
+        "agent-build",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-agent-row-carries-paseo",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "env": {
+        "PASEO_AGENT_ID": "agent-orch"
+      },
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_row_links_paseo_worker"
+    },
+    {
+      "id": "pipeline/agent-refuses-paseo-agent",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "build",
+        "claude",
+        "native",
+        "claude-opus-5-5",
+        "--paseo-agent",
+        "agent-build",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-agent-row-carries-paseo",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses_paseo_agent"
+    },
+    {
+      "id": "pipeline/agent-refuses-paseo-agent-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "build",
+        "claude",
+        "paseo",
+        "claude-opus-5-5",
+        "--paseo-agent",
+        "bad id!",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-agent-row-carries-paseo",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses_paseo_agent"
+    },
+    {
+      "id": "pipeline/agent-refuses-paseo-agent-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "build",
+        "claude",
+        "paseo",
+        "claude-opus-5-5",
+        "--paseo-agent",
+        "-x",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": "pipeline-agent-row-carries-paseo",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses_paseo_agent"
+    },
+    {
+      "id": "pipeline/agent-refuses-paseo-agent-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "agent",
+        "record",
+        "alpha/501-retry-uploads",
+        "build",
+        "claude",
+        "paseo",
+        "claude-opus-5-5",
+        "--paseo-agent",
+        "agent-build",
+        "--session",
+        "d4e5f6"
+      ],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_refuses_paseo_agent"
+    },
+    {
+      "id": "pipeline/agent-table",
+      "argv": ["--home", "{home}", "agent", "report", "alpha"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                },
+                "agents": [
+                  {
+                    "at": "2026-01-01T09:00:00Z",
+                    "stage": "idea",
+                    "role": "orchestrator",
+                    "harness": "claude",
+                    "via": "paseo",
+                    "model": "claude-opus-5-5",
+                    "effort": "medium",
+                    "session": "a1b2c3"
+                  },
+                  {
+                    "at": "2026-01-01T09:04:00Z",
+                    "stage": "spec",
+                    "role": "spec",
+                    "harness": "claude",
+                    "via": "native",
+                    "model": "claude-opus-5-5",
+                    "effort": "medium",
+                    "session": "a1b2c3"
+                  },
+                  {
+                    "at": "2026-01-01T10:10:00Z",
+                    "stage": "build",
+                    "role": "orchestrator",
+                    "harness": "opencode",
+                    "via": "paseo",
+                    "model": "glm-5.3-flash",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  },
+                  {
+                    "at": "2026-01-01T10:12:00Z",
+                    "stage": "build",
+                    "role": "build",
+                    "harness": "opencode",
+                    "via": "native",
+                    "model": "glm-5.3-flash",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  },
+                  {
+                    "at": "2026-01-01T11:00:00Z",
+                    "stage": "review",
+                    "round": 1,
+                    "role": "review-code",
+                    "harness": "opencode",
+                    "via": "native",
+                    "model": "gpt-6.1-sol",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  },
+                  "a hand-edited row",
+                  null
+                ]
+              },
+              {
+                "id": "502-other",
+                "stage": "build",
+                "project": "beta",
+                "agents": [
+                  {
+                    "at": "2026-01-01T10:12:00Z",
+                    "stage": "build",
+                    "role": "build",
+                    "harness": "opencode",
+                    "via": "native",
+                    "model": "glm-5.3-flash",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_agents.py::AgentReportTest.test_table"
+    },
+    {
+      "id": "pipeline/agent-table-2",
+      "argv": ["--home", "{home}", "agent", "report"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                },
+                "agents": [
+                  {
+                    "at": "2026-01-01T09:00:00Z",
+                    "stage": "idea",
+                    "role": "orchestrator",
+                    "harness": "claude",
+                    "via": "paseo",
+                    "model": "claude-opus-5-5",
+                    "effort": "medium",
+                    "session": "a1b2c3"
+                  },
+                  {
+                    "at": "2026-01-01T09:04:00Z",
+                    "stage": "spec",
+                    "role": "spec",
+                    "harness": "claude",
+                    "via": "native",
+                    "model": "claude-opus-5-5",
+                    "effort": "medium",
+                    "session": "a1b2c3"
+                  },
+                  {
+                    "at": "2026-01-01T10:10:00Z",
+                    "stage": "build",
+                    "role": "orchestrator",
+                    "harness": "opencode",
+                    "via": "paseo",
+                    "model": "glm-5.3-flash",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  },
+                  {
+                    "at": "2026-01-01T10:12:00Z",
+                    "stage": "build",
+                    "role": "build",
+                    "harness": "opencode",
+                    "via": "native",
+                    "model": "glm-5.3-flash",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  },
+                  {
+                    "at": "2026-01-01T11:00:00Z",
+                    "stage": "review",
+                    "round": 1,
+                    "role": "review-code",
+                    "harness": "opencode",
+                    "via": "native",
+                    "model": "gpt-6.1-sol",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  },
+                  "a hand-edited row",
+                  null
+                ]
+              },
+              {
+                "id": "502-other",
+                "stage": "build",
+                "project": "beta",
+                "agents": [
+                  {
+                    "at": "2026-01-01T10:12:00Z",
+                    "stage": "build",
+                    "role": "build",
+                    "harness": "opencode",
+                    "via": "native",
+                    "model": "glm-5.3-flash",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_agents.py::AgentReportTest.test_table"
+    },
+    {
+      "id": "pipeline/agent-table-3",
+      "argv": ["--home", "{home}", "agent", "report", "gamma"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "501-retry-uploads",
+                "stage": "review",
+                "round": 1,
+                "project": "alpha",
+                "updated": "2026-01-01T00:00:00Z",
+                "claim": {
+                  "device": "parity",
+                  "session": "d4e5f6",
+                  "since": "2999-01-01T00:00:00Z",
+                  "seen": "2999-01-01T00:00:00Z"
+                },
+                "agents": [
+                  {
+                    "at": "2026-01-01T09:00:00Z",
+                    "stage": "idea",
+                    "role": "orchestrator",
+                    "harness": "claude",
+                    "via": "paseo",
+                    "model": "claude-opus-5-5",
+                    "effort": "medium",
+                    "session": "a1b2c3"
+                  },
+                  {
+                    "at": "2026-01-01T09:04:00Z",
+                    "stage": "spec",
+                    "role": "spec",
+                    "harness": "claude",
+                    "via": "native",
+                    "model": "claude-opus-5-5",
+                    "effort": "medium",
+                    "session": "a1b2c3"
+                  },
+                  {
+                    "at": "2026-01-01T10:10:00Z",
+                    "stage": "build",
+                    "role": "orchestrator",
+                    "harness": "opencode",
+                    "via": "paseo",
+                    "model": "glm-5.3-flash",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  },
+                  {
+                    "at": "2026-01-01T10:12:00Z",
+                    "stage": "build",
+                    "role": "build",
+                    "harness": "opencode",
+                    "via": "native",
+                    "model": "glm-5.3-flash",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  },
+                  {
+                    "at": "2026-01-01T11:00:00Z",
+                    "stage": "review",
+                    "round": 1,
+                    "role": "review-code",
+                    "harness": "opencode",
+                    "via": "native",
+                    "model": "gpt-6.1-sol",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  },
+                  "a hand-edited row",
+                  null
+                ]
+              },
+              {
+                "id": "502-other",
+                "stage": "build",
+                "project": "beta",
+                "agents": [
+                  {
+                    "at": "2026-01-01T10:12:00Z",
+                    "stage": "build",
+                    "role": "build",
+                    "harness": "opencode",
+                    "via": "native",
+                    "model": "glm-5.3-flash",
+                    "effort": "high",
+                    "session": "d4e5f6"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_agents.py::AgentReportTest.test_table"
+    },
+    {
+      "id": "pipeline/lesson-refusal-queues-a-card",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt"
+      ],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [404, ""],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_refusal_queues_a_card"
+    },
+    {
+      "id": "pipeline/lesson-refusal-queues-a-card-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt"
+      ],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, " \n\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_refusal_queues_a_card"
+    },
+    {
+      "id": "pipeline/lesson-why-file-queues-a-card",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt",
+        "--why-file",
+        "{home}/why.txt"
+      ],
+      "home": "pipeline-lesson-why",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_why_file_queues_a_card"
+    },
+    {
+      "id": "pipeline/lesson-known-lesson-writes-nothing",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt"
+      ],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [
+          200,
+          "- Run pnpm test.\n- Worker route changes run pnpm test:protocol; pnpm test skips them.\n"
+        ],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_known_lesson_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-known-lesson-writes-nothing-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt"
+      ],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [
+          200,
+          "- Worker route changes run pnpm test:protocol; pnpm test skips them. (0900-older, 2026-11-01)\n- Run pnpm test.\n"
+        ],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_known_lesson_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing",
+      "argv": ["--home", "{home}", "lesson", "factory/1712-export-csv"],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-2",
+      "argv": ["--home", "{home}", "lesson", "factory/1712-export-csv", "--fact-file"],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--why-file",
+        "{home}/fact.txt"
+      ],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt",
+        "--fact-file",
+        "{home}/fact.txt"
+      ],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-5",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt",
+        "--context",
+        "{home}/fact.txt"
+      ],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-6",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt",
+        "--why-file",
+        ""
+      ],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-7",
+      "argv": ["--home", "{home}", "lesson", "factory", "--fact-file", "{home}/fact.txt"],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-8",
+      "argv": ["--home", "{home}", "lesson", "factory/../x", "--fact-file", "{home}/fact.txt"],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-9",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt"
+      ],
+      "home": "pipeline-lesson-long",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-10",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt"
+      ],
+      "home": "pipeline-lesson-link",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-11",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt"
+      ],
+      "home": "pipeline-lesson-secret",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-12",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "factory/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt",
+        "--why-file",
+        "{home}/why.txt"
+      ],
+      "home": "pipeline-lesson-long-why",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
+    },
+    {
+      "id": "pipeline/lesson-bad-input-writes-nothing-13",
+      "argv": [
+        "--home",
+        "{home}",
+        "lesson",
+        "nowhere/1712-export-csv",
+        "--fact-file",
+        "{home}/fact.txt"
+      ],
+      "home": "pipeline-lesson-base",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample"
+            },
+            {
+              "slug": "factory"
+            }
+          ]
+        ],
+        "GET /api/project-documents/factory/notes.md": [200, "# Notes\n\n- Run pnpm test.\n"],
+        "GET /api/project-history/factory/notes.md": [200, "[{\"version\": 7}, {\"version\": 6}]"],
+        "PUT /api/project-retro/factory/notes.md": [
+          200,
+          "",
+          {
+            "X-Project-Version": "8"
+          }
+        ],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/backlog": [200, ""],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_lesson.py::LessonTests.test_bad_input_writes_nothing"
     }
   ]
 }
