@@ -133,7 +133,11 @@ pub fn float_repr(x: f64) -> String {
     if x.is_infinite() {
         return if x > 0.0 { "Infinity" } else { "-Infinity" }.into();
     }
-    let sci = format!("{x:e}");
+    let mut sci = format!("{x:e}");
+    // At 17 digits the shortest form can break a tie upward; Python rounds the exact value half to even.
+    if sci.split('e').next().unwrap().chars().filter(char::is_ascii_digit).count() == 17 {
+        sci = format!("{x:.16e}");
+    }
     let (mantissa, exp) = sci.split_once('e').unwrap();
     let exp: i32 = exp.parse().unwrap();
     let (sign, mantissa) = match mantissa.strip_prefix('-') {
@@ -184,6 +188,7 @@ mod tests {
             ("123.456", "123.456"),
             ("1e400", "Infinity"),
             ("-1e400", "-Infinity"),
+            ("1059438285926254.25", "1059438285926254.2"),
         ] {
             assert_eq!(all(text), vec![want; 6], "{text}");
         }
