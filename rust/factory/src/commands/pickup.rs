@@ -15404,23 +15404,15 @@ exit "$archive_code"
         fn test_board_refuses_a_github_patch() {
             let ps = setup();
             ps.jobs(json!([export(json!({}))]));
-            let patch = json!({"github": {"merged": "2026-01-02T12:00:00Z"}});
-            let e = claims::board_write(
-                &ps.home,
-                "042-sample-export",
-                patch.as_object().unwrap().clone(),
-                &claims::WriteOpts {
-                    show: true,
-                    verdict: None,
-                    rewrite_round: None,
-                },
-            )
-            .unwrap_err();
             assert_eq!(
-                (e.code, e.stderr.as_str()),
+                board_patch(
+                    &ps,
+                    "042-sample-export",
+                    json!({"github": {"merged": "2026-01-02T12:00:00Z"}})
+                ),
                 (
                     2,
-                    "factory.py: only factory.py pickup sets github. Nothing was written.\n"
+                    "factory.py: only factory.py pickup sets github. Nothing was written.\n".into()
                 )
             );
             assert!(ps.puts().is_empty());
@@ -15624,6 +15616,18 @@ exit "$archive_code"
     }
 
     /// A command another slice owns is not ported yet: it exits 2 and writes nothing.
+    /// The board command's write of patch, as its stdin would carry it: (code, stderr).
+    pub(super) fn board_patch(fx: &Fx, id: &str, patch: Value) -> (i32, String) {
+        let opts = claims::WriteOpts {
+            show: true,
+            verdict: None,
+            rewrite_round: None,
+        };
+        let e = claims::board_write(&fx.home, id, patch.as_object().unwrap().clone(), &opts)
+            .unwrap_err();
+        (e.code, e.stderr)
+    }
+
     pub(super) fn assert_other_slice(fx: &Fx, argv: &[&str]) {
         let mut args = vec!["--home".into(), fx.home.display().to_string().into()];
         args.extend(argv.iter().map(|a| std::ffi::OsString::from(*a)));
@@ -15841,8 +15845,18 @@ exit "$archive_code"
         fn test_board_rejects_notes_read() {
             let fx = Fx::new();
             fx.jobs(json!([denied("007-csv-export", "alpha", json!({}))]));
-            let home = fx.home.display().to_string();
-            assert_other_slice(&fx, &["board", &home, "007-csv-export"]);
+            assert_eq!(
+                board_patch(
+                    &fx,
+                    "007-csv-export",
+                    json!({"backlog": {"notes_read": "x"}})
+                ),
+                (
+                    2,
+                    "factory.py: only factory.py deny-notes sets backlog.notes_read\n".into()
+                )
+            );
+            assert!(fx.calls().is_empty());
         }
     }
 
@@ -17031,13 +17045,23 @@ exit "$archive_code"
             assert_eq!(fx.job("043-sample-export")["auto_babysit"]["count"], 1);
         }
 
-        /// The board command belongs to the claims slice and is not ported yet, so it writes nothing.
         #[test]
         fn test_board_refuses_the_field() {
             let fx = setup();
             fx.jobs(one(json!({})));
-            let home = fx.home.display().to_string();
-            assert_other_slice(&fx, &["board", &home, "042-sample-export"]);
+            assert_eq!(
+                board_patch(
+                    &fx,
+                    "042-sample-export",
+                    json!({"auto_babysit": {"count": 0}})
+                ),
+                (
+                    2,
+                    "factory.py: only factory.py pickup sets auto_babysit. Nothing was written.\n"
+                        .into()
+                )
+            );
+            assert!(fx.puts().is_empty());
         }
 
         #[test]
