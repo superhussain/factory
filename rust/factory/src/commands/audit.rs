@@ -1,27 +1,25 @@
 //! The transcript commands: audit, usage, outcomes and bench.
 
-use std::collections::hash_map::RandomState;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
-use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use serde_json::{json, Map, Value};
 
-use crate::cli::Call;
+use crate::cli::{not_ported, Call};
 use crate::commands::checks::{pr_merge_commits, pr_states};
 use crate::commands::pipeline::fetch_base;
 use crate::shared::board::{dump_board, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{JOB_ID, NEW_JOB_ID, PASEO_ID, ROUTE_MODEL, SLUG};
-use crate::shared::exit::{exit, fail, Res};
-use crate::shared::fs::{read_text, resolve, temp_root};
+use crate::shared::exit::{fail, Res};
+use crate::shared::fs::{read_text, resolve};
 use crate::shared::home::{device_name, factory_home};
 use crate::shared::http::{access_message, api, cas};
 use crate::shared::paseo::paseo_server;
-use crate::shared::proc::{capture, git, hostname, which};
+use crate::shared::proc::{git, hostname, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
 use crate::shared::py::{
     is_space, os_error, round_half_even, round_int, rstrip, splitlines, strip, universal_newlines,
@@ -1783,7 +1781,8 @@ fn bench_arm(folder: &str, cases: &[Value]) -> Res<Value> {
 
 /// Each case's job folder, project and checkout, failing on the first case that cannot run. The
 /// merge commits come from GitHub, which the checks slice reads.
-fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<Vec<ReplayRow>> {
+/// Check that each case can run, failing on the first that cannot.
+fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<()> {
     let (paths, device) = (read_paths(home)?, device_name(home));
     let mut rows = Vec::new();
     let mut prs: Vec<(String, Vec<u64>)> = Vec::new();
@@ -1845,18 +1844,7 @@ fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<Vec<ReplayRow>> {
             Some((_, numbers)) => numbers.push(number as u64),
             None => prs.push((repo.to_string(), vec![number as u64])),
         }
-        rows.push((
-            ReplayRow {
-                id: id.to_string(),
-                head: py_str(c.get("head")),
-                job: jobs[0].clone(),
-                project,
-                checkout: PathBuf::from(fm_get(&paths, &slug).unwrap_or("")),
-                merge: String::new(),
-            },
-            repo.to_string(),
-            number as u64,
-        ));
+        rows.push((id.to_string(), repo.to_string(), number as u64));
     }
     let mut merges = Vec::new();
     for (repo, mut numbers) in prs {
@@ -1866,343 +1854,24 @@ fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<Vec<ReplayRow>> {
             .map_err(|why| fail(format!("bench: {why}"), 5))?;
         merges.push((repo, oids));
     }
-    let mut out = Vec::new();
-    for (mut row, repo, number) in rows {
-        let merge = merges
+    for (id, repo, number) in rows {
+        let merged = merges
             .iter()
             .find(|(r, _)| *r == repo)
-            .and_then(|(_, o)| o.get(&number).cloned().flatten());
-        let Some(merge) = merge else {
-            let pr = format!("https://github.com/{repo}/pull/{number}");
+            .is_some_and(|(_, o)| o.get(&number).is_some_and(Option::is_some));
+        if !merged {
             let pr = cases
                 .iter()
-                .find(|c| py_str(c.get("id")) == row.id)
-                .map_or(pr, |c| py_str(c.get("pr")));
+                .find(|c| py_str(c.get("id")) == id)
+                .map(|c| py_str(c.get("pr")))
+                .unwrap_or_default();
             return Err(fail(
-                format!("bench: {}: GitHub reports no merge commit for {pr}", row.id),
+                format!("bench: {id}: GitHub reports no merge commit for {pr}"),
                 4,
             ));
-        };
-        row.merge = merge;
-        out.push(row);
-    }
-    Ok(out)
-}
-
-/// One case bench replay runs, with its job folder, project file, checkout and merge commit.
-struct ReplayRow {
-    id: String,
-    head: String,
-    job: PathBuf,
-    project: PathBuf,
-    checkout: PathBuf,
-    merge: String,
-}
-
-const BENCH_REPLAY_SECONDS: u64 = 3600;
-const BENCH_REPLAY_TOOLS: [&str; 5] = ["Read", "Grep", "Glob", "Write", "Bash(git:*)"];
-
-/// True when checkout holds commit oid, fetching it from origin once when it does not.
-fn bench_have_commit(checkout: &Path, oid: &str) -> bool {
-    let dir = checkout.to_string_lossy();
-    let object = format!("{oid}^{{commit}}");
-    let have = || {
-        capture(
-            &["git", "-C", &dir, "cat-file", "-e", &object],
-            None,
-            &[],
-            None,
-        )
-        .is_ok_and(|r| r.code == 0)
-    };
-    if have() {
-        return true;
-    }
-    let _ = capture(
-        &["git", "-C", &dir, "fetch", "-q", "origin", oid],
-        None,
-        &[("GIT_TERMINAL_PROMPT", "0")],
-        Some(std::time::Duration::from_secs(60)),
-    );
-    have()
-}
-
-/// The reviewer prompt for one replayed case.
-fn bench_replay_prompt(row: &ReplayRow, tmp: &Path, base: &str, role: &str) -> String {
-    let (job, wt) = (tmp.join("job"), tmp.join("wt"));
-    let stem = row
-        .project
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let documents = row.project.with_file_name(format!("{stem}.documents.md"));
-    let mut lines = vec![
-        format!("Job id: {}", row.id),
-        format!("Job folder: {}", job.display()),
-        format!(
-            "Worktree: {} (detached at {}, base commit {base})",
-            wt.display(),
-            row.head
-        ),
-        format!("Project file: {}", row.project.display()),
-    ];
-    if documents.is_file() {
-        lines.push(format!("Project documents: {}", documents.display()));
-    }
-    lines.extend([
-        format!("Round folder: {}", job.join("round-1").display()),
-        format!("Your file: {}", job.join("round-1").join(format!("{role}.md")).display()),
-        String::new(),
-        format!("This is a reviewer benchmark replay. The pull request already merged; review it as if it were open. There is no branch factory/{}: run git diff {base}...{} wherever your instructions name the branch diff. There is no pre-review.md, and Bash runs only git. Write only Your file.", row.id, row.head),
-    ]);
-    lines.join("\n") + "\n"
-}
-
-/// {model: {kind: tokens}} summed over one Claude Code session's main transcript and its subagents.
-fn bench_session_usage(session: &str) -> Value {
-    let root = retro_transcripts();
-    let mut files: Vec<(PathBuf, bool)> = Vec::new();
-    for project in glob(&root, "", "") {
-        let main = project.join(format!("{session}.jsonl"));
-        if main.is_file() {
-            files.push((main, true));
         }
     }
-    for project in glob(&root, "", "") {
-        for sub in glob(&project.join(session).join("subagents"), "", ".jsonl") {
-            files.push((sub, false));
-        }
-    }
-    let mut totals: Vec<(String, Counts)> = Vec::new();
-    for (path, main) in files {
-        if let Ok((models, _)) = usage_scan(&path, main, None) {
-            for (model, counts) in models {
-                add_counts(&mut totals, &model, &counts);
-            }
-        }
-    }
-    let mut out = Map::new();
-    for (model, counts) in totals {
-        let kinds: Map<String, Value> = USAGE_TOKENS
-            .iter()
-            .zip(counts)
-            .map(|((k, _), n)| (k.to_string(), json!(n)))
-            .collect();
-        out.insert(model, Value::Object(kinds));
-    }
-    Value::Object(out)
-}
-
-/// A random version 4 UUID.
-fn uuid4() -> String {
-    let word = || {
-        let mut h = RandomState::new().build_hasher();
-        h.write_u128(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos(),
-        );
-        h.finish()
-    };
-    let (a, b) = (word(), word());
-    let b = (b & 0x3fff_ffff_ffff_ffff) | 0x8000_0000_0000_0000;
-    format!(
-        "{:08x}-{:04x}-4{:03x}-{:04x}-{:012x}",
-        a >> 32,
-        (a >> 16) & 0xffff,
-        a & 0x0fff,
-        b >> 48,
-        b & 0xffff_ffff_ffff
-    )
-}
-
-/// Run argv in cwd with input on stdin and stdout and stderr in log, killing it past seconds. None on a timeout.
-fn run_logged(
-    argv: &[String],
-    input: &str,
-    cwd: &Path,
-    log: fs::File,
-    seconds: u64,
-) -> io::Result<Option<i32>> {
-    let mut child = std::process::Command::new(&argv[0])
-        .args(&argv[1..])
-        .current_dir(cwd)
-        .env("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0")
-        .stdin(std::process::Stdio::piped())
-        .stdout(log.try_clone()?)
-        .stderr(log)
-        .spawn()?;
-    let mut stdin = child.stdin.take().unwrap();
-    let text = input.to_string();
-    let feeder = std::thread::spawn(move || {
-        let _ = io::Write::write_all(&mut stdin, text.as_bytes());
-    });
-    let deadline = Instant::now() + std::time::Duration::from_secs(seconds);
-    loop {
-        if let Some(status) = child.try_wait()? {
-            let _ = feeder.join();
-            return Ok(Some(status.code().unwrap_or(1)));
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Ok(None);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-}
-
-/// (Some(true), line) when the reviewer wrote its review into arm/<id>, (None, line) when one is already there,
-/// (Some(false), line) when the case failed. run.json and replay.log stay once claude ran.
-fn bench_replay_case(
-    row: &ReplayRow,
-    arm: &Path,
-    role: &str,
-    model: Option<&str>,
-) -> Res<(Option<bool>, String)> {
-    let (out, name, checkout) = (arm.join(&row.id), format!("{role}.md"), &row.checkout);
-    if out.join(&name).exists() {
-        return Ok((None, format!("skipped, {name} already exists")));
-    }
-    for oid in [&row.head, &row.merge] {
-        if !bench_have_commit(checkout, oid) {
-            return Ok((
-                Some(false),
-                format!("commit {oid} is not in {} after fetch", checkout.display()),
-            ));
-        }
-    }
-    let parent = format!("{}^1", row.merge);
-    let base = git(checkout, &["merge-base", &parent, &row.head]);
-    if base.is_empty() {
-        return Ok((
-            Some(false),
-            format!(
-                "no merge base of {parent} and {} in {}",
-                row.head,
-                checkout.display()
-            ),
-        ));
-    }
-    let tmp = temp_root()?.join(format!("factory-bench-{}-{}", row.id, &uuid4()[..8]));
-    fs::create_dir(&tmp).map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
-    let (dir, wt) = (checkout.to_string_lossy().into_owned(), tmp.join("wt"));
-    let wt_text = wt.to_string_lossy().into_owned();
-    let added = capture(
-        &[
-            "git", "-C", &dir, "worktree", "add", "--detach", &wt_text, &row.head,
-        ],
-        None,
-        &[],
-        None,
-    )
-    .map_or(1, |r| r.code);
-    if added != 0 {
-        let _ = fs::remove_dir_all(&tmp);
-        return Ok((Some(false), format!("git worktree add exited {added}")));
-    }
-    let result = (|| -> Res<(Option<bool>, String)> {
-        let io_fail = |e: io::Error, p: &Path| fail(os_error(&e, Some(p)), 1);
-        let round = tmp.join("job").join("round-1");
-        fs::create_dir_all(&round).map_err(|e| io_fail(e, &round))?;
-        for doc in ["spec.md", "build.md"] {
-            if row.job.join(doc).is_file() {
-                fs::copy(row.job.join(doc), tmp.join("job").join(doc))
-                    .map_err(|e| io_fail(e, &row.job))?;
-            }
-        }
-        let session = uuid4();
-        let claude = which("claude")
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let job_dir = tmp.join("job").to_string_lossy().into_owned();
-        let mut argv: Vec<String> = [
-            claude.as_str(),
-            "-p",
-            "--agent",
-            &format!("factory-{role}"),
-            "--session-id",
-            &session,
-            "--permission-mode",
-            "dontAsk",
-            "--allowedTools",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-        argv.extend(BENCH_REPLAY_TOOLS.iter().map(|s| s.to_string()));
-        argv.extend(["--add-dir".to_string(), job_dir]);
-        if let Some(model) = model {
-            argv.extend(["--model".to_string(), model.to_string()]);
-        }
-        fs::create_dir_all(&out).map_err(|e| io_fail(e, &out))?;
-        let log_path = out.join("replay.log");
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let log = options.open(&log_path).map_err(|e| io_fail(e, &log_path))?;
-        let start = Instant::now();
-        let prompt = bench_replay_prompt(row, &tmp, &base, role);
-        let code = run_logged(&argv, &prompt, &wt, log, BENCH_REPLAY_SECONDS).unwrap_or(Some(1));
-        let seconds = start.elapsed().as_secs_f64().round() as i64;
-        let models = bench_session_usage(&session);
-        let run = json!({"role": role, "model": model, "head": row.head, "base": base, "exit": code,
-                         "seconds": seconds, "models": models});
-        let run_path = out.join("run.json");
-        fs::write(&run_path, dumps(&run, DEFAULT)).map_err(|e| io_fail(e, &run_path))?;
-        let review = round.join(&name);
-        let first = if review.is_file() {
-            let raw = fs::read(&review).map_err(|e| io_fail(e, &review))?;
-            splitlines(&String::from_utf8_lossy(&raw), false)
-                .first()
-                .map(|l| l.to_string())
-        } else {
-            None
-        };
-        Ok(match code {
-            None => (
-                Some(false),
-                format!("claude timed out after {BENCH_REPLAY_SECONDS} s"),
-            ),
-            Some(code) if code != 0 => {
-                (Some(false), format!("claude exited {code}, see replay.log"))
-            }
-            _ => match first.filter(|l| l.starts_with("VERDICT: ")) {
-                None => (
-                    Some(false),
-                    format!("no {name} with a VERDICT line, see replay.log"),
-                ),
-                Some(first) => {
-                    fs::copy(&review, out.join(&name)).map_err(|e| io_fail(e, &review))?;
-                    (
-                        Some(true),
-                        format!(
-                            "wrote {name} ({first}), {seconds} s, {} tokens",
-                            token_count(&models)
-                        ),
-                    )
-                }
-            },
-        })
-    })();
-    let removed = capture(
-        &["git", "-C", &dir, "worktree", "remove", &wt_text],
-        None,
-        &[],
-        None,
-    )
-    .map_or(1, |r| r.code);
-    if removed != 0 {
-        eprintln!(
-            "factory.py: bench: left {}; remove it with git -C {dir} worktree remove {wt_text}",
-            tmp.display()
-        );
-    } else {
-        let _ = fs::remove_dir_all(&tmp);
-    }
-    result
+    Ok(())
 }
 
 /// bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>].
@@ -2254,30 +1923,8 @@ fn bench_replay(args: &[String]) -> Res<()> {
     if which("claude").is_none() {
         return Err(fail("bench: replay needs claude on PATH", 4));
     }
-    let rows = bench_replay_plan(&factory_home()?, &cases)?;
-    let (mut wrote, mut skipped, mut failed) = (0, 0, 0);
-    let model = get("--model");
-    for row in &rows {
-        if !arm.join(&row.id).join(format!("{role}.md")).exists() {
-            println!("{}: running {role} ...", row.id);
-        }
-        let (ok, line) = bench_replay_case(row, arm, role, model)?;
-        match ok {
-            Some(true) => wrote += 1,
-            None => skipped += 1,
-            Some(false) => failed += 1,
-        }
-        let tag = if ok == Some(false) { "failed: " } else { "" };
-        println!("{}: {tag}{line}", row.id);
-    }
-    println!(
-        "replayed {wrote}, skipped {skipped}, failed {failed} of {} cases into {name}",
-        rows.len()
-    );
-    if failed > 0 {
-        return Err(exit(1));
-    }
-    Ok(())
+    bench_replay_plan(&factory_home()?, &cases)?;
+    Err(not_ported("bench replay"))
 }
 
 /// bench cases <project-slug>: draft cases for the project's reverted or reworked jobs. The PR
