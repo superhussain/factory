@@ -2215,7 +2215,7 @@ fn doctor(home: &Path) -> Res<Value> {
         checks.push(json!({"name": name, "status": status, "message": message}));
     };
     check("location", true, "Location resolved.".into());
-    let mut config_error = match validate_home(&home) {
+    let mut config_error = match validate_home(&home, true) {
         Ok(()) => String::new(),
         Err(e) => strip(e.stderr.get("factory.py: ".len()..).unwrap_or("")).to_string(),
     };

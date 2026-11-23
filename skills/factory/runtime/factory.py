@@ -9738,7 +9738,7 @@ def read_location(pointer):
         home = Path(value["home"])
         if not home.is_absolute() or str(home.resolve()) != value["home"]:
             raise ValueError()
-        validate_home(home)
+        validate_home(home, deep=False)
         return home
     except (OSError, ValueError, UnicodeError, RuntimeError):
         fail(f"Invalid location pointer: {pointer}.", 2)
@@ -9790,7 +9790,10 @@ def closed_frontmatter(path):
     raise ValueError()
 
 
-def validate_home(home):
+def validate_home(home, deep=True):
+    """Exit 2 naming the first invalid piece of home. deep walks every file under projects/ and jobs/, which adopting
+    a home does; each command resolving the location pointer checks only the top level, since the walk costs
+    seconds on a large home."""
     home = Path(home)
     current = home
     try:
@@ -9809,6 +9812,8 @@ def validate_home(home):
                 continue
             if is_link(current) or not current.is_dir():
                 raise ValueError()
+            if not deep:
+                continue
             stack = [str(current)]
             while stack:
                 current = stack.pop()
