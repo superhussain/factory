@@ -1,7 +1,9 @@
 //! `pickup` and `pickup setup`: launchers, detached launches, stall takeover, the host timer and the
 //! board passes.
 
+use crate::commands::checks;
 use crate::commands::claims::{self, mine};
+use crate::commands::ops;
 use crate::commands::tracer::SPEC_APPROVED_NOTES;
 use crate::shared::pyval::truthy;
 #[cfg(test)]
@@ -15,14 +17,14 @@ use std::process::{Command, Stdio};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Map, Value};
+use serde_json::{json, Map, Number, Value};
 
-use crate::cli::{not_ported, Call};
-use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, riders_of};
+use crate::cli::Call;
+use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job};
 use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::{
-    tag_lookalike, ADAPTER_ID, BACKLOG_LINE, BACKLOG_NOTES_TAG, BACKPRESSURE_NEEDS_YOU,
-    HOLD_MAX_HOURS, HOLD_MIN_IDEAS, IDEA, IN_FLIGHT, JOB_ID, MAX_RIDERS, NOTE_INVISIBLE, NOTE_LINK,
+    tag_lookalike, ADAPTER_ID, BACKLOG_NOTES_TAG, BACKPRESSURE_NEEDS_YOU, HOLD_MAX_HOURS,
+    HOLD_MIN_IDEAS, IDEA, IN_FLIGHT, JOB_ID, MAX_RIDERS, NEW_JOB_ID, NOTE_INVISIBLE, NOTE_LINK,
     NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, PASEO_ID, REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL,
     SLUG, TERMINAL, UNATTENDED, WINDOWS,
 };
@@ -66,6 +68,7 @@ const PICKUP_SCHEDULER: &str = if cfg!(target_os = "macos") {
 const ORPHAN_SCAN_FILE: &str = "orphan-scan.json";
 const OUTCOMES_RECORD_FILE: &str = "outcomes-record.json";
 const RETRO_PUSH_FILE: &str = "retro-push.json";
+const AUDIT_PUSH_FILE: &str = "audit-push.json";
 const ORPHAN_KINDS: &[&str] = &["branch", "pr", "worktree", "workspace"];
 const ORPHAN_NOUNS: &[(&str, &str)] = &[
     ("branch", "branches"),
@@ -80,12 +83,10 @@ static CHECKOUT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Re::NONE);
 static BUNDLE_HASH: Pattern = Pattern::new("[0-9a-f]{7,64}", Re::NONE);
 static POSITIVE: Pattern = Pattern::new("[1-9][0-9]*", Re::NONE);
 static ENV_ASSIGN: Pattern = Pattern::new("(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=", Re::NONE);
+static COMMIT: Pattern = Pattern::new("[0-9a-f]{40}", Re::ASCII);
 static TRAILING_NUMBER: Pattern = Pattern::new(r"-\d+$", Re::NONE);
-
-/// A point that waits on a sibling slice: exit 2, which no code-5 catch in pickup swallows.
-fn deferred(what: &str) -> Exit {
-    not_ported(&format!("pickup {what}"))
-}
+/// An outcomes record line's `<slug> unknown: ` tail: the first unknown job and its reason.
+static OUTCOME_UNKNOWN: Pattern = Pattern::new(r"(\S+) \((.*?)\)(?:, |$)", Re::NONE);
 
 // ---- test seams
 
@@ -137,6 +138,28 @@ struct Fakes {
     usage_totals: Option<Rc<dyn Fn(&Path, &str, &str) -> Result<Value, String>>>,
     auto_babysit_pass: Option<Rc<dyn Fn(&mut Io, &Path) -> Res<()>>>,
     auto_babysit_limit: Option<usize>,
+    retro_push: Option<Rc<dyn Fn() -> Res<()>>>,
+    audit_stamp: Option<Rc<dyn Fn(&str) -> Option<i128>>>,
+    audit_push: Option<Rc<dyn Fn(&str) -> Res<()>>>,
+    usage_record: Option<Rc<dyn Fn(&Path, &str, &str, &str, &Value) -> Res<()>>>,
+    outcomes: Option<Rc<dyn Fn(&str, &mut String) -> Res<()>>>,
+    stop_pids: Option<Rc<dyn Fn(&Path) -> Option<Vec<u32>>>>,
+    close_pull_request: Option<Rc<dyn Fn(&Path, &Value, &str) -> Res<(&'static str, String)>>>,
+    close_stacked_prs: Option<Rc<dyn Fn(&Path, &str, &[Value], &str) -> Res<()>>>,
+    pr_states:
+        Option<Rc<dyn Fn(&str, &[u64], &str) -> Result<BTreeMap<u64, (Value, Value)>, String>>>,
+    pr_signals: Option<
+        Rc<
+            dyn Fn(
+                &str,
+                &[u64],
+                &str,
+                &BTreeMap<u64, Map<String, Value>>,
+            ) -> Result<Signals, String>,
+        >,
+    >,
+    cleanup_job:
+        Option<Rc<dyn Fn(&str, &Path, &str, bool, Option<&str>) -> (Vec<String>, Vec<String>)>>,
     pickup_scheduler: Option<&'static str>,
     launch_wait_seconds: Option<f64>,
     exe: Option<String>,
@@ -993,10 +1016,10 @@ fn run_passes(
                 }
             }
         }
-        retro_pickup_push(home)?;
-        audit_pickup_push(home)?;
+        retro_pickup_push(io, home)?;
+        audit_pickup_push(io, home, data.as_ref())?;
         orphan_pickup_scan(io, home)?;
-        outcomes_pickup_record(home)?;
+        outcomes_pickup_record(io, home)?;
     }
     retro_pickup_catchup(io, home, flags.dry);
     pickup_pass(
@@ -2648,23 +2671,57 @@ fn orphan_pickup_scan(io: &mut Io, home: &Path) -> Res<()> {
     Ok(())
 }
 
-/// Run outcomes record once per local date for each paths.md checkout folder that exists.
-fn outcomes_pickup_record(home: &Path) -> Res<()> {
+fn outcomes(slug: &str, out: &mut String) -> Res<()> {
+    #[cfg(test)]
+    if let Some(f) = fake!(outcomes) {
+        return f(slug, out);
+    }
+    crate::commands::audit::outcomes(true, Some(slug), out)
+}
+
+/// Run outcomes record once per local date for each paths.md checkout folder that exists, printing
+/// one line per project. paths.md is read before the date is recorded, and a project that stops
+/// retries the next local date.
+fn outcomes_pickup_record(io: &mut Io, home: &Path) -> Res<()> {
     #[cfg(test)]
     if let Some(f) = fake!(outcomes_pickup_record) {
         f(home);
         return Ok(());
     }
+    let mut paths = paths_of(home)?;
+    paths.sort();
+    paths.retain(|(slug, checkout)| SLUG.is_full(slug) && is_dir(checkout));
     if !claim_today(&home.join(OUTCOMES_RECORD_FILE))? {
         return Ok(());
     }
-    let mut paths = paths_of(home)?;
-    paths.sort();
-    if paths
-        .iter()
-        .any(|(slug, checkout)| SLUG.is_full(slug) && is_dir(checkout))
-    {
-        return Err(deferred("outcomes record"));
+    for (slug, _) in &paths {
+        let mut out = String::new();
+        if let Err(e) = outcomes(slug, &mut out) {
+            let _ = io.err.write_all(e.stderr.as_bytes());
+            errln!(
+                io,
+                "factory.py: outcomes record {slug} stopped (exit {}); it runs again tomorrow",
+                e.code
+            );
+            continue;
+        }
+        let lines = splitlines(&out, false);
+        let prefix = format!("{slug} unknown: ");
+        if let Some(m) = lines.iter().find_map(|line| {
+            line.strip_prefix(&prefix)
+                .and_then(|rest| OUTCOME_UNKNOWN.match_start(rest))
+        }) {
+            errln!(
+                io,
+                "factory.py: outcomes record {slug}: {} is unknown: {}",
+                &m[1],
+                &m[2]
+            );
+        }
+        let Some(last) = lines.last() else {
+            return Err(fail(format!("outcomes record {slug} printed nothing"), 1));
+        };
+        outln!(io, "outcomes record {slug}: {last}");
     }
     Ok(())
 }
@@ -2674,19 +2731,193 @@ fn retro_pushed_today(home: &Path) -> bool {
     ran_today(&home.join(RETRO_PUSH_FILE), &local_date(utc, offset))
 }
 
-fn retro_pickup_push(home: &Path) -> Res<()> {
+fn retro_push() -> Res<()> {
+    #[cfg(test)]
+    if let Some(f) = fake!(retro_push) {
+        return f();
+    }
+    crate::commands::retro::retro_push()
+}
+
+/// Push this host's digest on pickup's first run of a local date with no recorded push. Best
+/// effort: a failed push costs one warning, and the next pickup run retries it.
+fn retro_pickup_push(io: &mut Io, home: &Path) -> Res<()> {
     if retro_pushed_today(home) || !retro_transcripts().is_dir() {
         return Ok(());
     }
-    Err(deferred("retro push"))
+    if let Err(e) = retro_push() {
+        let _ = io.err.write_all(e.stderr.as_bytes());
+        errln!(
+            io,
+            "factory.py: retro push stopped (exit {}); the next pickup run retries it",
+            e.code
+        );
+    }
+    Ok(())
 }
 
-fn audit_pickup_push(home: &Path) -> Res<()> {
-    let _ = home;
+fn audit_stamp(job_id: &str) -> Option<i128> {
+    #[cfg(test)]
+    if let Some(f) = fake!(audit_stamp) {
+        return f(job_id);
+    }
+    crate::commands::audit::audit_stamp(job_id)
+}
+
+fn audit_push(job_id: &str) -> Res<()> {
+    #[cfg(test)]
+    if let Some(f) = fake!(audit_push) {
+        return f(job_id);
+    }
+    crate::commands::audit::audit_push(job_id)
+}
+
+fn usage_record(home: &Path, slug: &str, job_id: &str, device: &str, totals: &Value) -> Res<()> {
+    #[cfg(test)]
+    if let Some(f) = fake!(usage_record) {
+        return f(home, slug, job_id, device, totals);
+    }
+    crate::commands::audit::usage_record(home, slug, job_id, device, totals)
+}
+
+/// {job id: stamp} from <home>/audit-push.json, or {} for a missing or malformed record.
+fn audit_pushed(home: &Path) -> Map<String, Value> {
+    let record = read_json(&home.join(AUDIT_PUSH_FILE)).unwrap_or_default();
+    let jobs = if eq_int(record.get("version"), 1) {
+        record.get("jobs").and_then(Value::as_object)
+    } else {
+        None
+    };
+    match jobs {
+        Some(jobs)
+            if jobs
+                .values()
+                .all(|v| v.as_number().and_then(Number::as_i128).is_some()) =>
+        {
+            jobs.clone()
+        }
+        _ => Map::new(),
+    }
+}
+
+fn audit_push_stopped(io: &mut Io, e: Exit) -> Res<()> {
+    let _ = io.err.write_all(e.stderr.as_bytes());
+    errln!(
+        io,
+        "factory.py: audit push stopped (exit {}); the next pickup run retries it",
+        e.code
+    );
+    Ok(())
+}
+
+/// Push this host's audit rows for each in-flight or pr-open job whose transcripts changed since
+/// the last recorded push, and refresh this host's token share. Best effort: a failed push costs one
+/// warning, and the next pickup run retries it.
+fn audit_pickup_push(io: &mut Io, home: &Path, data: Option<&Value>) -> Res<()> {
     if !retro_transcripts().is_dir() {
         return Ok(());
     }
-    Err(deferred("audit push"))
+    let (record, mut kept) = (audit_pushed(home), Map::new());
+    let read;
+    let board = match data {
+        Some(board) => board,
+        None => match read_board(home) {
+            Ok(board) => {
+                read = board;
+                &read
+            }
+            Err(e) => return audit_push_stopped(io, e),
+        },
+    };
+    let jobs = ops::board_jobs(board)?;
+    let pushed = (|| -> Res<()> {
+        for job in jobs {
+            let stage = get_str(job, "stage");
+            if !stage.is_some_and(|s| IN_FLIGHT.contains(&s) || s == "pr-open") {
+                continue;
+            }
+            let Some(job_id) = get_str(job, "id").filter(|id| NEW_JOB_ID.is_full(id)) else {
+                continue;
+            };
+            let Some(stamp) = audit_stamp(job_id) else {
+                continue;
+            };
+            if record
+                .get(job_id)
+                .and_then(Value::as_number)
+                .and_then(Number::as_i128)
+                != Some(stamp)
+            {
+                audit_push(job_id)?;
+                usage_pickup_record(io, home, job)?;
+            }
+            kept.insert(job_id.to_string(), Value::from(stamp));
+        }
+        Ok(())
+    })();
+    if let Err(e) = pushed {
+        return audit_push_stopped(io, e);
+    }
+    if kept != record {
+        write_file(
+            &home.join(AUDIT_PUSH_FILE),
+            &(dumps(&json!({"version": 1, "jobs": kept}), DEFAULT) + "\n"),
+        )?;
+    }
+    Ok(())
+}
+
+/// Refresh this host's token share on a board job from pickup. Skips a job without a valid
+/// project, a host without a valid device:, a scan with no tokens and an unchanged share.
+fn usage_pickup_record(io: &mut Io, home: &Path, job: &Value) -> Res<()> {
+    let job_id = get_str(job, "id").unwrap_or_default();
+    let config = home.join("config.md");
+    let meta = if config.is_file() {
+        meta(&config)?
+    } else {
+        Vec::new()
+    };
+    let device = lookup(&meta, "device").unwrap_or("");
+    let Some(slug) = get_str(job, "project").filter(|s| SLUG.is_full(s)) else {
+        return Ok(());
+    };
+    if !HOST_NAME.is_full(device) {
+        return Ok(());
+    }
+    let totals = match usage_totals(io, home, slug, job_id) {
+        Ok(totals) => totals,
+        Err(why) => {
+            errln!(
+                io,
+                "factory.py: usage: scan failed on {job_id} ({why}); nothing recorded"
+            );
+            return Ok(());
+        }
+    };
+    let old: Map<String, Value> = job
+        .get("tokens")
+        .and_then(Value::as_object)
+        .and_then(|t| t.get(device))
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(k, _)| *k != "at")
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    if !truthy(&totals["models"]) || Value::Object(old) == totals {
+        return Ok(());
+    }
+    usage_record(home, slug, job_id, device, &totals)?;
+    outln!(io, "recorded {device} tokens on {job_id}");
+    Ok(())
+}
+
+fn stop_pids(wt: &Path) -> Option<Vec<u32>> {
+    #[cfg(test)]
+    if let Some(f) = fake!(stop_pids) {
+        return f(wt);
+    }
+    crate::commands::worktree::stop_pids(wt)
 }
 
 fn tracer_follow_pass(home: &Path) -> Res<()> {
@@ -2735,57 +2966,12 @@ fn tracer_build_pass(io: &mut Io, home: &Path, jobs: Option<&Value>) -> Res<bool
     )
 }
 
-/// The backlog lines this host already has a final triage verdict for.
-fn read_triaged(home: &Path) -> Vec<String> {
-    let data = read_json(&home.join("backlog-triage.json"));
-    let lines = data.as_ref().and_then(|d| {
-        let map = d.as_object()?;
-        if map.len() != 2 || int_of(map.get("version")) != Some(1) {
-            return None;
-        }
-        map.get("lines")?
-            .as_array()?
-            .iter()
-            .map(|l| l.as_str().map(String::from))
-            .collect::<Option<Vec<_>>>()
-    });
-    lines.unwrap_or_default()
-}
-
-/// Drop verdicts for lines no longer in the backlog. Rating a new line waits on the intake slice.
 fn backlog_triage_pass(home: &Path) -> Res<()> {
     #[cfg(test)]
     if let Some(f) = fake!(backlog_triage_pass) {
         return f(home);
     }
-    let r = api(home, "GET", "/api/backlog", None, &[200, 404], &[])?;
-    let text = if r.status == 200 {
-        r.text()?
-    } else {
-        String::new()
-    };
-    let raws: Vec<&str> = text
-        .split('\n')
-        .map(|l| l.trim_end_matches('\r'))
-        .filter(|l| BACKLOG_LINE.match_start(l).is_some())
-        .collect();
-    let cached = read_triaged(home);
-    let triaged: Vec<String> = cached
-        .iter()
-        .filter(|l| raws.contains(&l.as_str()))
-        .cloned()
-        .collect();
-    let todo = raws.iter().any(|raw| !triaged.iter().any(|t| t == raw));
-    if triaged != cached {
-        write_file(
-            &home.join("backlog-triage.json"),
-            &(dumps(&json!({"version": 1, "lines": triaged}), INDENT2) + "\n"),
-        )?;
-    }
-    if todo {
-        return Err(deferred("backlog triage"));
-    }
-    Ok(())
+    crate::commands::intake::backlog_triage_pass(home)
 }
 
 // ---- group B: routes, holds, claims and launches
@@ -5143,6 +5329,8 @@ const TAKEOVER_MINUTES: i64 = 30;
 const SESSION_STOP_CLOSED_HOURS: i64 = 24;
 const SYNC_STAGES: [&str; 2] = ["pr-open", "needs-human"];
 const PR_SYNC_LIMIT: usize = 100;
+const MERGED_NOTE: &str = "merged on GitHub";
+const GITHUB_CLOSE_REASON: &str = "PR closed on GitHub";
 const AUTO_BABYSIT_LIMIT: usize = 20;
 const PRIORITY_NUDGE: &str = "The owner prioritized factory job {id}. If your turn ended while work on it is still owed, continue with the next step now.";
 const IDLE_NUDGE_MINUTES: i64 = 20;
@@ -6511,7 +6699,7 @@ fn move_stop_pass(
     dry: bool,
     adapter: Option<&[String]>,
 ) -> Res<()> {
-    for i in 0..jobs_of(data).len() {
+    for i in 0..ops::board_jobs(data)?.len() {
         let j = data["jobs"][i].clone();
         let m = j.get("move");
         let mine: Vec<Value> = queued_stops(m)
@@ -6584,11 +6772,6 @@ fn move_stop_pass(
             }
             continue;
         }
-        // Stopping the worktree waits on the worktree slice; defer before any archive, so a run
-        // never archives sessions it cannot then record.
-        if home.join("worktrees").join(project).join(job_id).exists() {
-            return Err(deferred("worktree stop"));
-        }
         let mut failure = None;
         for a in &archives {
             let why = match adapter_run(adapter.unwrap(), &["archive", a, "--force"]) {
@@ -6602,6 +6785,12 @@ fn move_stop_pass(
                 break;
             }
         }
+        let wt = home.join("worktrees").join(project).join(job_id);
+        let alive = if wt.exists() {
+            stop_pids(&wt)
+        } else {
+            Some(Vec::new())
+        };
         if let Some((agent, why)) = failure {
             errln!(
                 io,
@@ -6609,9 +6798,29 @@ fn move_stop_pass(
             );
             continue;
         }
+        match alive {
+            Some(pids) if !pids.is_empty() => {
+                let pids: Vec<String> = pids.iter().map(u32::to_string).collect();
+                errln!(
+                    io,
+                    "factory.py: pickup could not stop {job_id}: processes still running: {}",
+                    pids.join(" ")
+                );
+                continue;
+            }
+            None => {
+                errln!(
+                    io,
+                    "factory.py: pickup could not stop {job_id}: processes were not checked"
+                );
+                continue;
+            }
+            Some(_) => {}
+        }
         let ats: Vec<Option<Value>> = mine.iter().map(|x| x.get("at").cloned()).collect();
         let done = cas(home, "/api/board", |text| {
             let mut board = load_board(text)?;
+            ops::board_jobs(&board)?;
             let Some(at) = job_index(&board, job_id) else {
                 return Ok((None, false));
             };
@@ -6853,37 +7062,50 @@ fn recorded_holders(j: &Value) -> Vec<String> {
     hosts
 }
 
-/// The stacked riders of lead_id that still have a PR.
-fn open_stacked(data: &Value, lead_id: &str) -> Vec<String> {
-    riders_of(data, lead_id)
-        .into_iter()
-        .filter_map(|id| {
-            jobs_of(data)
-                .iter()
-                .find(|j| get_str(j, "id") == Some(id.as_str()))
-        })
-        .filter(|r| {
-            r.get("stacked") == Some(&Value::Bool(true))
-                && get_str(r, "pr").is_some_and(|p| !p.is_empty())
-                && get_str(r, "project").is_some_and(|p| SLUG.is_full(p))
-                && !get_str(r, "stage").is_some_and(|s| TERMINAL.contains(&s))
-        })
-        .map(|r| get_str(r, "pr").unwrap().to_string())
-        .collect()
+fn close_pull_request(home: &Path, j: &Value, device: &str) -> Res<(&'static str, String)> {
+    #[cfg(test)]
+    if let Some(f) = fake!(close_pull_request) {
+        return f(home, j, device);
+    }
+    crate::commands::checks::close_pull_request(home, j, device, None)
 }
 
-/// decision.md for a job closed from the dashboard or by a GitHub close.
+fn close_stacked_prs(home: &Path, lead_id: &str, riders: &[Value], device: &str) -> Res<()> {
+    #[cfg(test)]
+    if let Some(f) = fake!(close_stacked_prs) {
+        return f(home, lead_id, riders, device);
+    }
+    crate::commands::checks::close_stacked_prs(home, lead_id, riders, device)
+}
+
+/// What decision.md's Evidence says of the pull request, per close_pull_request state.
+const PR_EVIDENCE: [(&str, &str); 4] = [
+    (
+        "closed",
+        "closed by pickup with a comment that links this page",
+    ),
+    ("merged", "already merged"),
+    ("already closed", "already closed"),
+    ("open", "still open"),
+];
+
+/// decision.md for a job closed from the dashboard or by a GitHub close. outcome is
+/// close_pull_request's (state, why), or None without a pr.
 fn close_decision(
     j: &Value,
     reason: &str,
     device: &str,
     earlier: Option<&str>,
-    outcome: bool,
+    outcome: Option<(&str, String)>,
     pickup: &Settings,
 ) -> String {
     let at = text_of(j["close"].get("at"));
     let stage = text_of(j.get("stage"));
     let pr = text_of(j.get("pr"));
+    let open_pr = match &outcome {
+        Some(("open", why)) => format!("- Pull request {pr} stays open because {why}. Close it on GitHub if it should not merge.\n"),
+        _ => String::new(),
+    };
     let holders = recorded_holders(j);
     let uncovered: Vec<&String> = holders.iter().filter(|h| !pickup.lists(h)).collect();
     let (project, id) = (text_of(j.get("project")), text_of(j.get("id")));
@@ -6928,12 +7150,14 @@ fn close_decision(
     let branch = get_str(j, "branch")
         .filter(|b| !b.is_empty())
         .unwrap_or("none");
-    let shown_pr = if outcome {
-        format!("{pr}, already closed")
-    } else {
-        "none".into()
+    let shown_pr = match outcome {
+        Some((state, _)) => {
+            let evidence = PR_EVIDENCE.iter().find(|(k, _)| *k == state).unwrap().1;
+            format!("{pr}, {evidence}")
+        }
+        None => "none".into(),
     };
-    let text = format!("CLOSED: {reason}\n\n**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- {requested}\n- Stage when closed: `{stage}`, round {round}.\n- Branch: `{branch}`.\n- Pull request: {shown_pr}.\n- Written by factory.py pickup on {device}.\n\n## Left out\n\n- {unreviewed}\n- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup {project}/{id}` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup {project}/{id}` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n{manual}");
+    let text = format!("CLOSED: {reason}\n\n**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- {requested}\n- Stage when closed: `{stage}`, round {round}.\n- Branch: `{branch}`.\n- Pull request: {shown_pr}.\n- Written by factory.py pickup on {device}.\n\n## Left out\n\n- {unreviewed}\n{open_pr}- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup {project}/{id}` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup {project}/{id}` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n{manual}");
     match earlier {
         Some(e) if !e.is_empty() => format!("{text}\n## Earlier decision\n\n{e}"),
         _ => text,
@@ -6950,7 +7174,7 @@ fn close_pass(
     dry: bool,
 ) -> Res<()> {
     let mut configs: Cache = HashMap::new();
-    for i in 0..jobs_of(data).len() {
+    for i in 0..ops::board_jobs(data)?.len() {
         let j = data["jobs"][i].clone();
         let terminal = get_str(&j, "stage").is_some_and(|s| TERMINAL.contains(&s));
         let (Some(job_id), Some(project)) = (
@@ -6973,21 +7197,32 @@ fn close_pass(
             continue;
         }
         let pr = get_str(&j, "pr").filter(|p| !p.is_empty());
-        let stacked = open_stacked(data, job_id);
         if dry {
             let mut line = format!("would close {job_id} {project}");
             if let Some(pr) = pr {
                 line += &format!(" and pull request {pr}");
             }
-            for r in &stacked {
-                line += &format!(" and stacked pull request {r}");
+            for r in claims::open_stacked(data, job_id) {
+                line += &format!(" and stacked pull request {}", text_of(r.get("pr")));
             }
             outln!(io, "{line}");
             continue;
         }
-        let github = get_str(&j["close"], "via") == Some("github");
-        if pr.is_some() && !github || !stacked.is_empty() {
-            return Err(deferred("PR close"));
+        let outcome = if get_str(&j["close"], "via") == Some("github") {
+            Some(("already closed", String::new()))
+        } else if pr.is_some() {
+            Some(close_pull_request(home, &j, device)?)
+        } else {
+            None
+        };
+        match &outcome {
+            Some(("closed", _)) => outln!(io, "closed pull request {} for {job_id}", pr.unwrap()),
+            Some(("open", why)) => errln!(
+                io,
+                "factory.py: pickup leaves pull request {} open: {why}",
+                pr.unwrap()
+            ),
+            _ => {}
         }
         if !configs.contains_key(project) {
             configs.insert(project.to_string(), pickup_config(home, project)?);
@@ -7001,16 +7236,24 @@ fn close_pass(
                     return Ok((None, ()));
                 }
                 Ok((
-                    Some(close_decision(&j, &reason, device, text, github, &config)),
+                    Some(close_decision(
+                        &j,
+                        &reason,
+                        device,
+                        text,
+                        outcome.clone(),
+                        &config,
+                    )),
                     (),
                 ))
             },
         )?;
         let at = j["close"].get("at").cloned();
-        let done = cas(home, "/api/board", |text| {
+        let (done, stacked) = cas(home, "/api/board", |text| {
             let mut board = load_board(text)?;
+            ops::board_jobs(&board)?;
             let Some(b) = job_index(&board, job_id) else {
-                return Ok((None, false));
+                return Ok((None, (false, Vec::new())));
             };
             let found = &board["jobs"][b];
             if !closing(found)
@@ -7018,28 +7261,52 @@ fn close_pass(
                 || get_str(found, "stage").is_some_and(|s| TERMINAL.contains(&s))
                 || claims::blocking(Some(found), device, "", minutes)?.is_some()
             {
-                return Ok((None, false));
+                return Ok((None, (false, Vec::new())));
             }
             board["jobs"][b]
                 .as_object_mut()
                 .unwrap()
                 .shift_remove("claim");
+            let stacked = claims::open_stacked(&board, job_id);
             patch_job(
                 &mut board,
                 job_id,
                 &json!({"stage": "closed", "note": reason, "needs": null, "close": {"closed": now()}}),
             );
-            Ok((Some(dump_board(&board)), true))
+            Ok((Some(dump_board(&board)), (true, stacked)))
         })?;
         if done {
             outln!(io, "closed {job_id} {project}");
+            close_stacked_prs(home, job_id, &stacked, device)?;
         }
     }
     Ok(())
 }
 
-/// Run cleanup once per host on each closed or merged job whose worktree or branch this host
-/// still holds. Cleanup itself waits on the worktree slice.
+fn cleanup_job(
+    repo: &str,
+    wt: &Path,
+    branch: &str,
+    drop_pushed: bool,
+    merged_head: Option<&str>,
+) -> (Vec<String>, Vec<String>) {
+    #[cfg(test)]
+    if let Some(f) = fake!(cleanup_job) {
+        return f(repo, wt, branch, drop_pushed, merged_head);
+    }
+    crate::commands::worktree::cleanup_job(repo, wt, branch, drop_pushed, merged_head)
+}
+
+/// True when this host already recorded its cleanup of a job under j[key].
+fn cleaned_here(j: &Value, device: &str, key: &str) -> bool {
+    j[key]
+        .get("cleanup")
+        .and_then(Value::as_object)
+        .is_some_and(|d| d.contains_key(device))
+}
+
+/// Run cleanup once per host on each dashboard-closed job, and each job pickup synced as merged,
+/// whose worktree or branch this host still holds, and record what it left.
 #[allow(clippy::too_many_arguments)]
 fn close_cleanup_pass(
     io: &mut Io,
@@ -7050,7 +7317,7 @@ fn close_cleanup_pass(
     settings: &mut Cache,
     dry: bool,
 ) -> Res<()> {
-    for j in jobs_of(data).to_vec() {
+    for j in ops::board_jobs(data)?.to_vec() {
         let stage = get_str(&j, "stage");
         let (key, field) = if stage == Some("merged") {
             ("github", "merged")
@@ -7058,7 +7325,7 @@ fn close_cleanup_pass(
             ("close", "closed")
         };
         let c = j.get(key).filter(|c| c.is_object());
-        let (Some(job_id), Some(project), Some(_)) = (
+        let (Some(job_id), Some(project), Some(at)) = (
             safe_id(&j),
             get_str(&j, "project").filter(|p| SLUG.is_full(p)),
             c.and_then(|c| get_str(c, field)),
@@ -7068,18 +7335,24 @@ fn close_cleanup_pass(
         if !stage.is_some_and(|s| TERMINAL.contains(&s)) {
             continue;
         }
-        let cleaned = c
-            .unwrap()
-            .get("cleanup")
-            .and_then(Value::as_object)
-            .is_some_and(|d| d.contains_key(device));
-        if cleaned || !has_checkout(paths, Some(project)) {
+        if cleaned_here(&j, device, key) || !has_checkout(paths, Some(project)) {
             continue;
         }
-        let repo = Path::new(lookup(paths, project).unwrap());
+        let repo = lookup(paths, project).unwrap();
         let wt = home.join("worktrees").join(project).join(job_id);
-        let branch = format!("refs/heads/factory/{job_id}");
-        if !wt.exists() && git(repo, &["rev-parse", "--verify", "-q", &branch]).is_empty() {
+        let branch = format!("factory/{job_id}");
+        if !wt.exists()
+            && git(
+                Path::new(repo),
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "-q",
+                    &format!("refs/heads/{branch}"),
+                ],
+            )
+            .is_empty()
+        {
             continue;
         }
         if let Some(reason) = pickup_reason(io, home, project, paths, settings, device, dry)? {
@@ -7092,7 +7365,44 @@ fn close_cleanup_pass(
             outln!(io, "would clean up {job_id} {project}");
             continue;
         }
-        return Err(deferred("close cleanup"));
+        let merged_head = c
+            .and_then(|c| get_str(c, "head"))
+            .filter(|h| key == "github" && COMMIT.is_full(h));
+        let (_, left) = cleanup_job(repo, &wt, &branch, true, merged_head);
+        let done = cas(home, "/api/board", |text| {
+            let mut board = load_board(text)?;
+            ops::board_jobs(&board)?;
+            let Some(b) = job_index(&board, job_id) else {
+                return Ok((None, false));
+            };
+            let found = &board["jobs"][b];
+            if get_str(found, "stage") != stage
+                || !found.get(key).is_some_and(Value::is_object)
+                || get_str(&found[key], field) != Some(at)
+                || cleaned_here(found, device, key)
+            {
+                return Ok((None, false));
+            }
+            let mut patch = Map::new();
+            patch.insert(
+                key.into(),
+                json!({"cleanup": {device: {"at": now(), "left": left}}}),
+            );
+            patch.insert("port".into(), Value::Null);
+            patch_job(&mut board, job_id, &Value::Object(patch));
+            Ok((Some(dump_board(&board)), true))
+        })?;
+        if done {
+            if left.is_empty() {
+                outln!(io, "cleaned up {job_id} {project}");
+            } else {
+                outln!(
+                    io,
+                    "cleaned up {job_id} {project}, left: {}",
+                    left.join("; ")
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -7598,8 +7908,21 @@ fn project_repo(home: &Path, project: &str, repos: &mut HashMap<String, String>)
     Ok(repos[project].to_lowercase())
 }
 
-/// Move each pr-open or needs-human job GitHub reports merged to merged, and queue a close for
-/// each it reports closed. Reading the PR states waits on the checks slice.
+fn pr_states(
+    repo: &str,
+    numbers: &[u64],
+    device: &str,
+) -> Result<BTreeMap<u64, (Value, Value)>, String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(pr_states) {
+        return f(repo, numbers, device);
+    }
+    crate::commands::checks::pr_states(repo, numbers, device)
+}
+
+/// Move each pr-open or needs-human job whose pull request GitHub reports merged to merged, and
+/// queue a close for each whose pull request GitHub reports closed. One gh api graphql call per
+/// repo, and one board write for the whole pass.
 #[allow(clippy::too_many_arguments)]
 fn pr_sync_pass(
     io: &mut Io,
@@ -7612,9 +7935,9 @@ fn pr_sync_pass(
     dry: bool,
 ) -> Res<()> {
     let mut repos = HashMap::new();
-    let mut groups: Vec<(String, usize)> = Vec::new();
-    for j in jobs_of(data).to_vec() {
-        let Some((repo, _)) = sync_match(&j) else {
+    let mut groups: Vec<(String, Vec<(Value, u64)>)> = Vec::new();
+    for j in ops::board_jobs(data)?.to_vec() {
+        let Some((repo, n)) = sync_match(&j) else {
             continue;
         };
         let (job_id, project) = (get_str(&j, "id").unwrap(), get_str(&j, "project").unwrap());
@@ -7633,19 +7956,97 @@ fn pr_sync_pass(
             }
             continue;
         }
+        let entry = (j.clone(), n.parse().unwrap());
         match groups.iter_mut().find(|(r, _)| *r == repo) {
-            Some(slot) => slot.1 += 1,
-            None => groups.push((repo, 1)),
+            Some(slot) => slot.1.push(entry),
+            None => groups.push((repo, vec![entry])),
         }
     }
-    if let Some((repo, n)) = groups.first() {
-        if *n > PR_SYNC_LIMIT {
+    let mut pending: Vec<(Value, Value, String)> = Vec::new();
+    for (repo, mut jobs) in groups {
+        if jobs.len() > PR_SYNC_LIMIT {
             errln!(
                 io,
-                "factory.py: pickup syncs the first {PR_SYNC_LIMIT} of {n} pull requests in {repo}"
+                "factory.py: pickup syncs the first {PR_SYNC_LIMIT} of {} pull requests in {repo}",
+                jobs.len()
             );
+            jobs.truncate(PR_SYNC_LIMIT);
         }
-        return Err(deferred("PR state sync"));
+        let numbers: Vec<u64> = jobs.iter().map(|(_, n)| *n).collect();
+        let states = match pr_states(&repo, &numbers, device) {
+            Ok(states) => states,
+            Err(why) => {
+                errln!(io, "factory.py: pickup skips the PR sync for {repo}: {why}");
+                continue;
+            }
+        };
+        for (j, n) in jobs {
+            let Some((state, head)) = states.get(&n) else {
+                continue;
+            };
+            let merged = match state.as_str() {
+                Some("MERGED") => true,
+                Some("CLOSED") => false,
+                _ => continue,
+            };
+            let line = format!(
+                "{} {}: {}",
+                text_of(j.get("id")),
+                text_of(j.get("project")),
+                if merged {
+                    MERGED_NOTE
+                } else {
+                    GITHUB_CLOSE_REASON
+                }
+            );
+            if dry {
+                outln!(io, "would sync {line}");
+                continue;
+            }
+            let patch = if merged {
+                let mut github = json!({"merged": now()});
+                if let Some(head) = head.as_str().filter(|h| COMMIT.is_full(h)) {
+                    github["head"] = head.into();
+                }
+                json!({"stage": "merged", "needs": null, "automerge": null, "babysit": null,
+                       "claim": null, "note": MERGED_NOTE, "github": github})
+            } else {
+                json!({"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "via": "github"},
+                       "babysit": null})
+            };
+            pending.push((j, patch, line));
+        }
+    }
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let rows = cas(home, "/api/board", |text| {
+        let mut board = load_board(text)?;
+        ops::board_jobs(&board)?;
+        let mut rows = Vec::new();
+        for (j, patch, line) in &pending {
+            let job_id = get_str(j, "id").unwrap();
+            let Some(found) = job_index(&board, job_id).map(|b| &board["jobs"][b]) else {
+                continue;
+            };
+            if sync_match(found).is_none()
+                || found["pr"] != j["pr"]
+                || found["project"] != j["project"]
+                || claims::blocking(Some(found), device, "", minutes)?.is_some()
+            {
+                continue;
+            }
+            let row = patch_job(&mut board, job_id, patch);
+            rows.push((j.clone(), row, line.clone()));
+        }
+        Ok(((!rows.is_empty()).then(|| dump_board(&board)), rows))
+    })?;
+    for (j, row, line) in rows {
+        let jobs = data["jobs"].as_array_mut().unwrap();
+        if let Some(slot) = jobs.iter_mut().find(|x| **x == j) {
+            *slot = row;
+        }
+        outln!(io, "synced {line}");
     }
     Ok(())
 }
@@ -7693,16 +8094,53 @@ fn auto_babysit_match(j: &Value) -> Option<(String, String)> {
     ))
 }
 
-/// The count of the job's automatic babysits so far.
-fn auto_babysit_record(j: &Value) -> i64 {
-    j.get("auto_babysit")
-        .filter(|a| a.is_object())
-        .and_then(|a| int_of(a.get("count")))
-        .unwrap_or(0)
+/// (count, head, reason) of the job's last automatic babysit, (0, null, null) before the first.
+fn auto_babysit_record(j: &Value) -> (i64, Value, Value) {
+    let Some(a) = j.get("auto_babysit").filter(|a| a.is_object()) else {
+        return (0, Value::Null, Value::Null);
+    };
+    let field = |k: &str| a.get(k).cloned().unwrap_or(Value::Null);
+    (
+        int_of(a.get("count")).unwrap_or(0),
+        field("head"),
+        field("reason"),
+    )
 }
 
-/// Set babysit on each pr-open job whose PR needs it, in projects whose project file sets
-/// auto_babysit. Reading the PR signals waits on the checks slice.
+/// When the job was last auto-babysat, or "" before the first, so it sorts first.
+fn auto_babysit_at(j: &Value) -> &str {
+    j.get("auto_babysit")
+        .and_then(|a| get_str(a, "at"))
+        .unwrap_or("")
+}
+
+fn auto_babysit_copy(reason: &str) -> &'static str {
+    match reason {
+        "fix-reviews" => "has an open review thread",
+        "rebase" => "has a merge conflict",
+        _ => "has a failing required check",
+    }
+}
+
+type Signals = BTreeMap<u64, (Value, Option<&'static str>)>;
+
+fn pr_signals(
+    repo: &str,
+    numbers: &[u64],
+    device: &str,
+    handled: &BTreeMap<u64, Map<String, Value>>,
+) -> Result<Signals, String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(pr_signals) {
+        return f(repo, numbers, device, handled);
+    }
+    crate::commands::checks::pr_signals(repo, numbers, device, handled)
+}
+
+/// Set babysit on each pr-open job whose PR fails a required check, has an open counted review
+/// thread or a merge conflict, in projects whose project file sets auto_babysit. At most
+/// auto_babysit times per job, and never twice for the same head and reason. One gh api graphql
+/// call per repo, and one board write for the whole pass.
 #[allow(clippy::too_many_arguments)]
 fn auto_babysit_pass(
     io: &mut Io,
@@ -7719,9 +8157,9 @@ fn auto_babysit_pass(
         return f(io, home);
     }
     let (mut caps, mut repos, mut noted) = (HashMap::new(), HashMap::new(), HashMap::new());
-    let mut groups: Vec<(String, usize)> = Vec::new();
-    for j in jobs_of(data).to_vec() {
-        let Some((repo, _)) = auto_babysit_match(&j) else {
+    let mut groups: Vec<(String, Vec<(Value, u64, i64)>)> = Vec::new();
+    for j in ops::board_jobs(data)?.to_vec() {
+        let Some((repo, n)) = auto_babysit_match(&j) else {
             continue;
         };
         let (job_id, project) = (get_str(&j, "id").unwrap(), get_str(&j, "project").unwrap());
@@ -7757,23 +8195,123 @@ fn auto_babysit_pass(
             }
             continue;
         }
-        if auto_babysit_record(&j) >= cap {
+        if auto_babysit_record(&j).0 >= cap {
             if dry {
                 outln!(io, "{head}: {cap} of {cap} automatic babysits used");
             }
             continue;
         }
+        let entry = (j.clone(), n.parse().unwrap(), cap);
         match groups.iter_mut().find(|(r, _)| *r == repo) {
-            Some(slot) => slot.1 += 1,
-            None => groups.push((repo, 1)),
+            Some(slot) => slot.1.push(entry),
+            None => groups.push((repo, vec![entry])),
         }
     }
-    if let Some((repo, n)) = groups.first() {
-        let limit = auto_babysit_limit();
-        if *n > limit {
-            errln!(io, "factory.py: pickup checks {limit} of {n} auto-babysit candidates for {repo} this run, oldest automatic babysit first");
+    let limit = auto_babysit_limit();
+    let mut pending = Vec::new();
+    for (repo, mut jobs) in groups {
+        jobs.sort_by(|a, b| auto_babysit_at(&a.0).cmp(auto_babysit_at(&b.0)));
+        if jobs.len() > limit {
+            errln!(io, "factory.py: pickup checks {limit} of {} auto-babysit candidates for {repo} this run, oldest automatic babysit first", jobs.len());
         }
-        return Err(deferred("auto-babysit PR signals"));
+        jobs.truncate(limit);
+        let numbers: Vec<u64> = jobs.iter().map(|(_, n, _)| *n).collect();
+        let handled: BTreeMap<u64, Map<String, Value>> = jobs
+            .iter()
+            .map(|(j, n, _)| (*n, checks::valid_handled(j.get("handled"))))
+            .collect();
+        let signals = match pr_signals(&repo, &numbers, device, &handled) {
+            Ok(signals) => signals,
+            Err(why) => {
+                errln!(
+                    io,
+                    "factory.py: pickup skips auto-babysit for {repo}: {why}"
+                );
+                continue;
+            }
+        };
+        for (j, n, cap) in jobs {
+            let Some((head, Some(reason))) = signals.get(&n).cloned() else {
+                continue;
+            };
+            let (job_id, project) = (text_of(j.get("id")), text_of(j.get("project")));
+            let (count, last_head, last_reason) = auto_babysit_record(&j);
+            if head == last_head && last_reason == reason {
+                if dry {
+                    let Some(head) = head.as_str() else {
+                        return Err(fail(
+                            format!("auto-babysit {job_id}: PR head is not a string"),
+                            1,
+                        ));
+                    };
+                    let short: String = head.chars().take(7).collect();
+                    outln!(
+                        io,
+                        "skip auto-babysit {job_id} {project}: already babysat {reason} at {short}"
+                    );
+                }
+                continue;
+            }
+            let copy = auto_babysit_copy(reason);
+            if dry {
+                outln!(
+                    io,
+                    "would auto-babysit {job_id} {project}: PR #{n} {copy} ({} of {cap})",
+                    count + 1
+                );
+                continue;
+            }
+            pending.push((j, n, cap, head, reason, copy));
+        }
+    }
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let rows = cas(home, "/api/board", |text| {
+        let mut board = load_board(text)?;
+        ops::board_jobs(&board)?;
+        let mut rows = Vec::new();
+        for (j, n, cap, head, reason, copy) in &pending {
+            let job_id = get_str(j, "id").unwrap();
+            let Some(found) = job_index(&board, job_id).map(|b| &board["jobs"][b]) else {
+                continue;
+            };
+            if auto_babysit_match(found).is_none()
+                || found["pr"] != j["pr"]
+                || found["project"] != j["project"]
+                || claims::blocking(Some(found), device, "", minutes)?.is_some()
+            {
+                continue;
+            }
+            let (count, last_head, last_reason) = auto_babysit_record(found);
+            if count >= *cap || (*head == last_head && last_reason == *reason) {
+                continue;
+            }
+            let stamp = now();
+            let row = patch_job(
+                &mut board,
+                job_id,
+                &json!({
+                    "babysit": {"at": stamp, "via": "pickup", "by": device, "reason": reason},
+                    "auto_babysit": {"count": count + 1, "head": head, "reason": reason, "at": stamp},
+                    "note": format!("auto-babysitting PR #{n}: it {copy}")}),
+            );
+            rows.push((j.clone(), *n, *cap, *copy, row));
+        }
+        Ok(((!rows.is_empty()).then(|| dump_board(&board)), rows))
+    })?;
+    for (j, n, cap, copy, row) in rows {
+        let jobs = data["jobs"].as_array_mut().unwrap();
+        if let Some(slot) = jobs.iter_mut().find(|x| **x == j) {
+            *slot = row.clone();
+        }
+        outln!(
+            io,
+            "auto-babysat {} {}: PR #{n} {copy} ({} of {cap})",
+            text_of(j.get("id")),
+            text_of(j.get("project")),
+            text_of(row["auto_babysit"].get("count"))
+        );
     }
     Ok(())
 }
@@ -8239,6 +8777,12 @@ exit "$code"
                     checkout_problem: Some(Rc::new(|_, _, _| Ok(None))),
                     orphan_pickup_scan: Some(Rc::new(|_| {})),
                     outcomes_pickup_record: Some(Rc::new(|_| {})),
+                    pr_states: Some(Rc::new(|_, numbers, _| {
+                        Ok(numbers
+                            .iter()
+                            .map(|n| (*n, (json!("OPEN"), Value::Null)))
+                            .collect())
+                    })),
                     launch_wait_seconds: Some(60.0),
                     ..Fakes::default()
                 }
@@ -8414,89 +8958,6 @@ exit "$code"
 
     pub(super) fn out_err(code: i32, out: &str, err: &str) -> (i32, String, String) {
         (code, out.to_string(), err.to_string())
-    }
-
-    mod deferred {
-        use super::*;
-
-        fn assert_deferred(result: (i32, String, String), what: &str) {
-            assert_eq!(
-                result,
-                (
-                    2,
-                    String::new(),
-                    format!("factory.py: pickup {what} is not ported to the Rust binary yet\n")
-                )
-            );
-        }
-
-        #[test]
-        fn backlog_triage() {
-            let fx = Fx::new();
-            fx.set_fakes(|f| {
-                f.backlog_triage_pass = None;
-                f.pickup_pass = Some(Rc::new(|_, _| Ok(())));
-            });
-            fs::write(
-                fx.home.join("backlog-triage.json"),
-                r#"{"version": 1, "lines": ["- [ ] alpha: gone"]}"#,
-            )
-            .unwrap();
-            let backlog = Rc::new(RefCell::new(String::new()));
-            let text = backlog.clone();
-            fx.state.borrow_mut().extra = Some(Rc::new(move |_, path, _| {
-                (path == "/api/backlog").then(|| ok(200, &text.borrow()))
-            }));
-            assert_eq!(fx.pickup(&[]).0, 0);
-            assert_eq!(
-                read_text(&fx.home.join("backlog-triage.json")).unwrap(),
-                "{\n  \"version\": 1,\n  \"lines\": []\n}\n"
-            );
-            *backlog.borrow_mut() = "# backlog\n\n- [ ] alpha: export the board\n".into();
-            assert_deferred(fx.pickup(&["--triage-now"]), "backlog triage");
-        }
-
-        #[test]
-        fn retro_push() {
-            let fx = Fx::new();
-            fs::create_dir_all(fx.root.join("claude/projects")).unwrap();
-            fs::write(
-                fx.home.join(RETRO_PUSH_FILE),
-                r#"{"version": 1, "date": "2026-01-01"}"#,
-            )
-            .unwrap();
-            assert_deferred(fx.pickup(&[]), "retro push");
-        }
-
-        #[test]
-        fn audit_push() {
-            let fx = Fx::new();
-            fs::create_dir_all(fx.root.join("claude/projects")).unwrap();
-            let (utc, offset) = local_now();
-            fs::write(
-                fx.home.join(RETRO_PUSH_FILE),
-                json!({"version": 1, "date": local_date(utc, offset)}).to_string(),
-            )
-            .unwrap();
-            assert_deferred(fx.pickup(&[]), "audit push");
-        }
-
-        #[test]
-        fn outcomes_record() {
-            let fx = Fx::new();
-            fx.set_fakes(|f| {
-                f.outcomes_pickup_record = None;
-                f.pickup_pass = Some(Rc::new(|_, _| Ok(())));
-            });
-            assert_deferred(fx.pickup(&[]), "outcomes record");
-            let record: Value = read_json(&fx.home.join(OUTCOMES_RECORD_FILE)).unwrap();
-            assert_eq!(record["version"], 1);
-            assert_eq!(
-                fx.pickup(&[]).0,
-                0,
-                "the record holds the date, so it waits a day"
-            );
-        }
     }
 
     mod pickup_test {
@@ -9784,12 +10245,13 @@ exit "$archive_code"
     const OTHER: &str = "9f1c2d3e-0000-4000-8000-000000000001";
     const LEFT_OUT: &str = " (left out --home because PASEO_HOME has unprintable characters)";
 
-    /// Python's MoveFixture. Stopping a worktree's processes waits on the worktree slice, so the
-    /// worktree folder exists only inside `gate`, which checks that exit; every other run follows
-    /// Python with no worktree, where stop_pids is never called.
+    /// Python's MoveFixture: the worktree exists, and the stop_pids fake logs each worktree and
+    /// answers with alive.
     pub(super) struct Mv {
         pub tk: Tk,
         pub wt: PathBuf,
+        pub stopped: Rc<RefCell<Vec<PathBuf>>>,
+        pub alive: Rc<RefCell<Option<Vec<u32>>>>,
     }
 
     impl std::ops::Deref for Mv {
@@ -9804,7 +10266,22 @@ exit "$archive_code"
             let tk = Tk::new();
             tk.set_adapter(Vec::new(), 0, 0);
             let wt = tk.home.join("worktrees/alpha/042-sample-export");
-            Mv { tk, wt }
+            fs::create_dir_all(&wt).unwrap();
+            let stopped = Rc::new(RefCell::new(Vec::new()));
+            let alive = Rc::new(RefCell::new(Some(Vec::new())));
+            let (log, answer) = (stopped.clone(), alive.clone());
+            tk.set_fakes(|f| {
+                f.stop_pids = Some(Rc::new(move |wt: &Path| {
+                    log.borrow_mut().push(wt.to_path_buf());
+                    answer.borrow().clone()
+                }))
+            });
+            Mv {
+                tk,
+                wt,
+                stopped,
+                alive,
+            }
         }
 
         pub fn moved(&self, extra: Value) -> Value {
@@ -9817,26 +10294,8 @@ exit "$archive_code"
             job
         }
 
-        /// With the worktree there, pickup stops at the deferred worktree stop and writes nothing.
-        pub fn gate(&self) {
-            fs::create_dir_all(&self.wt).unwrap();
-            let before = self.state.borrow().board.clone();
-            let (code, _, err) = self.pickup(&[]);
-            assert_eq!(
-                (code, err.as_str()),
-                (
-                    2,
-                    "factory.py: pickup worktree stop is not ported to the Rust binary yet\n"
-                )
-            );
-            assert_eq!(self.state.borrow().board, before);
-            assert!(
-                self.archives().is_empty(),
-                "the deferral comes before any archive"
-            );
-            fs::remove_dir_all(&self.wt).unwrap();
-            let _ = fs::remove_file(self.root.join("adapter-calls"));
-            self.clear_calls();
+        pub fn stops(&self) -> Vec<PathBuf> {
+            self.stopped.borrow().clone()
         }
 
         pub fn mv(&self) -> Value {
@@ -9882,24 +10341,26 @@ exit "$archive_code"
         fn test_old_host_stops_the_worktree_and_records_it() {
             let mv = Mv::new();
             mv.moved(json!({}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             assert_eq!(
                 out,
                 "stopped 042-sample-export alpha: moved to studio-mac\n"
             );
+            assert_eq!(mv.stops(), [mv.wt.clone()]);
             let m = mv.mv();
             assert!(is_stamp(&m["stopped"]));
             assert_eq!(m["at"], MOVE_AT);
             mv.clear_calls();
             assert_eq!(mv.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(mv.stops(), [mv.wt.clone()]);
             assert!(mv.puts().is_empty());
         }
 
         fn assert_stop_left_queued(mv: &Mv, project: &str, reason: &str) {
             assert_eq!(mv.pickup(&[]), out_err(0, "", &format!("factory.py: pickup skips the stop of 042-sample-export {project}: {reason}\n")));
             assert!(mv.puts().is_empty());
+            assert!(mv.stops().is_empty());
             assert!(mv.mv().get("stopped").is_none());
             assert_eq!(mv.pickup(&["--dry-run"]), out_err(0, &format!("skip stop 042-sample-export {project}: {reason}\nhost {DEVICE}: would launch 0\n"), ""));
         }
@@ -9970,10 +10431,10 @@ exit "$archive_code"
             let mv = Mv::new();
             mv.moved(json!({"from": "studio-mac", "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
                 "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": MOVE_AT}]}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             assert_eq!(out, "stopped 042-sample-export alpha: moved to cloud-box\n");
+            assert_eq!(mv.stops(), [mv.wt.clone()]);
             let m = mv.mv();
             assert!(m.get("stopped").is_none());
             let entry = &m["earlier"][0];
@@ -9992,7 +10453,6 @@ exit "$archive_code"
             let mv = Mv::new();
             mv.moved(json!({"from": DEVICE, "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
                 "earlier": [{"from": DEVICE, "session": "a1b2c3", "at": MOVE_AT}, {"from": "lab-linux", "session": "x", "at": MOVE_AT}]}));
-            mv.gate();
             assert_eq!(
                 mv.pickup(&[]).1,
                 "stopped 042-sample-export alpha: moved to cloud-box\n"
@@ -10007,6 +10467,7 @@ exit "$archive_code"
         fn test_no_worktree_still_records_the_stop() {
             let mv = Mv::new();
             mv.moved(json!({}));
+            fs::remove_dir(&mv.wt).unwrap();
             assert_eq!(
                 mv.pickup(&[]),
                 out_err(
@@ -10015,6 +10476,7 @@ exit "$archive_code"
                     ""
                 )
             );
+            assert!(mv.stops().is_empty());
             assert!(mv.mv().get("stopped").is_some());
         }
 
@@ -10022,16 +10484,40 @@ exit "$archive_code"
         fn test_survivors_leave_stopped_unset_for_a_retry() {
             let mv = Mv::new();
             mv.moved(json!({}));
-            mv.gate();
+            *mv.alive.borrow_mut() = Some(vec![123, 456]);
+            assert_eq!(
+                mv.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: pickup could not stop 042-sample-export: processes still running: 123 456\n"
+                )
+            );
+            assert!(mv.puts().is_empty());
             assert!(mv.mv().get("stopped").is_none());
+            *mv.alive.borrow_mut() = Some(Vec::new());
+            assert_eq!(
+                mv.pickup(&[]).1,
+                "stopped 042-sample-export alpha: moved to studio-mac\n"
+            );
+            assert!(mv.mv().get("stopped").is_some());
         }
 
         #[test]
         fn test_unchecked_processes_leave_stopped_unset() {
             let mv = Mv::new();
             mv.moved(json!({}));
-            mv.gate();
+            *mv.alive.borrow_mut() = None;
+            assert_eq!(
+                mv.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: pickup could not stop 042-sample-export: processes were not checked\n"
+                )
+            );
             assert!(mv.puts().is_empty());
+            assert!(mv.mv().get("stopped").is_none());
         }
 
         #[test]
@@ -10049,20 +10535,14 @@ exit "$archive_code"
         fn test_a_newer_move_is_not_marked_stopped() {
             let mv = Mv::new();
             mv.moved(json!({}));
-            mv.gate();
             let state = mv.state.clone();
-            // The pass reads the board, then its stop write reads it again: the move changes between.
-            let reads = Rc::new(RefCell::new(0));
-            mv.state.borrow_mut().extra = Some(Rc::new(move |method, path, _| {
-                if (method, path) == ("GET", "/api/board") {
-                    *reads.borrow_mut() += 1;
-                }
-                if *reads.borrow() == 2 {
+            mv.set_fakes(|f| {
+                f.stop_pids = Some(Rc::new(move |_: &Path| {
                     state.borrow_mut().board["jobs"][0]["move"]["at"] =
                         "2026-11-08T11:00:00Z".into();
-                }
-                None
-            }));
+                    Some(Vec::new())
+                }))
+            });
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
             assert!(mv.puts().is_empty());
@@ -10133,7 +10613,6 @@ exit "$archive_code"
             let mut job = mv.job("042-sample-export");
             job["move"]["stopped"] = Value::Null;
             mv.jobs(json!([job]));
-            mv.gate();
             assert_eq!(
                 mv.pickup(&[]),
                 out_err(
@@ -10153,7 +10632,6 @@ exit "$archive_code"
             let mut job = mv.job("042-sample-export");
             job["move"]["stopped"] = Value::Null;
             mv.jobs(json!([job]));
-            mv.gate();
             assert_eq!(
                 mv.pickup(&[]),
                 out_err(
@@ -10178,7 +10656,6 @@ exit "$archive_code"
             let mut job = mv.job("042-sample-export");
             job["move"]["stopped"] = Value::Null;
             mv.jobs(json!([job]));
-            mv.gate();
             assert_eq!(
                 mv.pickup(&[]),
                 out_err(
@@ -10209,7 +10686,6 @@ exit "$archive_code"
         fn test_one_run_stops_then_recovers() {
             let mv = rerun();
             mv.moved(json!({"to": DEVICE}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             let job = mv.job("042-sample-export");
@@ -10231,7 +10707,6 @@ exit "$archive_code"
             let mut job = mv.job("042-sample-export");
             job["move"]["stopped"] = Value::Null;
             mv.jobs(json!([job]));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             let job = mv.job("042-sample-export");
@@ -10244,7 +10719,16 @@ exit "$archive_code"
         fn test_survivors_block_the_claim() {
             let mv = rerun();
             mv.moved(json!({"to": DEVICE}));
-            mv.gate();
+            *mv.alive.borrow_mut() = Some(vec![123]);
+            assert_eq!(
+                mv.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: pickup could not stop 042-sample-export: processes still running: 123\n"
+                )
+            );
+            assert!(mv.puts().is_empty());
             assert!(mv.launched().is_empty());
             assert!(mv.job("042-sample-export").get("claim").is_none());
         }
@@ -10275,7 +10759,6 @@ exit "$archive_code"
             let mv = archive();
             mv.set_stalls(json!({}));
             mv.moved(json!({"agent": AGENT, "server": "srv-lab"}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             assert_eq!(out, format!("archived session {AGENT} and stopped 042-sample-export alpha: moved to studio-mac\n"));
@@ -10298,7 +10781,6 @@ exit "$archive_code"
             mv.set_stalls(json!({}));
             mv.moved(json!({"from": "studio-mac", "session": "d4e5f6", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
                 "earlier": [{"from": DEVICE, "session": "a1b2c3", "agent": AGENT, "server": "srv-lab", "at": MOVE_AT}]}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             assert_eq!(out, format!("archived session {AGENT} and stopped 042-sample-export alpha: moved to cloud-box\n"));
@@ -10411,7 +10893,6 @@ exit "$archive_code"
             mv.claim_marker("041-other-job", AGENT);
             mv.set_stalls(json!({}));
             mv.moved(json!({"agent": AGENT, "server": "srv-lab"}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err), (0, mv.hint(AGENT)));
             assert_eq!(
@@ -10580,7 +11061,6 @@ exit "$archive_code"
         fn test_archives_every_agent_and_names_them() {
             let mv = archive();
             two_agents(&mv);
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!((code, err.as_str()), (0, ""));
             assert_eq!(out, format!("archived sessions {AGENT}, {AGENT2} and stopped 042-sample-export alpha: moved to cloud-box\n"));
@@ -10630,7 +11110,6 @@ exit "$archive_code"
             mv.set_stalls(json!({}));
             mv.moved(json!({"agent": AGENT2, "server": "srv-lab", "to": "cloud-box", "at": "2026-11-08T11:00:00Z",
                 "earlier": [{"from": DEVICE, "session": "a1b2c3", "agent": AGENT, "server": "srv-lab", "at": MOVE_AT}]}));
-            mv.gate();
             let (code, out, err) = mv.pickup(&[]);
             assert_eq!(code, 0);
             assert_eq!(out, format!("archived session {AGENT} and stopped 042-sample-export alpha: moved to cloud-box\n"));
@@ -12005,18 +12484,6 @@ exit "$archive_code"
         }
     }
 
-    /// The retro and audit pushes wait on their slices: past the transcripts gate pickup exits 2.
-    fn assert_push_deferred(result: (i32, String, String), what: &str) {
-        assert_eq!(
-            result,
-            out_err(
-                2,
-                "",
-                &format!("factory.py: pickup {what} is not ported to the Rust binary yet\n")
-            )
-        );
-    }
-
     mod retro_pickup_test {
         use super::*;
 
@@ -12033,45 +12500,73 @@ exit "$archive_code"
             local_date(utc, offset)
         }
 
+        /// Fake retro_push: counts calls, and on success writes today's record as retro_push does.
+        fn push_fake(fx: &Fx, failure: Option<(&'static str, i32)>) -> Rc<RefCell<usize>> {
+            let calls = Rc::new(RefCell::new(0));
+            let (n, home) = (calls.clone(), fx.home.clone());
+            fx.set_fakes(|f| {
+                f.retro_push = Some(Rc::new(move || {
+                    *n.borrow_mut() += 1;
+                    if let Some((msg, code)) = failure {
+                        return Err(fail(msg, code));
+                    }
+                    let record = json!({"version": 1, "date": today()}).to_string() + "\n";
+                    fs::write(home.join(RETRO_PUSH_FILE), record).unwrap();
+                    Ok(())
+                }))
+            });
+            calls
+        }
+
+        fn record(fx: &Fx) -> Value {
+            loads(&read_text(&fx.home.join(RETRO_PUSH_FILE)).unwrap()).unwrap()
+        }
+
         #[test]
         fn test_first_run_of_a_day_pushes_once() {
             let fx = setup();
-            assert_push_deferred(fx.pickup(&[]), "retro push");
-            fs::write(
-                fx.home.join(RETRO_PUSH_FILE),
-                json!({"version": 1, "date": today()}).to_string(),
-            )
-            .unwrap();
-            assert_push_deferred(fx.pickup(&[]), "audit push");
+            let calls = push_fake(&fx, None);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(record(&fx), json!({"version": 1, "date": today()}));
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*calls.borrow(), 1);
         }
 
         #[test]
         fn test_an_earlier_date_pushes_again() {
             let fx = setup();
+            let calls = push_fake(&fx, None);
             fs::write(
                 fx.home.join(RETRO_PUSH_FILE),
                 r#"{"version": 1, "date": "2026-01-01"}"#,
             )
             .unwrap();
-            assert_push_deferred(fx.pickup(&[]), "retro push");
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*calls.borrow(), 1);
         }
 
         #[test]
         fn test_a_malformed_record_pushes_again() {
             let fx = setup();
+            let calls = push_fake(&fx, None);
             fs::write(fx.home.join(RETRO_PUSH_FILE), "{not json").unwrap();
-            assert_push_deferred(fx.pickup(&[]), "retro push");
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*calls.borrow(), 1);
+            assert_eq!(record(&fx), json!({"version": 1, "date": today()}));
         }
 
         #[test]
         fn test_an_unknown_version_pushes_again() {
             let fx = setup();
+            let calls = push_fake(&fx, None);
             fs::write(
                 fx.home.join(RETRO_PUSH_FILE),
                 json!({"version": 2, "date": today()}).to_string(),
             )
             .unwrap();
-            assert_push_deferred(fx.pickup(&[]), "retro push");
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*calls.borrow(), 1);
+            assert_eq!(record(&fx), json!({"version": 1, "date": today()}));
         }
 
         #[test]
@@ -12079,25 +12574,67 @@ exit "$archive_code"
             let fx = setup();
             alpha_on(&fx);
             fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
-            assert_push_deferred(fx.pickup(&[]), "retro push");
-            assert!(fx.launched().is_empty());
+            push_fake(&fx, Some(("Access rejected the service token", 5)));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert!(
+                matches(
+                    "launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n",
+                    &out
+                ),
+                "{out}"
+            );
+            assert!(err.contains("Access rejected the service token"), "{err}");
+            assert!(
+                err.ends_with(
+                    "factory.py: retro push stopped (exit 5); the next pickup run retries it\n"
+                ),
+                "{err}"
+            );
             assert!(!fx.home.join(RETRO_PUSH_FILE).exists());
+        }
+
+        #[test]
+        fn test_a_failing_retro_push_still_claims() {
+            let fx = setup();
+            let calls = push_fake(&fx, Some(("made-up push failure", 1)));
+            let ran = Rc::new(RefCell::new(0));
+            let n = ran.clone();
+            fx.set_fakes(|f| {
+                f.pickup_pass = Some(Rc::new(move |_, _| {
+                    *n.borrow_mut() += 1;
+                    Ok(())
+                }))
+            });
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: made-up push failure\nfactory.py: retro push stopped (exit 1); the next pickup run retries it\n"
+                )
+            );
+            assert_eq!((*calls.borrow(), *ran.borrow()), (1, 1));
         }
 
         #[test]
         fn test_no_transcripts_dir_sends_nothing() {
             let fx = setup();
+            let calls = push_fake(&fx, None);
             fx.set_env("CLAUDE_CONFIG_DIR", fx.root.join("gone"));
             fx.assert_silent(fx.pickup(&[]));
+            assert_eq!(*calls.borrow(), 0);
         }
 
         #[test]
         fn test_dry_run_never_pushes() {
             let fx = setup();
+            let calls = push_fake(&fx, None);
             assert_eq!(
                 fx.pickup(&["--dry-run"]),
                 out_err(0, &format!("host {DEVICE}: would launch 0\n"), "")
             );
+            assert_eq!(*calls.borrow(), 0);
         }
     }
 
@@ -12507,56 +13044,224 @@ exit "$archive_code"
             fx
         }
 
+        const SESSION: &str = "claude/projects/-home-u--paseo-worktrees-ab12-factory-1017-add-x/3f2a9c1d-0000-4000-8000-000000000001.jsonl";
+        const AT: &str = "2026-01-02T00:00:00Z";
+
+        /// Fake audit_push and usage_record: they log their job ids, the push fails as given, and
+        /// the record writes this host's share onto the board job as usage_record does.
+        fn push_fakes(fx: &Fx, failure: Option<(&'static str, i32)>) -> Rc<RefCell<Vec<String>>> {
+            let log = Rc::new(RefCell::new(Vec::new()));
+            let (pushes, records, state) = (log.clone(), log.clone(), fx.state.clone());
+            fx.set_fakes(|f| {
+                f.audit_push = Some(Rc::new(move |job_id| {
+                    pushes.borrow_mut().push(format!("push {job_id}"));
+                    match failure {
+                        Some((msg, code)) => Err(fail(msg, code)),
+                        None => Ok(()),
+                    }
+                }));
+                f.usage_record = Some(Rc::new(move |_, _, job_id, device, totals| {
+                    records.borrow_mut().push(format!("record {job_id}"));
+                    let mut share = json!({"at": AT});
+                    for (k, v) in totals.as_object().unwrap() {
+                        share[k] = v.clone();
+                    }
+                    let mut st = state.borrow_mut();
+                    let job = st.board["jobs"]
+                        .as_array_mut()
+                        .unwrap()
+                        .iter_mut()
+                        .find(|j| j["id"] == job_id)
+                        .unwrap();
+                    if !job["tokens"].is_object() {
+                        job["tokens"] = json!({});
+                    }
+                    job["tokens"][device] = share;
+                    Ok(())
+                }));
+            });
+            log
+        }
+
+        fn record(fx: &Fx) -> Value {
+            loads(&read_text(&fx.home.join(AUDIT_PUSH_FILE)).unwrap()).unwrap()
+        }
+
+        fn stamp_now() -> Value {
+            Value::from(crate::commands::audit::audit_stamp("1017-add-x").unwrap())
+        }
+
+        /// Move the session's mtime a second later and return it in nanoseconds.
+        fn touch_later(fx: &Fx) -> i128 {
+            let session = fx.root.join(SESSION);
+            let mtime = fs::metadata(&session).unwrap().modified().unwrap();
+            let later = mtime + Duration::from_secs(1);
+            fs::File::options()
+                .write(true)
+                .open(&session)
+                .unwrap()
+                .set_modified(later)
+                .unwrap();
+            later
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as i128
+        }
+
         #[test]
         fn test_pushes_once_until_a_transcript_changes() {
             let fx = setup();
-            assert_push_deferred(fx.pickup(&[]), "audit push");
-            assert!(!fx.home.join("audit-push.json").exists());
+            let log = push_fakes(&fx, None);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(
+                record(&fx),
+                json!({"version": 1, "jobs": {"1017-add-x": stamp_now()}})
+            );
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*log.borrow(), ["push 1017-add-x"]);
+            let later = touch_later(&fx);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*log.borrow(), ["push 1017-add-x", "push 1017-add-x"]);
+            assert_eq!(
+                record(&fx),
+                json!({"version": 1, "jobs": {"1017-add-x": Value::from(later)}})
+            );
         }
 
         #[test]
         fn test_skips_other_jobs() {
             let fx = setup();
+            let log = push_fakes(&fx, None);
+            fx.view("alpha", 200, effective("alpha", None, None));
             for jobs in [
                 json!([{"id": "1017-add-x", "project": "alpha", "stage": "merged"}]),
                 json!([idea("1017-add-x", "alpha", json!({}))]),
                 json!([{"id": "1018-other", "project": "alpha", "stage": "build"}]),
             ] {
                 fx.jobs(jobs);
-                assert_push_deferred(fx.pickup(&[]), "audit push");
-                assert!(!fx.home.join("audit-push.json").exists());
+                assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+                assert!(log.borrow().is_empty());
+                assert!(!fx.home.join(AUDIT_PUSH_FILE).exists());
             }
         }
 
         #[test]
         fn test_dry_run_never_pushes() {
             let fx = setup();
+            let log = push_fakes(&fx, None);
             assert_eq!(
                 fx.pickup(&["--dry-run"]),
                 out_err(0, &format!("host {DEVICE}: would launch 0\n"), "")
             );
+            assert!(log.borrow().is_empty());
         }
 
         #[test]
         fn test_a_failed_push_warns_and_still_launches() {
             let fx = setup();
             alpha_on(&fx);
-            assert_push_deferred(fx.pickup(&[]), "audit push");
-            assert!(fx.launched().is_empty());
+            let mut jobs = fx.state.borrow().board["jobs"].clone();
+            jobs.as_array_mut()
+                .unwrap()
+                .push(idea("120-sample-digest", "alpha", json!({})));
+            fx.jobs(jobs);
+            push_fakes(&fx, Some(("Access rejected the service token", 5)));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert!(
+                matches(
+                    "launched 120-sample-digest alpha on primary session [0-9a-f]{6}\n",
+                    &out
+                ),
+                "{out}"
+            );
+            assert!(err.contains("Access rejected the service token"), "{err}");
+            assert!(
+                err.ends_with(
+                    "factory.py: audit push stopped (exit 5); the next pickup run retries it\n"
+                ),
+                "{err}"
+            );
+            assert!(!fx.home.join(AUDIT_PUSH_FILE).exists());
+        }
+
+        #[test]
+        fn test_a_failing_audit_push_still_claims() {
+            let fx = setup();
+            let log = push_fakes(&fx, Some(("made-up push failure", 1)));
+            let ran = Rc::new(RefCell::new(0));
+            let n = ran.clone();
+            fx.set_fakes(|f| {
+                f.pickup_pass = Some(Rc::new(move |_, _| {
+                    *n.borrow_mut() += 1;
+                    Ok(())
+                }))
+            });
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: made-up push failure\nfactory.py: audit push stopped (exit 1); the next pickup run retries it\n"
+                )
+            );
+            assert_eq!(*log.borrow(), ["push 1017-add-x"]);
+            assert_eq!(*ran.borrow(), 1);
+            assert!(!fx.home.join(AUDIT_PUSH_FILE).exists());
         }
 
         #[test]
         fn test_refreshes_token_share() {
             let fx = setup();
-            assert_push_deferred(fx.pickup(&[]), "audit push");
-            assert!(fx.puts().is_empty());
+            let log = push_fakes(&fx, None);
+            let host_b = json!({"at": "2026-01-02T12:00:00Z", "transcripts": 1,
+                "models": {"claude-opus-5-5": {"input": 300, "output": 9100, "cache_write": 52000, "cache_read": 610000}}});
+            let models = json!({"claude-opus-5-5": {"input": 1200, "output": 48000, "cache_write": 210000, "cache_read": 3400000}});
+            fx.state.borrow_mut().board["jobs"][0]["tokens"] = json!({"host-b": host_b});
+            let session = fx.root.join(SESSION);
+            let mut text = read_text(&session).unwrap();
+            text += &(json!({"type": "assistant", "message": {"id": "u1", "model": "claude-opus-5-5", "usage": {
+                "input_tokens": 1200, "output_tokens": 48000, "cache_creation_input_tokens": 210000,
+                "cache_read_input_tokens": 3400000}}}).to_string() + "\n");
+            fs::write(&session, text).unwrap();
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(0, &format!("recorded {DEVICE} tokens on 1017-add-x\n"), "")
+            );
+            assert_eq!(*log.borrow(), ["push 1017-add-x", "record 1017-add-x"]);
+            assert_eq!(
+                fx.job("1017-add-x")["tokens"],
+                json!({"host-b": host_b, DEVICE: {"at": AT, "transcripts": 2, "models": models}})
+            );
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            touch_later(&fx);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(
+                *log.borrow(),
+                ["push 1017-add-x", "record 1017-add-x", "push 1017-add-x"]
+            );
         }
 
         #[test]
         fn test_token_scan_error_warns() {
             let fx = setup();
-            fx.set_fakes(|f| f.usage_totals = Some(Rc::new(|_, _, _| Err("ValueError".into()))));
-            assert_push_deferred(fx.pickup(&[]), "audit push");
+            let log = push_fakes(&fx, None);
+            fx.set_fakes(|f| {
+                f.usage_totals = Some(Rc::new(|_, _, _| Err("ValueError: boom".into())))
+            });
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: usage: scan failed on 1017-add-x (ValueError: boom); nothing recorded\n"
+                )
+            );
+            assert_eq!(*log.borrow(), ["push 1017-add-x"]);
+            assert_eq!(
+                record(&fx),
+                json!({"version": 1, "jobs": {"1017-add-x": stamp_now()}})
+            );
         }
     }
 
@@ -12607,6 +13312,136 @@ exit "$archive_code"
             assert!(seen.borrow().is_empty());
             assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
             assert_eq!(*seen.borrow(), vec![fx.home.clone()]);
+        }
+
+        /// Pickup with the real record step: paths.md lists alpha's checkout and beta's missing
+        /// folder, the claim pass does nothing, and the fake outcomes answers per slug.
+        fn record_fx(answer: fn(&str, &mut String) -> Res<()>) -> Fx {
+            let fx = Fx::new();
+            fs::write(
+                fx.home.join("paths.md"),
+                format!(
+                    "---\nalpha: {}\nbeta: {}\n---\n",
+                    fx.repo_a.display(),
+                    fx.root.join("gone").display()
+                ),
+            )
+            .unwrap();
+            fx.set_fakes(|f| {
+                f.outcomes_pickup_record = None;
+                f.pickup_pass = Some(Rc::new(|_, _| Ok(())));
+                f.outcomes = Some(Rc::new(answer));
+            });
+            fx
+        }
+
+        fn recorded(slug: &str, out: &mut String) -> Res<()> {
+            out.push_str(&format!("{slug} unknown: none\n"));
+            out.push_str("recorded 3 outcomes on the board\n");
+            Ok(())
+        }
+
+        fn today() -> String {
+            let (utc, offset) = local_now();
+            local_date(utc, offset)
+        }
+
+        #[test]
+        fn test_first_run_records_each_checkout() {
+            let fx = record_fx(recorded);
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "outcomes record alpha: recorded 3 outcomes on the board\n",
+                    ""
+                )
+            );
+            assert_eq!(
+                read_json(&fx.home.join(OUTCOMES_RECORD_FILE)).unwrap(),
+                json!({"version": 1, "date": today()})
+            );
+        }
+
+        #[test]
+        fn test_same_date_does_nothing() {
+            let fx = record_fx(recorded);
+            fx.pickup(&[]);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+        }
+
+        #[test]
+        fn test_unknown_prints_first_reason() {
+            let fx = record_fx(|_, out| {
+                out.push_str(
+                    "alpha unknown: 1017-add-x (no merge commit from GitHub), 1018-add-y (no PR)\n",
+                );
+                out.push_str("outcomes unchanged; nothing written\n");
+                Ok(())
+            });
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "outcomes record alpha: outcomes unchanged; nothing written\n",
+                    "factory.py: outcomes record alpha: 1017-add-x is unknown: no merge commit from GitHub\n"
+                )
+            );
+        }
+
+        #[test]
+        fn test_stopped_project_warns() {
+            let fx = record_fx(|slug, out| {
+                if slug == "alpha" {
+                    return Err(exit(5));
+                }
+                out.push_str("no jobs merged in the last 90 days\n");
+                Ok(())
+            });
+            fs::create_dir(fx.root.join("beta")).unwrap();
+            fs::write(
+                fx.home.join("paths.md"),
+                format!(
+                    "---\nbeta: {}\nalpha: {}\n---\n",
+                    fx.root.join("beta").display(),
+                    fx.repo_a.display()
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "outcomes record beta: no jobs merged in the last 90 days\n",
+                    "factory.py: outcomes record alpha stopped (exit 5); it runs again tomorrow\n"
+                )
+            );
+            assert!(fx.home.join(OUTCOMES_RECORD_FILE).exists());
+        }
+
+        #[test]
+        fn test_empty_output_fails() {
+            let fx = record_fx(|_, _| Ok(()));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(1, "", "factory.py: outcomes record alpha printed nothing\n")
+            );
+        }
+
+        #[test]
+        fn test_bad_paths_md_writes_no_stamp() {
+            let fx = record_fx(recorded);
+            fs::write(fx.home.join("paths.md"), b"---\nalpha: \xff\n---\n").unwrap();
+            let orphan_scan = hook_counter(&fx, true);
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, out.as_str()), (1, ""));
+            assert!(err.contains("invalid utf-8"), "{err}");
+            assert_eq!(
+                orphan_scan.borrow().len(),
+                1,
+                "the step before the record ran"
+            );
+            assert!(!fx.home.join(OUTCOMES_RECORD_FILE).exists());
         }
     }
 
@@ -13116,16 +13951,50 @@ exit "$archive_code"
                 "refs": [{"id": "042-sample-export", "kind": "batched-into"}], "updated": "2026-01-01T00:00:00Z"})
         }
 
-        fn deferred_close(fx: &Fx, files: &Files) {
-            assert_eq!(
-                fx.pickup(&[]),
-                out_err(
-                    2,
-                    "",
-                    "factory.py: pickup PR close is not ported to the Rust binary yet\n"
-                )
-            );
-            assert!(fx.puts().is_empty() && files.is_empty());
+        /// Fake close_pull_request: it answers (state, why) and logs a `gh close <pr>` call on the
+        /// Worker call list, so tests can order it against the decision write.
+        fn pr_answer(fx: &Fx, state: &'static str, why: &str) {
+            let (calls, why) = (fx.state.clone(), why.to_string());
+            fx.set_fakes(|f| {
+                f.close_pull_request = Some(Rc::new(move |_, j, _| {
+                    calls
+                        .borrow_mut()
+                        .calls
+                        .push(("gh close".into(), text_of(j.get("pr"))));
+                    Ok((state, why.clone()))
+                }))
+            });
+        }
+
+        /// Fake close_stacked_prs: logs (lead, riders) and a `gh stacked` call.
+        fn stacked_log(fx: &Fx) -> Rc<RefCell<Vec<(String, Vec<Value>)>>> {
+            let log = Rc::new(RefCell::new(Vec::new()));
+            let (seen, calls) = (log.clone(), fx.state.clone());
+            fx.set_fakes(|f| {
+                f.close_stacked_prs = Some(Rc::new(move |_, lead, riders, _| {
+                    calls
+                        .borrow_mut()
+                        .calls
+                        .push(("gh stacked".into(), lead.to_string()));
+                    seen.borrow_mut().push((lead.to_string(), riders.to_vec()));
+                    Ok(())
+                }))
+            });
+            log
+        }
+
+        fn gh_calls(fx: &Fx) -> Vec<(String, String)> {
+            fx.calls()
+                .into_iter()
+                .filter(|c| c.0.starts_with("gh "))
+                .collect()
+        }
+
+        fn position(fx: &Fx, call: (&str, &str)) -> usize {
+            fx.calls()
+                .iter()
+                .position(|c| (c.0.as_str(), c.1.as_str()) == call)
+                .unwrap()
         }
 
         #[test]
@@ -13254,26 +14123,32 @@ exit "$archive_code"
             assert!(fx.puts().is_empty() && files.is_empty());
         }
 
-        /// An open pull request needs the PR close, which waits on the checks slice; the parts of the
-        /// decision pickup writes without it are checked here.
         #[test]
         fn test_close_decision_names_an_open_pull_request() {
-            let (fx, files) = setup();
-            fx.jobs(json!([closing(
-                json!({"pr": "https://github.example.test/sample/pull/7"})
-            )]));
-            deferred_close(&fx, &files);
+            let job = closing(json!({"pr": "https://github.example.test/sample/pull/7"}));
             let on = Settings {
                 enabled: Some(true),
                 hosts: vec!["other-host".into(), DEVICE.into()],
                 reason: None,
             };
+            let text = close_decision(
+                &job,
+                REASON,
+                DEVICE,
+                None,
+                Some(("open", "gh is not installed on host-a".into())),
+                &on,
+            );
+            assert!(text.contains(
+                "- Pull request: https://github.example.test/sample/pull/7, still open.\n"
+            ));
+            assert!(text.contains("- No agent reviewed this close. The reason is the owner's own words.\n- Pull request https://github.example.test/sample/pull/7 stays open because gh is not installed on host-a. Close it on GitHub if it should not merge.\n- The next pickup run on each host"));
             let bare = close_decision(
                 &json!({"id": "042-sample-export", "project": "alpha", "stage": "spec", "close": {"at": "2026-01-02T12:00:00Z"}}),
                 REASON,
                 DEVICE,
                 None,
-                false,
+                None,
                 &on,
             );
             assert!(bare.contains(
@@ -13319,7 +14194,7 @@ exit "$archive_code"
                 hosts: vec![DEVICE.into()],
                 reason: None,
             };
-            let text = close_decision(&closing(json!({})), REASON, DEVICE, None, false, &only);
+            let text = close_decision(&closing(json!({})), REASON, DEVICE, None, None, &only);
             assert!(text.contains("- Host that needs `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup does not list it.\n"));
         }
 
@@ -13362,24 +14237,76 @@ exit "$archive_code"
         #[test]
         fn test_close_closes_an_open_pull_request() {
             let (fx, files) = setup();
+            pr_answer(&fx, "closed", "");
             fx.jobs(json!([closing(json!({"pr": PR}))]));
-            deferred_close(&fx, &files);
-            assert_eq!(fx.job("042-sample-export")["stage"], "build");
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    &format!(
+                        "closed pull request {PR} for 042-sample-export\nclosed 042-sample-export alpha\n"
+                    ),
+                    ""
+                )
+            );
+            assert_eq!(gh_calls(&fx), [("gh close".to_string(), PR.to_string())]);
+            assert!(position(&fx, ("gh close", PR)) < position(&fx, ("PUT", DECISION)));
+            let text = files.get(DECISION).unwrap();
+            assert!(text.contains(&format!(
+                "- Pull request: {PR}, closed by pickup with a comment that links this page.\n"
+            )));
+            assert!(!text.contains("stays open"));
+            assert_eq!(fx.job("042-sample-export")["stage"], "closed");
         }
 
         #[test]
         fn test_close_skips_a_finished_pull_request() {
             let (fx, files) = setup();
-            fx.jobs(json!([closing(json!({"pr": PR}))]));
-            deferred_close(&fx, &files);
+            for (state, line) in [
+                ("merged", "already merged"),
+                ("already closed", "already closed"),
+            ] {
+                fx.clear_calls();
+                files.files.borrow_mut().clear();
+                pr_answer(&fx, state, "");
+                fx.jobs(json!([closing(json!({"pr": PR}))]));
+                assert_eq!(
+                    fx.pickup(&[]),
+                    out_err(0, "closed 042-sample-export alpha\n", "")
+                );
+                let text = files.get(DECISION).unwrap();
+                assert!(text.contains(&format!("- Pull request: {PR}, {line}.\n")));
+                assert!(!text.contains("stays open"));
+            }
         }
 
         #[test]
         fn test_close_leaves_the_pull_request_open() {
             let (fx, files) = setup();
-            for pr in [PR, "https://github.com/other/repo/pull/7"] {
+            let other = "https://github.com/other/repo/pull/7";
+            for (pr, why) in [
+                (PR, "gh is not installed on host-a"),
+                (PR, "gh pr close exited 1 (check gh auth status on host-a)"),
+                (other, "its URL is not a pull request in sample/alpha"),
+            ] {
+                fx.clear_calls();
+                files.files.borrow_mut().clear();
+                pr_answer(&fx, "open", why);
                 fx.jobs(json!([closing(json!({"pr": pr}))]));
-                deferred_close(&fx, &files);
+                assert_eq!(
+                    fx.pickup(&[]),
+                    out_err(
+                        0,
+                        "closed 042-sample-export alpha\n",
+                        &format!("factory.py: pickup leaves pull request {pr} open: {why}\n")
+                    )
+                );
+                let text = files.get(DECISION).unwrap();
+                assert!(text.contains(&format!("- Pull request: {pr}, still open.\n")));
+                assert!(text.contains(&format!(
+                    "- Pull request {pr} stays open because {why}. Close it on GitHub if it should not merge.\n"
+                )));
+                assert_eq!(fx.job("042-sample-export")["stage"], "closed");
             }
         }
 
@@ -13398,15 +14325,33 @@ exit "$archive_code"
 
         #[test]
         fn test_close_closes_stacked_rider_pr() {
-            let (fx, files) = setup();
+            let (fx, _files) = setup();
+            let log = stacked_log(&fx);
             fx.jobs(json!([closing(json!({})), stacked_rider()]));
-            deferred_close(&fx, &files);
-            assert_eq!(fx.job("043-sample-schema")["pr"], RIDER_PR);
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(0, "closed 042-sample-export alpha\n", "")
+            );
+            assert_eq!(
+                *log.borrow(),
+                [(
+                    "042-sample-export".to_string(),
+                    vec![json!({"id": "043-sample-schema", "project": "alpha", "pr": RIDER_PR})]
+                )]
+            );
+            let board_put = fx
+                .calls()
+                .iter()
+                .rposition(|c| c.0 == "PUT" && c.1 == "/api/board")
+                .unwrap();
+            assert!(board_put < position(&fx, ("gh stacked", "042-sample-export")));
+            assert_eq!(fx.job("042-sample-export")["stage"], "closed");
         }
 
         #[test]
         fn test_close_skips_stacked_rider_without_project() {
             let (fx, _files) = setup();
+            let log = stacked_log(&fx);
             fx.jobs(json!([
                 closing(json!({})),
                 with(stacked_rider(), json!({"project": null}))
@@ -13415,6 +14360,10 @@ exit "$archive_code"
             assert_eq!(
                 fx.pickup(&[]),
                 out_err(0, "closed 042-sample-export alpha\n", "")
+            );
+            assert_eq!(
+                *log.borrow(),
+                [("042-sample-export".to_string(), Vec::new())]
             );
             assert_eq!(fx.job("042-sample-export")["stage"], "closed");
         }
@@ -13629,7 +14578,8 @@ exit "$archive_code"
         }
     }
 
-    /// gh_pr waits on the checks slice; gh_cli, which this file ports, reads gh the same way.
+    /// gh_pr is the checks slice's, and pickup reaches it only through close_pull_request; gh_cli,
+    /// pickup's own gh read, runs gh the same way.
     mod gh_pr_test {
         use super::*;
 
@@ -13661,17 +14611,6 @@ exit "$archive_code"
             fx.set_env("PATH", fx.root.join("empty"));
             assert_eq!(gh_cli(&["view", "x"]), None);
         }
-    }
-
-    pub(super) fn assert_deferred_run(fx: &Fx, args: &[&str], what: &str) {
-        assert_eq!(
-            fx.pickup(args),
-            out_err(
-                2,
-                "",
-                &format!("factory.py: pickup {what} is not ported to the Rust binary yet\n")
-            )
-        );
     }
 
     pub(super) fn git_in(cwd: &Path, args: &[&str]) -> String {
@@ -13718,16 +14657,36 @@ exit "$archive_code"
         wt
     }
 
-    /// Cleanup itself waits on the worktree slice. Each test keeps its name, and checks the gate:
-    /// pickup finds the closed job's leftovers, prints the dry lines, then exits 2 where Python cleans up.
+    /// Python's CloseCleanupTest through the real cleanup_job. Its tests that call cleanup_job,
+    /// stop_pids or lsof_exe directly live beside them in worktree.rs.
     mod close_cleanup_test {
         use super::*;
+
+        const LEFT: &str = "branch factory/042-sample-export: not merged into main";
+
+        fn unreachable() -> String {
+            format!("{LEFT} and origin could not be reached")
+        }
+
+        const ID: [&str; 4] = [
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+        ];
+
+        fn commit(wt: &Path, name: &str) {
+            fs::write(wt.join(name), "work\n").unwrap();
+            git_in(wt, &["add", name]);
+            git_in(wt, &[&ID[..], &["commit", "-q", "-m", name]].concat());
+        }
 
         fn setup() -> (Fx, PathBuf, Files) {
             let fx = Fx::new();
             alpha_on(&fx);
             let files = Files::install(&fx);
             let wt = job_worktree(&fx);
+            commit(&wt, "work.txt");
             (fx, wt, files)
         }
 
@@ -13737,62 +14696,150 @@ exit "$archive_code"
                 "close": with(json!({"reason": "Duplicate of 041-sample-report", "at": "2026-01-02T12:00:00Z", "closed": "2026-01-02T12:05:00Z"}), extra)})
         }
 
-        fn gate(fx: &Fx, wt: &Path) {
-            fx.jobs(json!([closed(json!({}))]));
-            assert_deferred_run(fx, &[], "close cleanup");
-            assert!(wt.exists());
-            assert!(fx.job("042-sample-export")["close"]
-                .get("cleanup")
-                .is_none());
-            assert!(fx.puts().is_empty());
+        fn branch_exists(fx: &Fx) -> bool {
+            !git_in(
+                &fx.repo_a,
+                &["branch", "--list", "factory/042-sample-export"],
+            )
+            .is_empty()
+        }
+
+        fn left(fx: &Fx) -> Value {
+            fx.job("042-sample-export")["close"]["cleanup"][DEVICE]["left"].clone()
+        }
+
+        fn with_origin(fx: &Fx, push: bool) {
+            let origin = fx.home.join("origin.git").display().to_string();
+            git_in(&fx.repo_a, &["init", "-q", "--bare", &origin]);
+            git_in(&fx.repo_a, &["remote", "add", "origin", &origin]);
+            if push {
+                git_in(
+                    &fx.repo_a,
+                    &["push", "-q", "origin", "factory/042-sample-export"],
+                );
+            }
         }
 
         #[test]
         fn test_cleanup_keeps_an_unmerged_branch() {
             let (fx, wt, _) = setup();
-            gate(&fx, &wt);
+            fx.jobs(json!([closed(json!({}))]));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    &format!(
+                        "cleaned up 042-sample-export alpha, left: {}\n",
+                        unreachable()
+                    ),
+                    ""
+                )
+            );
+            assert!(!wt.exists());
+            assert!(branch_exists(&fx));
+            let job = fx.job("042-sample-export");
+            let record = &job["close"]["cleanup"][DEVICE];
+            assert_eq!(
+                record.as_object().unwrap().keys().collect::<Vec<_>>(),
+                ["at", "left"]
+            );
+            assert_eq!(record["left"], json!([unreachable()]));
+            assert!(job.get("port").is_none());
+            fx.clear_calls();
+            fx.assert_silent(fx.pickup(&[]));
         }
 
         #[test]
         fn test_cleanup_runs_beside_a_pull_request_close() {
             let (fx, wt, files) = setup();
-            fx.jobs(json!([closed(json!({})), {"id": "043-sample-import", "stage": "build", "project": "alpha", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}}]));
+            let pr = "https://github.com/sample/alpha/pull/8";
+            let decision = "/api/jobs/alpha/043-sample-import/decision.md";
+            fx.set_fakes(|f| {
+                f.close_pull_request = Some(Rc::new(|_, _, _| Ok(("closed", String::new()))))
+            });
+            fx.jobs(json!([closed(json!({})), {"id": "043-sample-import", "stage": "build", "project": "alpha",
+                "round": 1, "branch": "factory/043-sample-import", "pr": pr, "updated": "2026-01-01T00:00:00Z",
+                "close": {"reason": "Duplicate of 041-sample-report", "at": "2026-01-02T12:00:00Z"}}]));
             assert_eq!(
                 fx.pickup(&[]),
                 out_err(
-                    2,
-                    "closed 043-sample-import alpha\n",
-                    "factory.py: pickup close cleanup is not ported to the Rust binary yet\n"
+                    0,
+                    &format!("closed pull request {pr} for 043-sample-import\nclosed 043-sample-import alpha\ncleaned up 042-sample-export alpha, left: {}\n", unreachable()),
+                    ""
                 )
             );
-            assert_eq!(fx.job("043-sample-import")["stage"], "closed");
+            assert_eq!(
+                fx.puts(),
+                [
+                    ("PUT".to_string(), decision.to_string()),
+                    ("PUT".into(), "/api/board".into()),
+                    ("PUT".into(), "/api/board".into())
+                ]
+            );
             assert!(files
-                .get("/api/jobs/alpha/043-sample-import/decision.md")
-                .is_some());
-            assert!(wt.exists());
+                .get(decision)
+                .unwrap()
+                .contains(&format!("- Pull request: {pr}, closed by pickup")));
+            let close = &fx.job("043-sample-import")["close"];
+            assert!(close.get("closed").is_some() && close.get("cleanup").is_none());
+            assert_eq!(left(&fx), json!([unreachable()]));
+            assert!(!wt.exists());
+            fx.clear_calls();
+            fx.assert_silent(fx.pickup(&[]));
         }
 
         #[test]
         fn test_cleanup_deletes_a_branch_origin_holds() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
+            let (fx, _, _) = setup();
+            with_origin(&fx, true);
+            fx.jobs(json!([closed(json!({}))]));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(0, "cleaned up 042-sample-export alpha\n", "")
+            );
+            assert!(!branch_exists(&fx));
+            assert_eq!(left(&fx), json!([]));
         }
 
         #[test]
         fn test_cleanup_keeps_a_branch_ahead_of_origin() {
             let (fx, wt, _) = setup();
-            gate(&fx, &wt);
+            with_origin(&fx, true);
+            commit(&wt, "more.txt");
+            fx.jobs(json!([closed(json!({}))]));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    &format!("cleaned up 042-sample-export alpha, left: {LEFT} and origin is at a different commit\n"),
+                    ""
+                )
+            );
+            assert!(branch_exists(&fx));
         }
 
         #[test]
         fn test_cleanup_keeps_a_branch_origin_lacks() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
+            let (fx, _, _) = setup();
+            with_origin(&fx, false);
+            fx.jobs(json!([closed(json!({}))]));
+            let missing = format!("{LEFT} and origin has no such branch");
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    &format!("cleaned up 042-sample-export alpha, left: {missing}\n"),
+                    ""
+                )
+            );
+            assert!(branch_exists(&fx));
+            assert_eq!(left(&fx), json!([missing]));
         }
 
         #[test]
         fn test_cleanup_keeps_a_branch_checked_out_elsewhere() {
             let (fx, wt, _) = setup();
+            with_origin(&fx, true);
             git_in(
                 &fx.repo_a,
                 &["worktree", "remove", "--force", &wt.display().to_string()],
@@ -13809,53 +14856,70 @@ exit "$archive_code"
                 ],
             );
             fx.jobs(json!([closed(json!({}))]));
-            assert_deferred_run(&fx, &[], "close cleanup");
+            fx.pickup(&[]);
+            assert!(branch_exists(&fx));
+            let left = left(&fx);
+            assert_eq!(left.as_array().unwrap().len(), 1);
+            assert!(left[0]
+                .as_str()
+                .unwrap()
+                .starts_with("branch factory/042-sample-export: checked out in "));
         }
 
+        /// A job pickup synced as merged passes its recorded head, and only a full commit id.
         #[test]
         fn test_merged_head_keeps_a_branch_ahead_of_the_pr() {
-            let (fx, wt, _) = setup();
-            fx.jobs(json!([{"id": "042-sample-export", "stage": "merged", "project": "alpha", "updated": "2026-01-02T12:05:00Z", "github": {"merged": "2026-01-02T12:05:00Z", "head": "a1b2".repeat(10)}}]));
-            assert_deferred_run(&fx, &[], "close cleanup");
-            assert!(wt.exists());
-        }
-
-        #[test]
-        fn test_merged_head_keeps_a_branch_checked_out_elsewhere() {
-            let (fx, wt, _) = setup();
-            git_in(
-                &fx.repo_a,
-                &["worktree", "remove", "--force", &wt.display().to_string()],
+            let (fx, _, _) = setup();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let log = seen.clone();
+            fx.set_fakes(|f| {
+                f.cleanup_job = Some(Rc::new(move |_, _, branch, drop_pushed, head| {
+                    log.borrow_mut().push((
+                        branch.to_string(),
+                        drop_pushed,
+                        head.map(String::from),
+                    ));
+                    (Vec::new(), Vec::new())
+                }))
+            });
+            let head = "a1b2".repeat(10);
+            for (n, given) in [json!(head), json!("a1b2"), Value::Null]
+                .into_iter()
+                .enumerate()
+            {
+                let mut github = json!({"merged": "2026-01-02T12:05:00Z"});
+                if !given.is_null() {
+                    github["head"] = given;
+                }
+                fx.jobs(
+                    json!([{"id": "042-sample-export", "stage": "merged", "project": "alpha",
+                    "updated": "2026-01-02T12:05:00Z", "github": github}]),
+                );
+                assert_eq!(
+                    fx.pickup(&[]),
+                    out_err(0, "cleaned up 042-sample-export alpha\n", ""),
+                    "{n}"
+                );
+            }
+            let branch = "factory/042-sample-export".to_string();
+            assert_eq!(
+                *seen.borrow(),
+                [
+                    (branch.clone(), true, Some(head)),
+                    (branch.clone(), true, None),
+                    (branch, true, None)
+                ]
             );
-            fx.jobs(json!([{"id": "042-sample-export", "stage": "merged", "project": "alpha", "updated": "2026-01-02T12:05:00Z", "github": {"merged": "2026-01-02T12:05:00Z"}}]));
-            assert_deferred_run(&fx, &[], "close cleanup");
-        }
-
-        #[test]
-        fn test_cleanup_job_keeps_a_pushed_branch_by_default() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
-        }
-
-        #[test]
-        fn test_cleanup_skips_ls_remote_without_a_branch_tip() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
+            assert!(fx.job("042-sample-export")["github"]["cleanup"][DEVICE].is_object());
         }
 
         #[test]
         fn test_cleanup_removes_a_merged_job() {
             let (fx, wt, _) = setup();
-            let id = [
-                "-c",
-                "user.name=Test",
-                "-c",
-                "user.email=test@example.invalid",
-            ];
             git_in(
                 &fx.repo_a,
                 &[
-                    &id[..],
+                    &ID[..],
                     &[
                         "merge",
                         "-q",
@@ -13867,36 +14931,40 @@ exit "$archive_code"
                 ]
                 .concat(),
             );
-            gate(&fx, &wt);
+            fx.jobs(json!([closed(json!({}))]));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(0, "cleaned up 042-sample-export alpha\n", "")
+            );
+            assert!(!wt.exists());
+            assert!(!branch_exists(&fx));
+            assert_eq!(left(&fx), json!([]));
         }
 
-        #[test]
-        fn test_cleanup_without_lsof_still_removes_a_merged_job() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
-        }
-
-        #[test]
-        fn test_stop_pids_without_lsof_is_unchecked() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
-        }
-
-        #[test]
-        fn test_lsof_falls_back_to_a_system_folder() {
-            let (fx, wt, _) = setup();
-            gate(&fx, &wt);
-        }
-
+        /// Rust cleanup_job cannot fail, so Python's raising cleanup_job is a fake that leaves work:
+        /// pickup records it and still launches.
         #[test]
         fn test_a_cleanup_error_still_launches_ideas() {
             let (fx, _, _) = setup();
+            fx.set_fakes(|f| {
+                f.cleanup_job = Some(Rc::new(|_, _, _, _, _| {
+                    (
+                        Vec::new(),
+                        vec!["worktree made-up: still in use".to_string()],
+                    )
+                }))
+            });
             fx.jobs(json!([
                 closed(json!({})),
                 idea("001-alpha", "alpha", json!({}))
             ]));
-            assert_deferred_run(&fx, &[], "close cleanup");
-            assert!(fx.launched().is_empty());
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(out.starts_with(
+                "cleaned up 042-sample-export alpha, left: worktree made-up: still in use\n"
+            ));
+            assert_eq!(fx.launched().len(), 1);
+            assert_eq!(left(&fx), json!(["worktree made-up: still in use"]));
         }
 
         #[test]
@@ -13959,14 +15027,36 @@ exit "$archive_code"
         }
     }
 
-    /// Reading PR states waits on the checks slice: past job matching, pickup exits 2, dry run included.
+    /// Python's PrSyncTest with pr_states faked as Python patches it. Its pr_states query test
+    /// lives in checks.rs; here the same name checks what pickup does with a parsed answer.
     mod pr_sync_test {
         use super::*;
 
         const PR7: &str = "https://github.com/sample/alpha/pull/7";
         const PR8: &str = "https://github.com/sample/alpha/pull/8";
+        const DECISION: &str = "/api/jobs/alpha/043-sample-import/decision.md";
 
-        fn setup() -> (Fx, Files) {
+        fn oid() -> String {
+            "a1b2".repeat(10)
+        }
+
+        struct Ps {
+            fx: Fx,
+            files: Files,
+            states: Rc<RefCell<BTreeMap<u64, &'static str>>>,
+            heads: Rc<RefCell<BTreeMap<u64, String>>>,
+            failure: Rc<RefCell<Option<String>>>,
+            reads: Rc<RefCell<Vec<(String, Vec<u64>)>>>,
+        }
+
+        impl std::ops::Deref for Ps {
+            type Target = Fx;
+            fn deref(&self) -> &Fx {
+                &self.fx
+            }
+        }
+
+        fn setup() -> Ps {
             let fx = Fx::new();
             for slug in ["alpha", "beta"] {
                 fx.view(
@@ -13993,7 +15083,40 @@ exit "$archive_code"
                 .unwrap();
             }
             let files = Files::install(&fx);
-            (fx, files)
+            let states = Rc::new(RefCell::new(BTreeMap::from([(7, "MERGED"), (8, "CLOSED")])));
+            let heads = Rc::new(RefCell::new(BTreeMap::new()));
+            let failure = Rc::new(RefCell::new(None));
+            let reads = Rc::new(RefCell::new(Vec::new()));
+            let (st, hd, fl, rd) = (
+                states.clone(),
+                heads.clone(),
+                failure.clone(),
+                reads.clone(),
+            );
+            fx.set_fakes(|f| {
+                f.pr_states = Some(Rc::new(move |repo, numbers, _| {
+                    rd.borrow_mut().push((repo.to_string(), numbers.to_vec()));
+                    if let Some(why) = fl.borrow().clone() {
+                        return Err(why);
+                    }
+                    Ok(numbers
+                        .iter()
+                        .filter_map(|n| {
+                            let state = *st.borrow().get(n)?;
+                            let head = hd.borrow().get(n).map_or(Value::Null, |h| json!(h));
+                            Some((*n, (json!(state), head)))
+                        })
+                        .collect())
+                }))
+            });
+            Ps {
+                fx,
+                files,
+                states,
+                heads,
+                failure,
+                reads,
+            }
         }
 
         fn export(extra: Value) -> Value {
@@ -14010,156 +15133,392 @@ exit "$archive_code"
             )
         }
 
-        fn gate(fx: &Fx, jobs: Value) {
-            fx.jobs(jobs.clone());
-            for args in [&[][..], &["--dry-run"]] {
-                assert_deferred_run(fx, args, "PR state sync");
-            }
-            assert!(fx.puts().is_empty());
-            assert_eq!(fx.state.borrow().board["jobs"], jobs);
+        fn keys(v: &Value) -> Vec<String> {
+            let mut keys: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+            keys.sort();
+            keys
         }
 
         #[test]
         fn test_pr_states_sends_one_query_and_parses_it() {
-            let (fx, _) = setup();
-            gate(&fx, json!([export(json!({})), sample_import(json!({}))]));
+            let ps = setup();
+            *ps.states.borrow_mut() = BTreeMap::from([(7, "MERGED")]);
+            ps.heads.borrow_mut().insert(7, oid());
+            ps.jobs(json!([export(json!({})), sample_import(json!({}))]));
+            assert_eq!(
+                ps.pickup(&[]),
+                out_err(0, "synced 042-sample-export alpha: merged on GitHub\n", "")
+            );
+            assert_eq!(
+                *ps.reads.borrow(),
+                [("sample/alpha".to_string(), vec![7, 8])]
+            );
+            assert_eq!(ps.job("042-sample-export")["github"]["head"], oid());
+            assert_eq!(ps.job("043-sample-import")["stage"], "pr-open");
         }
 
         #[test]
         fn test_merged_pr_moves_the_job_to_merged() {
-            let (fx, _) = setup();
+            let ps = setup();
             let stale = json!({"device": "other-host", "session": "s1", "since": stamp(-300), "seen": stamp(-240)});
-            gate(
-                &fx,
-                json!([export(
-                    json!({"stage": "pr-open", "babysit": {"at": "2026-01-01T00:00:00Z", "by": "dashboard"}})
-                )]),
-            );
-            gate(&fx, json!([export(json!({"claim": stale}))]));
+            for job in [
+                export(
+                    json!({"stage": "pr-open", "babysit": {"at": "2026-01-01T00:00:00Z", "by": "dashboard"}}),
+                ),
+                export(json!({"claim": stale})),
+            ] {
+                ps.clear_calls();
+                ps.jobs(json!([job]));
+                assert_eq!(
+                    ps.pickup(&[]),
+                    out_err(0, "synced 042-sample-export alpha: merged on GitHub\n", "")
+                );
+                assert_eq!(ps.puts(), [("PUT".to_string(), "/api/board".to_string())]);
+                let job = ps.job("042-sample-export");
+                assert_eq!(
+                    (&job["stage"], &job["note"]),
+                    (&json!("merged"), &json!("merged on GitHub"))
+                );
+                assert_eq!(keys(&job["github"]), ["merged"]);
+                assert_eq!(job["done"], job["updated"]);
+                for key in ["needs", "automerge", "babysit", "claim"] {
+                    assert!(job.get(key).is_none(), "{key}");
+                }
+                ps.clear_calls();
+                ps.assert_silent(ps.pickup(&[]));
+            }
         }
 
         #[test]
         fn test_merged_pr_records_the_head() {
-            let (fx, _) = setup();
-            gate(&fx, json!([export(json!({}))]));
+            let ps = setup();
+            for (head, recorded) in [(oid(), true), ("not-a-sha".to_string(), false)] {
+                ps.heads.borrow_mut().insert(7, head.clone());
+                ps.jobs(json!([export(json!({}))]));
+                assert_eq!(
+                    ps.pickup(&[]),
+                    out_err(0, "synced 042-sample-export alpha: merged on GitHub\n", "")
+                );
+                let github = ps.job("042-sample-export")["github"].clone();
+                if recorded {
+                    assert_eq!(keys(&github), ["head", "merged"]);
+                    assert_eq!(github["head"], head);
+                } else {
+                    assert_eq!(keys(&github), ["merged"]);
+                }
+            }
         }
 
         #[test]
         fn test_two_merged_prs_make_one_board_write() {
-            let (fx, _) = setup();
-            gate(&fx, json!([export(json!({})), sample_import(json!({}))]));
+            let ps = setup();
+            *ps.states.borrow_mut() = BTreeMap::from([(7, "MERGED"), (8, "MERGED")]);
+            ps.jobs(json!([export(json!({})), sample_import(json!({}))]));
+            let (code, out, _) = ps.pickup(&[]);
+            assert_eq!(code, 0);
+            assert!(out.contains("synced 042-sample-export alpha: merged on GitHub\nsynced 043-sample-import alpha: merged on GitHub\n"));
+            assert_eq!(ps.puts().iter().filter(|c| c.1 == "/api/board").count(), 1);
+            assert_eq!(
+                (
+                    ps.job("042-sample-export")["stage"].clone(),
+                    ps.job("043-sample-import")["stage"].clone()
+                ),
+                (json!("merged"), json!("merged"))
+            );
         }
 
         #[test]
         fn test_closed_pr_closes_the_job() {
-            let (fx, files) = setup();
-            gate(&fx, json!([sample_import(json!({}))]));
-            assert!(files.is_empty());
+            let ps = setup();
+            ps.jobs(json!([sample_import(json!({}))]));
+            assert_eq!(
+                ps.pickup(&[]),
+                out_err(
+                    0,
+                    "synced 043-sample-import alpha: PR closed on GitHub\nclosed 043-sample-import alpha\n",
+                    ""
+                )
+            );
+            assert_eq!(
+                ps.puts(),
+                [
+                    ("PUT".to_string(), "/api/board".to_string()),
+                    ("PUT".into(), DECISION.into()),
+                    ("PUT".into(), "/api/board".into())
+                ]
+            );
+            let job = ps.job("043-sample-import");
+            let at = job["close"]["at"].as_str().unwrap().to_string();
+            assert_eq!(ps.files.get(DECISION).unwrap(), format!(
+                "CLOSED: PR closed on GitHub\n\n**Summary.** GitHub reported pull request {PR8} closed without merging, so factory.py pickup closed the job at {at} while at stage `pr-open`. Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- GitHub reported the pull request closed. Pickup queued the close at {at}.\n- Stage when closed: `pr-open`, round 0.\n- Branch: `factory/043-sample-import`.\n- Pull request: {PR8}, already closed.\n- Written by factory.py pickup on host-a.\n\n## Left out\n\n- No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` ref if the work is still wanted.\n- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup alpha/043-sample-import` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup alpha/043-sample-import` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n"));
+            assert_eq!(
+                (&job["stage"], &job["note"]),
+                (&json!("closed"), &json!("PR closed on GitHub"))
+            );
+            assert_eq!(keys(&job["close"]), ["at", "closed", "reason", "via"]);
+            assert_eq!(job["close"]["via"], "github");
+            ps.clear_calls();
+            ps.assert_silent(ps.pickup(&[]));
         }
 
         #[test]
         fn test_a_host_named_github_still_closes_the_pr() {
-            let (fx, files) = setup();
-            fx.jobs(json!([sample_import(json!({"close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z", "by": "github", "via": "chat"}}))]));
-            assert_deferred_run(&fx, &[], "PR close");
-            assert!(files.is_empty());
+            let ps = setup();
+            let asked = Rc::new(RefCell::new(Vec::new()));
+            let log = asked.clone();
+            ps.set_fakes(|f| {
+                f.close_pull_request = Some(Rc::new(move |_, j, _| {
+                    log.borrow_mut().push(text_of(j.get("pr")));
+                    Ok(("already closed", String::new()))
+                }))
+            });
+            ps.jobs(json!([sample_import(json!({"close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z", "by": "github", "via": "chat"}}))]));
+            assert_eq!(
+                ps.pickup(&[]),
+                out_err(0, "closed 043-sample-import alpha\n", "")
+            );
+            assert_eq!(*asked.borrow(), [PR8]);
+            assert!(ps
+                .files
+                .get(DECISION)
+                .unwrap()
+                .contains("Closed from the dashboard"));
+        }
+
+        fn worktree_with_work(ps: &Ps, work: bool) -> PathBuf {
+            let wt = job_worktree(ps);
+            if work {
+                fs::write(wt.join("work.txt"), "work\n").unwrap();
+                git_in(&wt, &["add", "work.txt"]);
+                git_in(
+                    &wt,
+                    &[
+                        "-c",
+                        "user.name=Test",
+                        "-c",
+                        "user.email=test@example.invalid",
+                        "commit",
+                        "-q",
+                        "-m",
+                        "work",
+                    ],
+                );
+            }
+            wt
         }
 
         #[test]
         fn test_merged_job_is_cleaned_once_per_host() {
-            let (fx, _) = setup();
-            job_worktree(&fx);
-            gate(&fx, json!([export(json!({"port": 8230}))]));
+            let ps = setup();
+            let wt = worktree_with_work(&ps, false);
+            ps.jobs(json!([export(json!({"port": 8230}))]));
+            assert_eq!(
+                ps.pickup(&[]),
+                out_err(
+                    0,
+                    "synced 042-sample-export alpha: merged on GitHub\ncleaned up 042-sample-export alpha\n",
+                    ""
+                )
+            );
+            assert!(!wt.exists());
+            assert_eq!(
+                git_in(
+                    &ps.repo_a,
+                    &["branch", "--list", "factory/042-sample-export"]
+                ),
+                ""
+            );
+            let job = ps.job("042-sample-export");
+            assert_eq!(keys(&job["github"]), ["cleanup", "merged"]);
+            assert_eq!(keys(&job["github"]["cleanup"]), [DEVICE]);
+            assert_eq!(job["github"]["cleanup"][DEVICE]["left"], json!([]));
+            assert!(job.get("port").is_none());
+            assert_eq!(
+                ps.puts(),
+                [
+                    ("PUT".to_string(), "/api/board".to_string()),
+                    ("PUT".into(), "/api/board".into())
+                ]
+            );
+            git_in(
+                &ps.repo_a,
+                &[
+                    "worktree",
+                    "add",
+                    "-q",
+                    &wt.display().to_string(),
+                    "-b",
+                    "factory/042-sample-export",
+                ],
+            );
+            ps.clear_calls();
+            ps.assert_silent(ps.pickup(&[]));
+            assert!(wt.exists());
         }
 
         #[test]
         fn test_merged_job_deletes_a_branch_main_lacks() {
-            let (fx, _) = setup();
-            job_worktree(&fx);
-            gate(&fx, json!([export(json!({"port": 8230}))]));
+            let ps = setup();
+            let wt = worktree_with_work(&ps, true);
+            let head = git_in(&wt, &["rev-parse", "HEAD"]).trim().to_string();
+            ps.heads.borrow_mut().insert(7, head.clone());
+            ps.jobs(json!([export(json!({"port": 8230}))]));
+            assert_eq!(
+                ps.pickup(&[]),
+                out_err(
+                    0,
+                    "synced 042-sample-export alpha: merged on GitHub\ncleaned up 042-sample-export alpha\n",
+                    ""
+                )
+            );
+            assert!(!wt.exists());
+            assert_eq!(
+                git_in(
+                    &ps.repo_a,
+                    &["branch", "--list", "factory/042-sample-export"]
+                ),
+                ""
+            );
+            let job = ps.job("042-sample-export");
+            assert_eq!(job["github"]["head"], head);
+            assert_eq!(job["github"]["cleanup"][DEVICE]["left"], json!([]));
         }
 
-        /// The board command belongs to the claims slice and is not ported yet, so it writes nothing.
         #[test]
         fn test_board_refuses_a_github_patch() {
-            let (fx, _) = setup();
-            fx.jobs(json!([export(json!({}))]));
-            let home = fx.home.display().to_string();
+            let ps = setup();
+            ps.jobs(json!([export(json!({}))]));
             assert_eq!(
-                crate::cli::main(vec![
-                    "board".into(),
-                    home.into(),
-                    "042-sample-export".into()
-                ]),
-                2
+                board_patch(
+                    &ps,
+                    "042-sample-export",
+                    json!({"github": {"merged": "2026-01-02T12:00:00Z"}})
+                ),
+                (
+                    2,
+                    "factory.py: only factory.py pickup sets github. Nothing was written.\n".into()
+                )
             );
-            assert!(fx.puts().is_empty());
+            assert!(ps.puts().is_empty());
         }
 
         #[test]
         fn test_one_read_per_repo_across_projects() {
-            let (fx, _) = setup();
-            gate(
-                &fx,
-                json!([export(json!({})), sample_import(json!({"project": "beta"}))]),
+            let ps = setup();
+            ps.states.borrow_mut().clear();
+            ps.jobs(json!([
+                export(json!({})),
+                sample_import(json!({"project": "beta"}))
+            ]));
+            ps.assert_silent(ps.pickup(&[]));
+            assert_eq!(
+                *ps.reads.borrow(),
+                [("sample/alpha".to_string(), vec![7, 8])]
             );
         }
 
         #[test]
         fn test_skips_a_pr_number_past_nine_digits() {
-            let (fx, _) = setup();
-            fx.jobs(json!([export(
-                json!({"pr": "https://github.com/sample/alpha/pull/9999999999"})
-            )]));
-            fx.assert_silent(fx.pickup(&[]));
-            gate(
-                &fx,
-                json!([
-                    export(json!({"pr": "https://github.com/sample/alpha/pull/9999999999"})),
-                    sample_import(json!({}))
-                ]),
+            let ps = setup();
+            ps.jobs(json!([
+                export(json!({"pr": "https://github.com/sample/alpha/pull/9999999999"})),
+                sample_import(json!({}))
+            ]));
+            assert_eq!(
+                ps.pickup(&[]),
+                out_err(
+                    0,
+                    "synced 043-sample-import alpha: PR closed on GitHub\nclosed 043-sample-import alpha\n",
+                    ""
+                )
             );
+            assert_eq!(*ps.reads.borrow(), [("sample/alpha".to_string(), vec![8])]);
+            assert_eq!(ps.job("042-sample-export")["stage"], "needs-human");
         }
 
         #[test]
         fn test_all_open_is_silent() {
-            let (fx, _) = setup();
-            gate(&fx, json!([export(json!({})), sample_import(json!({}))]));
+            let ps = setup();
+            *ps.states.borrow_mut() = BTreeMap::from([(7, "OPEN"), (8, "OPEN")]);
+            ps.jobs(json!([export(json!({})), sample_import(json!({}))]));
+            ps.assert_silent(ps.pickup(&[]));
         }
 
         #[test]
         fn test_dry_run_prints_and_writes_nothing() {
-            let (fx, _) = setup();
-            gate(&fx, json!([export(json!({})), sample_import(json!({}))]));
+            let ps = setup();
+            ps.jobs(json!([export(json!({})), sample_import(json!({}))]));
+            assert_eq!(
+                ps.pickup(&["--dry-run"]),
+                out_err(
+                    0,
+                    "would sync 042-sample-export alpha: merged on GitHub\nwould sync 043-sample-import alpha: PR closed on GitHub\nhost host-a: would launch 0\n",
+                    ""
+                )
+            );
+            assert!(ps.puts().is_empty());
         }
 
         #[test]
         fn test_a_failed_read_warns_and_later_passes_run() {
-            let (fx, _) = setup();
-            gate(
-                &fx,
-                json!([export(json!({})), sample_import(json!({})), {"id": "044-sample-close", "stage": "build", "project": "alpha", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}}]),
-            );
+            let ps = setup();
+            for why in [
+                "gh is not installed on host-a",
+                "gh api graphql timed out after 60 seconds on host-a",
+                "gh api graphql exited 1 (check gh auth status on host-a)",
+                "gh api graphql returned no repository (check the project file's repo and gh auth status on host-a)",
+            ] {
+                *ps.failure.borrow_mut() = Some(why.to_string());
+                ps.jobs(json!([export(json!({})), sample_import(json!({})), {"id": "044-sample-close", "stage": "build", "project": "alpha", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}}]));
+                assert_eq!(
+                    ps.pickup(&[]),
+                    out_err(
+                        0,
+                        "closed 044-sample-close alpha\n",
+                        &format!("factory.py: pickup skips the PR sync for sample/alpha: {why}\n")
+                    )
+                );
+                assert_eq!(
+                    (
+                        ps.job("042-sample-export")["stage"].clone(),
+                        ps.job("043-sample-import")["stage"].clone()
+                    ),
+                    (json!("needs-human"), json!("pr-open"))
+                );
+            }
         }
 
         #[test]
         fn test_syncs_the_first_hundred_pull_requests_of_a_repo() {
-            let (fx, _) = setup();
+            let ps = setup();
+            ps.states.borrow_mut().clear();
             let jobs: Vec<Value> = (1..102).map(|n| sample_import(json!({"id": format!("{n:03}-sample"), "pr": format!("https://github.com/sample/alpha/pull/{n}")}))).collect();
-            fx.jobs(Value::Array(jobs));
-            assert_eq!(fx.pickup(&[]), out_err(2, "", "factory.py: pickup syncs the first 100 of 101 pull requests in sample/alpha\nfactory.py: pickup PR state sync is not ported to the Rust binary yet\n"));
+            ps.jobs(Value::Array(jobs));
+            assert_eq!(
+                ps.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: pickup syncs the first 100 of 101 pull requests in sample/alpha\n"
+                )
+            );
+            assert_eq!(
+                *ps.reads.borrow(),
+                [("sample/alpha".to_string(), (1..101).collect::<Vec<u64>>())]
+            );
         }
 
         #[test]
         fn test_skips_claimed_closing_riders_unlisted_hosts_and_other_repos() {
-            let (fx, _) = setup();
-            fx.jobs(json!([
+            let ps = setup();
+            *ps.states.borrow_mut() = (7..12).map(|n| (n, "MERGED")).collect();
+            ps.jobs(json!([
                 export(json!({"claim": held("other-host")})),
                 sample_import(json!({"close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}})),
                 export(json!({"id": "045-sample-rider", "pr": "https://github.com/sample/alpha/pull/9", "refs": [{"id": "042-sample-export", "kind": "batched-into"}]})),
                 export(json!({"id": "046-sample-delta", "project": "delta", "pr": "https://github.com/sample/alpha/pull/10"})),
                 export(json!({"id": "047-sample-other", "pr": "https://github.com/sample/other/pull/11"}))]));
-            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            let (code, out, err) = ps.pickup(&["--dry-run"]);
             assert_eq!((code, err.as_str()), (0, ""));
             assert_eq!(
                 lines(&out),
@@ -14170,7 +15529,8 @@ exit "$archive_code"
                     "host host-a: would launch 0"
                 ]
             );
-            assert!(fx.puts().is_empty());
+            assert!(ps.reads.borrow().is_empty());
+            assert!(ps.puts().is_empty());
         }
     }
 
@@ -14240,6 +15600,18 @@ exit "$archive_code"
     }
 
     /// A command another slice owns is not ported yet: it exits 2 and writes nothing.
+    /// The board command's write of patch, as its stdin would carry it: (code, stderr).
+    pub(super) fn board_patch(fx: &Fx, id: &str, patch: Value) -> (i32, String) {
+        let opts = claims::WriteOpts {
+            show: true,
+            verdict: None,
+            rewrite_round: None,
+        };
+        let e = claims::board_write(&fx.home, id, patch.as_object().unwrap().clone(), &opts)
+            .unwrap_err();
+        (e.code, e.stderr)
+    }
+
     pub(super) fn assert_other_slice(fx: &Fx, argv: &[&str]) {
         let mut args = vec!["--home".into(), fx.home.display().to_string().into()];
         args.extend(argv.iter().map(|a| std::ffi::OsString::from(*a)));
@@ -14457,8 +15829,18 @@ exit "$archive_code"
         fn test_board_rejects_notes_read() {
             let fx = Fx::new();
             fx.jobs(json!([denied("007-csv-export", "alpha", json!({}))]));
-            let home = fx.home.display().to_string();
-            assert_other_slice(&fx, &["board", &home, "007-csv-export"]);
+            assert_eq!(
+                board_patch(
+                    &fx,
+                    "007-csv-export",
+                    json!({"backlog": {"notes_read": "x"}})
+                ),
+                (
+                    2,
+                    "factory.py: only factory.py deny-notes sets backlog.notes_read\n".into()
+                )
+            );
+            assert!(fx.calls().is_empty());
         }
     }
 
@@ -15281,11 +16663,77 @@ exit "$archive_code"
         }
     }
 
-    /// Reading PR signals waits on the checks slice. A pr-open job in such a project reaches the PR
-    /// state sync first, which waits on the same slice, so each test checks that gate and calls the
-    /// pass on its own for its skip lines.
+    /// Python's AutoBabysitTest with pr_signals faked as Python patches it. Its pr_signals and
+    /// pr_signal tests live in checks.rs; here the same names check what the pass does with a
+    /// parsed answer.
     mod auto_babysit_test {
         use super::*;
+
+        const HEAD: &str = "abc12340000000000000000000000000000000000";
+        const LINT: &str = "check:da966368ea663ea5";
+        const THREAD: &str = "thread:892c9835f792e6f5";
+
+        type Read = (String, Vec<u64>, BTreeMap<u64, Map<String, Value>>);
+
+        /// The pr_signals fake: it logs each read, applies race to 042-sample-export's board row,
+        /// then fails with failure or answers from signals.
+        struct Sig {
+            signals: Rc<RefCell<BTreeMap<u64, (Value, Option<&'static str>)>>>,
+            reads: Rc<RefCell<Vec<Read>>>,
+            failure: Rc<RefCell<Option<String>>>,
+            race: Rc<RefCell<Option<Value>>>,
+        }
+
+        fn signals(fx: &Fx) -> Sig {
+            let sig = Sig {
+                signals: Rc::new(RefCell::new(BTreeMap::new())),
+                reads: Rc::new(RefCell::new(Vec::new())),
+                failure: Rc::new(RefCell::new(None)),
+                race: Rc::new(RefCell::new(None)),
+            };
+            let (signals, reads, failure, race, state) = (
+                sig.signals.clone(),
+                sig.reads.clone(),
+                sig.failure.clone(),
+                sig.race.clone(),
+                fx.state.clone(),
+            );
+            fx.set_fakes(|f| {
+                f.pr_signals = Some(Rc::new(move |repo, numbers, _, handled| {
+                    reads
+                        .borrow_mut()
+                        .push((repo.to_string(), numbers.to_vec(), handled.clone()));
+                    if let Some(race) = race.borrow().clone() {
+                        let mut st = state.borrow_mut();
+                        let job = st.board["jobs"]
+                            .as_array_mut()
+                            .unwrap()
+                            .iter_mut()
+                            .find(|j| j["id"] == "042-sample-export")
+                            .unwrap();
+                        for (k, v) in race.as_object().unwrap() {
+                            job[k] = v.clone();
+                        }
+                    }
+                    if let Some(why) = failure.borrow().clone() {
+                        return Err(why);
+                    }
+                    Ok(numbers
+                        .iter()
+                        .filter_map(|n| Some((*n, signals.borrow().get(n)?.clone())))
+                        .collect())
+                }))
+            });
+            sig
+        }
+
+        fn fix_ci() -> (Value, Option<&'static str>) {
+            (json!(HEAD), Some("fix-ci"))
+        }
+
+        fn handled(entries: Value) -> Map<String, Value> {
+            entries.as_object().unwrap().clone()
+        }
 
         fn setup() -> Fx {
             let fx = Fx::new();
@@ -15361,32 +16809,94 @@ exit "$archive_code"
             )
         }
 
-        fn gate(fx: &Fx, jobs: Value) {
-            fx.jobs(jobs.clone());
-            for args in [&[][..], &["--dry-run"]] {
-                assert_deferred_run(fx, args, "PR state sync");
-            }
-            assert_eq!(pass(fx, true), out_err(2, "", "factory.py: pickup auto-babysit PR signals is not ported to the Rust binary yet\n"));
-            assert!(fx.puts().is_empty());
-            assert_eq!(fx.state.borrow().board["jobs"], jobs);
-        }
-
         fn one(extra: Value) -> Value {
             json!([export("042-sample-export", "alpha", 7, extra)])
+        }
+
+        fn board_puts(fx: &Fx) -> usize {
+            fx.puts().iter().filter(|c| c.1 == "/api/board").count()
         }
 
         #[test]
         fn test_dry_run_and_launch() {
             let fx = setup();
-            gate(
-                &fx,
-                one(json!({"priority": {"at": "2026-01-01T00:00:00Z"}})),
+            let sig = signals(&fx);
+            fx.jobs(one(json!({"priority": {"at": "2026-01-01T00:00:00Z"}})));
+            sig.signals.borrow_mut().insert(7, fix_ci());
+            let idle = format!("host {DEVICE}: would launch 0\n");
+            let line = "042-sample-export alpha: PR #7 has a failing required check (1 of 3)";
+            assert_eq!(
+                fx.pickup(&["--dry-run"]),
+                out_err(0, &format!("would auto-babysit {line}\n{idle}"), "")
+            );
+            assert!(fx.puts().is_empty());
+            assert_eq!(
+                *sig.reads.borrow(),
+                [(
+                    "sample/alpha".to_string(),
+                    vec![7],
+                    BTreeMap::from([(7, Map::new())])
+                )]
+            );
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let job = fx.job("042-sample-export");
+            let tag = job["claim"]["session"].as_str().unwrap().to_string();
+            assert_eq!(
+                out,
+                format!("auto-babysat {line}\nlaunched babysit 042-sample-export alpha on primary session {tag}\n")
+            );
+            let at = job["babysit"]["at"].clone();
+            assert_eq!(
+                job["babysit"],
+                json!({"at": at, "via": "pickup", "by": DEVICE, "reason": "fix-ci"})
+            );
+            assert_eq!(
+                job["auto_babysit"],
+                json!({"count": 1, "head": HEAD, "reason": "fix-ci", "at": at})
+            );
+            assert_eq!(
+                job["note"],
+                "auto-babysitting PR #7: it has a failing required check"
+            );
+            assert_eq!(job["priority"], json!({"at": "2026-01-01T00:00:00Z"}));
+            assert!(job.get("needs").is_none());
+            assert!(fx.launched()[0].argv[7].contains("/factory babysit 042-sample-export"));
+            {
+                let mut st = fx.state.borrow_mut();
+                let row = st.board["jobs"][0].as_object_mut().unwrap();
+                row.shift_remove("babysit");
+                row.shift_remove("claim");
+            }
+            fx.clear_calls();
+            assert_eq!(
+                fx.pickup(&["--dry-run"]),
+                out_err(
+                    0,
+                    &format!("skip auto-babysit 042-sample-export alpha: already babysat fix-ci at abc1234\n{idle}"),
+                    ""
+                )
+            );
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert!(fx.puts().is_empty());
+            sig.signals.borrow_mut().insert(
+                7,
+                (json!(format!("def5678{}", "0".repeat(33))), Some("fix-ci")),
+            );
+            assert_eq!(
+                fx.pickup(&["--dry-run"]),
+                out_err(
+                    0,
+                    &format!("would auto-babysit 042-sample-export alpha: PR #7 has a failing required check (2 of 3)\n{idle}"),
+                    ""
+                )
             );
         }
 
         #[test]
         fn test_guards() {
             let fx = setup();
+            let sig = signals(&fx);
             fx.jobs(json!([
                 export("043-sample-export", "alpha", 13, json!({"auto_babysit": {"count": 3, "head": "x", "reason": "rebase"}})),
                 export("044-sample-export", "alpha", 14, json!({"needs": "approve PR #14"})),
@@ -15401,113 +16911,233 @@ exit "$archive_code"
                 export("053-sample-export", "beta", 23, json!({})),
                 export("054-sample-export", "echo", 24, json!({})),
                 export("055-sample-export", "fox", 25, json!({}))]));
-            let (code, out, err) = pass(&fx, true);
+            *sig.signals.borrow_mut() = (13..26).map(|n| (n, fix_ci())).collect();
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
             assert_eq!((code, err.as_str()), (0, ""));
-            assert_eq!(lines(&out), ["skip auto-babysit 043-sample-export alpha: 3 of 3 automatic babysits used", "skip auto-babysit 049-sample-export alpha: claimed by other-host session s1", "skip auto-babysit 054-sample-export echo: no Babysit note", &format!("skip auto-babysit 055-sample-export fox: pickup does not list host {DEVICE}")]);
-            assert!(fx.puts().is_empty());
+            let skips: Vec<&str> = lines(&out)
+                .into_iter()
+                .filter(|l| l.contains("auto-babysit"))
+                .collect();
+            assert_eq!(
+                skips,
+                [
+                    "skip auto-babysit 043-sample-export alpha: 3 of 3 automatic babysits used",
+                    "skip auto-babysit 049-sample-export alpha: claimed by other-host session s1",
+                    "skip auto-babysit 054-sample-export echo: no Babysit note",
+                    &format!("skip auto-babysit 055-sample-export fox: pickup does not list host {DEVICE}")
+                ]
+            );
+            assert!(sig.reads.borrow().is_empty() && fx.puts().is_empty());
+            let (_, out, _) = fx.pickup(&[]);
+            assert!(!out.contains("auto-babysat"));
+            assert!(fx.job("044-sample-export").get("auto_babysit").is_none());
+            assert!(sig.reads.borrow().is_empty());
         }
 
         #[test]
         fn test_a_failed_read_skips_the_repo() {
             let fx = setup();
-            gate(&fx, one(json!({})));
+            let sig = signals(&fx);
+            fx.jobs(one(json!({})));
+            sig.signals.borrow_mut().insert(7, fix_ci());
+            *sig.failure.borrow_mut() = Some("gh is not installed on host-a".into());
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "",
+                    "factory.py: pickup skips auto-babysit for sample/alpha: gh is not installed on host-a\n"
+                )
+            );
+            assert_eq!(sig.reads.borrow().len(), 1);
+            assert!(fx.puts().is_empty());
+            assert!(fx.job("042-sample-export").get("babysit").is_none());
         }
 
         #[test]
         fn test_over_the_limit_reads_the_oldest_first() {
             let fx = setup();
+            let sig = signals(&fx);
             fx.set_fakes(|f| f.auto_babysit_limit = Some(1));
             fx.jobs(json!([export("042-sample-export", "alpha", 7, json!({"auto_babysit": {"count": 1, "head": "x", "reason": "rebase", "at": "2026-01-02T00:00:00Z"}})), export("043-sample-export", "alpha", 8, json!({}))]));
-            assert_eq!(pass(&fx, false), out_err(2, "", "factory.py: pickup checks 1 of 2 auto-babysit candidates for sample/alpha this run, oldest automatic babysit first\nfactory.py: pickup auto-babysit PR signals is not ported to the Rust binary yet\n"));
+            let (code, _, err) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert_eq!(
+                *sig.reads.borrow(),
+                [(
+                    "sample/alpha".to_string(),
+                    vec![8],
+                    BTreeMap::from([(8, Map::new())])
+                )]
+            );
+            assert_eq!(err, "factory.py: pickup checks 1 of 2 auto-babysit candidates for sample/alpha this run, oldest automatic babysit first\n");
         }
 
         #[test]
         fn test_the_write_rechecks_the_job() {
             let fx = setup();
-            gate(&fx, one(json!({})));
+            let sig = signals(&fx);
+            for race in [
+                json!({"babysit": {"at": "2026-01-02T12:00:00Z", "by": "dashboard"}}),
+                json!({"auto_babysit": {"count": 3, "head": "x", "reason": "rebase"}}),
+            ] {
+                fx.clear_calls();
+                fx.jobs(one(json!({})));
+                sig.signals.borrow_mut().insert(7, fix_ci());
+                *sig.race.borrow_mut() = Some(race.clone());
+                assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+                assert!(fx.puts().is_empty());
+                assert_eq!(
+                    fx.job("042-sample-export"),
+                    export("042-sample-export", "alpha", 7, race)
+                );
+            }
         }
 
         #[test]
         fn test_two_jobs_make_one_board_write() {
             let fx = setup();
-            gate(
-                &fx,
-                json!([
-                    export("042-sample-export", "alpha", 7, json!({})),
-                    export("043-sample-export", "alpha", 8, json!({}))
-                ]),
-            );
+            let sig = signals(&fx);
+            fx.jobs(json!([
+                export("042-sample-export", "alpha", 7, json!({})),
+                export("043-sample-export", "alpha", 8, json!({}))
+            ]));
+            *sig.signals.borrow_mut() = BTreeMap::from([(7, fix_ci()), (8, fix_ci())]);
+            let (code, out, err) = pass(&fx, false);
+            assert_eq!((code, err.as_str(), board_puts(&fx)), (0, "", 1));
+            assert_eq!(out, "auto-babysat 042-sample-export alpha: PR #7 has a failing required check (1 of 3)\nauto-babysat 043-sample-export alpha: PR #8 has a failing required check (1 of 3)\n");
+            for job_id in ["042-sample-export", "043-sample-export"] {
+                assert_eq!(fx.job(job_id)["auto_babysit"]["count"], 1);
+            }
         }
 
         #[test]
         fn test_the_write_rechecks_each_row() {
             let fx = setup();
-            gate(
-                &fx,
-                json!([
-                    export("042-sample-export", "alpha", 7, json!({})),
-                    export("043-sample-export", "alpha", 8, json!({}))
-                ]),
-            );
+            let sig = signals(&fx);
+            fx.jobs(json!([
+                export("042-sample-export", "alpha", 7, json!({})),
+                export("043-sample-export", "alpha", 8, json!({}))
+            ]));
+            *sig.signals.borrow_mut() = BTreeMap::from([(7, fix_ci()), (8, fix_ci())]);
+            *sig.race.borrow_mut() =
+                Some(json!({"babysit": {"at": "2026-01-02T12:00:00Z", "by": "dashboard"}}));
+            let (code, out, err) = pass(&fx, false);
+            assert_eq!((code, err.as_str(), board_puts(&fx)), (0, "", 1));
+            assert_eq!(out, "auto-babysat 043-sample-export alpha: PR #8 has a failing required check (1 of 3)\n");
+            assert!(fx.job("042-sample-export").get("auto_babysit").is_none());
+            assert_eq!(fx.job("043-sample-export")["auto_babysit"]["count"], 1);
         }
 
-        /// The board command belongs to the claims slice and is not ported yet, so it writes nothing.
         #[test]
         fn test_board_refuses_the_field() {
             let fx = setup();
             fx.jobs(one(json!({})));
-            let home = fx.home.display().to_string();
-            assert_other_slice(&fx, &["board", &home, "042-sample-export"]);
+            assert_eq!(
+                board_patch(
+                    &fx,
+                    "042-sample-export",
+                    json!({"auto_babysit": {"count": 0}})
+                ),
+                (
+                    2,
+                    "factory.py: only factory.py pickup sets auto_babysit. Nothing was written.\n"
+                        .into()
+                )
+            );
+            assert!(fx.puts().is_empty());
         }
 
         #[test]
         fn test_pr_signals_sends_one_query_per_repo() {
             let fx = setup();
-            gate(
-                &fx,
-                json!([
-                    export("042-sample-export", "alpha", 7, json!({})),
-                    export("043-sample-export", "alpha", 8, json!({}))
-                ]),
+            let sig = signals(&fx);
+            fx.jobs(json!([
+                export("042-sample-export", "alpha", 7, json!({})),
+                export(
+                    "043-sample-export",
+                    "alpha",
+                    8,
+                    json!({"handled": {LINT: {"count": 3, "at": "2026-01-02T12:00:00Z"}}})
+                )
+            ]));
+            *sig.signals.borrow_mut() = BTreeMap::from([(7, fix_ci()), (8, (json!(HEAD), None))]);
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("would auto-babysit 042-sample-export alpha: PR #7 has a failing required check (1 of 3)\nhost {DEVICE}: would launch 0\n"), ""));
+            assert_eq!(
+                *sig.reads.borrow(),
+                [(
+                    "sample/alpha".to_string(),
+                    vec![7, 8],
+                    BTreeMap::from([
+                        (7, Map::new()),
+                        (
+                            8,
+                            handled(json!({LINT: {"count": 3, "at": "2026-01-02T12:00:00Z"}}))
+                        )
+                    ])
+                )]
             );
         }
 
+        /// Each reason pr_signals reads prints its own copy.
         #[test]
         fn test_pr_signals_follow_the_reading_order() {
             let fx = setup();
-            gate(&fx, one(json!({})));
+            let sig = signals(&fx);
+            fx.jobs(one(json!({})));
+            for (reason, copy) in [
+                ("fix-reviews", "has an open review thread"),
+                ("rebase", "has a merge conflict"),
+                ("fix-ci", "has a failing required check"),
+            ] {
+                sig.signals
+                    .borrow_mut()
+                    .insert(7, (json!(HEAD), Some(reason)));
+                assert_eq!(
+                    lines(&fx.pickup(&["--dry-run"]).1)[0],
+                    format!("would auto-babysit 042-sample-export alpha: PR #7 {copy} (1 of 3)")
+                );
+            }
         }
 
+        /// A PR whose only signals are capped reads as no reason, and pickup leaves it alone.
         #[test]
         fn test_pr_signal_skips_capped_items() {
             let fx = setup();
-            gate(
-                &fx,
-                one(
-                    json!({"handled": {"check:da966368ea663ea5": {"count": 3, "at": "2026-01-02T12:00:00Z"}}}),
-                ),
-            );
+            let sig = signals(&fx);
+            fx.jobs(one(
+                json!({"handled": {LINT: {"count": 3, "at": "2026-01-02T12:00:00Z"}}}),
+            ));
+            sig.signals.borrow_mut().insert(7, (json!(HEAD), None));
+            fx.assert_silent(fx.pickup(&[]));
+            assert!(fx.job("042-sample-export").get("auto_babysit").is_none());
         }
 
         #[test]
         fn test_pr_signal_skips_handled_threads() {
             let fx = setup();
-            gate(
-                &fx,
-                one(
-                    json!({"handled": {"thread:892c9835f792e6f5": {"count": 1, "at": "2026-01-02T12:00:00Z"}}}),
-                ),
-            );
+            let sig = signals(&fx);
+            let thread = json!({THREAD: {"count": 1, "at": "2026-01-02T12:00:00Z"}});
+            fx.jobs(one(json!({"handled": thread})));
+            sig.signals.borrow_mut().insert(7, (json!(HEAD), None));
+            fx.assert_silent(fx.pickup(&[]));
+            assert_eq!(sig.reads.borrow()[0].2[&7], handled(thread));
         }
 
         #[test]
         fn test_pass_hands_handled_to_pr_signals() {
             let fx = setup();
-            gate(
-                &fx,
-                one(
-                    json!({"handled": {"check:da966368ea663ea5": {"count": 1, "at": "2026-01-02T12:00:00Z"}}}),
-                ),
+            let sig = signals(&fx);
+            let capped = json!({"count": 3, "at": "2026-01-02T12:00:00Z"});
+            fx.jobs(one(json!({"handled": {LINT: capped, "bogus": capped}})));
+            assert_eq!(fx.pickup(&["--dry-run"]).0, 0);
+            assert_eq!(
+                *sig.reads.borrow(),
+                [(
+                    "sample/alpha".to_string(),
+                    vec![7],
+                    BTreeMap::from([(7, handled(json!({LINT: capped})))])
+                )]
             );
         }
     }
@@ -16774,93 +18404,100 @@ exit "$archive_code"
         }
     }
 
-    mod deferred_passes {
+    mod board_jobs_test {
         use super::*;
 
-        fn assert_deferred(result: (i32, String, String), what: &str) {
-            assert_eq!(result.0, 2);
-            assert!(
-                result.2.ends_with(&format!(
-                    "factory.py: pickup {what} is not ported to the Rust binary yet\n"
-                )),
-                "{}",
-                result.2
-            );
+        /// Each pass that reads the board's jobs through ops::board_jobs, on one board.
+        fn run_passes(fx: &Fx, board: &Value) -> Vec<(&'static str, i32, String)> {
+            let paths = paths_of(&fx.home).unwrap();
+            let mut results = Vec::new();
+            for name in [
+                "audit push",
+                "worktree stop",
+                "PR close",
+                "close cleanup",
+                "PR state sync",
+                "auto-babysit",
+            ] {
+                let (mut out, mut err) = (Vec::new(), Vec::new());
+                let mut io = Io {
+                    out: &mut out,
+                    err: &mut err,
+                };
+                let mut data = board.clone();
+                let settings = &mut HashMap::new();
+                let (home, io) = (&fx.home, &mut io);
+                let result = match name {
+                    "audit push" => audit_pickup_push(io, home, Some(&data)),
+                    "worktree stop" => {
+                        move_stop_pass(io, home, &mut data, DEVICE, &paths, settings, false, None)
+                    }
+                    "PR close" => close_pass(io, home, &mut data, DEVICE, 120, false),
+                    "close cleanup" => {
+                        close_cleanup_pass(io, home, &mut data, DEVICE, &paths, settings, false)
+                    }
+                    "PR state sync" => {
+                        pr_sync_pass(io, home, &mut data, DEVICE, 120, &paths, settings, false)
+                    }
+                    _ => {
+                        auto_babysit_pass(io, home, &mut data, DEVICE, 120, &paths, settings, false)
+                    }
+                };
+                let e = result.unwrap_err();
+                results.push((name, e.code, e.stderr));
+            }
+            results
         }
 
-        fn alpha_repo(fx: &Fx) {
-            fs::create_dir_all(fx.home.join("projects")).unwrap();
+        #[test]
+        fn test_board_jobs_fails_closed() {
+            let fx = Fx::new();
+            fs::create_dir_all(fx.root.join("claude/projects")).unwrap();
+            let stderr = "factory.py: the board's jobs is not a list of objects\n";
+            for board in [json!({"jobs": [1]}), json!({"jobs": {}})] {
+                for (name, code, err) in run_passes(&fx, &board) {
+                    assert_eq!((code, err.as_str()), (1, stderr), "{name} on {board}");
+                }
+            }
+            assert!(fx.puts().is_empty());
+        }
+
+        /// A dry already-babysat line needs the PR head as text, where Python slices it.
+        #[test]
+        fn test_auto_babysit_head_not_a_string_fails() {
+            let fx = Fx::new();
+            fs::create_dir(fx.home.join("projects")).unwrap();
             fs::write(
                 fx.home.join("projects/alpha.md"),
                 "---\nrepo: sample/alpha\nauto_babysit: 3\n---\n",
             )
             .unwrap();
-            alpha_on(fx);
-        }
-
-        #[test]
-        fn pr_state_sync() {
-            let fx = Fx::new();
-            alpha_repo(&fx);
-            fx.jobs(json!([{"id": "042-sample-export", "stage": "pr-open", "project": "alpha", "pr": "https://github.com/sample/alpha/pull/7", "updated": "2026-01-01T00:00:00Z"}]));
-            assert_deferred(fx.pickup(&[]), "PR state sync");
-        }
-
-        #[test]
-        fn auto_babysit_pr_signals() {
-            let fx = Fx::new();
-            alpha_repo(&fx);
             fx.view(
                 "alpha",
                 200,
                 with(
                     effective("alpha", Some(json!({"pickup": on()})), None),
-                    json!({"stage_notes": {"babysit": [{"text": "Fix it."}]}}),
+                    json!({"stage_notes": {"babysit": ["Fix it."]}}),
                 ),
             );
-            let mut data = json!({"jobs": [{"id": "042-sample-export", "stage": "pr-open", "project": "alpha", "pr": "https://github.com/sample/alpha/pull/7", "updated": "2026-01-01T00:00:00Z"}]});
-            let (mut out, mut err) = (Vec::new(), Vec::new());
-            let mut io = Io {
-                out: &mut out,
-                err: &mut err,
-            };
-            let paths = paths_of(&fx.home).unwrap();
-            let e = auto_babysit_pass(
-                &mut io,
-                &fx.home,
-                &mut data,
-                DEVICE,
-                120,
-                &paths,
-                &mut HashMap::new(),
-                false,
-            )
-            .unwrap_err();
-            assert_eq!((e.code, e.stderr.as_str()), (2, "factory.py: pickup auto-babysit PR signals is not ported to the Rust binary yet\n"));
-        }
-
-        #[test]
-        fn pr_close() {
-            let fx = Fx::new();
-            alpha_on(&fx);
-            fx.jobs(json!([{"id": "042-sample-export", "stage": "build", "project": "alpha", "pr": "https://github.com/sample/alpha/pull/7", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z"}}]));
-            assert_deferred(fx.pickup(&[]), "PR close");
-        }
-
-        #[test]
-        fn close_cleanup() {
-            let fx = Fx::new();
-            alpha_on(&fx);
-            fs::create_dir_all(fx.home.join("worktrees/alpha/042-sample-export")).unwrap();
-            fx.jobs(json!([{"id": "042-sample-export", "stage": "closed", "project": "alpha", "updated": "2026-01-01T00:00:00Z", "close": {"reason": "Duplicate", "at": "2026-01-02T12:00:00Z", "closed": "2026-01-02T12:05:00Z"}}]));
-            assert_deferred(fx.pickup(&[]), "close cleanup");
-        }
-
-        #[test]
-        fn worktree_stop() {
-            let mv = Mv::new();
-            mv.moved(json!({}));
-            mv.gate();
+            fx.set_fakes(|f| {
+                f.pr_signals = Some(Rc::new(|_, _, _, _| {
+                    Ok(BTreeMap::from([(7, (json!(7), Some("fix-ci")))]))
+                }))
+            });
+            fx.jobs(
+                json!([{"id": "042-sample-export", "stage": "pr-open", "project": "alpha",
+                "pr": "https://github.com/sample/alpha/pull/7", "updated": "2026-01-01T00:00:00Z",
+                "auto_babysit": {"count": 1, "head": 7, "reason": "fix-ci"}}]),
+            );
+            assert_eq!(
+                fx.pickup(&["--dry-run"]),
+                out_err(
+                    1,
+                    "",
+                    "factory.py: auto-babysit 042-sample-export: PR head is not a string\n"
+                )
+            );
         }
     }
 }
