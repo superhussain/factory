@@ -364,10 +364,18 @@ fn workspace_project(cwd: &str, paths: &[(String, String)]) -> Option<String> {
 /// Paseo workspaces that no open board job owns. Only reads.
 pub(crate) fn orphan_scan(home: &Path) -> Res<(Vec<Value>, Vec<String>)> {
     let board = read_board(home)?;
-    let jobs = board["jobs"].as_array().cloned().unwrap_or_default();
+    let jobs = board_jobs(&board)?;
     let paths = read_paths(home);
     let gh = which("gh");
-    scan(home, &jobs, &paths, gh.as_deref(), which("paseo").is_some())
+    scan(home, jobs, &paths, gh.as_deref(), which("paseo").is_some())
+}
+
+/// The board's jobs, refusing anything but a list of objects, where Python would raise.
+fn board_jobs(board: &Value) -> Res<&[Value]> {
+    match board.get("jobs") {
+        Some(Value::Array(jobs)) if jobs.iter().all(Value::is_object) => Ok(jobs),
+        _ => Err(fail("the board's jobs is not a list of objects", 1)),
+    }
 }
 
 fn scan(
@@ -690,10 +698,8 @@ pub fn archive_workspace(call: &Call) -> Res<()> {
     }
     let agent = py_str(&session.unwrap()["agent"]);
     let board = read_board(&home)?;
-    let found = board["jobs"]
-        .as_array()
-        .into_iter()
-        .flatten()
+    let found = board_jobs(&board)?
+        .iter()
         .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id.as_str()));
     let Some(found) = found else {
         return Err(fail(
@@ -745,12 +751,14 @@ pub fn archive_workspace(call: &Call) -> Res<()> {
     let id = wks
         .and_then(Value::as_str)
         .filter(|w| PASEO_ID.is_full(w) && !w.starts_with('-'));
-    let worktree = fancy_regex::Regex::new(&format!(
-        r"\A(?:factory-{}(-\d+)?)\z",
-        job_id.replace('.', r"\.")
-    ))
-    .unwrap();
-    let ours = worktree.is_match(basename(&here)).unwrap_or(false);
+    let ours = basename(&here)
+        .strip_prefix(&format!("factory-{job_id}"))
+        .is_some_and(|rest| {
+            rest.is_empty()
+                || rest
+                    .strip_prefix('-')
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        });
     let (Some(wks), true, true) = (
         id,
         space.get("isolation").and_then(Value::as_str) == Some("worktree"),
@@ -1030,6 +1038,27 @@ mod tests {
         assert_eq!(early_reason(false, paseo), Some("not a Paseo session"));
         assert_eq!(early_reason(true, None), Some("paseo is not on PATH"));
         assert_eq!(early_reason(true, paseo), None);
+    }
+
+    #[test]
+    fn orphans_and_archive_refuse_a_malformed_board() {
+        let merged = json!({"id": "042-dark-mode", "project": "sample", "stage": "merged"});
+        for board in [
+            json!({}),
+            json!([1]),
+            json!({"jobs": {}}),
+            json!({"jobs": ["x"]}),
+            json!({"jobs": [5, merged]}),
+        ] {
+            let e = board_jobs(&board).unwrap_err();
+            assert_eq!(e.code, 1, "{board}");
+            assert_eq!(
+                e.stderr,
+                "factory.py: the board's jobs is not a list of objects\n"
+            );
+        }
+        let board = json!({"jobs": [merged]});
+        assert_eq!(board_jobs(&board).unwrap(), &[merged]);
     }
 
     #[cfg(unix)]
