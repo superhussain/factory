@@ -347,6 +347,7 @@
       "argv": ["--home", "{home}", "retro", "admit", "env-secret"],
       "home": "retro-admit",
       "stubs": {},
+      "routes": {},
       "exit": 2,
       "from": "tests/cli/test_retro.py::RetroAdmitTest.test_env_value_writes_nothing"
     },
