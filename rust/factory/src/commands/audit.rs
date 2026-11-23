@@ -9,7 +9,7 @@ use std::time::UNIX_EPOCH;
 use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
-use crate::commands::checks::pr_merge_commits;
+use crate::commands::checks::{pr_merge_commits, pr_states};
 use crate::commands::pipeline::fetch_base;
 use crate::shared::board::{dump_board, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
@@ -1896,10 +1896,12 @@ fn bench_draft(args: &[String]) -> Res<()> {
         })
         .collect();
     jobs.sort_by_key(|j| py_str(j.get("id")));
-    let mut prs = 0;
-    for j in jobs {
+    let mut prs: Vec<(String, i64)> = Vec::new();
+    for j in &jobs {
         match pr_parts(j.get("pr")) {
-            Some((pr_repo, _)) if pr_repo.to_lowercase() == repo.to_lowercase() => prs += 1,
+            Some((pr_repo, n)) if pr_repo.to_lowercase() == repo.to_lowercase() => {
+                prs.push((py_str(j.get("id")), n))
+            }
             _ => {
                 let repo = if repo.is_empty() {
                     "the project file repo"
@@ -1913,13 +1915,39 @@ fn bench_draft(args: &[String]) -> Res<()> {
             }
         }
     }
-    if prs > 0 {
-        return Err(not_ported("bench cases"));
+    let numbers: BTreeSet<u64> = prs.iter().map(|(_, n)| *n as u64).collect();
+    let numbers: Vec<u64> = numbers.into_iter().collect();
+    let device = retro_host()?;
+    let mut heads = std::collections::BTreeMap::new();
+    for chunk in numbers.chunks(50) {
+        let found =
+            pr_states(repo, chunk, &device).map_err(|why| fail(format!("bench: {why}"), 5))?;
+        heads.extend(found.into_iter().map(|(n, (_, head))| (n, head)));
     }
-    Err(fail(
-        format!("bench: no reverted or reworked jobs to draft in {slug}"),
-        3,
-    ))
+    let mut cases = Vec::new();
+    for j in &jobs {
+        let id = py_str(j.get("id"));
+        let Some((_, n)) = prs.iter().find(|(i, _)| *i == id) else {
+            continue;
+        };
+        match heads
+            .get(&(*n as u64))
+            .and_then(Value::as_str)
+            .filter(|h| COMMIT.is_full(h))
+        {
+            Some(head) => cases.push(json!({"id": j["id"], "pr": j["pr"], "head": head,
+                                            "source": j["outcome"]["result"], "defects": []})),
+            None => eprintln!("factory.py: bench cases skips {id}: no head commit from GitHub"),
+        }
+    }
+    if cases.is_empty() {
+        return Err(fail(
+            format!("bench: no reverted or reworked jobs to draft in {slug}"),
+            3,
+        ));
+    }
+    println!("{}", dumps(&json!({"cases": cases}), INDENT2));
+    Ok(())
 }
 
 pub fn bench_cmd(call: &Call) -> Res<()> {
