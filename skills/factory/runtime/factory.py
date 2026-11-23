@@ -5566,6 +5566,8 @@ def install_timer(home, scheduler):
         plist.parent.mkdir(parents=True, exist_ok=True)
         write_atomic(plist, text)
         setup_run(["launchctl", "bootout", f"gui/{uid}/factory.pickup"])
+        # A disabled label makes bootstrap fail with "5: Input/output error".
+        setup_run(["launchctl", "enable", f"gui/{uid}/factory.pickup"])
         code, out = setup_run(["launchctl", "bootstrap", f"gui/{uid}", str(plist)])
         done = f"installed launchd timer: {plist}"
     elif scheduler == "cron":
@@ -5587,7 +5589,8 @@ def install_timer(home, scheduler):
                                "/TR", str(cmd), "/F"])
         done = f"installed schtasks timer: {cmd}"
     if code:
-        fail(f"could not install the {scheduler} timer: {out.strip()}", 1)
+        label = " factory.pickup" if scheduler == "launchd" else ""
+        fail(f"could not install the {scheduler} timer{label}: {out.strip()}", 1)
     return done
 
 
