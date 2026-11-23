@@ -8,8 +8,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
-use crate::cli::{not_ported, Call};
+use crate::cli::Call;
 use crate::commands::claims::{self, mine};
+use crate::commands::{intake, retro};
 use crate::shared::board::{
     dump_board, escalated, lead_of, load_board, patch_job, read_board, riders_of,
 };
@@ -35,7 +36,8 @@ use crate::shared::py::{
 };
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2, NO_ASCII};
 use crate::shared::pyre::{translate, Flags, Pattern};
-use crate::shared::pyval::{py_str, truthy};
+use crate::shared::pyval::{py_eq, py_str, truthy};
+use crate::shared::redact::redact_values;
 use crate::shared::time::{format_stamp, now, parse_stamp, unix_now};
 use crate::shared::unicode::nfkc;
 
@@ -3101,10 +3103,23 @@ fn failure_class(code: &CheckExit, log: &Path) -> Option<&'static str> {
     }
 }
 
-/// The last lines of a failing check's log for pre-review.md, with secrets redacted.
-fn pre_review_tail(_log_text: &str, _env: &crate::shared::conf::Conf) -> Res<Vec<String>> {
-    // Deferred to integration: 2202-port-retro
-    Err(not_ported("pre-review"))
+/// The last PRE_REVIEW_TAIL lines of a failing check's log for pre-review.md: home .env values of
+/// ENV_SECRET_MIN or more characters and retro_redact's patterns as [redacted], each line printable, at most
+/// 300 characters, with ~ as -. Overlapping matches merge into one [redacted].
+fn pre_review_tail(log_text: &str, env: &crate::shared::conf::Conf) -> Res<Vec<String>> {
+    let text = redact_values(
+        log_text,
+        env.values().filter(|v| v.chars().count() >= ENV_SECRET_MIN),
+    );
+    let lines = splitlines(&text, false);
+    let tail: Vec<String> = lines[lines.len().saturating_sub(PRE_REVIEW_TAIL)..]
+        .iter()
+        .map(|l| l.chars().take(4000).collect())
+        .collect();
+    Ok(retro::retro_redact(&tail.join("\n"))
+        .split('\n')
+        .map(|l| printable_line(l, 300).replace('~', "-"))
+        .collect())
 }
 
 /// The raw id of the job's batched-into ref, as Python's `lead_of` returns it.
@@ -3414,6 +3429,8 @@ pub fn pre_review_cmd(call: &Call) -> Res<()> {
 
 const GROUNDING_USAGE: &str = "usage: grounding <project-slug>/<job-id> <round>";
 const GROUNDING_NEAR: i64 = 10;
+const GROUNDING_BOARD_MAX: usize = 20;
+const PRE_REVIEW_TAIL: usize = 40;
 #[cfg_attr(not(test), allow(dead_code))]
 const GROUNDING_ROWS_MAX: usize = 100;
 static CITATION: Pattern = Pattern::new(
@@ -3715,20 +3732,180 @@ fn grounding_report(
     out.join("\n") + "\n"
 }
 
-fn grounding(_home: &Path, _slug: &str, _job_id: &str, round_text: &str, _o: &mut Out) -> Res<()> {
+/// Everything grounding does after hold: check each citation, write grounding.md and the round's board entry.
+fn grounding(home: &Path, slug: &str, job_id: &str, round_text: &str, o: &mut Out) -> Res<()> {
     if !ROUND.is_full(round_text) {
         return Err(fail(
             format!("bad round {}. {GROUNDING_USAGE}", repr(round_text)),
             2,
         ));
     }
-    // Deferred to integration: 2194-port-claims and its hold sub-job
-    Err(not_ported("grounding"))
+    let n: usize = round_text.parse().unwrap_or(usize::MAX);
+    let data = read_board(home)?;
+    let job = data["jobs"].as_array().and_then(|jobs| {
+        jobs.iter()
+            .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
+    });
+    let rounds = job.and_then(|j| j.get("rounds")).and_then(Value::as_array);
+    let Some(rounds) = rounds.filter(|r| r.len() >= n && r[n - 1].is_object()) else {
+        return Err(fail(
+            format!("{job_id} has no rounds entry {n} on the board. Nothing was written."),
+            4,
+        ));
+    };
+    let md = project_files(home, slug)?.0;
+    let meta = frontmatter(&md)
+        .map_err(|e| fail(os_error(&e, Some(&md)), 1))?
+        .0;
+    let base = fm_get(&meta, "base")
+        .filter(|b| !b.is_empty())
+        .unwrap_or("main")
+        .to_string();
+    let repo = fm_get(&meta, "repo").unwrap_or("").to_string();
+    let riders = riders_of(&data, job_id);
+    let stacked = data["jobs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|r| r.get("stacked") == Some(&Value::Bool(true)))
+        .filter_map(|r| r.get("id").and_then(Value::as_str))
+        .find(|id| riders.iter().any(|r| r == id));
+    let wt = home
+        .join("worktrees")
+        .join(slug)
+        .join(stacked.unwrap_or(job_id));
+    let folder = home.join("jobs").join(slug).join(job_id);
+    let round_folder = folder.join(format!("round-{n}"));
+    let out_file = round_folder.join("grounding.md");
+    for node in [&folder, &round_folder, &out_file] {
+        if is_link(node).map_err(|e| fail(os_error(&e, Some(node)), 1))? {
+            return Err(fail(
+                format!(
+                    "{} is a symlink or junction; nothing was written",
+                    node.display()
+                ),
+                6,
+            ));
+        }
+    }
+    if !wt.is_dir() {
+        return Err(fail(
+            format!("no worktree at {}; nothing was written", wt.display()),
+            4,
+        ));
+    }
+    if !round_folder.is_dir() {
+        return Err(fail(
+            format!(
+                "no round folder at {}; nothing was written",
+                round_folder.display()
+            ),
+            4,
+        ));
+    }
+    let wt_text = wt.to_string_lossy().into_owned();
+    let git = |args: &[&str]| -> Option<String> {
+        let argv: Vec<&str> = ["git", "-C", &wt_text]
+            .into_iter()
+            .chain(args.iter().copied())
+            .collect();
+        capture(&argv, None, &[], None)
+            .ok()
+            .filter(|r| r.code == 0)
+            .map(|r| r.stdout)
+    };
+    let head = git(&["rev-parse", "HEAD"])
+        .map(|h| strip(&h).to_string())
+        .filter(|h| !h.is_empty());
+    let tracked: Vec<String> = git(&["ls-files", "-z"])
+        .unwrap_or_default()
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(String::from)
+        .collect();
+    let ranges = diff_ranges(&wt, &base, &repo);
+    let (mut rows, mut checked, mut files) = (Vec::new(), 0, 0);
+    for name in TRACER_REVIEWERS {
+        let review = format!("review-{name}.md");
+        let path = round_folder.join(&review);
+        if !path.is_file() || is_link(&path).unwrap_or(true) {
+            continue;
+        }
+        let raw = std::fs::read(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
+        let text = String::from_utf8_lossy(&raw);
+        if splitlines(&text, false).first().copied().unwrap_or("") == "VERDICT: SKIPPED" {
+            continue;
+        }
+        files += 1;
+        for c in find_citations(&text) {
+            checked += 1;
+            let (status, _, reason) = ground_citation(
+                &c.path,
+                &c.lines,
+                &wt,
+                &folder,
+                &tracked,
+                ranges.as_ref().ok(),
+                name == "code",
+                c.span,
+            );
+            if status != "ok" {
+                rows.push(GroundRow {
+                    review: review.clone(),
+                    citation: c.citation,
+                    status,
+                    reason,
+                });
+            }
+        }
+    }
+    let diff_reason = ranges.as_ref().err().map(String::as_str);
+    let report = grounding_report(&rows, head.as_deref(), &base, diff_reason, checked, files);
+    write_atomic(&out_file, report.as_bytes())
+        .map_err(|e| fail(os_error(&e, Some(&out_file)), 1))?;
+    let mut entry = rounds[n - 1].as_object().unwrap().clone();
+    entry.shift_remove("unverified");
+    if !rows.is_empty() {
+        let listed: Vec<Value> = rows
+            .iter()
+            .take(GROUNDING_BOARD_MAX)
+            .map(|r| json!(format!("{} {} {}", r.review, r.citation, r.status)))
+            .collect();
+        entry.insert("unverified".into(), Value::Array(listed));
+    }
+    let entry = Value::Object(entry);
+    if !py_eq(&entry, &rounds[n - 1]) {
+        let mut rounds = rounds.clone();
+        rounds[n - 1] = entry;
+        let mut patch = Map::new();
+        patch.insert("rounds".into(), Value::Array(rounds));
+        let opts = claims::WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: Some(n),
+        };
+        claims::board_write(home, job_id, patch, &opts)?;
+    }
+    let unverified: Vec<Value> = rows
+        .iter()
+        .map(|r| json!({"review": r.review, "citation": r.citation, "status": r.status, "reason": r.reason}))
+        .collect();
+    let result = if rows.is_empty() {
+        "clean"
+    } else {
+        "unverified"
+    };
+    let out = json!({"round": n, "result": result, "checked": checked, "unverified": unverified, "diff": diff_reason});
+    o.out.push_str(&(dumps(&out, DEFAULT) + "\n"));
+    Ok(())
 }
 
 /// Check each path:line a round's reviews cite against the job worktree, write grounding.md and the board.
 pub fn grounding_cmd(call: &Call) -> Res<()> {
     let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    if ROUND.is_full(&call.args[1]) {
+        claims::hold_target(&call.args[0], None)?;
+    }
     flushed(|o| grounding(&home, &slug, &job_id, &call.args[1], o))
 }
 
@@ -3736,16 +3913,29 @@ const VERDICT_USAGE: &str =
     "usage: verdict <project-slug>/<job-id> <round> <reviewer> <PASS|CHANGES|SKIPPED|pending>";
 
 fn verdict(
-    _home: &Path,
-    _slug: &str,
-    _job_id: &str,
-    _n: u64,
-    _reviewer: &str,
-    _value: &str,
-    _o: &mut Out,
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    n: u64,
+    reviewer: &str,
+    value: &str,
+    o: &mut Out,
 ) -> Res<()> {
-    // Deferred to integration: 2194-port-claims
-    Err(not_ported("verdict"))
+    let n = usize::try_from(n).unwrap_or(usize::MAX);
+    let opts = claims::WriteOpts {
+        show: false,
+        verdict: Some(claims::Verdict {
+            slug: slug.to_string(),
+            n,
+            reviewer: reviewer.to_string(),
+            value: value.to_string(),
+        }),
+        rewrite_round: None,
+    };
+    let job = claims::board_write(home, job_id, Map::new(), &opts)?;
+    let out = json!({"round": n, "verdicts": job["rounds"][n - 1]});
+    o.out.push_str(&(dumps(&out, DEFAULT) + "\n"));
+    Ok(())
 }
 
 /// Set one reviewer's verdict in the board's rounds entry N in one CAS write, keeping the rest.
@@ -4645,9 +4835,22 @@ fn lesson_text(home: &Path, path: &str, flag: &str, hi: usize) -> Res<String> {
 }
 
 /// Queue a held lesson card: a backlog line only a person's dashboard approve turns into a notes.md bullet.
-fn queue_lesson(_slug: &str, _job: &str, _fact: &str, _why: &str, _o: &mut Out) -> Res<()> {
-    // Deferred to integration: 2205-port-intake
-    Err(not_ported("lesson"))
+fn queue_lesson(slug: &str, job: &str, fact: &str, why: &str, o: &mut Out) -> Res<()> {
+    print!("{}", std::mem::take(&mut o.out));
+    eprint!("{}", std::mem::take(&mut o.err));
+    queue_lesson_line(slug, job, fact, why)?;
+    Ok(())
+}
+
+/// The backlog line a lesson card queues, through backlog_add. True when the line was added.
+pub(crate) fn queue_lesson_line(slug: &str, job: &str, fact: &str, why: &str) -> Res<bool> {
+    let today = &format_stamp(unix_now())[..10];
+    let context = format!("Recommend: approve\n\nApprove adds this bullet to {slug}/notes.md. No job starts.\nWhy it waits: {why}\n\nLesson: from {job}, queued {today}");
+    intake::backlog_add(
+        &factory_home()?,
+        &format!("{slug}: Lesson: {fact}"),
+        Some(&context),
+    )
 }
 
 /// Append fact as one bullet to <slug>/notes.md through the retro route, or queue a lesson card.
@@ -6611,7 +6814,6 @@ mod tests {
         use std::fs;
 
         const JOB: &str = "001-sample-job";
-        const DEFER: &str = "deferred to integration: 2202-port-retro";
         const SPEC: &str = "# Sample\n\n## Design\n\n- Files: `outside/design.py`\n\n## Tasks\n\n1. Tool\n   - Files: `tools/a.py`\n2. Test\n   - Files: `tests/b.py`\n\n## Risks\n\n- None.\n";
 
         fn check(name: &str, code: &str) -> Value {
@@ -6903,9 +7105,7 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2202-port-retro"]
         fn failure_writes_tail_and_log() {
-            let _ = DEFER;
             let f = Fix::new("pre-tail");
             let noisy = "import sys\nfor i in range(60): print(f'line {i} ~x~')\nsys.exit(1)";
             f.base(
@@ -6940,7 +7140,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2202-port-retro"]
         fn a_check_failing_in_two_consecutive_rounds_is_a_repeat() {
             let f = Fix::new("pre-repeat");
             f.base(
@@ -6971,7 +7170,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2202-port-retro"]
         fn failure_classes() {
             let f = Fix::new("pre-classes");
             let record = f.logs.parent().unwrap().join("pre-review-failures.json");
@@ -7045,7 +7243,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2202-port-retro"]
         fn a_transient_failure_is_retried_once() {
             let f = Fix::new("pre-transient");
             let marker = f.tmp.join("deps-ran");
@@ -7085,7 +7282,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2202-port-retro"]
         fn a_pass_between_does_not_reset_the_repeat() {
             let f = Fix::new("pre-pass-between");
             let record = f.logs.parent().unwrap().join("pre-review-failures.json");
@@ -7122,7 +7318,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2202-port-retro"]
         fn two_failures_in_one_round_are_not_a_repeat() {
             let f = Fix::new("pre-two-failures");
             let record = f.logs.parent().unwrap().join("pre-review-failures.json");
@@ -7165,7 +7360,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2202-port-retro"]
         fn failure_tail_is_redacted() {
             let f = Fix::new("pre-redacted");
             fs::write(
@@ -7192,7 +7386,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2202-port-retro"]
         fn nested_env_values_are_redacted_longest_first() {
             let f = Fix::new("pre-nested");
             fs::write(
@@ -7214,7 +7407,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2202-port-retro"]
         fn end_overlapping_env_values_are_fully_redacted() {
             let f = Fix::new("pre-overlap");
             fs::write(
@@ -7232,7 +7424,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2202-port-retro"]
         fn timeout_and_missing() {
             let f = Fix::new("pre-timeout");
             f.base(
@@ -7913,13 +8104,9 @@ mod tests {
             }
         }
 
-        const DEFER: &str = "deferred to integration: 2194-port-claims";
-
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2194-port-claims"]
         fn running_example() {
-            let _ = DEFER;
             let f = Fix::new("ground-example");
             let (result, _) = f.result(json!([round_1()]));
             assert_eq!(
@@ -7941,7 +8128,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2194-port-claims"]
         fn board_entry() {
             let f = Fix::new("ground-board");
             let (_, puts) = f.result(json!([round_1()]));
@@ -7957,7 +8143,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2194-port-claims"]
         fn clean_rerun() {
             let f = Fix::new("ground-clean");
             f.review(
@@ -8008,7 +8193,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2194-port-claims"]
         fn skipped_ignored() {
             let f = Fix::new("ground-skipped");
             f.review("code", "VERDICT: SKIPPED\n\nsrc/nope.py:1\n");
@@ -8025,7 +8209,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2194-port-claims"]
         fn resolution() {
             let f = Fix::new("ground-resolution");
             fs::create_dir(f.wt.join("lib")).unwrap();
@@ -8079,7 +8262,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2194-port-claims"]
         fn unreadable_diff() {
             let f = Fix::new("ground-unreadable");
             FETCH_URL
@@ -8102,7 +8284,6 @@ mod tests {
 
         #[cfg(unix)]
         #[test]
-        #[ignore = "deferred to integration: 2194-port-claims"]
         fn refusals() {
             let f = Fix::new("ground-refusals");
             for round in ["0", "x", "01"] {
