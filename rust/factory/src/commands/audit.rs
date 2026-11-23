@@ -4,7 +4,7 @@ use std::collections::hash_map::RandomState;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::hash::{BuildHasher, Hasher};
-use std::io::{self, Read};
+use std::io::{self, BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 #[cfg(test)]
@@ -807,22 +807,48 @@ fn add_counts(models: &mut Vec<(String, Counts)>, model: &str, counts: &Counts) 
 }
 
 /// The text of a transcript's first non-meta user line within USAGE_PROMPT_LINES, else "".
+/// It reads only up to that line, as Python's lazy file iteration does: the lines before it can
+/// hold megabytes of tool output.
 fn usage_prompt(path: &Path) -> String {
-    let Ok(lines) = read_lines(path, Some(USAGE_PROMPT_LINES)) else {
+    let Ok(file) = File::open(path) else {
         return String::new();
     };
-    for line in &lines {
-        let Ok(Value::Object(e)) = loads(line) else {
-            continue;
-        };
-        if e.get("type").and_then(Value::as_str) == Some("user") && !truthy(e.get("isMeta")) {
-            return match e.get("message") {
-                Some(Value::Object(msg)) => retro_text(msg.get("content").unwrap_or(&Value::Null)),
-                _ => String::new(),
-            };
+    let mut reader = io::BufReader::new(file);
+    let (mut raw, mut seen) = (Vec::new(), 0);
+    while seen < USAGE_PROMPT_LINES {
+        raw.clear();
+        if !matches!(reader.read_until(b'\n', &mut raw), Ok(n) if n > 0) {
+            break;
+        }
+        let text = String::from_utf8_lossy(&raw);
+        let text = text.strip_suffix('\n').unwrap_or(&text);
+        let text = text.strip_suffix('\r').unwrap_or(text);
+        // A lone \r ends a line too, as in Python's universal newlines.
+        for line in text.split('\r') {
+            if seen == USAGE_PROMPT_LINES {
+                break;
+            }
+            seen += 1;
+            if let Some(prompt) = usage_prompt_line(line) {
+                return prompt;
+            }
         }
     }
     String::new()
+}
+
+/// The prompt text of a non-meta user transcript line, else None.
+fn usage_prompt_line(line: &str) -> Option<String> {
+    let Ok(Value::Object(e)) = loads(line) else {
+        return None;
+    };
+    if e.get("type").and_then(Value::as_str) != Some("user") || truthy(e.get("isMeta")) {
+        return None;
+    }
+    Some(match e.get("message") {
+        Some(Value::Object(msg)) => retro_text(msg.get("content").unwrap_or(&Value::Null)),
+        _ => String::new(),
+    })
 }
 
 /// ([(model, counts)], unreadable line count) for one transcript, each message id counted once.
@@ -2607,6 +2633,23 @@ mod tests {
         assert!(is_audit_control('\u{1b}') && is_audit_control('\u{9b}'));
         assert!(is_audit_control('\u{202e}') && is_audit_control('\u{2069}'));
         assert!(!is_audit_control('a') && !is_audit_control('\u{a0}'));
+    }
+
+    #[test]
+    fn usage_prompt_counts_universal_lines() {
+        let dir = std::env::temp_dir().join(format!("audit-prompt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        let user = r#"{"type": "user", "message": {"content": "hi é"}}"#;
+        let meta = r#"{"type": "user", "isMeta": true, "message": {"content": "meta"}}"#;
+        std::fs::write(&path, format!("\u{ff}bad\r{meta}\r\n{user}\n")).unwrap();
+        assert_eq!(usage_prompt(&path), "hi \u{e9}");
+        let filler = "{}\r".repeat(USAGE_PROMPT_LINES - 1);
+        std::fs::write(&path, format!("{filler}{user}\n")).unwrap();
+        assert_eq!(usage_prompt(&path), "hi \u{e9}");
+        std::fs::write(&path, format!("{filler}{{}}\n{user}\n")).unwrap();
+        assert_eq!(usage_prompt(&path), "");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
