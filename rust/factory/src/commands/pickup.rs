@@ -22,10 +22,10 @@ use crate::cli::{not_ported, Call};
 use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, riders_of};
 use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::{
-    tag_lookalike, ADAPTER_ID, BACKLOG_LINE, BACKLOG_NOTES_TAG, BACKPRESSURE_NEEDS_YOU,
-    HOLD_MAX_HOURS, HOLD_MIN_IDEAS, IDEA, IN_FLIGHT, JOB_ID, MAX_RIDERS, NEW_JOB_ID,
-    NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, PASEO_ID, REVIEW_ROUTE_KEYS,
-    ROUTE_EFFORTS, ROUTE_MODEL, SLUG, TERMINAL, UNATTENDED, WINDOWS,
+    tag_lookalike, ADAPTER_ID, BACKLOG_NOTES_TAG, BACKPRESSURE_NEEDS_YOU, HOLD_MAX_HOURS,
+    HOLD_MIN_IDEAS, IDEA, IN_FLIGHT, JOB_ID, MAX_RIDERS, NEW_JOB_ID, NOTE_INVISIBLE, NOTE_LINK,
+    NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, PASEO_ID, REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL,
+    SLUG, TERMINAL, UNATTENDED, WINDOWS,
 };
 use crate::shared::exit::{exit, fail, Exit, Res};
 use crate::shared::fs::{is_link, read_text, regular_metadata, resolve, write_atomic};
@@ -2944,57 +2944,12 @@ fn tracer_build_pass(io: &mut Io, home: &Path, jobs: Option<&Value>) -> Res<bool
     )
 }
 
-/// The backlog lines this host already has a final triage verdict for.
-fn read_triaged(home: &Path) -> Vec<String> {
-    let data = read_json(&home.join("backlog-triage.json"));
-    let lines = data.as_ref().and_then(|d| {
-        let map = d.as_object()?;
-        if map.len() != 2 || int_of(map.get("version")) != Some(1) {
-            return None;
-        }
-        map.get("lines")?
-            .as_array()?
-            .iter()
-            .map(|l| l.as_str().map(String::from))
-            .collect::<Option<Vec<_>>>()
-    });
-    lines.unwrap_or_default()
-}
-
-/// Drop verdicts for lines no longer in the backlog. Rating a new line waits on the intake slice.
 fn backlog_triage_pass(home: &Path) -> Res<()> {
     #[cfg(test)]
     if let Some(f) = fake!(backlog_triage_pass) {
         return f(home);
     }
-    let r = api(home, "GET", "/api/backlog", None, &[200, 404], &[])?;
-    let text = if r.status == 200 {
-        r.text()?
-    } else {
-        String::new()
-    };
-    let raws: Vec<&str> = text
-        .split('\n')
-        .map(|l| l.trim_end_matches('\r'))
-        .filter(|l| BACKLOG_LINE.match_start(l).is_some())
-        .collect();
-    let cached = read_triaged(home);
-    let triaged: Vec<String> = cached
-        .iter()
-        .filter(|l| raws.contains(&l.as_str()))
-        .cloned()
-        .collect();
-    let todo = raws.iter().any(|raw| !triaged.iter().any(|t| t == raw));
-    if triaged != cached {
-        write_file(
-            &home.join("backlog-triage.json"),
-            &(dumps(&json!({"version": 1, "lines": triaged}), INDENT2) + "\n"),
-        )?;
-    }
-    if todo {
-        return Err(deferred("backlog triage"));
-    }
-    Ok(())
+    crate::commands::intake::backlog_triage_pass(home)
 }
 
 // ---- group B: routes, holds, claims and launches
@@ -8623,47 +8578,6 @@ exit "$code"
 
     pub(super) fn out_err(code: i32, out: &str, err: &str) -> (i32, String, String) {
         (code, out.to_string(), err.to_string())
-    }
-
-    mod deferred {
-        use super::*;
-
-        fn assert_deferred(result: (i32, String, String), what: &str) {
-            assert_eq!(
-                result,
-                (
-                    2,
-                    String::new(),
-                    format!("factory.py: pickup {what} is not ported to the Rust binary yet\n")
-                )
-            );
-        }
-
-        #[test]
-        fn backlog_triage() {
-            let fx = Fx::new();
-            fx.set_fakes(|f| {
-                f.backlog_triage_pass = None;
-                f.pickup_pass = Some(Rc::new(|_, _| Ok(())));
-            });
-            fs::write(
-                fx.home.join("backlog-triage.json"),
-                r#"{"version": 1, "lines": ["- [ ] alpha: gone"]}"#,
-            )
-            .unwrap();
-            let backlog = Rc::new(RefCell::new(String::new()));
-            let text = backlog.clone();
-            fx.state.borrow_mut().extra = Some(Rc::new(move |_, path, _| {
-                (path == "/api/backlog").then(|| ok(200, &text.borrow()))
-            }));
-            assert_eq!(fx.pickup(&[]).0, 0);
-            assert_eq!(
-                read_text(&fx.home.join("backlog-triage.json")).unwrap(),
-                "{\n  \"version\": 1,\n  \"lines\": []\n}\n"
-            );
-            *backlog.borrow_mut() = "# backlog\n\n- [ ] alpha: export the board\n".into();
-            assert_deferred(fx.pickup(&["--triage-now"]), "backlog triage");
-        }
     }
 
     mod pickup_test {
