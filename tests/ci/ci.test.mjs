@@ -64,7 +64,13 @@ test("the targets job installs a checksum-verified gitleaks and scans for secret
 });
 
 test("ci aggregates every job and skips only cancelled runs", () => {
-  assert.deepEqual(workflow.jobs.ci.needs, ["targets", "python", "browser", "paseo-plugin"]);
+  assert.deepEqual(workflow.jobs.ci.needs, [
+    "targets",
+    "python",
+    "browser",
+    "paseo-plugin",
+    "rust",
+  ]);
   assert.equal(workflow.jobs.ci.if, "${{ !cancelled() }}");
 });
 
@@ -72,7 +78,7 @@ test("the aggregate names each job in RESULTS", () => {
   const step = workflow.jobs.ci.steps.find((entry) => entry.name === "All CI jobs passed");
   assert.equal(
     step.env.RESULTS,
-    "targets=${{ needs.targets.result }} python=${{ needs.python.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }}",
+    "targets=${{ needs.targets.result }} python=${{ needs.python.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }} rust=${{ needs.rust.result }}",
   );
 });
 
@@ -132,4 +138,25 @@ test("the paseo-plugin job installs, typechecks and tests the plugin in order", 
     "pnpm --dir paseo-plugin run typecheck",
     "pnpm run test:paseo-plugin",
   ]);
+});
+
+test("the rust job builds linux-x64, checks darwin-arm64 and windows-x64, and runs parity", () => {
+  const { rust } = workflow.jobs;
+  assert.equal(rust["runs-on"], "ubuntu-22.04");
+  assert.equal(rust["timeout-minutes"], 10);
+  assert.equal(rust.strategy, undefined);
+  assert.equal(rust.defaults.run["working-directory"], "rust");
+  assert.equal(action(rust.steps[0]), "actions/checkout");
+  assert.equal(rust.steps[0].with["persist-credentials"], false);
+  assert.deepEqual(
+    rust.steps.slice(1).map((step) => step.run.trim()),
+    [
+      "rustup toolchain install\nrustup target add aarch64-apple-darwin x86_64-pc-windows-gnu",
+      "cargo build --release --locked\ncargo test --locked",
+      "cargo check --locked --target aarch64-apple-darwin",
+      "cargo check --locked --target x86_64-pc-windows-gnu",
+      "python3 tests/parity/run.py --bin rust/target/release/factory --ids rust/parity.txt",
+    ],
+  );
+  assert.equal(rust.steps.at(-1)["working-directory"], ".");
 });

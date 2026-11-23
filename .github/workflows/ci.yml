@@ -130,15 +130,41 @@ jobs:
       - run: pnpm --dir paseo-plugin install --frozen-lockfile
       - run: pnpm --dir paseo-plugin run typecheck
       - run: pnpm run test:paseo-plugin
+  # Builds linux-x64 natively and type-checks the darwin-arm64 and windows-x64 targets.
+  rust:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain and targets
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-pc-windows-gnu
+      - name: Build and test linux-x64
+        run: |
+          cargo build --release --locked
+          cargo test --locked
+      - name: Check darwin-arm64
+        run: cargo check --locked --target aarch64-apple-darwin
+      - name: Check windows-x64
+        run: cargo check --locked --target x86_64-pc-windows-gnu
+      - name: Parity
+        working-directory: .
+        run: python3 tests/parity/run.py --bin rust/target/release/factory --ids rust/parity.txt
   ci:
     if: ${{ !cancelled() }}
-    needs: [targets, python, browser, paseo-plugin]
+    needs: [targets, python, browser, paseo-plugin, rust]
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
       - name: All CI jobs passed
         env:
-          RESULTS: targets=${{ needs.targets.result }} python=${{ needs.python.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }}
+          RESULTS: targets=${{ needs.targets.result }} python=${{ needs.python.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }} rust=${{ needs.rust.result }}
         run: |
           status=0
           for pair in $RESULTS; do
