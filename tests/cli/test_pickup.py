@@ -4633,13 +4633,13 @@ class BatchHoldTest(PickupFixture):
         self.assertEqual([j["id"] for j in self.board["jobs"] if "claim" in j], ["101-wrap-doc-line"])
 
 
-def waiting_jobs(count):
-    """count jobs on project beta that wait on a person: two with needs, one at needs-human, two held PRs."""
-    jobs = [{"id": "201-pick-format", "stage": "spec", "project": "beta", "needs": "Pick a format"},
-            {"id": "202-pick-name", "stage": "build", "project": "beta", "needs": "Pick a name"},
-            {"id": "203-sign-off", "stage": "needs-human", "project": "beta"},
-            {"id": "204-held-pr", "stage": "pr-open", "project": "beta", "escalated": True},
-            {"id": "205-held-pr", "stage": "pr-open", "project": "beta", "escalated": True}]
+def waiting_jobs(count, project="alpha"):
+    """count jobs on project that wait on a person: two with needs, one at needs-human, two held PRs."""
+    jobs = [{"id": "201-pick-format", "stage": "spec", "project": project, "needs": "Pick a format"},
+            {"id": "202-pick-name", "stage": "build", "project": project, "needs": "Pick a name"},
+            {"id": "203-sign-off", "stage": "needs-human", "project": project},
+            {"id": "204-held-pr", "stage": "pr-open", "project": project, "escalated": True},
+            {"id": "205-held-pr", "stage": "pr-open", "project": project, "escalated": True}]
     return [dict(j, updated="2026-01-01T00:00:00Z") for j in jobs[:count]]
 
 
@@ -4658,6 +4658,17 @@ class BackpressureTest(PickupFixture):
     def test_five_waiting_hold(self):
         self.board["jobs"] = waiting_jobs(5) + [idea("120-add-csv-export", "alpha")]
         self.assertEqual(self.dry(), [self.HOLD.format(5, 5), f"host {DEVICE}: would launch 0"])
+
+    def test_other_project_waiting_launch(self):
+        self.board["jobs"] = waiting_jobs(5, "beta") + [idea("120-add-csv-export", "alpha")]
+        lines = self.dry()
+        self.assertTrue(lines[0].startswith("would launch 120-add-csv-export alpha on primary: "), lines)
+        self.assertEqual(lines[1:], [f"host {DEVICE}: would launch 1"])
+
+    def test_counts_own_project_only(self):
+        self.board["jobs"] = waiting_jobs(4) + waiting_jobs(5, "beta")[4:] + [idea("120-add-csv-export", "alpha")]
+        lines = self.dry()
+        self.assertTrue(lines[0].startswith("would launch 120-add-csv-export alpha on primary: "), lines)
 
     def test_four_waiting_launch(self):
         self.board["jobs"] = waiting_jobs(4) + [idea("120-add-csv-export", "alpha")]
