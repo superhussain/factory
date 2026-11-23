@@ -16,7 +16,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use super::exit::{fail, Exit, Res};
-use super::http::{api, jitter};
+use super::http::{api, jitter, Response};
 use super::pyjson::{dumps, loads, COMPACT};
 
 pub const PROTOCOL: u64 = 1;
@@ -167,8 +167,16 @@ fn mirror_read(home: &Path, filter: Map<String, Value>) -> Option<BoardRead> {
     })
 }
 
+/// The Worker client a board write goes through: `http::api`, or a test's stand-in for it.
+pub type Api<'a> =
+    &'a dyn Fn(&Path, &str, &str, Option<&[u8]>, &[u16], &[(&str, &str)]) -> Res<Response>;
+
 /// The board straight from the Worker.
 pub fn http_read(home: &Path) -> Res<BoardRead> {
+    http_read_via(home, &api)
+}
+
+fn http_read_via(home: &Path, api: Api) -> Res<BoardRead> {
     let r = api(home, "GET", "/api/board", None, &[200, 404], &[])?;
     if r.status == 404 {
         return Ok(BoardRead {
@@ -408,9 +416,25 @@ pub fn row_patch(old: &str, new: &str, reads: Reads) -> Option<String> {
     }
     let mut body = json!({"rows": rows});
     if let Some(picks) = reads {
+        // The depends-on rows of every row written, open or not, since a reopened or merged
+        // dependency changes whether that row may start.
+        let deps: HashSet<&str> = after
+            .iter()
+            .filter(|(id, row)| was.get(id.as_str()) != Some(&row))
+            .flat_map(|(_, row)| {
+                row.get("refs")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+            })
+            .filter(|r| r.get("kind").and_then(Value::as_str) == Some("depends-on"))
+            .filter_map(|r| r.get("id")?.as_str())
+            .collect();
         let digests: Vec<Value> = before
             .iter()
-            .filter(|(id, row)| now.get(id.as_str()) == Some(&row) && picks(row))
+            .filter(|(id, row)| {
+                now.get(id.as_str()) == Some(&row) && (deps.contains(id.as_str()) || picks(row))
+            })
             .map(|(id, row)| json!({"id": id, "sha256": row_sha256(row)}))
             .collect();
         if !digests.is_empty() {
@@ -434,7 +458,7 @@ pub fn row_patch(old: &str, new: &str, reads: Reads) -> Option<String> {
 /// daemon takes it, straight to the Worker. True once the Worker committed it, false on a 409
 /// conflict, so the caller reads again. A request the daemon took but never answered fails,
 /// since the write may have landed and running the change again could repeat it.
-fn send_patch(home: &Path, body: &str, mirror: bool) -> Res<bool> {
+fn send_patch(home: &Path, body: &str, mirror: bool, api: Api) -> Res<bool> {
     if mirror {
         let mut request = Map::new();
         request.insert("op".into(), "patch".into());
@@ -491,19 +515,28 @@ pub fn cas<T>(home: &Path, change: impl FnMut(Option<&str>) -> Res<(Option<Strin
 }
 
 /// `cas` for a change that decides from rows it doesn't write, such as a claim under an in-flight
-/// cap: each unchanged row `reads` picks goes in the PATCH as a digest, so the Worker refuses the
-/// write if any of them changed since the read.
+/// cap: each unchanged row `reads` picks, and each depends-on row of a row it writes, goes in the
+/// PATCH as a digest, so the Worker refuses the write if any of them changed since the read.
 pub fn cas_reading<T>(
     home: &Path,
     reads: Reads,
+    change: impl FnMut(Option<&str>) -> Res<(Option<String>, T)>,
+) -> Res<T> {
+    cas_via(home, reads, &api, change)
+}
+
+/// `cas_reading` through the Worker client `api`, so a caller's test seam reaches it too.
+pub fn cas_via<T>(
+    home: &Path,
+    reads: Reads,
+    api: Api,
     mut change: impl FnMut(Option<&str>) -> Res<(Option<String>, T)>,
 ) -> Res<T> {
     let mut direct = false;
     for _ in 0..20 {
-        let read = if direct {
-            http_read(home)?
-        } else {
-            read(home)?
+        let read = match (direct, mirror_read(home, Map::new())) {
+            (false, Some(read)) => read,
+            _ => http_read_via(home, api)?,
         };
         if read.text.is_some() && read.etag.is_none() {
             return Err(fail("/api/board: the Worker sent no ETag", 1));
@@ -515,7 +548,7 @@ pub fn cas_reading<T>(
             _ => None,
         };
         let wrote = match body {
-            Some(body) => send_patch(home, &body, read.mirror)?,
+            Some(body) => send_patch(home, &body, read.mirror, api)?,
             None => {
                 let cond = match &read.etag {
                     Some(etag) => ("If-Match", etag.as_str()),

@@ -4414,185 +4414,196 @@ fn batch(home: &Path, slug: &str, lead_id: &str, ids: &[String], o: &mut Out) ->
             }
         }
     }
-    let (result, made, waiting) = cas(home, "/api/board", |text| {
-        let mut data = load_board(text)?;
-        let Some(lead) = job_by(&data, lead_id).cloned() else {
-            return Err(fail(
-                format!("no job {lead_id} on the board. Nothing was written."),
-                4,
-            ));
-        };
-        let alone = lead
-            .get("priority")
-            .and_then(Value::as_object)
-            .is_some_and(|p| p.get("alone") == Some(&Value::Bool(true)));
-        let jobs = data["jobs"].as_array().cloned().unwrap_or_default();
-        let open_ids = open_job_ids(&jobs);
-        let together: Vec<Value> = std::iter::once(json!(lead_id))
-            .chain(
-                rider_jobs(&data, lead_id)
-                    .iter()
-                    .map(|j| j.get("id").cloned().unwrap_or(Value::Null)),
-            )
-            .collect();
-        let mut depends: Vec<(String, Vec<Value>)> = Vec::new();
-        let mut made: Vec<(String, String)> = Vec::new();
-        for pick in &line_picks {
-            let mut names = local.clone();
-            names.extend(jobs.iter().map(|j| match j.get("id") {
-                None => String::new(),
-                Some(v) => py_str(Some(v)),
-            }));
-            names.extend(made.iter().map(|(_, id)| id.clone()));
-            let title = line(pick).entry["title"].as_str().unwrap().to_string();
-            made.push((
-                pick.clone(),
-                next_job_id(&names, &feature_slug(&title), archive_floor(&data)),
-            ));
-        }
-        let same_call: Vec<(String, String)> = line_picks
-            .iter()
-            .zip(&made)
-            .map(|(p, (_, id))| (rstrip(&line(p).raw[6..]).to_string(), id.clone()))
-            .collect();
-        if !idea_ids.is_empty() {
-            if !mine(lead.get("claim").unwrap_or(&json!({})), &device, &session) {
+    // batch_problem reads the lead's riders and each idea's dependencies, rows this write may not
+    // touch, so every open row and each written row's dependencies go in as reads.
+    let reads = crate::shared::board_client::open_row;
+    let (result, made, waiting) = crate::shared::board_client::cas_reading(
+        home,
+        Some(&reads),
+        |text| {
+            let mut data = load_board(text)?;
+            let Some(lead) = job_by(&data, lead_id).cloned() else {
                 return Err(fail(
-                    format!("{lead_id} is not held by this session. Nothing was written."),
-                    6,
+                    format!("no job {lead_id} on the board. Nothing was written."),
+                    4,
+                ));
+            };
+            let alone = lead
+                .get("priority")
+                .and_then(Value::as_object)
+                .is_some_and(|p| p.get("alone") == Some(&Value::Bool(true)));
+            let jobs = data["jobs"].as_array().cloned().unwrap_or_default();
+            let open_ids = open_job_ids(&jobs);
+            let together: Vec<Value> = std::iter::once(json!(lead_id))
+                .chain(
+                    rider_jobs(&data, lead_id)
+                        .iter()
+                        .map(|j| j.get("id").cloned().unwrap_or(Value::Null)),
+                )
+                .collect();
+            let mut depends: Vec<(String, Vec<Value>)> = Vec::new();
+            let mut made: Vec<(String, String)> = Vec::new();
+            for pick in &line_picks {
+                let mut names = local.clone();
+                names.extend(jobs.iter().map(|j| match j.get("id") {
+                    None => String::new(),
+                    Some(v) => py_str(Some(v)),
+                }));
+                names.extend(made.iter().map(|(_, id)| id.clone()));
+                let title = line(pick).entry["title"].as_str().unwrap().to_string();
+                made.push((
+                    pick.clone(),
+                    next_job_id(&names, &feature_slug(&title), archive_floor(&data)),
                 ));
             }
-            if alone {
-                return Err(fail(
+            let same_call: Vec<(String, String)> = line_picks
+                .iter()
+                .zip(&made)
+                .map(|(p, (_, id))| (rstrip(&line(p).raw[6..]).to_string(), id.clone()))
+                .collect();
+            if !idea_ids.is_empty() {
+                if !mine(lead.get("claim").unwrap_or(&json!({})), &device, &session) {
+                    return Err(fail(
+                        format!("{lead_id} is not held by this session. Nothing was written."),
+                        6,
+                    ));
+                }
+                if alone {
+                    return Err(fail(
                     format!("{lead_id} was started alone from the dashboard, so it takes no riders. Nothing was written."),
                     2,
                 ));
-            }
-            if str_of(&lead, "stage") != Some("spec") {
-                return Err(fail(
-                    format!(
-                        "batch runs while {lead_id} is at spec, not {}. Nothing was written.",
-                        py_str(lead.get("stage"))
-                    ),
-                    2,
-                ));
-            }
-            if lead.get("tracer").is_some() {
-                return Err(fail(
-                    format!("cannot batch into {lead_id}: follows Tracer"),
-                    2,
-                ));
-            }
-            if riders_of(&data, lead_id).len() + idea_ids.len() > MAX_RIDERS {
-                return Err(fail(
-                    format!("a batch holds at most {MAX_RIDERS} riders"),
-                    2,
-                ));
+                }
+                if str_of(&lead, "stage") != Some("spec") {
+                    return Err(fail(
+                        format!(
+                            "batch runs while {lead_id} is at spec, not {}. Nothing was written.",
+                            py_str(lead.get("stage"))
+                        ),
+                        2,
+                    ));
+                }
+                if lead.get("tracer").is_some() {
+                    return Err(fail(
+                        format!("cannot batch into {lead_id}: follows Tracer"),
+                        2,
+                    ));
+                }
+                if riders_of(&data, lead_id).len() + idea_ids.len() > MAX_RIDERS {
+                    return Err(fail(
+                        format!("a batch holds at most {MAX_RIDERS} riders"),
+                        2,
+                    ));
+                }
+                for pick in &line_picks {
+                    let (refs, why) = backlog_waits(
+                        &backlog_text,
+                        &line(pick).context,
+                        &open_ids,
+                        &together,
+                        &same_call,
+                    );
+                    if let Some(why) = why {
+                        return Err(fail(
+                            audit_clean(&format!(
+                                "cannot batch {pick}: {why}. Nothing was written."
+                            )),
+                            2,
+                        ));
+                    }
+                    depends.push((pick.clone(), refs));
+                }
+                let mut picked: Vec<String> = Vec::new();
+                for idea_id in &job_picks {
+                    let Some(j) = job_by(&data, idea_id) else {
+                        return Err(fail(
+                            format!("no job {idea_id} on the board. Nothing was written."),
+                            4,
+                        ));
+                    };
+                    if let Some(problem) =
+                        batch_problem(&data, j, slug, &device, &session, minutes)?
+                    {
+                        return Err(fail(
+                            audit_clean(&format!(
+                                "cannot batch {idea_id}: {problem}. Nothing was written."
+                            )),
+                            2,
+                        ));
+                    }
+                    picked.push(idea_id.clone());
+                }
+                for id in &picked {
+                    let refs = job_by(&data, id)
+                        .map(|j| list_of(j, "refs"))
+                        .unwrap_or_default();
+                    remove_job_field(&mut data, id, "claim");
+                    let mut refs = refs;
+                    refs.push(json!({"id": lead_id, "kind": BATCH_REF}));
+                    patch_job(
+                        &mut data,
+                        id,
+                        &json!({"stage": "spec", "note": format!("batched into {lead_id}"), "refs": refs}),
+                    );
+                }
             }
             for pick in &line_picks {
-                let (refs, why) = backlog_waits(
-                    &backlog_text,
-                    &line(pick).context,
-                    &open_ids,
-                    &together,
-                    &same_call,
-                );
-                if let Some(why) = why {
-                    return Err(fail(
-                        audit_clean(&format!("cannot batch {pick}: {why}. Nothing was written.")),
-                        2,
-                    ));
-                }
-                depends.push((pick.clone(), refs));
-            }
-            let mut picked: Vec<String> = Vec::new();
-            for idea_id in &job_picks {
-                let Some(j) = job_by(&data, idea_id) else {
-                    return Err(fail(
-                        format!("no job {idea_id} on the board. Nothing was written."),
-                        4,
-                    ));
+                let l = line(pick);
+                let mut refs: Vec<Value> = match &l.suffix {
+                    Some((kind, id)) if !id.contains("..") => vec![json!({"id": id, "kind": kind})],
+                    _ => Vec::new(),
                 };
-                if let Some(problem) = batch_problem(&data, j, slug, &device, &session, minutes)? {
-                    return Err(fail(
-                        audit_clean(&format!(
-                            "cannot batch {idea_id}: {problem}. Nothing was written."
-                        )),
-                        2,
-                    ));
-                }
-                picked.push(idea_id.clone());
-            }
-            for id in &picked {
-                let refs = job_by(&data, id)
-                    .map(|j| list_of(j, "refs"))
-                    .unwrap_or_default();
-                remove_job_field(&mut data, id, "claim");
-                let mut refs = refs;
+                refs.extend(
+                    depends
+                        .iter()
+                        .find(|(k, _)| k == pick)
+                        .map(|(_, r)| r.clone())
+                        .unwrap_or_default(),
+                );
                 refs.push(json!({"id": lead_id, "kind": BATCH_REF}));
+                let id = &made.iter().find(|(k, _)| k == pick).unwrap().1;
                 patch_job(
                     &mut data,
                     id,
-                    &json!({"stage": "spec", "note": format!("batched into {lead_id}"), "refs": refs}),
+                    &json!({"project": slug, "title": l.entry["title"], "idea": l.entry["idea"], "stage": "spec",
+                        "note": format!("batched into {lead_id}"), "refs": refs}),
                 );
             }
-        }
-        for pick in &line_picks {
-            let l = line(pick);
-            let mut refs: Vec<Value> = match &l.suffix {
-                Some((kind, id)) if !id.contains("..") => vec![json!({"id": id, "kind": kind})],
-                _ => Vec::new(),
-            };
-            refs.extend(
-                depends
-                    .iter()
-                    .find(|(k, _)| k == pick)
-                    .map(|(_, r)| r.clone())
-                    .unwrap_or_default(),
-            );
-            refs.push(json!({"id": lead_id, "kind": BATCH_REF}));
-            let id = &made.iter().find(|(k, _)| k == pick).unwrap().1;
-            patch_job(
-                &mut data,
-                id,
-                &json!({"project": slug, "title": l.entry["title"], "idea": l.entry["idea"], "stage": "spec",
-                        "note": format!("batched into {lead_id}"), "refs": refs}),
-            );
-        }
-        let mut candidates: Vec<Value> = Vec::new();
-        for j in data["jobs"].as_array().into_iter().flatten() {
-            if str_of(j, "id").is_some_and(|id| id != lead_id && JOB_ID.is_full(id))
-                && batch_problem(&data, j, slug, &device, &session, minutes)?.is_none()
-            {
-                candidates.push(entry(j));
-            }
-        }
-        let mut waiting: Vec<String> = Vec::new();
-        for (k, v) in &lines {
-            if line_picks.contains(k) {
-                continue;
-            }
-            match backlog_waits(&backlog_text, &v.context, &open_ids, &together, &[]).1 {
-                None => candidates.push(v.entry.clone()),
-                Some(why) => {
-                    waiting.push(format!("skipping {k} \"{}\": {why}", rstrip(&v.raw[6..])))
+            let mut candidates: Vec<Value> = Vec::new();
+            for j in data["jobs"].as_array().into_iter().flatten() {
+                if str_of(j, "id").is_some_and(|id| id != lead_id && JOB_ID.is_full(id))
+                    && batch_problem(&data, j, slug, &device, &session, minutes)?.is_none()
+                {
+                    candidates.push(entry(j));
                 }
             }
-        }
-        if alone {
-            candidates.clear();
-            waiting.clear();
-        }
-        candidates.truncate(MAX_CANDIDATES);
-        let riders: Vec<Value> = rider_jobs(&data, lead_id).iter().map(entry).collect();
-        let result = json!({"lead": lead_id, "riders": riders, "candidates": candidates});
-        let new = if idea_ids.is_empty() {
-            None
-        } else {
-            Some(dump_board(&data))
-        };
-        Ok((new, (result, made, waiting)))
-    })?;
+            let mut waiting: Vec<String> = Vec::new();
+            for (k, v) in &lines {
+                if line_picks.contains(k) {
+                    continue;
+                }
+                match backlog_waits(&backlog_text, &v.context, &open_ids, &together, &[]).1 {
+                    None => candidates.push(v.entry.clone()),
+                    Some(why) => {
+                        waiting.push(format!("skipping {k} \"{}\": {why}", rstrip(&v.raw[6..])))
+                    }
+                }
+            }
+            if alone {
+                candidates.clear();
+                waiting.clear();
+            }
+            candidates.truncate(MAX_CANDIDATES);
+            let riders: Vec<Value> = rider_jobs(&data, lead_id).iter().map(entry).collect();
+            let result = json!({"lead": lead_id, "riders": riders, "candidates": candidates});
+            let new = if idea_ids.is_empty() {
+                None
+            } else {
+                Some(dump_board(&data))
+            };
+            Ok((new, (result, made, waiting)))
+        },
+    )?;
     let mut result = result;
     let drop = |ids: Vec<String>| {
         cas(home, "/api/board", |text| {

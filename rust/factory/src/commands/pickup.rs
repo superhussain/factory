@@ -239,20 +239,32 @@ fn cas<T>(
     ))
 }
 
-/// The board `cas` for a claim under an in-flight cap. The cap counts rows the write doesn't
-/// touch, so each open row goes in as a read and the Worker refuses the write if one changed.
+/// The board `cas` for a claim, through this file's `api` seam. The claim decides from rows it
+/// doesn't write, so these go in as reads and the Worker refuses the write if one changed: every
+/// open row, and under a cap every row the cap counts, merged or closed too, since a reopened
+/// one would count again.
 fn claim_cas<T>(
     home: &Path,
+    pick: &Pick,
+    device: &str,
     change: impl FnMut(Option<&str>) -> Res<(Option<String>, T)>,
 ) -> Res<T> {
-    #[cfg(test)]
-    return cas(home, "/api/board", change);
-    #[cfg(not(test))]
-    crate::shared::board_client::cas_reading(
-        home,
-        Some(&crate::shared::board_client::open_row),
-        change,
-    )
+    let scope = |j: &Value| {
+        crate::shared::board_client::open_row(j)
+            || match pick.max_inflight {
+                None => false,
+                Some(_) if pick.by_host => {
+                    j.get("claim")
+                        .and_then(|c| c.get("device"))
+                        .and_then(Value::as_str)
+                        == Some(device)
+                }
+                Some(_) => pick
+                    .project
+                    .is_none_or(|p| get_str(j, "project") == Some(p)),
+            }
+    };
+    crate::shared::board_client::cas_via(home, Some(&scope), &api, change)
 }
 
 #[cfg(test)]
@@ -3831,7 +3843,7 @@ fn claim_ideas(
         let limits = read_limits(home)?;
         exp_limited = lookup(&limits, &experiment.name).is_some_and(|u| u > now().as_str());
     }
-    claim_cas(home, |text| {
+    claim_cas(home, pick, device, |text| {
         let mut data = load_board(text)?;
         let mut picked: Vec<Entry> = Vec::new();
         let count = match pick.max_inflight {
@@ -12817,6 +12829,127 @@ exit "$archive_code"
                 ["121-sample-next"]
             );
             assert!(fx.job("120-sample-digest").get("claim").is_none());
+        }
+
+        /// Serves the board with Accept-Patch and applies PATCHes as the Worker does: a row
+        /// whose stored value is not its expect, or a read whose digest no longer matches, is a
+        /// 409. After the first read, `meanwhile` changes the board, as another writer would.
+        fn patching_worker(fx: &Fx, meanwhile: impl Fn(&mut Value) + 'static) {
+            use crate::shared::board_client::row_sha256;
+            let state = fx.state.clone();
+            let reads = Rc::new(std::cell::Cell::new(0));
+            let meanwhile = Rc::new(meanwhile);
+            fx.state.borrow_mut().extra = Some(Rc::new(move |method, path, body| {
+                if path != "/api/board" {
+                    return None;
+                }
+                if method == "GET" {
+                    let text = crate::shared::board::dump_board(&state.borrow().board);
+                    reads.set(reads.get() + 1);
+                    if reads.get() == 1 {
+                        meanwhile(&mut state.borrow_mut().board);
+                    }
+                    return Some(Ok(Response {
+                        status: 200,
+                        headers: vec![
+                            ("ETag".into(), "\"board\"".into()),
+                            ("Accept-Patch".into(), "application/json".into()),
+                        ],
+                        body: text.into_bytes(),
+                    }));
+                }
+                assert_eq!(method, "PATCH");
+                let patch: Value = serde_json::from_slice(body.unwrap()).unwrap();
+                let mut st = state.borrow_mut();
+                let jobs = st.board["jobs"].as_array_mut().unwrap();
+                let at = |jobs: &Vec<Value>, id: &Value| jobs.iter().position(|j| &j["id"] == id);
+                let stale_row = patch["rows"].as_array().unwrap().iter().any(|e| {
+                    at(jobs, &e["id"]).map_or(Value::Null, |i| jobs[i].clone()) != e["expect"]
+                });
+                let stale_read = patch["reads"].as_array().into_iter().flatten().any(|r| {
+                    at(jobs, &r["id"]).is_none_or(|i| row_sha256(&jobs[i]) != r["sha256"])
+                });
+                if stale_row || stale_read {
+                    return Some(ok(409, r#"{"error":"conflict"}"#));
+                }
+                for e in patch["rows"].as_array().unwrap() {
+                    match at(jobs, &e["id"]) {
+                        Some(i) => jobs[i] = e["row"].clone(),
+                        None => jobs.push(e["row"].clone()),
+                    }
+                }
+                Some(ok(200, ""))
+            }));
+        }
+
+        fn alpha_pick(max_inflight: Option<usize>) -> Pick<'static> {
+            Pick {
+                max_inflight,
+                project: Some("alpha"),
+                by_host: false,
+                builds: false,
+                experiment: None,
+                route: None,
+                skip_ids: Vec::new(),
+            }
+        }
+
+        /// Under a cap of 1 with nothing in flight, another host claims 121 between this host's
+        /// read and its PATCH. The claim of 120 carries 121's digest, so the Worker refuses it,
+        /// and the re-read finds the cap full.
+        #[test]
+        fn test_claim_ideas_refuses_a_concurrent_claim_under_the_cap() {
+            let fx = Fx::new();
+            fx.jobs(json!([
+                idea("120-sample-digest", "alpha", json!({})),
+                idea("121-sample-next", "alpha", json!({}))
+            ]));
+            patching_worker(&fx, |board| {
+                board["jobs"][1]["stage"] = json!("build");
+                board["jobs"][1]["updated"] = json!(stamp(0));
+            });
+            let paths = vec![("alpha".to_string(), fx.repo_a.display().to_string())];
+            let picked =
+                claim_ideas(&fx.home, DEVICE, "", 120, &paths, 5, &alpha_pick(Some(1))).unwrap();
+            assert!(picked.is_empty());
+            assert!(fx.job("120-sample-digest").get("claim").is_none());
+            let methods: Vec<String> = fx
+                .state
+                .borrow()
+                .calls
+                .iter()
+                .filter(|c| c.1 == "/api/board")
+                .map(|c| c.0.clone())
+                .collect();
+            assert_eq!(methods, ["GET", "PATCH", "GET"]);
+        }
+
+        /// 120 depends on the merged 119. Someone reopens 119 between the read and the PATCH, so
+        /// the claim, which carries 119's digest, is refused and the re-read leaves 120 waiting.
+        /// A merged row in the cap's project is read too, so its reopening is caught.
+        #[test]
+        fn test_claim_ideas_refuses_when_a_dependency_reopens() {
+            let fx = Fx::new();
+            fx.jobs(json!([
+                {"id": "119-sample-base", "stage": "merged", "project": "alpha"},
+                idea("120-sample-digest", "alpha", json!({"refs": [{"id": "119-sample-base", "kind": "depends-on"}]})),
+            ]));
+            patching_worker(&fx, |board| {
+                board["jobs"][0]["stage"] = json!("build");
+            });
+            let paths = vec![("alpha".to_string(), fx.repo_a.display().to_string())];
+            let picked =
+                claim_ideas(&fx.home, DEVICE, "", 120, &paths, 5, &alpha_pick(None)).unwrap();
+            assert!(picked.is_empty());
+            assert!(fx.job("120-sample-digest").get("claim").is_none());
+            let patches = fx
+                .state
+                .borrow()
+                .calls
+                .iter()
+                .filter(|c| c.0 == "PATCH")
+                .count();
+            assert_eq!(patches, 1);
         }
 
         /// batch_problem belongs to the batch command's slice; its not-before reason is this

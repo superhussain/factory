@@ -2626,8 +2626,15 @@ fn claim_ideas(
     max_inflight: Option<usize>,
     project: Option<&str>,
 ) -> Res<Vec<Value>> {
-    // The cap counts rows this write doesn't touch, so each open row goes in as a read.
-    board_client::cas_reading(home, Some(&board_client::open_row), |text| {
+    // The claim decides from rows it doesn't write, so these go in as reads: every open row, and
+    // under a cap every row of the cap's project, merged or closed too, since a reopened one
+    // would count again.
+    let scope = |j: &Value| {
+        board_client::open_row(j)
+            || max_inflight.is_some()
+                && project.is_none_or(|p| j.get("project").and_then(Value::as_str) == Some(p))
+    };
+    board_client::cas_reading(home, Some(&scope), |text| {
         let mut data = load_board(text)?;
         let budget = match max_inflight {
             None => limit,
