@@ -1,5 +1,6 @@
 # Pre-commit: gitleaks on the staged diff, then oxlint + oxfmt --check on staged JS/TS files only.
-# skills/ is the only filtered path (see docs/development.md).
+# The format check skips skills/ (see docs/development.md) and the fixture folders tests/fixtures/ and
+# tests/parity/homes/, as .oxfmtrc.json does.
 mise exec -- gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml || exit 1
 
 files=$(mktemp) || exit 1

@@ -187,6 +187,11 @@ class PlaceholderTest(unittest.TestCase):
         values = {"home": "/h", "tmp": "/t", "api": "http://a", "today": "2026-01-02"}
         self.assertEqual(run.expand("{home} {tmp} {api} {today} {other}", values), "/h /t http://a 2026-01-02 {other}")
 
+    def test_stub_values_are_json_escaped(self):
+        values = {"home": 'a"b\\c'}
+        json_values = {name: json.dumps(value)[1:-1] for name, value in values.items()}
+        self.assertEqual(json.loads(run.expand(json.dumps(["{home}/x"]), json_values)), ['a"b\\c/x'])
+
     def test_home_files_stubs_and_routes_are_expanded(self):
         script = (
             "import json, os, sys, time, urllib.request\n"

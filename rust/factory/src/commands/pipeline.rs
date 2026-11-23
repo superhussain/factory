@@ -3431,7 +3431,6 @@ const GROUNDING_BOARD_MAX: usize = 20;
 /// Worker refusals that will not change on retry, so an expired trial settles revert-failed.
 const TRIAL_LASTING_REFUSALS: [u16; 4] = [400, 403, 404, 413];
 const PRE_REVIEW_TAIL: usize = 40;
-#[cfg_attr(not(test), allow(dead_code))]
 const GROUNDING_ROWS_MAX: usize = 100;
 static CITATION: Pattern = Pattern::new(
     r"(?<![\w./:-])((?:[\w.-]+/)*[\w-][\w.-]*\.[A-Za-z][A-Za-z0-9]{0,9}):([0-9]+)(?:-([0-9]+))?((?:,[0-9]+)*)(?![\w])",
@@ -3454,7 +3453,6 @@ struct Citation {
 }
 
 /// Each distinct path:line a review cites, in order of first appearance.
-#[cfg_attr(not(test), allow(dead_code))]
 fn find_citations(text: &str) -> Vec<Citation> {
     let mut found = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -3495,7 +3493,6 @@ fn find_citations(text: &str) -> Vec<Citation> {
 /// The lines the branch changes since origin/<base>, by path, or why they cannot be read.
 type Ranges = std::collections::BTreeMap<String, Vec<(i64, i64)>>;
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn diff_ranges(wt: &Path, base: &str, repo: &str) -> Result<Ranges, String> {
     if let Some(reason) = fetch_base(wt, base, repo) {
         return Err(reason);
@@ -3546,7 +3543,6 @@ fn diff_ranges(wt: &Path, base: &str, repo: &str) -> Result<Ranges, String> {
 }
 
 /// (status, resolved, reason) for one cited path and its lines: ok, no-file, bad-line or off-diff.
-#[cfg_attr(not(test), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 fn ground_citation(
     path: &str,
@@ -3670,7 +3666,6 @@ fn bytes_lines(bytes: &[u8]) -> i64 {
 }
 
 /// One unverified citation row for grounding.md.
-#[cfg_attr(not(test), allow(dead_code))]
 struct GroundRow {
     review: String,
     citation: String,
@@ -3679,7 +3674,6 @@ struct GroundRow {
 }
 
 /// grounding.md's text for a round's unverified rows.
-#[cfg_attr(not(test), allow(dead_code))]
 fn grounding_report(
     rows: &[GroundRow],
     head: Option<&str>,
@@ -5170,20 +5164,6 @@ fn record_agent(
         patch_job(&mut data, job_id, &json!({"agents": rows}));
         Ok((Some(dump_board(&data)), Some(full)))
     })
-}
-
-/// Set paseo on each of job's agents rows that session recorded and no session has linked yet.
-#[cfg_attr(not(test), allow(dead_code))]
-fn link_agent_rows(job: &mut Value, session: &str, paseo: &Value) {
-    let Some(rows) = job.get_mut("agents").and_then(Value::as_array_mut) else {
-        return;
-    };
-    for row in rows.iter_mut().filter_map(Value::as_object_mut) {
-        if row.get("session").and_then(Value::as_str) == Some(session) && !row.contains_key("paseo")
-        {
-            row.insert("paseo".into(), paseo.clone());
-        }
-    }
 }
 
 fn agent(sub: &str, args: &[String], o: &mut Out) -> Res<()> {
@@ -8622,12 +8602,12 @@ mod tests {
             let mut row2 = spec_row("2026-01-01T10:10:00Z".into());
             row2["session"] = json!("d4e5f6");
             let mut job = json!({"agents": [spec_row("2026-01-01T09:00:00Z".into()), row1, row2, "a hand-edited row"]});
-            link_agent_rows(&mut job, "a1b2c3", &paseo);
+            claims::link_agent_rows(&mut job, "a1b2c3", &paseo);
             assert_eq!(job["agents"][0]["paseo"], paseo);
             assert_eq!(job["agents"][1]["paseo"], other);
             assert!(job["agents"][2].get("paseo").is_none());
             assert_eq!(job["agents"][3], "a hand-edited row");
-            link_agent_rows(&mut json!({}), "a1b2c3", &paseo);
+            claims::link_agent_rows(&mut json!({}), "a1b2c3", &paseo);
         }
     }
 }

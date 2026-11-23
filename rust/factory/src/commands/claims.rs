@@ -1158,7 +1158,7 @@ fn fresh_hold(
 }
 
 /// Set paseo on each of job's agents rows that session recorded and no session has linked yet.
-fn link_agent_rows(job: &mut Value, session: &str, paseo: &Value) {
+pub(crate) fn link_agent_rows(job: &mut Value, session: &str, paseo: &Value) {
     let Some(rows) = job.get_mut("agents").and_then(Value::as_array_mut) else {
         return;
     };
@@ -1681,6 +1681,10 @@ fn scan_array(c: &[char], idx: usize) -> Scan {
 mod tests {
     use super::*;
 
+    use crate::shared::fs::temp_dir;
+    use crate::shared::http::tests::{home_for, serve};
+    use crate::shared::TEST_ENV_LOCK;
+
     #[test]
     fn blocking_fails_closed_on_a_malformed_claim() {
         for job in [
@@ -1700,9 +1704,6 @@ mod tests {
             None
         );
     }
-    use crate::shared::fs::temp_dir;
-    use crate::shared::http::tests::{home_for, serve};
-    use crate::shared::TEST_ENV_LOCK;
 
     /// Run f with these environment variables set, restoring them after. Tests that read the Paseo or session
     /// variables hold the same lock.

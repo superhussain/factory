@@ -733,11 +733,20 @@ pub fn archive_workspace(call: &Call) -> Res<()> {
     let Some(Value::Array(spaces)) = spaces else {
         return Err(fail(format!("paseo workspace ls failed: exit {code}"), 1));
     };
-    let here = normpath(&cwd);
+    // os.path.normcase: Windows compares paths without case.
+    let norm = |p: &str| {
+        let p = normpath(p);
+        if cfg!(windows) {
+            p.to_lowercase()
+        } else {
+            p
+        }
+    };
+    let here = norm(&cwd);
     let space = spaces.iter().find(|w| {
         w.get("cwd")
             .and_then(Value::as_str)
-            .is_some_and(|c| normpath(c) == here)
+            .is_some_and(|c| norm(c) == here)
     });
     let Some(space) = space else {
         let reason = format!("no Paseo workspace at {cwd}");

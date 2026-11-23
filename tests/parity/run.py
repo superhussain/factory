@@ -126,8 +126,10 @@ def run_side(case, command):
             stub_dir.mkdir()
             for tool in TOOLS:
                 stub.launcher(bin_dir, tool)
+            # Stub files are JSON text, so each value goes in JSON-escaped.
+            json_values = {name: json.dumps(value)[1:-1] for name, value in values.items()}
             for tool, entries in case["stubs"].items():
-                (stub_dir / f"{tool}.json").write_text(expand(json.dumps(entries), values), encoding="utf-8")
+                (stub_dir / f"{tool}.json").write_text(expand(json.dumps(entries), json_values), encoding="utf-8")
             env = isolated_env(home)
             # A side gets only the fake token from home/.env, so a real one never reaches the fixture or a diff.
             env.pop("FACTORY_ACCESS_CLIENT_ID", None)
