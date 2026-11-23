@@ -119,7 +119,11 @@ fn run(home: &Path) -> Res<()> {
     let home = home.to_path_buf();
     let origin = api_url(&home)?;
     let headers = access_headers(&home, &origin)?;
-    let _lock = take_lock(&home)?;
+    // Another copy already serves this home; a service or cron line that starts a second one
+    // gets a quiet exit 0.
+    let Some(_lock) = take_lock(&home)? else {
+        return Ok(());
+    };
     catch_stop_signals();
     let exe = std::env::current_exe().map_err(|e| fail(os_error(&e, None), 1))?;
     let url = host_url(&origin);
@@ -521,8 +525,13 @@ fn run_pickup(exe: &Path, home: &Path, stop: Stop) -> (i32, bool) {
     }
 }
 
-fn take_lock(home: &Path) -> Res<File> {
-    let dir = home.join("logs").join("daemon");
+fn lock_dir(home: &Path) -> std::path::PathBuf {
+    home.join("logs").join("daemon")
+}
+
+/// The daemon lock, or None when another copy holds it.
+fn take_lock(home: &Path) -> Res<Option<File>> {
+    let dir = lock_dir(home);
     let path = dir.join("daemon.lock");
     let file = std::fs::create_dir_all(&dir)
         .and_then(|_| {
@@ -534,11 +543,8 @@ fn take_lock(home: &Path) -> Res<File> {
         })
         .map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
     match file.try_lock() {
-        Ok(()) => Ok(file),
-        Err(TryLockError::WouldBlock) => Err(fail(
-            format!("another factory daemon is running for {}", home.display()),
-            3,
-        )),
+        Ok(()) => Ok(Some(file)),
+        Err(TryLockError::WouldBlock) => Ok(None),
         Err(TryLockError::Error(e)) => Err(fail(os_error(&e, Some(&path)), 1)),
     }
 }
@@ -694,7 +700,7 @@ mod tests {
         assert!(!log.contains("pickup pass"), "{log}");
         sleep(Duration::from_millis(200));
         assert!(closed.load(Ordering::SeqCst));
-        take_lock(&home).unwrap();
+        take_lock(&home).unwrap().unwrap();
     }
 
     /// Runs `serve` against origin until `passes` passes have started, and returns their reasons.
@@ -848,19 +854,23 @@ mod tests {
         assert!(log_text(&home).contains(&format!("connect failed: {message}; retry in ")));
     }
 
+    /// A second daemon for the same home, as a service restart or the cron line starts, returns
+    /// Ok (exit 0) before it connects, prints or logs anything.
     #[test]
-    fn second_daemon_exits_3() {
-        let home = temp_dir("daemon-lock");
-        let _first = take_lock(&home).unwrap();
-        let e = take_lock(&home).unwrap_err();
-        assert_eq!(e.code, 3);
-        assert_eq!(
-            e.stderr,
-            format!(
-                "factory.py: another factory daemon is running for {}\n",
-                home.display()
-            )
-        );
+    fn second_daemon_exits_0_quietly() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let home = home("lock-held", &origin);
+        let _first = take_lock(&home).unwrap().unwrap();
+        assert!(super::run(&home).is_ok());
+        listener.set_nonblocking(true).unwrap();
+        assert!(listener.accept().is_err(), "the second daemon connected");
+        let logs: Vec<_> = std::fs::read_dir(lock_dir(&home))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n.to_string_lossy().ends_with(".log"))
+            .collect();
+        assert!(logs.is_empty(), "{logs:?}");
     }
 
     #[cfg(unix)]
