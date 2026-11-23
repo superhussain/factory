@@ -39,7 +39,8 @@ def install_cli(test_case):
     destination = Path(temp.name).resolve() / "installed"
     result = subprocess.run(
         ["python3", "-B", str(ROOT / "tools" / "install.py"), "--destination", str(destination)],
-        capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        capture_output=True, text=True, # FACTORY_RUNTIME=python keeps cargo out of the install, so these suites test the Python runtime.
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "FACTORY_RUNTIME": "python"})
     if result.returncode != 0:
         raise AssertionError("install.py failed: " + result.stderr)
     installed = destination / "factory" / "runtime" / "factory.py"
