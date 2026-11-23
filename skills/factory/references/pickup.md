@@ -94,10 +94,11 @@ Each run, in order:
   Settings, Pipeline, Batch follow-ups. The board shows the same state on each
   held idea's chip: "Waits for a batch (n of min, hh of maxh)", "Batches behind
   <id>", or "Batch ready" on the one pickup launches next.
-- Holds back plain ideas while review falls behind. Pickup counts the jobs that
-  wait on you across every project, as the dashboard's Needs you column does:
-  `needs-human`, a set `needs`, or an escalated `pr-open` PR. At or above the
-  effective pipeline's `backpressure.needs_you` (a whole number from 1 to 50,
+- Holds back plain ideas while review falls behind. Pickup counts, per project,
+  the jobs that wait on you, as the dashboard's Needs you column does:
+  `needs-human`, a set `needs`, or an escalated `pr-open` PR. Only the idea's own
+  project counts, so one project's review queue never pauses another. At or
+  above that project's effective pipeline `backpressure.needs_you` (a whole number from 1 to 50,
   default 5), it skips each idea with
   `skip <id> <project>: backpressure (<n> waiting on you, pauses at <limit>)`.
   Prioritized ideas, approved specs and moved jobs still launch. This line

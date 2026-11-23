@@ -1,5 +1,5 @@
-// While the jobs waiting on you, in every project, reach the idea's project limit, a plain idea
-// shows pickup's backpressure pause. A prioritized or claimed idea shows no chip, and the paused
+// While its own project's jobs waiting on you reach the project limit, a plain idea shows pickup's
+// backpressure pause. Another project's waiting jobs never pause it. A prioritized or claimed idea shows no chip, and the paused
 // chip replaces a held idea's batch chip.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -22,24 +22,26 @@ const job = (id, extra) => ({
   updated: AT,
   ...extra,
 });
-const JOBS = [
-  ...[1, 2, 3, 4, 5].map((n) =>
-    job(`20${n}-waiting`, { project: "other", stage: "needs-human", idea: undefined }),
-  ),
+const waiting = (project) =>
+  [1, 2, 3, 4, 5].map((n) =>
+    job(`20${n}-waiting`, { project, stage: "needs-human", idea: undefined }),
+  );
+const IDEAS = [
   job("120-add-csv-export", {}),
   job("121-rushed", { priority: { at: AT } }),
   job("122-follow-up", { refs: [{ id: "120-add-csv-export", kind: "follow-up-of" }] }),
   job("123-claimed", { claim: { device: "host-a", session: "s1", since: AT } }),
 ];
+const JOBS = [...waiting("sample"), ...IDEAS];
 const project = (title) => `---\nrepo: example/sample\nbase: main\ntitle: ${title}\n---\n`;
 const TITLE =
-  "Pickup starts no new idea while 5 jobs wait on you. It pauses at 5. Approved specs, moved jobs and prioritized ideas still start. Settings, Pipeline, Review backpressure sets the number.";
+  "Pickup starts no new idea in this project while 5 of its jobs wait on you. It pauses at 5. Approved specs, moved jobs and prioritized ideas still start. Settings, Pipeline, Review backpressure sets the number.";
 
-async function openBoard(browser, origin, pipeline, onPage) {
+async function openBoard(browser, origin, pipeline, jobs = JOBS, onPage) {
   await seedProject(origin, "sample", project("Synthetic sample"));
   await seedProject(origin, "other", project("Synthetic other"));
   await seedPipeline(origin, pipeline);
-  await seedBoard(origin, JOBS);
+  await seedBoard(origin, jobs);
   const errors = [];
   const page = await browser.newPage();
   page.on("pageerror", (error) => errors.push(String(error)));
@@ -133,6 +135,19 @@ test("backpressure chip respects the limit", { timeout: 120000 }, async () => {
   });
 });
 
+test("another project's waiting jobs do not pause", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    const { page, errors } = await openBoard(browser, origin, { schema: 1 }, [
+      ...waiting("other"),
+      ...IDEAS,
+    ]);
+    await page.waitForSelector('.card[data-id="122-follow-up"] .chip.held');
+    assert.deepEqual(await pausedChips(page), {});
+    assert.deepEqual(errors, []);
+  });
+});
+
 // Routes /api/pipeline/effective/sample to answer(request) and lets every other request through.
 const routeEffective = (answer) => async (page) => {
   await page.setBypassServiceWorker(true);
@@ -157,6 +172,7 @@ test("backpressure chip waits for the effective view", { timeout: 120000 }, asyn
       browser,
       origin,
       { schema: 1, backpressure: { needs_you: 6 } },
+      JOBS,
       routeEffective((request) => {
         held = request;
         arrived();
@@ -187,6 +203,7 @@ test(
         browser,
         origin,
         { schema: 1 },
+        JOBS,
         routeEffective((request) => request.respond({ status: 500, body: "fixture failure" })),
       );
       await page.waitForSelector('.card[data-id="120-add-csv-export"] .chip.backpressure');

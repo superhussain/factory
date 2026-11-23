@@ -1035,7 +1035,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
             <option value="on">Set: use the number below</option>
           </select></label>
           <label for="pipeline-backpressure-needs">Jobs waiting on you before new ideas pause<input type="number" id="pipeline-backpressure-needs" min="1" max="50" step="1"></label>
-          <p id="pipeline-backpressure-help" class="muted">Pickup starts no new idea while this many jobs wait on you in the Needs you column. Held PRs count. Approved specs, moved jobs and prioritized ideas still start. A project value replaces the global one whole.</p>
+          <p id="pipeline-backpressure-help" class="muted">Pickup starts no new idea in a project while this many of that project's jobs wait on you in the Needs you column. Other projects never count. Held PRs count. Approved specs, moved jobs and prioritized ideas still start. A project value replaces the global one whole.</p>
         </fieldset>
         <fieldset id="pipeline-archive">
           <legend>Archive old jobs</legend>
@@ -2341,8 +2341,8 @@ function clearHoldConfigs() {
 }
 
 async function loadHoldConfigs() {
-  const anyWaiting = jobs.some(waitsOnYou);
-  const slugs = new Set(jobs.filter((j) => batchHeld(j) || (anyWaiting && backpressurePlain(j))).map((j) => j.project)
+  const waitingProjects = new Set(jobs.filter(waitsOnYou).map((j) => j.project));
+  const slugs = new Set(jobs.filter((j) => batchHeld(j) || (waitingProjects.has(j.project) && backpressurePlain(j))).map((j) => j.project)
     .filter((p) => typeof p === 'string' && !holdConfigs.has(p) && !backpressureConfigs.has(p) && !holdLoading.has(p)));
   let set = false;
   await Promise.all([...slugs].map(async (slug) => {
@@ -2391,15 +2391,16 @@ function backpressurePlain(j) {
   return j.stage === 'idea' && typeof j.project === 'string' && typeof j.priority?.at !== 'string' && !j.claim && !notBefore(j) && pickupCanLaunch(j);
 }
 
-// The paused chip as { text, title } while the jobs waiting on you, in every project, reach the idea's project limit, or null.
+// The paused chip as { text, title } while the idea's project's own jobs waiting on you reach its limit, or null.
+// Other projects' waiting jobs never pause this one.
 function backpressureState(j) {
   if (!backpressurePlain(j) || !holdSettled.has(j.project)) return null;
-  const waiting = jobs.filter(waitsOnYou).length;
+  const waiting = jobs.filter((x) => x.project === j.project && waitsOnYou(x)).length;
   const limit = backpressureConfigs.get(j.project) ?? BACKPRESSURE_DEFAULT;
   if (waiting < limit) return null;
   return {
     text: 'Paused: ' + waiting + ' waiting on you',
-    title: 'Pickup starts no new idea while ' + waiting + ' jobs wait on you. It pauses at ' + limit + '. Approved specs, moved jobs and prioritized ideas still start. Settings, Pipeline, Review backpressure sets the number.',
+    title: 'Pickup starts no new idea in this project while ' + waiting + ' of its jobs wait on you. It pauses at ' + limit + '. Approved specs, moved jobs and prioritized ideas still start. Settings, Pipeline, Review backpressure sets the number.',
   };
 }
 
