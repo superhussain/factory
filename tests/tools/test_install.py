@@ -421,6 +421,22 @@ class InstallTest(IsolatedTestCase):
         self.assertFalse((target / "runtime/factory").exists())
         self.assertFalse((self.root / "ran").exists())
 
+    @unittest.skipIf(os.name == "nt", "the fake cargo is a shell script")
+    def test_cargo_off_path_falls_back_to_home_cargo_bin(self):
+        source = self.checkout(None)
+        home_cargo = self.root / ".cargo/bin/cargo"
+        home_cargo.parent.mkdir(parents=True)
+        home_cargo.write_text('#!/bin/sh\nmkdir -p "$CARGO_TARGET_DIR/release" && printf home > "$CARGO_TARGET_DIR/release/factory"\n')
+        home_cargo.chmod(0o755)
+        os.environ.pop("CARGO_TARGET_DIR", None)
+        with patch.object(self.installer.shutil, "which", return_value=None):
+            self.assertIsNone(self.installer.rust_binary(source.parents[1]))
+            del os.environ["FACTORY_RUNTIME"]
+            target, err, bundle = self.install_rust(source)
+        self.assertEqual(err, "")
+        self.assertEqual((target / "runtime/factory").read_bytes(), b"home")
+        self.assertEqual(bundle["entry"], ["runtime/factory"])
+
     @unittest.skipIf(os.name == "nt", "the planted binary is a shell script")
     def test_launcher_hands_off_to_the_binary_beside_it(self):
         runtime = self.root / "launcher/runtime"
