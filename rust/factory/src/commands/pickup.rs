@@ -83,6 +83,8 @@ static BUNDLE_HASH: Pattern = Pattern::new("[0-9a-f]{7,64}", Re::NONE);
 static POSITIVE: Pattern = Pattern::new("[1-9][0-9]*", Re::NONE);
 static ENV_ASSIGN: Pattern = Pattern::new("(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=", Re::NONE);
 static TRAILING_NUMBER: Pattern = Pattern::new(r"-\d+$", Re::NONE);
+/// An outcomes record line's `<slug> unknown: ` tail: the first unknown job and its reason.
+static OUTCOME_UNKNOWN: Pattern = Pattern::new(r"(\S+) \((.*?)\)(?:, |$)", Re::NONE);
 
 /// A point that waits on a sibling slice: exit 2, which no code-5 catch in pickup swallows.
 fn deferred(what: &str) -> Exit {
@@ -143,6 +145,7 @@ struct Fakes {
     audit_stamp: Option<Rc<dyn Fn(&str) -> Option<i128>>>,
     audit_push: Option<Rc<dyn Fn(&str) -> Res<()>>>,
     usage_record: Option<Rc<dyn Fn(&Path, &str, &str, &str, &Value) -> Res<()>>>,
+    outcomes: Option<Rc<dyn Fn(&str, &mut String) -> Res<()>>>,
     pickup_scheduler: Option<&'static str>,
     launch_wait_seconds: Option<f64>,
     exe: Option<String>,
@@ -1002,7 +1005,7 @@ fn run_passes(
         retro_pickup_push(io, home)?;
         audit_pickup_push(io, home, data.as_ref())?;
         orphan_pickup_scan(io, home)?;
-        outcomes_pickup_record(home)?;
+        outcomes_pickup_record(io, home)?;
     }
     retro_pickup_catchup(io, home, flags.dry);
     pickup_pass(
@@ -2654,23 +2657,57 @@ fn orphan_pickup_scan(io: &mut Io, home: &Path) -> Res<()> {
     Ok(())
 }
 
-/// Run outcomes record once per local date for each paths.md checkout folder that exists.
-fn outcomes_pickup_record(home: &Path) -> Res<()> {
+fn outcomes(slug: &str, out: &mut String) -> Res<()> {
+    #[cfg(test)]
+    if let Some(f) = fake!(outcomes) {
+        return f(slug, out);
+    }
+    crate::commands::audit::outcomes(true, Some(slug), out)
+}
+
+/// Run outcomes record once per local date for each paths.md checkout folder that exists, printing
+/// one line per project. paths.md is read before the date is recorded, and a project that stops
+/// retries the next local date.
+fn outcomes_pickup_record(io: &mut Io, home: &Path) -> Res<()> {
     #[cfg(test)]
     if let Some(f) = fake!(outcomes_pickup_record) {
         f(home);
         return Ok(());
     }
+    let mut paths = paths_of(home)?;
+    paths.sort();
+    paths.retain(|(slug, checkout)| SLUG.is_full(slug) && is_dir(checkout));
     if !claim_today(&home.join(OUTCOMES_RECORD_FILE))? {
         return Ok(());
     }
-    let mut paths = paths_of(home)?;
-    paths.sort();
-    if paths
-        .iter()
-        .any(|(slug, checkout)| SLUG.is_full(slug) && is_dir(checkout))
-    {
-        return Err(deferred("outcomes record"));
+    for (slug, _) in &paths {
+        let mut out = String::new();
+        if let Err(e) = outcomes(slug, &mut out) {
+            let _ = io.err.write_all(e.stderr.as_bytes());
+            errln!(
+                io,
+                "factory.py: outcomes record {slug} stopped (exit {}); it runs again tomorrow",
+                e.code
+            );
+            continue;
+        }
+        let lines = splitlines(&out, false);
+        let prefix = format!("{slug} unknown: ");
+        if let Some(m) = lines.iter().find_map(|line| {
+            line.strip_prefix(&prefix)
+                .and_then(|rest| OUTCOME_UNKNOWN.match_start(rest))
+        }) {
+            errln!(
+                io,
+                "factory.py: outcomes record {slug}: {} is unknown: {}",
+                &m[1],
+                &m[2]
+            );
+        }
+        let Some(last) = lines.last() else {
+            return Err(fail(format!("outcomes record {slug} printed nothing"), 1));
+        };
+        outln!(io, "outcomes record {slug}: {last}");
     }
     Ok(())
 }
@@ -8627,23 +8664,6 @@ exit "$code"
             *backlog.borrow_mut() = "# backlog\n\n- [ ] alpha: export the board\n".into();
             assert_deferred(fx.pickup(&["--triage-now"]), "backlog triage");
         }
-
-        #[test]
-        fn outcomes_record() {
-            let fx = Fx::new();
-            fx.set_fakes(|f| {
-                f.outcomes_pickup_record = None;
-                f.pickup_pass = Some(Rc::new(|_, _| Ok(())));
-            });
-            assert_deferred(fx.pickup(&[]), "outcomes record");
-            let record: Value = read_json(&fx.home.join(OUTCOMES_RECORD_FILE)).unwrap();
-            assert_eq!(record["version"], 1);
-            assert_eq!(
-                fx.pickup(&[]).0,
-                0,
-                "the record holds the date, so it waits a day"
-            );
-        }
     }
 
     mod pickup_test {
@@ -12980,6 +13000,136 @@ exit "$archive_code"
             assert!(seen.borrow().is_empty());
             assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
             assert_eq!(*seen.borrow(), vec![fx.home.clone()]);
+        }
+
+        /// Pickup with the real record step: paths.md lists alpha's checkout and beta's missing
+        /// folder, the claim pass does nothing, and the fake outcomes answers per slug.
+        fn record_fx(answer: fn(&str, &mut String) -> Res<()>) -> Fx {
+            let fx = Fx::new();
+            fs::write(
+                fx.home.join("paths.md"),
+                format!(
+                    "---\nalpha: {}\nbeta: {}\n---\n",
+                    fx.repo_a.display(),
+                    fx.root.join("gone").display()
+                ),
+            )
+            .unwrap();
+            fx.set_fakes(|f| {
+                f.outcomes_pickup_record = None;
+                f.pickup_pass = Some(Rc::new(|_, _| Ok(())));
+                f.outcomes = Some(Rc::new(answer));
+            });
+            fx
+        }
+
+        fn recorded(slug: &str, out: &mut String) -> Res<()> {
+            out.push_str(&format!("{slug} unknown: none\n"));
+            out.push_str("recorded 3 outcomes on the board\n");
+            Ok(())
+        }
+
+        fn today() -> String {
+            let (utc, offset) = local_now();
+            local_date(utc, offset)
+        }
+
+        #[test]
+        fn test_first_run_records_each_checkout() {
+            let fx = record_fx(recorded);
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "outcomes record alpha: recorded 3 outcomes on the board\n",
+                    ""
+                )
+            );
+            assert_eq!(
+                read_json(&fx.home.join(OUTCOMES_RECORD_FILE)).unwrap(),
+                json!({"version": 1, "date": today()})
+            );
+        }
+
+        #[test]
+        fn test_same_date_does_nothing() {
+            let fx = record_fx(recorded);
+            fx.pickup(&[]);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+        }
+
+        #[test]
+        fn test_unknown_prints_first_reason() {
+            let fx = record_fx(|_, out| {
+                out.push_str(
+                    "alpha unknown: 1017-add-x (no merge commit from GitHub), 1018-add-y (no PR)\n",
+                );
+                out.push_str("outcomes unchanged; nothing written\n");
+                Ok(())
+            });
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "outcomes record alpha: outcomes unchanged; nothing written\n",
+                    "factory.py: outcomes record alpha: 1017-add-x is unknown: no merge commit from GitHub\n"
+                )
+            );
+        }
+
+        #[test]
+        fn test_stopped_project_warns() {
+            let fx = record_fx(|slug, out| {
+                if slug == "alpha" {
+                    return Err(exit(5));
+                }
+                out.push_str("no jobs merged in the last 90 days\n");
+                Ok(())
+            });
+            fs::create_dir(fx.root.join("beta")).unwrap();
+            fs::write(
+                fx.home.join("paths.md"),
+                format!(
+                    "---\nbeta: {}\nalpha: {}\n---\n",
+                    fx.root.join("beta").display(),
+                    fx.repo_a.display()
+                ),
+            )
+            .unwrap();
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(
+                    0,
+                    "outcomes record beta: no jobs merged in the last 90 days\n",
+                    "factory.py: outcomes record alpha stopped (exit 5); it runs again tomorrow\n"
+                )
+            );
+            assert!(fx.home.join(OUTCOMES_RECORD_FILE).exists());
+        }
+
+        #[test]
+        fn test_empty_output_fails() {
+            let fx = record_fx(|_, _| Ok(()));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(1, "", "factory.py: outcomes record alpha printed nothing\n")
+            );
+        }
+
+        #[test]
+        fn test_bad_paths_md_writes_no_stamp() {
+            let fx = record_fx(recorded);
+            fs::write(fx.home.join("paths.md"), b"---\nalpha: \xff\n---\n").unwrap();
+            let orphan_scan = hook_counter(&fx, true);
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, out.as_str()), (1, ""));
+            assert!(err.contains("invalid utf-8"), "{err}");
+            assert_eq!(
+                orphan_scan.borrow().len(),
+                1,
+                "the step before the record ran"
+            );
+            assert!(!fx.home.join(OUTCOMES_RECORD_FILE).exists());
         }
     }
 
