@@ -9,13 +9,15 @@ use std::time::UNIX_EPOCH;
 use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
+use crate::shared::board::{dump_board, load_board, patch_job};
 use crate::shared::conf::{fm_get, frontmatter};
-use crate::shared::consts::{NEW_JOB_ID, NOTE_SECRETS, PASEO_ID};
+use crate::shared::consts::{NEW_JOB_ID, NOTE_SECRETS, PASEO_ID, ROUTE_MODEL};
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::read_text;
 use crate::shared::home::factory_home;
-use crate::shared::http::{access_message, api};
+use crate::shared::http::{access_message, api, cas};
 use crate::shared::proc::hostname;
+use crate::shared::project::r2_target;
 use crate::shared::py::{is_space, os_error, repr, rstrip, strip, universal_newlines};
 use crate::shared::pyjson::{dumps, float_repr, loads, DEFAULT};
 use crate::shared::pyre::{Captures, Flags, Pattern};
@@ -1033,8 +1035,344 @@ pub fn audit_cmd(call: &Call) -> Res<()> {
     Ok(())
 }
 
-pub fn usage_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("usage"))
+/// The kinds a usage count keeps, with the transcript field each comes from.
+const USAGE_TOKENS: [(&str, &str); 4] = [
+    ("input", "input_tokens"),
+    ("output", "output_tokens"),
+    ("cache_write", "cache_creation_input_tokens"),
+    ("cache_read", "cache_read_input_tokens"),
+];
+const USAGE_PROMPT_LINES: usize = 50;
+
+type Counts = [i64; 4];
+
+fn add_counts(models: &mut Vec<(String, Counts)>, model: &str, counts: &Counts) {
+    let i = match models.iter().position(|(m, _)| m == model) {
+        Some(i) => i,
+        None => {
+            models.push((model.to_string(), [0; 4]));
+            models.len() - 1
+        }
+    };
+    for (total, n) in models[i].1.iter_mut().zip(counts) {
+        *total += n;
+    }
+}
+
+/// The text of a transcript's first non-meta user line within USAGE_PROMPT_LINES, else "".
+fn usage_prompt(path: &Path) -> String {
+    let Ok(lines) = read_lines(path, Some(USAGE_PROMPT_LINES)) else {
+        return String::new();
+    };
+    for line in &lines {
+        let Ok(Value::Object(e)) = loads(line) else {
+            continue;
+        };
+        if e.get("type").and_then(Value::as_str) == Some("user") && !truthy(e.get("isMeta")) {
+            return match e.get("message") {
+                Some(Value::Object(msg)) => retro_text(msg.get("content").unwrap_or(&Value::Null)),
+                _ => String::new(),
+            };
+        }
+    }
+    String::new()
+}
+
+/// ([(model, counts)], unreadable line count) for one transcript, each message id counted once.
+/// main skips isSidechain lines. since keeps only lines whose timestamp is at or after it.
+fn usage_scan(
+    path: &Path,
+    main: bool,
+    since: Option<&str>,
+) -> io::Result<(Vec<(String, Counts)>, usize)> {
+    let mut turns: Vec<(String, String, Counts)> = Vec::new();
+    let mut bad = 0;
+    for line in read_lines(path, None)? {
+        if strip(&line).is_empty() {
+            continue;
+        }
+        let Ok(e) = loads(&line) else {
+            bad += 1;
+            continue;
+        };
+        let Value::Object(e) = e else { continue };
+        if e.get("type").and_then(Value::as_str) != Some("assistant")
+            || (main && truthy(e.get("isSidechain")))
+        {
+            continue;
+        }
+        if let Some(since) = since {
+            if !e
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .is_some_and(|t| t >= since)
+            {
+                continue;
+            }
+        }
+        let Some(msg) = e.get("message").and_then(Value::as_object) else {
+            continue;
+        };
+        let (Some(id), Some(usage)) = (
+            msg.get("id").and_then(Value::as_str),
+            msg.get("usage").and_then(Value::as_object),
+        ) else {
+            continue;
+        };
+        let model = msg
+            .get("model")
+            .and_then(Value::as_str)
+            .filter(|m| ROUTE_MODEL.is_full(m))
+            .unwrap_or("other");
+        let i = match turns.iter().position(|(t, ..)| t == id) {
+            Some(i) => i,
+            None => {
+                turns.push((id.to_string(), model.to_string(), [0; 4]));
+                turns.len() - 1
+            }
+        };
+        for (best, (_, field)) in turns[i].2.iter_mut().zip(USAGE_TOKENS) {
+            if let Some(value) = int_of(usage.get(field)) {
+                *best = (*best).max(value);
+            }
+        }
+    }
+    let mut models = Vec::new();
+    for (_, model, counts) in &turns {
+        add_counts(&mut models, model, counts);
+    }
+    models.retain(|(_, c)| c.iter().any(|n| *n != 0));
+    Ok((models, bad))
+}
+
+/// [(path, main)] for this host's transcripts that ran in the job's worktree, plus each main
+/// session or subagent elsewhere whose own first prompt names the job folder or prompt folder.
+fn usage_transcripts(home: &Path, slug: &str, job_id: &str) -> io::Result<Vec<(PathBuf, bool)>> {
+    let root = retro_transcripts();
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut needles: Vec<String> = Vec::new();
+    for base in ["jobs", "prompts"] {
+        let p = home.join(base).join(slug).join(job_id);
+        for s in [
+            p.display().to_string(),
+            p.display().to_string().replace('\\', "/"),
+        ] {
+            if !needles.contains(&s) {
+                needles.push(s);
+            }
+        }
+    }
+    needles.sort();
+    let worktrees = audit_folders(job_id)?;
+    let mut projects = Vec::new();
+    for entry in fs::read_dir(&root)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            projects.push(path);
+        }
+    }
+    projects.sort();
+    let mut found = Vec::new();
+    for project in projects {
+        for path in glob(&project, "", ".jsonl") {
+            let subs = glob(&project.join(stem(&path)).join("subagents"), "", ".jsonl");
+            if worktrees.contains(&project) {
+                found.push((path, true));
+                found.extend(subs.into_iter().map(|s| (s, false)));
+                continue;
+            }
+            if names_job(&usage_prompt(&path), &needles) {
+                found.push((path, true));
+            }
+            found.extend(
+                subs.into_iter()
+                    .filter(|s| names_job(&usage_prompt(s), &needles))
+                    .map(|s| (s, false)),
+            );
+        }
+    }
+    Ok(found)
+}
+
+/// {"transcripts": n, "models": {model: {kind: tokens}}} summed over the job's transcripts here.
+/// Warns on stderr about unreadable files and lines.
+pub(crate) fn usage_totals(home: &Path, slug: &str, job_id: &str) -> io::Result<Value> {
+    let mut totals: Vec<(String, Counts)> = Vec::new();
+    let mut read = 0;
+    for (path, main) in usage_transcripts(home, slug, job_id)? {
+        let Ok((models, bad)) = usage_scan(&path, main, None) else {
+            eprintln!("factory.py: usage: cannot read {}", file_name(&path));
+            continue;
+        };
+        read += 1;
+        if bad > 0 {
+            let s = if bad == 1 { "" } else { "s" };
+            eprintln!(
+                "factory.py: usage: {bad} unreadable line{s} in {}",
+                file_name(&path)
+            );
+        }
+        for (model, counts) in &models {
+            add_counts(&mut totals, model, counts);
+        }
+    }
+    totals.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut models = Map::new();
+    for (model, counts) in totals {
+        let kinds: Map<String, Value> = USAGE_TOKENS
+            .iter()
+            .zip(counts)
+            .map(|((key, _), n)| (key.to_string(), Value::from(n)))
+            .collect();
+        models.insert(model, Value::Object(kinds));
+    }
+    Ok(json!({"transcripts": read, "models": models}))
+}
+
+/// Write this host's token totals to the board job under tokens.<device>, keeping other hosts'
+/// entries.
+pub(crate) fn usage_record(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    device: &str,
+    totals: &Value,
+) -> Res<()> {
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(job) = data["jobs"].as_array().and_then(|jobs| {
+            jobs.iter()
+                .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
+        }) else {
+            return Err(fail(
+                format!("no job {slug}/{job_id} on the board. Nothing was written."),
+                4,
+            ));
+        };
+        if job.get("project").and_then(Value::as_str) != Some(slug) {
+            return Err(fail(
+                format!("{job_id} is not assigned to {slug}. Nothing was written."),
+                2,
+            ));
+        }
+        let mut tokens = job
+            .get("tokens")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let job = patch_job(&mut data, job_id, &json!({}));
+        let mut entry = Map::new();
+        entry.insert("at".into(), job["updated"].clone());
+        entry.extend(totals.as_object().cloned().unwrap_or_default());
+        tokens.insert(device.to_string(), Value::Object(entry));
+        let slot = data["jobs"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
+            .unwrap();
+        slot["tokens"] = Value::Object(tokens);
+        Ok((Some(dump_board(&data)), ()))
+    })
+}
+
+/// Input, output and cache_write tokens summed over a {model: {kind: tokens}} map. cache_read and
+/// negative counts are left out.
+fn token_count(models: &Value) -> i64 {
+    models
+        .as_object()
+        .into_iter()
+        .flat_map(|m| m.values())
+        .filter_map(Value::as_object)
+        .flat_map(|counts| counts.iter())
+        .filter(|(k, _)| ["input", "output", "cache_write"].contains(&k.as_str()))
+        .filter_map(|(_, v)| int_of(Some(v)))
+        .filter(|v| *v >= 0)
+        .sum()
+}
+
+pub fn usage_cmd(call: &Call) -> Res<()> {
+    let args = &call.args;
+    let record = args.len() == 2;
+    if record && args[0] != "record" {
+        return Err(fail(
+            "usage: factory.py usage [record] <project-slug>/<job-id>",
+            2,
+        ));
+    }
+    let (home, slug, job_id) = r2_target(args.last().unwrap(), true)?;
+    let mut host = retro_host()?;
+    if record {
+        let config = home.join("config.md");
+        host = fm_get(&config_meta(&config)?, "device")
+            .unwrap_or("")
+            .to_string();
+        if !HOST_NAME.is_full(&host) {
+            return Err(fail(
+                format!(
+                    "set device: in {}; pair this host with factory.py host pair <id> <code>",
+                    config.display()
+                ),
+                2,
+            ));
+        }
+    }
+    let totals = match usage_totals(&home, &slug, &job_id) {
+        Ok(totals) => totals,
+        Err(e) => {
+            eprintln!(
+                "factory.py: usage: scan failed ({}: {}); nothing recorded",
+                exc_name(&e),
+                os_error(&e, Some(&retro_transcripts()))
+            );
+            return Ok(());
+        }
+    };
+    let n = totals["transcripts"].as_u64().unwrap_or(0);
+    if n == 0 {
+        println!("no Claude Code transcripts on {host} name {job_id}; nothing recorded");
+        return Ok(());
+    }
+    println!(
+        "job {job_id} on {host}: {n} transcript{}",
+        if n == 1 { "" } else { "s" }
+    );
+    let mut lines: Vec<Vec<String>> = vec![std::iter::once("model")
+        .chain(USAGE_TOKENS.iter().map(|(k, _)| *k))
+        .map(String::from)
+        .collect()];
+    for (model, counts) in totals["models"].as_object().unwrap() {
+        let mut line = vec![model.clone()];
+        for (key, _) in USAGE_TOKENS {
+            line.push(thousands(counts[key].as_i64().unwrap_or(0)));
+        }
+        lines.push(line);
+    }
+    let widths: Vec<usize> = (0..lines[0].len())
+        .map(|i| lines.iter().map(|l| l[i].chars().count()).max().unwrap())
+        .collect();
+    for line in &lines {
+        let cells: Vec<String> = line
+            .iter()
+            .zip(&widths)
+            .enumerate()
+            .map(|(i, (cell, w))| {
+                if i == 0 {
+                    format!("{cell:<w$}")
+                } else {
+                    format!("{cell:>w$}")
+                }
+            })
+            .collect();
+        println!("{}", cells.join("  "));
+    }
+    if record {
+        usage_record(&home, &slug, &job_id, &host, &totals)?;
+        println!("recorded {host} tokens on {job_id}");
+    }
+    Ok(())
 }
 
 pub fn outcomes_cmd(_call: &Call) -> Res<()> {
@@ -1196,5 +1534,71 @@ mod tests {
         assert!(names_job("jobs/a/1017-add-x", &needles));
         assert!(!names_job("jobs/a/1017-add-xy", &needles));
         assert!(!names_job("jobs/a/1017-add-x-2", &needles));
+    }
+
+    fn turn(id: &str, model: &str, n: [i64; 4], side: bool, stamp: Option<&str>) -> String {
+        let mut line = json!({"type": "assistant", "isSidechain": side, "message": {"id": id, "model": model, "usage": {
+            "input_tokens": n[0], "output_tokens": n[1], "cache_creation_input_tokens": n[2],
+            "cache_read_input_tokens": n[3]}}});
+        if let Some(stamp) = stamp {
+            line["timestamp"] = Value::from(stamp);
+        }
+        line.to_string() + "\n"
+    }
+
+    #[test]
+    fn usage_scan_dedupes() {
+        const OPUS: &str = "claude-opus-5-5";
+        let dir = std::env::temp_dir().join(format!("audit-usage-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        let text = [
+            turn("a", OPUS, [1, 2, 3, 4], false, None),
+            turn("a", OPUS, [1, 5, 3, 4], false, None),
+            turn("b", OPUS, [10, 0, 0, 0], false, None),
+            turn("c", "<synthetic>", [0, 7, 0, 0], false, None),
+            turn("d", "zero-model", [0, 0, 0, 0], false, None),
+            "{broken\n".into(),
+            "\n".into(),
+            turn("e", OPUS, [9, 9, 9, 9], true, None),
+        ]
+        .concat();
+        fs::write(&path, text).unwrap();
+        let (models, bad) = usage_scan(&path, true, None).unwrap();
+        assert_eq!(bad, 1);
+        assert_eq!(
+            models,
+            [
+                (OPUS.to_string(), [11, 5, 3, 4]),
+                ("other".to_string(), [0, 7, 0, 0])
+            ]
+        );
+        assert_eq!(usage_scan(&path, false, None).unwrap().0[0].1[0], 20);
+
+        let d2 = turn(
+            "d2",
+            OPUS,
+            [10, 20, 30, 40],
+            false,
+            Some("2026-01-01T00:00:00.250Z"),
+        );
+        let day = [
+            turn(
+                "d1",
+                OPUS,
+                [1, 2, 3, 4],
+                false,
+                Some("2025-12-31T23:59:59.900Z"),
+            ),
+            d2.clone(),
+            d2,
+        ]
+        .concat();
+        fs::write(&path, day).unwrap();
+        assert_eq!(
+            usage_scan(&path, true, Some("2026-01-01T00:00:00")).unwrap(),
+            (vec![(OPUS.to_string(), [10, 20, 30, 40])], 0)
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
