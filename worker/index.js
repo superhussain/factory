@@ -493,6 +493,7 @@ async function boardRefusal(env, stored, data, sameBase, principal) {
         checkBatchRefs(stored.jobs, data.jobs) ??
         checkNewStarters(stored.jobs, data.jobs) ??
         (await checkApprovalNotes(env, stored.jobs, data.jobs, principal)) ??
+        checkSpecApproval(stored.jobs, data.jobs, principal) ??
         checkResolve(stored.jobs, data.jobs, principal) ??
         checkSteer(stored.jobs, data.jobs, principal) ??
         checkTrials(stored.doc, data))
@@ -3038,6 +3039,44 @@ async function checkApprovalNotes(env, storedJobs, jobs, principal) {
       !(await validReceipt(env, row))
     )
       return `a board write from a device cannot set the note "${TRACER_APPROVED_NOTE}" on ${quoteIdCut(row.id, QUOTED_ID_MAX)} without a Tracer-signed scope receipt for ${tracerIds(row)[0]}. Nothing was written.`;
+  }
+  return null;
+}
+
+const COMMAND_APPROVED_NOTE = "spec approved";
+const SPEC_APPROVAL_NOTES = {
+  dashboard: DASHBOARD_APPROVED_NOTE,
+  tracer: TRACER_APPROVED_NOTE,
+  command: COMMAND_APPROVED_NOTE,
+};
+
+// spec_approval records who passed the spec-approval gate. A changed value must be well formed,
+// come from a signed-in person when via is dashboard, and arrive with its via's note. A row whose
+// spec_approval is unchanged or removed passes. An error message, or null.
+function checkSpecApproval(storedJobs, jobs, principal) {
+  const stored = new Map();
+  for (const j of storedJobs)
+    if (typeof j?.id === "string" && !stored.has(j.id)) stored.set(j.id, j);
+  for (const row of jobs) {
+    if (typeof row !== "object" || row === null || typeof row.id !== "string") continue;
+    const a = row.spec_approval;
+    if (a === undefined || JSON.stringify(a) === JSON.stringify(stored.get(row.id)?.spec_approval))
+      continue;
+    const id = quoteIdCut(row.id, QUOTED_ID_MAX);
+    const keys =
+      a && typeof a === "object" && !Array.isArray(a) ? Object.keys(a).sort().join() : "";
+    if (
+      keys !== "at,decider,via" ||
+      a.decider !== "person" ||
+      !Object.hasOwn(SPEC_APPROVAL_NOTES, a.via) ||
+      typeof a.at !== "string" ||
+      !STEER_AT.test(a.at)
+    )
+      return `spec_approval on ${id} must be {decider: "person", via: "dashboard", "tracer" or "command", at}. Nothing was written.`;
+    if (a.via === "dashboard" && principal?.kind !== "user")
+      return `a board write from a device cannot set spec_approval via dashboard on ${id}: only a signed-in person approves a spec on the dashboard. Nothing was written.`;
+    if (row.note !== SPEC_APPROVAL_NOTES[a.via])
+      return `spec_approval via ${a.via} on ${id} needs the note "${SPEC_APPROVAL_NOTES[a.via]}" in the same write. Nothing was written.`;
   }
   return null;
 }

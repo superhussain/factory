@@ -22,6 +22,7 @@
   "note": "optional one-line status, e.g. escalation reason",
   "needs": "optional: what only a human can do, e.g. approve spec.md",
   "steer": [{ "note": "Keep the CSV header order the same as the old report.", "at": "2026-01-02T14:00:00Z" }],
+  "spec_approval": { "decider": "person", "via": "dashboard | tracer | command", "at": "..." },
   "not_before": "optional UTC time; pickup and stuck leave the job alone until it, e.g. 2026-11-17T09:00:00Z",
   "port": "optional dev-server port or block the builder holds, e.g. 8130-8139",
   "refs": [{ "id": "029-mobile-offline-swr", "kind": "rework-of | follow-up-of | sub-job-of | depends-on | batched-into (set only by factory batch; dropped by the lead's close or merge, or the dashboard's Remove from batch while the lead is at spec)" }],
@@ -85,6 +86,11 @@ Worker refuses any edit, a device write, a write that drops stored notes,
 a device write that removes an open row holding notes, and notes on riders.
 `factory board` refuses a `steer` patch with exit 2. `factory prompt ... build` wraps every
 note as data in each later build prompt, as [dashboard](dashboard.md) describes.
+`spec_approval` records who passed the spec-approval gate. The dashboard's Approve spec,
+factory.py's Tracer approval and the `/factory approve-spec` patch write it with the approval
+note. The Worker refuses `via: "dashboard"` from a device and any `via` without its note.
+`board` refuses a `spec_approval` patch. `factory.py job` infers it for older rows from the
+approval notes and marks it `inferred`.
 `backlog` is set only on jobs decided from the Backlog column or `backlog decide`. It holds
 the backlog line, the decision, when it was made, and any notes typed with the decision.
 Approve also appends the notes to `idea`.

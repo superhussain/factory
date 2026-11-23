@@ -152,6 +152,8 @@ flowchart LR
   explorer card to any stage but `idea` or `closed`.
 - `origin.approved` carries `decider: "person"`. An older approval without it was made
   by a person, since `suggest approve` is its only writer.
+- A passed spec-approval gate records `spec_approval` with `decider: "person"` and `via`
+  `dashboard`, `tracer` or `command`. Only a signed-in person writes `via: "dashboard"`.
 - A job's `decision` carries `decider` too: `person` for `/factory approve` and a
   person's close, `model` for the approver.
 - Honest limit: the Worker cannot yet tell a human from a service token, so a token

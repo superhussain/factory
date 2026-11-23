@@ -250,6 +250,11 @@ test("approve spec", { timeout: 240000 }, async (t) => {
           [j.stage, j.note, "needs" in j, j.updated],
           ["build", "spec approved on the dashboard", false, NOW],
         );
+        assert.deepEqual(j.spec_approval, {
+          decider: "person",
+          via: "dashboard",
+          at: NOW,
+        });
         assert.equal(await page.$eval("#d-approve-spec-err", (el) => el.hidden), true);
       });
 
@@ -268,6 +273,11 @@ test("approve spec", { timeout: 240000 }, async (t) => {
           [j.stage, j.note, "needs" in j],
           ["build", "spec approved on the dashboard", false],
         );
+        assert.deepEqual(j.spec_approval, {
+          decider: "person",
+          via: "dashboard",
+          at: NOW,
+        });
       });
 
       await t.test(`a row that changed meanwhile writes nothing ${width}`, async () => {
