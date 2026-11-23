@@ -1684,7 +1684,6 @@ pub(crate) fn pr_merge_commits(
 
 /// The head commit and pr_signal of each of repo's pull requests from one gh api graphql call, or why not.
 /// handled maps each number to its job's handled entries.
-#[allow(dead_code)] // pickup's auto-babysit pass reads these once its PR legs are ported.
 pub(crate) fn pr_signals(
     repo: &str,
     numbers: &[u64],

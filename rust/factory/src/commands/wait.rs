@@ -1,4 +1,4 @@
-//! wait and watch: block until job artifacts carry a valid first line. round-wait is not ported yet.
+//! wait, watch and round-wait: block until job artifacts carry a valid first line.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;

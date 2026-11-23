@@ -4,8 +4,8 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use crate::commands::{
-    audit, checks, claims, intake, lookup, ops, pickup, pipeline, prompt, retro, setup, sync,
-    tracer, wait, worktree,
+    audit, catch_up, checks, claims, intake, lookup, ops, pickup, pipeline, prompt, retro, setup,
+    sync, tracer, wait, worktree,
 };
 use crate::shared::consts::{MAX_RIDERS, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
@@ -76,7 +76,7 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
     ("archive-workspace", ops::archive_workspace, 1, 2),
     ("orphans", ops::orphans_cmd, 0, 0),
     ("escalation", pipeline::escalation_cmd, 2, 2),
-    ("catch-up", catch_up, 0, 0),
+    ("catch-up", catch_up::catch_up, 0, 0),
     ("repeats", pipeline::repeats_cmd, 2, 2),
     ("review-plan", pipeline::review_plan_cmd, 2, 2),
     ("review-floor", pipeline::review_floor_cmd, 1, 1),
@@ -102,14 +102,6 @@ pub const USAGE: &str = include_str!("usage.txt");
 fn handler_for(name: &str, count: usize) -> Option<Handler> {
     let (_, handler, lo, hi) = COMMANDS.iter().find(|(n, ..)| *n == name)?;
     (name == "ideas" || (*lo..=*hi).contains(&count)).then_some(*handler)
-}
-
-pub fn not_ported(name: &str) -> Exit {
-    fail(format!("{name} is not ported to the Rust binary yet"), 2)
-}
-
-fn catch_up(_call: &Call) -> Res<()> {
-    Err(not_ported("catch-up"))
 }
 
 fn run(args: Vec<OsString>) -> Res<()> {
@@ -280,17 +272,6 @@ mod tests {
             .collect();
         assert_eq!(python.len(), 69);
         assert_eq!(rust, python);
-    }
-
-    #[test]
-    fn unported_command_exits_2() {
-        let e = not_ported("claim");
-        assert_eq!(e.code, 2);
-        assert_eq!(
-            e.stderr,
-            "factory.py: claim is not ported to the Rust binary yet\n"
-        );
-        assert_eq!(e.status, None);
     }
 
     #[test]
