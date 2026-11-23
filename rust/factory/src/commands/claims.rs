@@ -1067,7 +1067,163 @@ fn scan_array(c: &[char], idx: usize) -> Scan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use crate::shared::fs::temp_dir;
+    use crate::shared::http::tests::{home_for, serve};
+    use std::sync::Mutex;
+
+    static ENV: Mutex<()> = Mutex::new(());
+
+    /// Run f with these environment variables set, restoring them after. Tests that read the Paseo or session
+    /// variables hold the same lock.
+    fn with_env<T>(vars: &[(&str, &str)], f: impl FnOnce() -> T) -> T {
+        let _lock = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let saved: Vec<_> = vars.iter().map(|(k, _)| (*k, std::env::var_os(k))).collect();
+        for (k, v) in vars {
+            std::env::set_var(k, v);
+        }
+        let out = f();
+        for (k, v) in saved {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+        out
+    }
+
+    const NO_PASEO: &[(&str, &str)] = &[("PASEO_AGENT_ID", ""), ("FACTORY_SESSION", "s")];
+
+    /// PASEO_HOME with a server id and an agent, so paseo_session links, and a FACTORY_HOME that cannot resolve.
+    fn paseo_without_home(name: &str) -> PathBuf {
+        let paseo = temp_dir(name);
+        fs::write(paseo.join("server-id"), "srv_new\n").unwrap();
+        paseo
+    }
+
+    fn refused_home(name: &str) -> PathBuf {
+        let (origin, _) = serve(vec![]);
+        home_for(name, &origin)
+    }
+
+    #[test]
+    fn archive_floor_reads_only_a_positive_int() {
+        for (archived, floor) in [
+            (json!({"max_id": 416}), 416),
+            (json!({"max_id": true}), 0),
+            (json!({"max_id": "416"}), 0),
+            (json!({"max_id": -1}), 0),
+            (json!({"max_id": 416.0}), 0),
+            (json!([416]), 0),
+            (Value::Null, 0),
+        ] {
+            assert_eq!(archive_floor(&json!({"jobs": [], "archived": archived})), floor, "{archived}");
+        }
+        assert_eq!(archive_floor(&json!({"jobs": []})), 0);
+        assert_eq!(next_job_id(&["415-add-export".into()], "x", 416), "417-x");
+        assert_eq!(next_job_id(&["420-later".into()], "x", 416), "421-x");
+        assert_eq!(next_job_id(&["sample".into(), "12-short".into()], "x", 0), "001-x");
+    }
+
+    #[test]
+    fn claim_puts_refs_on_the_stub() {
+        let refs = json!([{"id": "041-recipe-import", "kind": "sub-job-of"}, {"id": "052-parse-recipe-urls", "kind": "depends-on"}]);
+        let claim = new_claim("d", "s", None);
+        let stub = claim_stub("417-store-imported-recipes", "sample", "2026-11-01T00:00:00Z", claim.clone(), None, Some(refs.clone()));
+        assert_eq!((&stub["refs"], stub.get("stage")), (&refs, None));
+        let bare = claim_stub("418-no-refs", "sample", "2026-11-01T00:00:00Z", claim, None, Some(json!([])));
+        assert!(bare.get("refs").is_none());
+        assert_eq!(bare.as_object().unwrap().keys().collect::<Vec<_>>(), ["id", "project", "updated", "started", "claim"]);
+    }
+
+    #[test]
+    fn rewrite_round_opens_only_that_round() {
+        let (r1, r2) = (json!({"code": "PASS"}), json!({"code": "CHANGES"}));
+        let found = json!({"rounds": [r1, r2]});
+        assert_eq!(rounds_refusal("042-x", Some(&found), &json!([r1, {"code": "PASS"}]), Some(2)), None);
+        assert_eq!(
+            rounds_refusal("042-x", Some(&found), &json!([{"code": "CHANGES"}, {"code": "PASS"}]), Some(2)).unwrap(),
+            "042-x cannot rewrite round 1 in a board patch. Only factory.py verdict and round-wait change a recorded round. Nothing was written."
+        );
+        assert!(rounds_refusal("042-x", Some(&found), &json!([r1, {"code": "PASS"}]), None).is_some());
+    }
+
+    #[test]
+    fn new_session_tag_is_six_hex() {
+        let tag = with_env(&[("FACTORY_SESSION", "")], || {
+            new_session();
+            std::env::var("FACTORY_SESSION").unwrap()
+        });
+        assert!(tag.len() == 6 && tag.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()), "{tag}");
+        with_env(&[("FACTORY_SESSION", "kept")], || {
+            new_session();
+            assert_eq!(std::env::var("FACTORY_SESSION").unwrap(), "kept");
+        });
+    }
+
+    #[test]
+    fn tracer_json_is_not_ported() {
+        let home = refused_home("claims-tracer");
+        fs::write(home.join("tracer.json"), "{}").unwrap();
+        let opts = WriteOpts { show: false, verdict: None, rewrite_round: None };
+        let patch = json!({"stage": "review"}).as_object().unwrap().clone();
+        let e = with_env(NO_PASEO, || board_write(&home, "001-test", patch, &opts)).unwrap_err();
+        assert_eq!((e.code, e.stderr), (2, "factory.py: board with Tracer is not ported to the Rust binary yet\n".into()));
+        let note = json!({"note": "x"}).as_object().unwrap().clone();
+        let e = with_env(NO_PASEO, || board_write(&home, "001-test", note, &opts)).unwrap_err();
+        assert_eq!(e.code, 5, "a patch that skips the Tracer mirror reaches the Worker");
+    }
+
+    #[test]
+    fn stacked_close_is_not_ported() {
+        const BOARD: &str = r#"{"updated":"","jobs":[{"id":"001-lead","project":"sample","stage":"build"},{"id":"002-rider","project":"sample","stage":"build","stacked":true,"pr":"https://github.com/o/r/pull/2","refs":[{"id":"001-lead","kind":"batched-into"}]}]}"#;
+        let (origin, seen) = serve(vec![(200, BOARD, vec![("ETag", "\"b\"")])]);
+        let home = home_for("claims-stacked", &origin);
+        let opts = WriteOpts { show: false, verdict: None, rewrite_round: None };
+        let patch = json!({"stage": "closed"}).as_object().unwrap().clone();
+        let e = with_env(NO_PASEO, || board_write(&home, "001-lead", patch, &opts)).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr),
+            (2, "factory.py: board closing stacked pull requests is not ported to the Rust binary yet\n".into())
+        );
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.iter().map(|s| s.method.as_str()).collect::<Vec<_>>(), ["GET"]);
+    }
+
+    const UNRESOLVED: &str = "factory.py: factory home must be absolute. Nothing was written.\n";
+
+    #[test]
+    fn board_resolves_home_before_the_write() {
+        let paseo = paseo_without_home("claims-paseo-board");
+        let home = refused_home("claims-home-board");
+        let opts = WriteOpts { show: false, verdict: None, rewrite_round: None };
+        let patch = json!({"note": "checking"}).as_object().unwrap().clone();
+        let vars = [("PASEO_HOME", paseo.to_str().unwrap()), ("PASEO_AGENT_ID", "agent_new"), ("FACTORY_HOME", "relative"), ("FACTORY_SESSION", "s")];
+        let e = with_env(&vars, || board_write(&home, "001-test", patch, &opts)).unwrap_err();
+        assert_eq!((e.code, e.stderr.as_str()), (2, UNRESOLVED));
+    }
+
+    #[test]
+    fn claim_id_resolves_home_before_the_write() {
+        let paseo = paseo_without_home("claims-paseo-claim");
+        let home = refused_home("claims-home-claim");
+        let vars = [("PASEO_HOME", paseo.to_str().unwrap()), ("PASEO_AGENT_ID", "agent_new"), ("FACTORY_HOME", "relative"), ("FACTORY_SESSION", "s")];
+        let e = with_env(&vars, || claim_id(&home, "sample-export", "sample", None)).unwrap_err();
+        assert_eq!((e.code, e.stderr.as_str()), (2, UNRESOLVED));
+        assert!(!home.join("jobs").exists());
+    }
+
+    #[test]
+    fn claim_id_resolves_home_before_the_folder_and_session() {
+        let paseo = paseo_without_home("claims-paseo-fresh");
+        let fresh = temp_dir("claims-fresh").join("fresh");
+        let vars = [("PASEO_HOME", paseo.to_str().unwrap()), ("PASEO_AGENT_ID", "agent_new"), ("FACTORY_HOME", "relative"), ("FACTORY_SESSION", "")];
+        let session = with_env(&vars, || {
+            assert!(claim_id(&fresh, "sample-export", "sample", None).is_err());
+            std::env::var("FACTORY_SESSION").unwrap()
+        });
+        assert_eq!(session, "");
+        assert!(!fresh.exists());
+    }
 
     #[test]
     fn py_json_error_matches_cpython() {
