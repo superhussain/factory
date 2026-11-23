@@ -3,9 +3,16 @@
 `rust/factory` is a port of `skills/factory/runtime/factory.py`. Python stays the oracle: the parity harness runs each case on both and compares exit code, stdout, stderr, the home tree, tool calls and Worker requests (see `docs/development.md`, Parity harness). The binary is not installed or called by the skill yet.
 
 ```sh
-cd rust && cargo build --release --locked && cargo test --locked
-python3 tests/parity/run.py --bin rust/target/release/factory --ids rust/parity
+cd rust && cargo build --profile host --locked && cargo test --locked
+python3 tests/parity/run.py --bin rust/target/host/factory --ids rust/parity
 ```
+
+## Build speed
+
+- `cargo build --profile host` is the fast local loop. The `host` profile inherits `release` without LTO, with 16 codegen units and incremental builds, so a one-file change rebuilds in seconds. Its runtime speed matches `release`. `tools/install.py` and CI build it; `release` stays for any binary published later.
+- `tools/install.py` builds in one private folder, `~/.cache/huss-skills/factory/build-src` (`%LOCALAPPDATA%\huss-skills\factory\build-src` on Windows), with targets in `cargo-target` beside it. Before each build it syncs `rust/` and every file the crate names in `include_str!` or `include_bytes!`, rewriting only files whose bytes differ, so incremental artifacts survive catch-up's fresh worktrees. A `.build.lock` there keeps two installs from building at once.
+- Built binaries sit in `bin/<key>/factory` beside those folders, the newest 3 kept. The key is a sha256 over every synced file's path and content hash, `rustc -vV` (toolchain version and host triple) and the profile. When the key and the stored binary's sha256 match, the install copies it and runs no cargo. stderr says `install: Rust binary from cache <key8>` or `install: Rust binary built in <n> s`.
+- To clear the cache, delete `bin`, `build-src` and `cargo-target` under `~/.cache/huss-skills/factory`. The next install rebuilds from cold.
 
 ## Module contract
 
