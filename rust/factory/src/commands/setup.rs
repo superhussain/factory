@@ -30,7 +30,7 @@ use crate::shared::proc::{git, git_ok, origin_git};
 use crate::shared::project::{
     local_bytes, project_files, pull_project, read_paths, read_project_state, save_project_state,
 };
-use crate::shared::py::{is_space, os_error, repr, splitlines, strip};
+use crate::shared::py::{is_space, lstrip, os_error, repr, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::time::{format_stamp, now, parse_stamp};
@@ -170,7 +170,7 @@ fn load_connection(path: &Path) -> Res<String> {
         )
     };
     regular_metadata(path).map_err(|()| invalid())?;
-    let text = crate::shared::fs::read_text(path).map_err(|_| invalid())?;
+    let text = read_text(path).map_err(|_| invalid())?;
     let data = loads(&text).map_err(|_| invalid())?;
     let map = data.as_object().ok_or_else(invalid)?;
     if map.len() != 2
@@ -341,11 +341,9 @@ fn without_path(text: &str) -> String {
     for (i, line) in lines.iter().enumerate().skip(1) {
         if strip(line) == "---" {
             let head = lines[1..i].iter().filter(|l| {
-                let rest = l.trim_start_matches(crate::shared::py::is_space);
-                !rest.strip_prefix("path").is_some_and(|r| {
-                    r.trim_start_matches(crate::shared::py::is_space)
-                        .starts_with(':')
-                })
+                !lstrip(l)
+                    .strip_prefix("path")
+                    .is_some_and(|r| lstrip(r).starts_with(':'))
             });
             return std::iter::once(&lines[0])
                 .chain(head)
