@@ -124,11 +124,23 @@ test("the plan keys the whole merge tree and the rust inputs, and lookups never 
   const { plan, ci } = workflow.jobs;
   const keys = plan.steps.find((step) => step.name === "Input keys").run;
   assert.match(keys, /git rev-parse 'HEAD\^\{tree\}'/);
+  assert.match(keys, /git merge-base "origin\/\$GITHUB_BASE_REF" HEAD/);
+  assert.equal(plan.steps[0].with["fetch-depth"], 0);
+  const sameRepo = "github.event.pull_request.head.repo.full_name == github.repository";
+  for (const lookup of plan.steps.filter((step) => action(step) === "actions/cache/restore")) {
+    assert.ok(lookup.if.includes(sameRepo), lookup.name);
+  }
+  for (const save of ci.steps.filter((step) => action(step) === "actions/cache/save")) {
+    assert.ok(save.if.includes(sameRepo), save.name);
+  }
   for (const path of [
     "rust",
     "tests/parity",
     "skills",
+    "tools",
+    "worker/admission.js",
     "tests/cli/support.py",
+    "tests/fixtures",
     ".github/workflows/ci.yml",
   ]) {
     assert.ok(keys.includes(`HEAD:${path} `) || keys.includes(`HEAD:${path} |`), path);

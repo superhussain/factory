@@ -9,6 +9,7 @@ env:
   PYTHONDONTWRITEBYTECODE: '1'
   WRANGLER_SEND_METRICS: 'false'
 jobs:
+  # Markers are used and saved only for same-repo PRs; a fork PR always runs everything.
   # A run whose merge tree matches a passing run's skips every job; one whose rust inputs match skips the rust jobs.
   plan:
     runs-on: ubuntu-22.04
@@ -22,13 +23,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Input keys
         id: keys
         run: |
-          echo "all=ci-pass-all-$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
-          rust="$(git rev-parse HEAD:rust HEAD:tests/parity HEAD:skills HEAD:tests/cli/support.py HEAD:tests/fixtures/cli-v1.json HEAD:.github/workflows/ci.yml | sha256sum | cut -c1-40)"
+          echo "all=ci-pass-all-$(git rev-parse 'HEAD^{tree}')-$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
+          rust="$(git rev-parse HEAD:rust HEAD:tests/parity HEAD:skills HEAD:tools HEAD:worker/admission.js HEAD:tests/cli/support.py HEAD:tests/fixtures HEAD:.github/workflows/ci.yml | sha256sum | cut -c1-40)"
           echo "rust=ci-pass-rust-$rust" >> "$GITHUB_OUTPUT"
       - name: Look up a passing run of this tree
+        if: github.event.pull_request.head.repo.full_name == github.repository
         id: all
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -36,6 +39,7 @@ jobs:
           key: ${{ steps.keys.outputs.all }}
           lookup-only: true
       - name: Look up a passing rust run of these inputs
+        if: github.event.pull_request.head.repo.full_name == github.repository
         id: rust
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -301,13 +305,13 @@ jobs:
       - if: ${{ !cancelled() }}
         run: mkdir -p .ci-pass && echo pass > .ci-pass/pass
       - name: Record a passing rust run of these inputs
-        if: ${{ !cancelled() && needs.rust-build.result == 'success' && needs.rust-test.result == 'success' && needs.rust-check.result == 'success' && needs.parity.result == 'success' }}
+        if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && needs.rust-build.result == 'success' && needs.rust-test.result == 'success' && needs.rust-check.result == 'success' && needs.parity.result == 'success' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ci-pass
           key: ${{ needs.plan.outputs.rust-key }}
       - name: Record a passing run of this tree
-        if: needs.plan.outputs.all != 'true'
+        if: github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.all != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ci-pass
