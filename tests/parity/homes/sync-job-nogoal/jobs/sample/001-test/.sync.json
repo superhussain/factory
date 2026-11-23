@@ -1,0 +1,10 @@
+{
+  "build.md": {
+    "etag": "\"b1\"",
+    "sha256": "45f5eccb5e753b0454bca6cea488c392f4cab8b6c2be2349217ef8e9855af29a"
+  },
+  "spec.md": {
+    "etag": "\"s1\"",
+    "sha256": "4e75c8d2e579c5ceb6d50d80059636b7ac31e3289baa8ed7c8f83deba7b131c5"
+  }
+}
