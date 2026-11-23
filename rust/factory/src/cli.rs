@@ -65,6 +65,7 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
     ("pr-state", checks::pr_state_cmd, 1, 3),
     ("pr-handled", ops::pr_handled_cmd, 2, 34),
     ("pr-queue", checks::pr_queue_cmd, 1, 1),
+    ("pr-merge", checks::pr_merge_cmd, 1, 1),
     ("pickup", pickup::pickup, 0, 5),
     ("explore", setup::explore, 1, 3),
     ("host", setup::host_cmd, 3, 3),

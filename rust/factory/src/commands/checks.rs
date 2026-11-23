@@ -46,6 +46,9 @@ const PR_ENQUEUE_MUTATION: &str = "query=mutation($id:ID!,$sha:GitObjectID!){enq
 const PR_QUEUE_USAGE: &str = "usage: pr-queue <project-slug>/<job-id>";
 const PR_QUEUE_INTERVAL: f64 = 10.0;
 const PR_QUEUE_TIMEOUT: f64 = 120.0;
+const PR_MERGE_QUERY: &str = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){state isDraft mergeable mergeStateStatus headRefOid baseRefName isMergeQueueEnabled}}}";
+const PR_MERGE_INTERVAL: f64 = 5.0;
+const PR_MERGE_SETTLE: f64 = 30.0;
 const AUTONOMY_DAYS: i64 = 90;
 const AUTONOMY_CLASSES: &[&str] = &["internal", "visible"];
 const AUTONOMY_HOLD_NOTE: &str = "earned autonomy hold: a person reviews and merges";
@@ -1426,6 +1429,30 @@ pub fn pr_state_cmd(call: &Call) -> Res<()> {
     )
 }
 
+/// Print the one JSON line of pr, status and detail, then exit with code.
+fn pr_status(
+    out: &mut dyn Write,
+    number: &str,
+    status: &str,
+    detail: String,
+    code: i32,
+) -> Res<()> {
+    writeln!(
+        out,
+        "{}",
+        dumps(
+            &json!({"pr": py_int(number), "status": status, "detail": detail}),
+            DEFAULT
+        )
+    )
+    .ok();
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(exit(code))
+    }
+}
+
 /// Queue the PR with the enqueuePullRequest mutation, else through merge-async, and print one JSON line once
 /// GitHub says enqueued or failed.
 fn pr_queue_run(
@@ -1461,21 +1488,8 @@ fn pr_queue_run(
     }
     let parts: Vec<&str> = pr.split('/').collect();
     let path = format!("repos/{}/{}/pulls/{number}/merge-async", parts[3], parts[4]);
-    let done = |out: &mut dyn Write, status: &str, detail: String, code: i32| -> Res<()> {
-        writeln!(
-            out,
-            "{}",
-            dumps(
-                &json!({"pr": py_int(number), "status": status, "detail": detail}),
-                DEFAULT
-            )
-        )
-        .ok();
-        if code == 0 {
-            Ok(())
-        } else {
-            Err(exit(code))
-        }
+    let done = |out: &mut dyn Write, status: &str, detail: String, code: i32| {
+        pr_status(out, number, status, detail, code)
     };
 
     let (id, sha_arg) = (
@@ -1580,6 +1594,132 @@ pub fn pr_queue_cmd(call: &Call) -> Res<()> {
         .unwrap_or("main");
     let number = pr.split('/').nth(6).unwrap();
     pr_queue_run(&mut System::new(), &pr, base, number, &mut io::stdout())
+}
+
+/// Read the PR's mergeability, again while GitHub still computes it, then merge pinned to the head it read,
+/// hand a merge-queue repo to pr_queue_run, or print why it cannot merge.
+fn pr_merge_run(h: &mut dyn Host, pr: &str, base: &str, out: &mut dyn Write) -> Res<()> {
+    let parts: Vec<&str> = pr.split('/').collect();
+    let number = parts[6];
+    let (o, r, n) = (
+        format!("o={}", parts[3]),
+        format!("r={}", parts[4]),
+        format!("n={number}"),
+    );
+    let args = [
+        "api",
+        "graphql",
+        "-f",
+        PR_MERGE_QUERY,
+        "-f",
+        &o,
+        "-f",
+        &r,
+        "-F",
+        &n,
+        "--jq",
+        ".data.repository.pullRequest",
+    ];
+    let start = h.monotonic();
+    let (view, unknown) = loop {
+        let view = loads(&gh_answer(h.gh(&args), "gh api graphql")?)
+            .ok()
+            .filter(Value::is_object);
+        let Some(view) = view else {
+            return Err(fail("gh api graphql printed no JSON object", 5));
+        };
+        let unknown = ["mergeable", "mergeStateStatus"]
+            .iter()
+            .any(|k| view.get(*k).and_then(Value::as_str) == Some("UNKNOWN"));
+        let elapsed = h.monotonic() - start;
+        if !unknown || elapsed >= PR_MERGE_SETTLE {
+            break (view, unknown);
+        }
+        h.sleep(PR_MERGE_INTERVAL.min(PR_MERGE_SETTLE - elapsed));
+    };
+    let field = |key: &str| printable_line(&str_or_empty(view.get(key)), 255);
+    let (mergeable, status) = (field("mergeable"), field("mergeStateStatus"));
+    let state = field("state");
+    if state != "OPEN" {
+        return Err(fail(format!("{pr} is {state}, not OPEN"), 4));
+    }
+    let target = field("baseRefName");
+    if target != base {
+        return Err(fail(
+            format!("PR #{number} targets {target}, not {base}: it waits for its parent"),
+            4,
+        ));
+    }
+    let done = |out: &mut dyn Write, status: &str, detail: String, code: i32| {
+        pr_status(out, number, status, detail, code)
+    };
+    if view.get("isDraft") == Some(&Value::Bool(true)) || status == "DRAFT" {
+        return done(out, "draft", format!("PR #{number} is a draft"), 1);
+    }
+    if mergeable == "CONFLICTING" || status == "DIRTY" {
+        let detail =
+            format!("PR #{number} conflicts with {base}: merge {base} into the branch and push");
+        return done(out, "conflict", detail, 6);
+    }
+    if view.get("isMergeQueueEnabled") == Some(&Value::Bool(true)) {
+        return pr_queue_run(h, pr, base, number, out);
+    }
+    if unknown {
+        let detail =
+            format!("GitHub had not computed mergeability after {PR_MERGE_SETTLE} seconds");
+        return done(out, "unknown", detail, 3);
+    }
+    if status == "BEHIND" {
+        let detail =
+            format!("PR #{number} is behind {base}: run checks again, which updates the branch");
+        return done(out, "behind", detail, 3);
+    }
+    if status == "BLOCKED" {
+        let detail = "GitHub blocks the merge: a required review or check is missing".to_string();
+        return done(out, "blocked", detail, 1);
+    }
+    let sha = field("headRefOid");
+    if !COMMIT.is_full(&sha) {
+        return Err(fail("gh api graphql printed no usable headRefOid", 5));
+    }
+    let merge = [
+        "pr",
+        "merge",
+        pr,
+        "--merge",
+        "--delete-branch",
+        "--match-head-commit",
+        &sha,
+    ];
+    match h.gh(&merge) {
+        None => Err(fail("gh is not installed", 5)),
+        Some(GhOut {
+            code: GhCode::Timeout,
+            ..
+        }) => Err(fail(
+            format!("gh pr merge timed out after 60 seconds: read gh pr view {pr} --json state before merging again"),
+            5,
+        )),
+        Some(GhOut {
+            code: GhCode::Exit(0),
+            ..
+        }) => done(out, "merged", format!("head {}", &sha[..12]), 0),
+        Some(GhOut { stderr, .. }) => {
+            let first = stderr.lines().next().unwrap_or("");
+            done(out, "refused", printable_line(first, 500), 1)
+        }
+    }
+}
+
+pub fn pr_merge_cmd(call: &Call) -> Res<()> {
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    let pr = board_pr(&home, &slug, &job_id, false)?;
+    merge_hold(&home, &slug, &job_id, &pr)?;
+    let meta = project_meta(&home, &slug)?;
+    let base = fm_get(&meta, "base")
+        .filter(|b| !b.is_empty())
+        .unwrap_or("main");
+    pr_merge_run(&mut System::new(), &pr, base, &mut io::stdout())
 }
 
 const CI_FAILED: &[&str] = &[
@@ -3356,5 +3496,244 @@ mod tests {
         );
         assert_eq!(fake.count("graphql"), 1);
         assert_eq!(fake.calls[2][..3], ["api", "-X", "PUT"]);
+    }
+
+    const MERGE_HEAD: &str = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+
+    /// PR 42's GraphQL mergeability reading.
+    fn mergeability(mergeable: &str, status: &str) -> Value {
+        json!({"state": "OPEN", "isDraft": false, "mergeable": mergeable, "mergeStateStatus": status,
+               "headRefOid": MERGE_HEAD, "baseRefName": "main", "isMergeQueueEnabled": false})
+    }
+
+    fn merge_fake(reads: Vec<Value>, merge: Option<GhOut>) -> Fake {
+        let reads = reads.iter().map(|v| ok(&v.to_string())).collect();
+        Fake::default()
+            .on(&["api", "graphql", "-f", PR_MERGE_QUERY], reads)
+            .on(&["pr", "merge"], vec![merge])
+    }
+
+    /// (exit code, stdout, stderr) of pr_merge_run.
+    fn run_merge(fake: &mut Fake) -> (i32, String, String) {
+        let mut out = Vec::new();
+        let (code, err) = match pr_merge_run(fake, PR, "main", &mut out) {
+            Ok(()) => (0, String::new()),
+            Err(e) => (e.code, e.stderr),
+        };
+        (code, String::from_utf8(out).unwrap(), err)
+    }
+
+    fn merges(fake: &Fake) -> usize {
+        fake.calls
+            .iter()
+            .filter(|c| c[..2] == ["pr", "merge"])
+            .count()
+    }
+
+    fn line(status: &str, detail: &str) -> String {
+        format!(
+            "{}\n",
+            dumps(
+                &json!({"pr": 42, "status": status, "detail": detail}),
+                DEFAULT
+            )
+        )
+    }
+
+    #[test]
+    fn merge_clean_merges() {
+        let mut fake = merge_fake(vec![mergeability("MERGEABLE", "CLEAN")], ok(""));
+        assert_eq!(
+            run_merge(&mut fake),
+            got(0, &line("merged", "head a1a1a1a1a1a1"), "")
+        );
+        assert_eq!(
+            fake.calls,
+            [
+                vec![
+                    "api",
+                    "graphql",
+                    "-f",
+                    PR_MERGE_QUERY,
+                    "-f",
+                    "o=example",
+                    "-f",
+                    "r=sample",
+                    "-F",
+                    "n=42",
+                    "--jq",
+                    ".data.repository.pullRequest"
+                ],
+                vec![
+                    "pr",
+                    "merge",
+                    PR,
+                    "--merge",
+                    "--delete-branch",
+                    "--match-head-commit",
+                    MERGE_HEAD
+                ]
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_conflict_exits_6() {
+        for (mergeable, status) in [
+            ("CONFLICTING", "DIRTY"),
+            ("CONFLICTING", "BLOCKED"),
+            ("MERGEABLE", "DIRTY"),
+        ] {
+            let mut fake = merge_fake(vec![mergeability(mergeable, status)], ok(""));
+            let detail = "PR #42 conflicts with main: merge main into the branch and push";
+            assert_eq!(run_merge(&mut fake), got(6, &line("conflict", detail), ""));
+            assert_eq!(merges(&fake), 0);
+        }
+    }
+
+    #[test]
+    fn merge_unknown_rereads() {
+        let mut fake = merge_fake(
+            vec![
+                mergeability("UNKNOWN", "UNKNOWN"),
+                mergeability("MERGEABLE", "CLEAN"),
+            ],
+            ok(""),
+        );
+        assert_eq!(
+            run_merge(&mut fake),
+            got(0, &line("merged", "head a1a1a1a1a1a1"), "")
+        );
+        assert_eq!(
+            (fake.count("graphql"), fake.now, merges(&fake)),
+            (2, 5.0, 1)
+        );
+    }
+
+    #[test]
+    fn merge_unknown_exits_3() {
+        let mut fake = merge_fake(vec![mergeability("MERGEABLE", "UNKNOWN")], ok(""));
+        let detail = "GitHub had not computed mergeability after 30 seconds";
+        assert_eq!(run_merge(&mut fake), got(3, &line("unknown", detail), ""));
+        assert_eq!(
+            (fake.count("graphql"), fake.now, merges(&fake)),
+            (7, 30.0, 0)
+        );
+    }
+
+    #[test]
+    fn merge_behind_exits_3() {
+        let mut fake = merge_fake(vec![mergeability("MERGEABLE", "BEHIND")], ok(""));
+        let detail = "PR #42 is behind main: run checks again, which updates the branch";
+        assert_eq!(run_merge(&mut fake), got(3, &line("behind", detail), ""));
+        assert_eq!(merges(&fake), 0);
+    }
+
+    #[test]
+    fn merge_blocked_exits_1() {
+        let mut fake = merge_fake(vec![mergeability("MERGEABLE", "BLOCKED")], ok(""));
+        let detail = "GitHub blocks the merge: a required review or check is missing";
+        assert_eq!(run_merge(&mut fake), got(1, &line("blocked", detail), ""));
+        assert_eq!(merges(&fake), 0);
+    }
+
+    #[test]
+    fn merge_draft_exits_1() {
+        for read in [
+            with(mergeability("MERGEABLE", "CLEAN"), "isDraft", true.into()),
+            mergeability("MERGEABLE", "DRAFT"),
+        ] {
+            let mut fake = merge_fake(vec![read], ok(""));
+            assert_eq!(
+                run_merge(&mut fake),
+                got(1, &line("draft", "PR #42 is a draft"), "")
+            );
+            assert_eq!(merges(&fake), 0);
+        }
+    }
+
+    #[test]
+    fn merge_refused_exits_1() {
+        let stderr =
+            "GraphQL: Head branch was modified. Review and try the merge again.\nsecond line\n";
+        let mut fake = merge_fake(
+            vec![mergeability("MERGEABLE", "CLEAN")],
+            reply(1, "", stderr),
+        );
+        let detail = "GraphQL: Head branch was modified. Review and try the merge again.";
+        assert_eq!(run_merge(&mut fake), got(1, &line("refused", detail), ""));
+    }
+
+    #[test]
+    fn merge_queue_delegates() {
+        let read = with(
+            mergeability("MERGEABLE", "BLOCKED"),
+            "isMergeQueueEnabled",
+            true.into(),
+        );
+        let view =
+            json!({"headRefOid": MERGE_HEAD, "baseRefName": "main", "id": "PR_node42"}).to_string();
+        let entry = json!({"data": {"enqueuePullRequest": {"mergeQueueEntry": {"state": "QUEUED", "position": 1}}}});
+        let mut fake = merge_fake(vec![read], ok(""))
+            .on(
+                &["api", "graphql", "-f", PR_ENQUEUE_MUTATION],
+                vec![ok(&entry.to_string())],
+            )
+            .on(&["pr", "view"], vec![ok(&view)]);
+        assert_eq!(
+            run_merge(&mut fake),
+            got(0, &line("enqueued", "position 1"), "")
+        );
+        assert_eq!(merges(&fake), 0);
+    }
+
+    #[test]
+    fn merge_not_open_exits_4() {
+        let read = with(mergeability("MERGEABLE", "CLEAN"), "state", "MERGED".into());
+        let mut fake = merge_fake(vec![read], ok(""));
+        let err = format!("factory.py: {PR} is MERGED, not OPEN\n");
+        assert_eq!(run_merge(&mut fake), got(4, "", &err));
+        assert_eq!(merges(&fake), 0);
+    }
+
+    #[test]
+    fn merge_stacked_exits_4() {
+        let read = with(
+            mergeability("MERGEABLE", "CLEAN"),
+            "baseRefName",
+            "factory/041-parent".into(),
+        );
+        let mut fake = merge_fake(vec![read], ok(""));
+        let err =
+            "factory.py: PR #42 targets factory/041-parent, not main: it waits for its parent\n";
+        assert_eq!(run_merge(&mut fake), got(4, "", err));
+        assert_eq!(merges(&fake), 0);
+    }
+
+    #[test]
+    fn merge_gh_missing_or_timeout_exits_5() {
+        let clean = || ok(&mergeability("MERGEABLE", "CLEAN").to_string());
+        let late = format!(
+            "gh pr merge timed out after 60 seconds: read gh pr view {PR} --json state before merging again"
+        );
+        for (read, merge, why) in [
+            (None, ok(""), "gh is not installed"),
+            (
+                timeout(),
+                ok(""),
+                "gh api graphql timed out after 60 seconds",
+            ),
+            (ok("null"), ok(""), "gh api graphql printed no JSON object"),
+            (clean(), None, "gh is not installed"),
+            (clean(), timeout(), late.as_str()),
+        ] {
+            let mut fake = Fake::default()
+                .on(&["api", "graphql"], vec![read])
+                .on(&["pr", "merge"], vec![merge]);
+            assert_eq!(
+                run_merge(&mut fake),
+                got(5, "", &format!("factory.py: {why}\n"))
+            );
+        }
     }
 }
