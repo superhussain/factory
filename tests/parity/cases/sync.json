@@ -3,50 +3,29 @@
   "cases": [
     {
       "id": "sync/pull-project-new",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample"],
       "home": null,
       "stubs": {},
       "routes": {
-        "GET /api/projects/sample.md": [
-          200,
-          "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n"
-        ]
+        "GET /api/projects/sample.md": [200, "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n"]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::ProjectSyncTest.test_missing_equal_and_clean_refresh"
     },
     {
       "id": "sync/pull-project-dirty",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample"],
       "home": "sync-project",
       "stubs": {},
       "routes": {
-        "GET /api/projects/sample.md": [
-          200,
-          "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n"
-        ]
+        "GET /api/projects/sample.md": [200, "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n"]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::ProjectSyncTest.test_dirty_pull_where_and_repeated_init_keep_draft_and_paths"
     },
     {
       "id": "sync/pull-project-diverged",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample"],
       "home": "sync-project",
       "stubs": {},
       "routes": {
@@ -60,107 +39,62 @@
     },
     {
       "id": "sync/pull-project-legacy",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample"],
       "home": "sync-project-nostate",
       "stubs": {},
       "routes": {
-        "GET /api/projects/sample.md": [
-          200,
-          "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n"
-        ]
+        "GET /api/projects/sample.md": [200, "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n"]
       },
       "exit": 6,
       "from": "tests/cli/test_factory.py::ProjectSyncTest.test_unversioned_divergence_and_marker_resolution"
     },
     {
       "id": "sync/pull-project-missing",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample"],
       "home": "sync-project",
       "stubs": {},
       "routes": {
-        "GET /api/projects/sample.md": [
-          404,
-          "not found"
-        ]
+        "GET /api/projects/sample.md": [404, "not found"]
       },
       "exit": 5,
       "from": "tests/cli/test_factory.py::ProjectSyncTest.test_error_paths_preserve_draft_and_state"
     },
     {
       "id": "sync/push-project",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "push", "sample"],
       "home": "sync-project",
       "stubs": {},
       "routes": {
-        "PUT /api/projects/sample.md": [
-          200,
-          "ok"
-        ]
+        "PUT /api/projects/sample.md": [200, "ok"]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::ProjectSyncTest.test_project_cli_and_successful_where_fields"
     },
     {
       "id": "sync/push-project-stale",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "push", "sample"],
       "home": "sync-project",
       "stubs": {},
       "routes": {
-        "PUT /api/projects/sample.md": [
-          412,
-          ""
-        ]
+        "PUT /api/projects/sample.md": [412, ""]
       },
       "exit": 6,
       "from": "tests/cli/test_factory.py::ProjectSyncTest.test_both_changed_stale_push_never_gets_or_retries"
     },
     {
       "id": "sync/push-project-strips-path",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "push", "sample"],
       "home": "sync-project-path",
       "stubs": {},
       "routes": {
-        "PUT /api/projects/sample.md": [
-          200,
-          "ok"
-        ]
+        "PUT /api/projects/sample.md": [200, "ok"]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::ProjectSyncTest.test_path_stripping_records_uploaded_snapshot_only"
     },
     {
       "id": "sync/push-project-no-base",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "push", "sample"],
       "home": "sync-project-nostate",
       "stubs": {},
       "routes": {},
@@ -169,12 +103,7 @@
     },
     {
       "id": "sync/push-project-bad-state",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "push", "sample"],
       "home": "sync-project-badstate",
       "stubs": {},
       "routes": {},
@@ -183,12 +112,7 @@
     },
     {
       "id": "sync/pull-project-bad-state",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample"],
       "home": "sync-project-badstate",
       "stubs": {},
       "routes": {},
@@ -197,12 +121,7 @@
     },
     {
       "id": "sync/push-project-unresolved",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "push", "sample"],
       "home": "sync-project-remote",
       "stubs": {},
       "routes": {},
@@ -211,12 +130,7 @@
     },
     {
       "id": "sync/push-up-to-date",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
       "home": "sync-job",
       "stubs": {},
       "routes": {
@@ -239,12 +153,7 @@
     },
     {
       "id": "sync/push-deleted-in-r2",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
       "home": "sync-job",
       "stubs": {},
       "routes": {
@@ -263,12 +172,7 @@
     },
     {
       "id": "sync/push-remote-newer",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
       "home": "sync-job-pending",
       "stubs": {},
       "routes": {
@@ -291,12 +195,7 @@
     },
     {
       "id": "sync/push-goal-retry",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
       "home": "sync-job-pending",
       "stubs": {},
       "routes": {
@@ -317,22 +216,14 @@
           200,
           "{\"updated\":\"2026-01-02T12:00:00Z\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"updated\":\"2026-01-02T12:00:00Z\"}]}\n"
         ],
-        "PUT /api/board": [
-          200,
-          ""
-        ]
+        "PUT /api/board": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::FactoryTest.test_push_retries_goal_after_board_failure"
     },
     {
       "id": "sync/push-goal-unchanged",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
       "home": "sync-job-pending",
       "stubs": {},
       "routes": {
@@ -359,12 +250,7 @@
     },
     {
       "id": "sync/push-goal-board-fails",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
       "home": "sync-job-pending",
       "stubs": {},
       "routes": {
@@ -385,22 +271,14 @@
           200,
           "{\"updated\":\"2026-01-02T12:00:00Z\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"updated\":\"2026-01-02T12:00:00Z\"}]}\n"
         ],
-        "PUT /api/board": [
-          500,
-          "boom"
-        ]
+        "PUT /api/board": [500, "boom"]
       },
       "exit": 5,
       "from": "tests/cli/test_factory.py::FactoryTest.test_push_retries_goal_after_board_failure"
     },
     {
       "id": "sync/push-clears-goal",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
       "home": "sync-job-nogoal",
       "stubs": {},
       "routes": {
@@ -417,30 +295,19 @@
             }
           ]
         ],
-        "PUT /api/jobs/sample/001-test/spec.md": [
-          200,
-          ""
-        ],
+        "PUT /api/jobs/sample/001-test/spec.md": [200, ""],
         "GET /api/board": [
           200,
           "{\"updated\":\"2026-01-02T12:00:00Z\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"updated\":\"2026-01-02T12:00:00Z\",\"goal\":\"Sample exports stay under one megabyte.\"}]}\n"
         ],
-        "PUT /api/board": [
-          200,
-          ""
-        ]
+        "PUT /api/board": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::FactoryTest.test_push_clears_goal_when_spec_drops_it"
     },
     {
       "id": "sync/push-local-edit",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
       "home": "sync-job-edited",
       "stubs": {},
       "routes": {
@@ -457,22 +324,14 @@
             }
           ]
         ],
-        "PUT /api/jobs/sample/001-test/build.md": [
-          200,
-          ""
-        ]
+        "PUT /api/jobs/sample/001-test/build.md": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::FactoryTest.test_remote_newer_artifact_keeps_claim"
     },
     {
       "id": "sync/push-adopts-remote",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-idea"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-idea"],
       "home": "sync-idea",
       "stubs": {},
       "routes": {
@@ -495,12 +354,7 @@
     },
     {
       "id": "sync/push-unresolved-remote",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
       "home": "sync-job-remote",
       "stubs": {},
       "routes": {
@@ -523,56 +377,30 @@
     },
     {
       "id": "sync/push-scratchpad",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-idea"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-idea"],
       "home": "sync-idea",
       "stubs": {},
       "routes": {
-        "GET /api/jobs/sample/001-idea/?etags=1": [
-          200,
-          []
-        ],
-        "PUT /api/jobs/sample/001-idea/scratchpad.md": [
-          200,
-          ""
-        ]
+        "GET /api/jobs/sample/001-idea/?etags=1": [200, []],
+        "PUT /api/jobs/sample/001-idea/scratchpad.md": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::ScratchpadSyncTest.test_push_uploads_scratchpad_and_another_device_pulls_identical_bytes"
     },
     {
       "id": "sync/push-no-etag-list",
-      "argv": [
-        "--home",
-        "{home}",
-        "push",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "push", "sample/001-test"],
       "home": "sync-job",
       "stubs": {},
       "routes": {
-        "GET /api/jobs/sample/001-test/?etags=1": [
-          200,
-          [
-            "spec.md"
-          ]
-        ]
+        "GET /api/jobs/sample/001-test/?etags=1": [200, ["spec.md"]]
       },
       "exit": 5,
       "from": "skills/factory/runtime/factory.py::sync_state"
     },
     {
       "id": "sync/pull-up-to-date",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample/001-test"],
       "home": "sync-job",
       "stubs": {},
       "routes": {
@@ -595,12 +423,7 @@
     },
     {
       "id": "sync/pull-newer",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample/001-test"],
       "home": "sync-job",
       "stubs": {},
       "routes": {
@@ -627,12 +450,7 @@
     },
     {
       "id": "sync/pull-unpushed",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample/001-test"],
       "home": "sync-job-edited",
       "stubs": {},
       "routes": {
@@ -655,12 +473,7 @@
     },
     {
       "id": "sync/pull-conflict",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample/001-test"],
       "home": "sync-job-edited",
       "stubs": {},
       "routes": {
@@ -677,22 +490,14 @@
             }
           ]
         ],
-        "GET /api/jobs/sample/001-test/build.md": [
-          200,
-          "Build log from another device.\n"
-        ]
+        "GET /api/jobs/sample/001-test/build.md": [200, "Build log from another device.\n"]
       },
       "exit": 6,
       "from": "tests/cli/test_factory.py::FactoryTest.test_conflicting_checkpoint_keeps_claim"
     },
     {
       "id": "sync/pull-conflict-same-bytes",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample/001-test"],
       "home": "sync-job-edited",
       "stubs": {},
       "routes": {
@@ -709,22 +514,14 @@
             }
           ]
         ],
-        "GET /api/jobs/sample/001-test/build.md": [
-          200,
-          "Build log, edited here.\n"
-        ]
+        "GET /api/jobs/sample/001-test/build.md": [200, "Build log, edited here.\n"]
       },
       "exit": 0,
       "from": "skills/factory/runtime/factory.py::reconcile"
     },
     {
       "id": "sync/pull-unresolved-remote",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample/001-test"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample/001-test"],
       "home": "sync-job-remote",
       "stubs": {},
       "routes": {
@@ -751,12 +548,7 @@
     },
     {
       "id": "sync/pull-scratchpad",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample/001-idea"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample/001-idea"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -783,30 +575,18 @@
     },
     {
       "id": "sync/pull-merged-job",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample/010-merged"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample/010-merged"],
       "home": null,
       "stubs": {},
       "routes": {
-        "GET /api/jobs/sample/010-merged/?etags=1": [
-          200,
-          []
-        ]
+        "GET /api/jobs/sample/010-merged/?etags=1": [200, []]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::SyncFinishedJobsTest.test_pull_still_lists_a_merged_job"
     },
     {
       "id": "sync/all",
-      "argv": [
-        "--home",
-        "{home}",
-        "sync"
-      ],
+      "argv": ["--home", "{home}", "sync"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -814,26 +594,15 @@
           200,
           "{\"updated\":\"2026-01-02T12:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"stage\":\"idea\",\"project\":\"sample\"},{\"id\":\"002-build\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"003-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"004-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"005-review\",\"stage\":\"review\",\"project\":\"other\"},{\"id\":\"006-stub\",\"project\":\"sample\"}]}\n"
         ],
-        "GET /api/jobs/sample/002-build/?etags=1": [
-          200,
-          []
-        ],
-        "GET /api/jobs/other/005-review/?etags=1": [
-          200,
-          []
-        ]
+        "GET /api/jobs/sample/002-build/?etags=1": [200, []],
+        "GET /api/jobs/other/005-review/?etags=1": [200, []]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::SyncFinishedJobsTest.test_bulk_sync_skips_merged_and_closed_jobs"
     },
     {
       "id": "sync/project",
-      "argv": [
-        "--home",
-        "{home}",
-        "sync",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "sync", "sample"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -841,26 +610,15 @@
           200,
           "{\"updated\":\"2026-01-02T12:00:00Z\",\"jobs\":[{\"id\":\"001-idea\",\"stage\":\"idea\",\"project\":\"sample\"},{\"id\":\"002-build\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"003-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"004-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"005-review\",\"stage\":\"review\",\"project\":\"other\"},{\"id\":\"006-stub\",\"project\":\"sample\"}]}\n"
         ],
-        "GET /api/jobs/sample/002-build/?etags=1": [
-          200,
-          []
-        ],
-        "GET /api/jobs/other/005-review/?etags=1": [
-          200,
-          []
-        ]
+        "GET /api/jobs/sample/002-build/?etags=1": [200, []],
+        "GET /api/jobs/other/005-review/?etags=1": [200, []]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::SyncFinishedJobsTest.test_project_sync_skips_merged_and_closed_jobs"
     },
     {
       "id": "sync/job-target",
-      "argv": [
-        "--home",
-        "{home}",
-        "sync",
-        "sample/002-build"
-      ],
+      "argv": ["--home", "{home}", "sync", "sample/002-build"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -874,30 +632,18 @@
     },
     {
       "id": "sync/empty-board",
-      "argv": [
-        "--home",
-        "{home}",
-        "sync"
-      ],
+      "argv": ["--home", "{home}", "sync"],
       "home": null,
       "stubs": {},
       "routes": {
-        "GET /api/board": [
-          404,
-          ""
-        ]
+        "GET /api/board": [404, ""]
       },
       "exit": 0,
       "from": "skills/factory/runtime/factory.py::sync"
     },
     {
       "id": "sync/bad-slug",
-      "argv": [
-        "--home",
-        "{home}",
-        "sync",
-        "bad slug"
-      ],
+      "argv": ["--home", "{home}", "sync", "bad slug"],
       "home": null,
       "stubs": {},
       "routes": {},
@@ -906,11 +652,7 @@
     },
     {
       "id": "sync/record-without-project",
-      "argv": [
-        "--home",
-        "{home}",
-        "sync"
-      ],
+      "argv": ["--home", "{home}", "sync"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -924,12 +666,7 @@
     },
     {
       "id": "sync/conflict",
-      "argv": [
-        "--home",
-        "{home}",
-        "sync",
-        "sample"
-      ],
+      "argv": ["--home", "{home}", "sync", "sample"],
       "home": "sync-job-edited",
       "stubs": {},
       "routes": {
@@ -950,21 +687,14 @@
             }
           ]
         ],
-        "GET /api/jobs/sample/001-test/build.md": [
-          200,
-          "Build log from another device.\n"
-        ]
+        "GET /api/jobs/sample/001-test/build.md": [200, "Build log from another device.\n"]
       },
       "exit": 6,
       "from": "tests/cli/test_factory.py::FactoryTest.test_conflicting_checkpoint_keeps_claim"
     },
     {
       "id": "sync/list-fails",
-      "argv": [
-        "--home",
-        "{home}",
-        "sync"
-      ],
+      "argv": ["--home", "{home}", "sync"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -972,10 +702,7 @@
           200,
           "{\"updated\":\"2026-01-02T12:00:00Z\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"updated\":\"2026-01-02T12:00:00Z\"}]}\n"
         ],
-        "GET /api/jobs/sample/001-test/?etags=1": [
-          500,
-          "boom"
-        ]
+        "GET /api/jobs/sample/001-test/?etags=1": [500, "boom"]
       },
       "exit": 5,
       "from": "skills/factory/runtime/factory.py::sync_state"
