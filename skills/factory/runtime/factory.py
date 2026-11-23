@@ -225,7 +225,6 @@ The board, backlog, and project files live in R2 behind the factory Worker at
 `api_url` in config.md. Job folders and worktrees stay on this device.
 """
 
-import collections
 import contextlib
 import fnmatch
 import http.client
@@ -7410,7 +7409,10 @@ def pickup_pass(home, device, minutes, dry, limit, cap, data=None):
             return f"skip {j['id']} {project}: experiment {experiment['name']} limited until {exp_limited}"
         return None
 
-    waiting = collections.Counter(j.get("project") for j in data["jobs"] if waits_on_you(j))
+    waiting = {}
+    for j in data["jobs"]:
+        if waits_on_you(j):
+            waiting[j.get("project")] = waiting.get(j.get("project"), 0) + 1
     holds = {**batch_holds(home, jobs, lambda j: base_skip(j) is None),
              **backpressure_holds(home, jobs, waiting, lambda j: base_skip(j) is None),
              **daily_cap_holds(home, device, jobs, lambda j: base_skip(j) is None, dry)}
