@@ -26,7 +26,7 @@ PYTHON = [sys.executable, "-B", str(SKILL / "runtime/factory.py")]
 TOOLS = ("gh", "paseo", "git")
 CASES = HERE / "cases"
 REQUEST_HEADERS = ("content-type", "if-match", "if-none-match", "cf-access-client-id", "cf-access-client-secret",
-                   "user-agent")
+                   "user-agent", "authorization")
 STAMP = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
 
@@ -67,12 +67,20 @@ def read_ids(path):
     return patterns
 
 
-def routes_for(case):
-    """The case's routes for http_fixture, as fresh lists because list replies pop. A string body is sent as text."""
+def expand(text, values):
+    """Text with each {name} placeholder in values replaced by its value."""
+    for name, value in values.items():
+        text = text.replace("{" + name + "}", value)
+    return text
+
+
+def routes_for(case, values):
+    """The case's routes for http_fixture, as fresh lists because list replies pop. A string body is sent as text.
+    Keys and string bodies get their placeholders expanded."""
     def reply(route):
         status, body, *extra = route
-        return (status, body.encode("utf-8") if isinstance(body, str) else body, *extra)
-    return {key: [reply(r) for r in value] if isinstance(value[0], list) else reply(value)
+        return (status, expand(body, values).encode("utf-8") if isinstance(body, str) else body, *extra)
+    return {expand(key, values): [reply(r) for r in value] if isinstance(value[0], list) else reply(value)
             for key, value in case["routes"].items()}
 
 
@@ -100,26 +108,35 @@ def run_side(case, command):
     root = Path(tempfile.mkdtemp(prefix="parity-")).resolve()
     try:
         home, bin_dir, stub_dir = root / "home", root / "bin", root / "stub"
-        if case["home"]:
-            shutil.copytree(HERE / "homes" / case["home"], home)
-        else:
-            home.mkdir()
-        bin_dir.mkdir()
-        stub_dir.mkdir()
-        for tool in TOOLS:
-            stub.launcher(bin_dir, tool)
-        for tool, entries in case["stubs"].items():
-            (stub_dir / f"{tool}.json").write_text(json.dumps(entries), encoding="utf-8")
-        env = isolated_env(home)
-        # A side gets only the fake token from home/.env, so a real one never reaches the fixture or a diff.
-        env.pop("FACTORY_ACCESS_CLIENT_ID", None)
-        env.pop("FACTORY_ACCESS_CLIENT_SECRET", None)
-        env.update(case.get("env", {}))
-        env.update(PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""), FACTORY_STUB_DIR=str(stub_dir),
-                   PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
-        argv = [arg.replace("{home}", str(home)) for arg in case["argv"]]
-        stdin = {"input": case["stdin"].encode("utf-8")} if "stdin" in case else {"stdin": subprocess.DEVNULL}
-        with http_fixture(routes_for(case)) if "routes" in case else contextlib.nullcontext() as server:
+        routes = {}
+        with http_fixture(routes) if "routes" in case else contextlib.nullcontext() as server:
+            values = {"home": str(home), "tmp": str(root), "today": time.strftime("%Y-%m-%d")}
+            if server:
+                values["api"] = server.origin
+                routes.update(routes_for(case, values))
+            if case["home"]:
+                shutil.copytree(HERE / "homes" / case["home"], home)
+                for path in home.rglob("*"):
+                    if path.is_file() and not path.is_symlink():
+                        text = path.read_bytes().decode("utf-8", "surrogateescape")
+                        path.write_bytes(expand(text, values).encode("utf-8", "surrogateescape"))
+            else:
+                home.mkdir()
+            bin_dir.mkdir()
+            stub_dir.mkdir()
+            for tool in TOOLS:
+                stub.launcher(bin_dir, tool)
+            for tool, entries in case["stubs"].items():
+                (stub_dir / f"{tool}.json").write_text(expand(json.dumps(entries), values), encoding="utf-8")
+            env = isolated_env(home)
+            # A side gets only the fake token from home/.env, so a real one never reaches the fixture or a diff.
+            env.pop("FACTORY_ACCESS_CLIENT_ID", None)
+            env.pop("FACTORY_ACCESS_CLIENT_SECRET", None)
+            env.update(case.get("env", {}))
+            env.update(PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""), FACTORY_STUB_DIR=str(stub_dir),
+                       PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
+            argv = [arg.replace("{home}", str(home)) for arg in case["argv"]]
+            stdin = {"input": case["stdin"].encode("utf-8")} if "stdin" in case else {"stdin": subprocess.DEVNULL}
             if server:
                 (home / "config.md").write_text(f"---\napi_url: {server.origin}\ndevice: parity\n---\n",
                                                 encoding="utf-8")

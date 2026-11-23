@@ -5,11 +5,13 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from support import ROOT, SKILL, IsolatedTestCase, invoke, invoke_process, load_runtime
+from support import ROOT, SKILL, IsolatedTestCase, http_fixture, invoke, invoke_process, load_runtime
 
 sys.path.insert(0, str(ROOT / "tests" / "parity"))
 import run
@@ -177,6 +179,44 @@ class RunnerTest(unittest.TestCase):
             Path(temp, "board.txt").write_text("main/no-args\n")
             self.assertEqual(run_main(["--ids", temp]),
                              (2, "", "parity: board.txt: pattern main/no-args must start with board/\n"))
+
+
+@unittest.skipIf(os.name == "nt", "the parity runner refuses Windows in phase 0")
+class PlaceholderTest(unittest.TestCase):
+    def test_expand_replaces_known_names_only(self):
+        values = {"home": "/h", "tmp": "/t", "api": "http://a", "today": "2026-01-02"}
+        self.assertEqual(run.expand("{home} {tmp} {api} {today} {other}", values), "/h /t http://a 2026-01-02 {other}")
+
+    def test_home_files_stubs_and_routes_are_expanded(self):
+        script = (
+            "import json, os, sys, time, urllib.request\n"
+            "home = sys.argv[1]\n"
+            "tmp = os.path.dirname(home)\n"
+            "today = time.strftime('%Y-%m-%d')\n"
+            "h, api, day = open(home + '/f.txt').read().split('|')\n"
+            "stub = json.load(open(os.environ['FACTORY_STUB_DIR'] + '/gh.json'))\n"
+            "body = urllib.request.urlopen(api + '/day/' + today).read().decode()\n"
+            "print(h == home, api.startswith('http://127.0.0.1:'), day == today, stub == [tmp], body == tmp)\n")
+        with tempfile.TemporaryDirectory() as temp:
+            Path(temp, "homes/placeholders").mkdir(parents=True)
+            Path(temp, "homes/placeholders/f.txt").write_text("{home}|{api}|{today}")
+            Path(temp, "side.py").write_text(script)
+            case = {"id": "main/placeholders", "argv": ["{home}"], "home": "placeholders", "stubs": {"gh": ["{tmp}"]},
+                    "routes": {"GET /day/{today}": [200, "{tmp}"]}}
+            with patch.object(run, "HERE", Path(temp)):
+                fields = dict(run.run_side(case, [sys.executable, str(Path(temp, "side.py"))]))
+        self.assertEqual((fields["exit code"], fields["stdout"]), ("0", "True True True True True\n"), fields["stderr"])
+        self.assertEqual(fields["requests"].count(time.strftime("%Y-%m-%d")), 1)
+
+
+class PatchTest(unittest.TestCase):
+    def test_patch_is_served_and_authorization_recorded(self):
+        with http_fixture({"PATCH /x": (200, b"ok")}) as server:
+            request = urllib.request.Request(server.origin + "/x", data=b"{}", method="PATCH",
+                                             headers={"Authorization": "Bearer fake"})
+            self.assertEqual(urllib.request.urlopen(request).read(), b"ok")
+        line = json.loads(run.request_lines(server, lambda data: data)[0])
+        self.assertEqual((line["method"], line["headers"]["authorization"]), ("PATCH", "Bearer fake"))
 
 
 class UsageTextTest(unittest.TestCase):
