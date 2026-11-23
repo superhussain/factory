@@ -593,11 +593,17 @@ For each case, one at a time, it:
 2. Adds a detached scratch worktree at the head under a temp folder, and copies
    the job's `spec.md` and `build.md` into a scratch job folder with an empty
    `round-1/`.
-3. Runs the installed `factory-<role>` agent through `claude -p` in the scratch
-   worktree, with `--permission-mode dontAsk` and only Read, Grep, Glob, Write
-   and `git` in Bash allowed, `--add-dir` on the scratch job folder, and
-   `--model` when given. Its output goes to `<arm>/<case-id>/replay.log`, and it
-   stops after an hour.
+3. Runs the `factory-<role>` agent through `claude -p` in the scratch worktree.
+   The agent file must be at `factory-<role>.md` in `claude_agents_dir` from
+   `config.md`, or in `~/.claude/agents`, with a `description`; without it bench
+   exits 4 before any case runs. `--setting-sources ""` loads no settings files,
+   so their hooks and allow rules cannot widen the grant, and `--agents` passes
+   the agent file inline. `--permission-mode dontAsk` and `--allowedTools` allow
+   only Read, Grep, Glob, Write and `git diff`, `git log`, `git show` and
+   `git blame` in Bash. `--disallowedTools "Bash(git *--out*)"` stops
+   `--output`. `--add-dir` names the scratch job folder, and `--model` is passed
+   when given. Its output goes to `<arm>/<case-id>/replay.log`, and it stops
+   after an hour.
 4. Copies the review to `<arm>/<case-id>/<reviewer>.md` when its first line
    starts `VERDICT: `, and writes `run.json` with role, model, head, base, exit,
    wall seconds and the session's token totals. `run.json` and `replay.log` stay
