@@ -2528,6 +2528,26 @@ fn stop_daemon(home: &Path) -> Option<String> {
     })
 }
 
+/// Whether a daemon holds the lock, read after an install or uninstall has had up to 5 seconds
+/// to start or stop it, so the state line does not report the moment before the change.
+fn settled_running(home: &Path, action: ServiceAction, installed: bool) -> Option<bool> {
+    let want = match action {
+        ServiceAction::Install if installed => Some(true),
+        ServiceAction::Uninstall => Some(false),
+        _ => None,
+    };
+    let mut running = daemon::running(home);
+    if cfg!(test) || want.is_none() {
+        return running;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while running != want && running.is_some() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        running = daemon::running(home);
+    }
+    running
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum ServiceAction {
     Show,
@@ -2570,7 +2590,7 @@ fn daemon_setup(io: &mut Io, home: &Path, action: ServiceAction, overridden: boo
         ServiceAction::Show => {}
     }
     let (installed, detail) = timer_installed(scheduler, &DAEMON);
-    let state = service_state(installed, daemon::running(home));
+    let state = service_state(installed, settled_running(home, action, installed));
     outln!(io, "daemon setup ({}, {scheduler}): {state}", host_os());
     outln!(io, "    {detail}");
     let mut argv = vec![exe()];
