@@ -5778,6 +5778,11 @@ mod tests {
     #[test]
     fn deferred_stubs() {
         let home = Path::new("/nonexistent");
+        let e = claim_id(home, "x", "s", None).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (2, "factory.py: next is not ported to the Rust binary yet\n")
+        );
         let e = push_imported(home, "s/1-a", "s", "1-a", &BTreeSet::new()).unwrap_err();
         assert_eq!(
             (e.code, e.stderr.as_str()),
@@ -5785,15 +5790,6 @@ mod tests {
                 2,
                 "factory.py: idea-images is not ported to the Rust binary yet\n"
             )
-        );
-    }
-
-    #[test]
-    fn deferred_claim_id() {
-        let e = claim_id(Path::new("/nonexistent"), "x", "s", None).unwrap_err();
-        assert_eq!(
-            (e.code, e.stderr.as_str()),
-            (2, "factory.py: next is not ported to the Rust binary yet\n")
         );
     }
 
