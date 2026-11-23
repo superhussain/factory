@@ -209,6 +209,12 @@ for (const [name, board, write] of [
       }),
   ],
   [
+    "a row added before the end",
+    undefined,
+    (s) => s.put({ updated: UPDATED, jobs: [BUILD, IDEA, SPEC] }),
+  ],
+  ["rows reordered", undefined, (s) => s.put({ updated: UPDATED, jobs: [SPEC, BUILD] })],
+  [
     "over 100 changed rows",
     { updated: UPDATED, jobs: many },
     (s) => s.put({ updated: UPDATED, jobs: many.map((j) => ({ ...j, stage: "pr-open" })) }),
@@ -227,20 +233,39 @@ for (const [name, board, write] of [
   });
 }
 
-// A socket that records every frame it is sent, opened with attachment `attached`.
+// A socket that records every frame it is sent and its close, opened with attachment `attached`.
 const socket = (attached) => {
   const sent = [];
-  return { sent, send: (frame) => sent.push(frame), deserializeAttachment: () => attached };
+  const closed = [];
+  return {
+    sent,
+    closed,
+    send: (frame) => sent.push(frame),
+    close: (code) => closed.push(code),
+    deserializeAttachment: () => attached,
+  };
 };
+
+// A bucket where host mac-a is `state` and bound to token tok-a.
+function hostsBucket(state = "active") {
+  const bucket = memoryBucket();
+  bucket.objects.set("hosts/mac-a.json", {
+    key: "hosts/mac-a.json",
+    bytes: Buffer.from(JSON.stringify({ id: "mac-a", token: "tok-a", state })),
+    httpEtag: '"h1"',
+  });
+  return bucket;
+}
 
 test("room", async () => {
   const now = Math.floor(Date.now() / 1000);
   const fresh = socket({ exp: now + 3600 });
   const expired = socket({ exp: now - 1 });
   const unattached = socket(null);
+  const host = socket({ host: true, token: "tok-a" });
   const room = new BoardEvents(
-    { getWebSockets: () => [fresh, expired, unattached], setWebSocketAutoResponse() {} },
-    {},
+    { getWebSockets: () => [fresh, expired, unattached, host], setWebSocketAutoResponse() {} },
+    { BUCKET: hostsBucket() },
   );
   const frame = JSON.stringify({ type: "rows", etag: '"e2"', prev: '"e1"', rows: [IDEA] });
   const notify = (key) =>
@@ -256,6 +281,7 @@ test("room", async () => {
   assert.deepEqual(fresh.sent, [frame, changed("backlog.md")]);
   assert.deepEqual(expired.sent, [changed("board.json"), changed("backlog.md")]);
   assert.deepEqual(unattached.sent, [changed("board.json"), changed("backlog.md")]);
+  assert.deepEqual(host.sent, [frame, changed("backlog.md")]);
 });
 
 test("exp header", async () => {
@@ -269,7 +295,12 @@ test("exp header", async () => {
       ),
     }),
   };
-  const headers = { Upgrade: "websocket", Origin: ORIGIN, "X-Factory-Exp": "9999999999" };
+  const headers = {
+    Upgrade: "websocket",
+    Origin: ORIGIN,
+    "X-Factory-Exp": "9999999999",
+    "X-Factory-Host": "1",
+  };
   for (const principal of [person, { ...person, exp: undefined }])
     await serveFactory(
       new Request(ORIGIN + "/events/board", { headers }),
@@ -280,4 +311,57 @@ test("exp header", async () => {
     forwarded.map((r) => r.headers.get("X-Factory-Exp")),
     ["4102444800", null],
   );
+  // A browser cannot mark its own socket as a host's.
+  assert.deepEqual(
+    forwarded.map((r) => r.headers.get("X-Factory-Host")),
+    [null, null],
+  );
+});
+
+// Before a rows frame goes to host seats the room re-checks which tokens are bound. A seat
+// whose host was retired, or one from before seats named their token, is closed and gets
+// nothing; the bound seat still gets rows.
+test("unbound host seats are closed before rows go out", async () => {
+  const bound = socket({ host: true, token: "tok-a" });
+  const gone = socket({ host: true, token: "tok-gone" });
+  const legacy = socket({ host: true });
+  const bucket = hostsBucket();
+  const room = new BoardEvents(
+    { getWebSockets: () => [bound, gone, legacy], setWebSocketAutoResponse() {} },
+    { BUCKET: bucket },
+  );
+  const frame = JSON.stringify({ type: "rows", etag: '"e2"', prev: '"e1"', rows: [IDEA] });
+  const notify = () => room.fetch(new Request(NOTIFY, { method: "POST", body: frame }));
+  await notify();
+  assert.deepEqual(bound.sent, [frame]);
+  assert.deepEqual([gone.sent, gone.closed], [[], [4003]]);
+  assert.deepEqual([legacy.sent, legacy.closed], [[], [4003]]);
+  // Retired straight in R2: the cached set holds for up to 60 s, a revoke clears it.
+  bucket.objects.set("hosts/mac-a.json", {
+    key: "hosts/mac-a.json",
+    bytes: Buffer.from(JSON.stringify({ id: "mac-a", token: null, state: "retired" })),
+    httpEtag: '"h2"',
+  });
+  await room.fetch(
+    new Request("https://board-events.invalid/revoke?token=other", { method: "POST" }),
+  );
+  await notify();
+  assert.deepEqual(bound.sent, [frame]);
+  assert.deepEqual(bound.closed, [4003]);
+});
+
+// A revoke closes only the seats of the named token.
+test("revoke closes one token's seats", async () => {
+  const a = socket({ host: true, token: "tok-a" });
+  const b = socket({ host: true, token: "tok-b" });
+  const tab = socket({ exp: 4102444800 });
+  const room = new BoardEvents(
+    { getWebSockets: () => [a, b, tab], setWebSocketAutoResponse() {} },
+    { BUCKET: hostsBucket() },
+  );
+  const r = await room.fetch(
+    new Request("https://board-events.invalid/revoke?token=tok-a", { method: "POST" }),
+  );
+  assert.equal(r.status, 204);
+  assert.deepEqual([a.closed, b.closed, tab.closed], [[4003], [], []]);
 });
