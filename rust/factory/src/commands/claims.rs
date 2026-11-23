@@ -12,7 +12,9 @@ use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
 use crate::shared::board::{batch_refs, dump_board, lead_of, load_board, patch_job};
-use crate::shared::consts::{BUILD_STATES, IDEA, JOB_ID, NEW_JOB_ID, PASEO_ID, REF_KINDS, RELEASE, SLUG, TERMINAL};
+use crate::shared::consts::{
+    BUILD_STATES, IDEA, JOB_ID, NEW_JOB_ID, PASEO_ID, REF_KINDS, RELEASE, SLUG, TERMINAL,
+};
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::{is_link, read_text};
 use crate::shared::home::{factory_home, holder};
@@ -26,8 +28,14 @@ static ID_DIGITS: Pattern = Pattern::new(r"(\d{3,})-", Flags::ASCII);
 
 /// Give a session that has no tag a fresh one, and tell the orchestrator to reuse it.
 pub(crate) fn new_session() {
-    if std::env::var("FACTORY_SESSION").unwrap_or_default().is_empty() {
-        let tag = format!("{:06x}", RandomState::new().build_hasher().finish() & 0xff_ffff);
+    if std::env::var("FACTORY_SESSION")
+        .unwrap_or_default()
+        .is_empty()
+    {
+        let tag = format!(
+            "{:06x}",
+            RandomState::new().build_hasher().finish() & 0xff_ffff
+        );
         std::env::set_var("FACTORY_SESSION", &tag);
         eprintln!("new session {tag}: pass --session {tag} to every later claim, next, hold, and board call");
     }
@@ -49,17 +57,25 @@ pub(crate) fn paseo_session() -> Option<Value> {
     let agent = std::env::var("PASEO_AGENT_ID").unwrap_or_default();
     let agent = strip(&agent);
     let server = paseo_server()?;
-    (PASEO_ID.is_full(agent) && !agent.starts_with('-')).then(|| json!({"server": server, "agent": agent}))
+    (PASEO_ID.is_full(agent) && !agent.starts_with('-'))
+        .then(|| json!({"server": server, "agent": agent}))
 }
 
 /// <home>/paseo-claims/<job-id>/<agent>, the marker that this host's Paseo session claimed the job.
 pub(crate) fn paseo_claim_path(home: &Path, job_id: &str, agent: &str) -> Option<PathBuf> {
-    let ok = JOB_ID.is_full(job_id) && !job_id.contains("..") && PASEO_ID.is_full(agent) && !agent.starts_with('-');
+    let ok = JOB_ID.is_full(job_id)
+        && !job_id.contains("..")
+        && PASEO_ID.is_full(agent)
+        && !agent.starts_with('-');
     ok.then(|| home.join("paseo-claims").join(job_id).join(agent))
 }
 
 pub(crate) fn record_paseo_claim(home: &Path, job_id: &str, paseo: &Value) {
-    let Some(path) = paseo.get("agent").and_then(Value::as_str).and_then(|a| paseo_claim_path(home, job_id, a)) else {
+    let Some(path) = paseo
+        .get("agent")
+        .and_then(Value::as_str)
+        .and_then(|a| paseo_claim_path(home, job_id, a))
+    else {
         return;
     };
     if fs::create_dir_all(path.parent().unwrap()).is_ok() {
@@ -74,17 +90,36 @@ pub(crate) fn new_claim(device: &str, session: &str, since: Option<&str>) -> Val
 
 /// The highest id the Worker has archived off the board, so no new job reuses it.
 pub(crate) fn archive_floor(data: &Value) -> u128 {
-    let Some(Value::Number(n)) = data.get("archived").and_then(|a| a.get("max_id")) else { return 0 };
+    let Some(Value::Number(n)) = data.get("archived").and_then(|a| a.get("max_id")) else {
+        return 0;
+    };
     let text = n.to_string();
-    if text.bytes().all(|b| b.is_ascii_digit()) { text.parse().unwrap_or(u128::MAX) } else { 0 }
+    if text.bytes().all(|b| b.is_ascii_digit()) {
+        text.parse().unwrap_or(u128::MAX)
+    } else {
+        0
+    }
 }
 
 pub(crate) fn next_job_id(names: &[String], feature_slug: &str, floor: u128) -> String {
-    let used = names.iter().filter_map(|n| ID_DIGITS.match_start(n)).map(|m| m[1].parse().unwrap_or(u128::MAX));
-    format!("{:03}-{feature_slug}", used.chain([floor]).max().unwrap_or(0).saturating_add(1))
+    let used = names
+        .iter()
+        .filter_map(|n| ID_DIGITS.match_start(n))
+        .map(|m| m[1].parse().unwrap_or(u128::MAX));
+    format!(
+        "{:03}-{feature_slug}",
+        used.chain([floor]).max().unwrap_or(0).saturating_add(1)
+    )
 }
 
-fn claim_stub(job_id: &str, project: &str, stamp: &str, claim: Value, paseo: Option<&Value>, refs: Option<Value>) -> Value {
+fn claim_stub(
+    job_id: &str,
+    project: &str,
+    stamp: &str,
+    claim: Value,
+    paseo: Option<&Value>,
+    refs: Option<Value>,
+) -> Value {
     let mut stub = json!({"id": job_id, "project": project, "updated": stamp, "started": stamp, "claim": claim});
     if let Some(paseo) = paseo {
         stub["paseo"] = paseo.clone();
@@ -96,23 +131,39 @@ fn claim_stub(job_id: &str, project: &str, stamp: &str, claim: Value, paseo: Opt
 }
 
 fn listing(folder: &Path) -> Vec<PathBuf> {
-    fs::read_dir(folder).map(|d| d.filter_map(|e| Some(e.ok()?.path())).collect()).unwrap_or_default()
+    fs::read_dir(folder)
+        .map(|d| d.filter_map(|e| Some(e.ok()?.path())).collect())
+        .unwrap_or_default()
 }
 
 fn name_of(p: &Path) -> String {
-    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 /// Reserve the next id on the shared board with a stageless stub. Ids are unique across the whole factory, so
 /// `#<id>` links and board lookups stay unambiguous. refs, when given, go on the stub.
-pub(crate) fn claim_id(home: &Path, feature_slug: &str, project_slug: &str, refs: Option<Value>) -> Res<String> {
+pub(crate) fn claim_id(
+    home: &Path,
+    feature_slug: &str,
+    project_slug: &str,
+    refs: Option<Value>,
+) -> Res<String> {
     for slug in [feature_slug, project_slug] {
         if !SLUG.is_full(slug) {
-            return Err(fail(format!("bad slug {}: use letters, digits, - and _", repr(slug)), 2));
+            return Err(fail(
+                format!("bad slug {}: use letters, digits, - and _", repr(slug)),
+                2,
+            ));
         }
     }
     let paseo = paseo_session();
-    let resolved = if paseo.is_some() { Some(factory_home()?) } else { None };
+    let resolved = if paseo.is_some() {
+        Some(factory_home()?)
+    } else {
+        None
+    };
     let jobs = home.join("jobs");
     fs::create_dir_all(&jobs).map_err(|e| fail(os_error(&e, Some(&jobs)), 1))?;
     let mut local = Vec::new();
@@ -126,11 +177,21 @@ pub(crate) fn claim_id(home: &Path, feature_slug: &str, project_slug: &str, refs
         let mut data = load_board(text)?;
         let rows = jobs_of(&data)?;
         let mut names = local.clone();
-        names.extend(rows.iter().map(|j| py_str(j.get("id").unwrap_or(&json!("")))));
+        names.extend(
+            rows.iter()
+                .map(|j| py_str(j.get("id").unwrap_or(&json!("")))),
+        );
         let job_id = next_job_id(&names, feature_slug, archive_floor(&data));
         let stamp = now();
         data["updated"] = Value::from(stamp.clone());
-        let stub = claim_stub(&job_id, project_slug, &stamp, new_claim(&device, &session, None), paseo.as_ref(), refs.clone());
+        let stub = claim_stub(
+            &job_id,
+            project_slug,
+            &stamp,
+            new_claim(&device, &session, None),
+            paseo.as_ref(),
+            refs.clone(),
+        );
         data["jobs"].as_array_mut().unwrap().push(stub);
         Ok((Some(dump_board(&data)), job_id))
     })?;
@@ -143,13 +204,18 @@ pub(crate) fn claim_id(home: &Path, feature_slug: &str, project_slug: &str, refs
 }
 
 pub fn claim(call: &Call) -> Res<()> {
-    println!("{}", claim_id(Path::new(&call.args[0]), &call.args[1], &call.args[2], None)?);
+    println!(
+        "{}",
+        claim_id(Path::new(&call.args[0]), &call.args[1], &call.args[2], None)?
+    );
     Ok(())
 }
 
 /// The board's jobs list. Python raises when it is missing; the binary fails 1.
 fn jobs_of(data: &Value) -> Res<&Vec<Value>> {
-    data.get("jobs").and_then(Value::as_array).ok_or_else(|| fail("the board has no jobs list", 1))
+    data.get("jobs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| fail("the board has no jobs list", 1))
 }
 
 const CLAIM_REFRESH_MINUTES: f64 = 10.0;
@@ -159,7 +225,10 @@ const TRACER_APPROVED_NOTE: &str = "spec approved in Tracer";
 const SPEC_APPROVED_NOTES: [&str; 2] = [TRACER_APPROVED_NOTE, "spec approved on the dashboard"];
 const RECEIPT_REFUSAL: &str = "without a Tracer-signed scope receipt";
 static NOT_BEFORE: Pattern = Pattern::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", Flags::NONE);
-static TRACER_JIRA: Pattern = Pattern::new(r"(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9]*-[1-9][0-9]*", Flags::NONE);
+static TRACER_JIRA: Pattern = Pattern::new(
+    r"(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9]*-[1-9][0-9]*",
+    Flags::NONE,
+);
 static TRACER_DIGITS: Pattern = Pattern::new(r"(\d{1,7})-", Flags::ASCII);
 static APPROVE: Pattern = Pattern::new(r"APPROVE\b", Flags::NONE);
 
@@ -197,7 +266,8 @@ fn get_str<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
 
 /// `value in (a, b, ...)` for string choices.
 fn is_one_of(v: Option<&Value>, choices: &[&str]) -> bool {
-    v.and_then(Value::as_str).is_some_and(|s| choices.contains(&s))
+    v.and_then(Value::as_str)
+        .is_some_and(|s| choices.contains(&s))
 }
 
 fn or_null(v: Option<&Value>) -> &Value {
@@ -212,16 +282,29 @@ pub(crate) fn mine(c: &Value, device: &str, session: &str) -> bool {
 fn seen_age(c: &Value) -> Res<f64> {
     let seen = c.get("seen");
     let Some(stamp) = seen.and_then(Value::as_str).and_then(parse_stamp) else {
-        return Err(fail(format!("bad claim seen stamp {}", py_repr(or_null(seen))), 1));
+        return Err(fail(
+            format!("bad claim seen stamp {}", py_repr(or_null(seen))),
+            1,
+        ));
     };
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
     Ok(now - stamp as f64)
 }
 
 /// The job's claim if another session holds it and checked in within the last minutes.
-pub(crate) fn blocking(job: Option<&Value>, device: &str, session: &str, minutes: u32) -> Res<Option<Value>> {
+pub(crate) fn blocking(
+    job: Option<&Value>,
+    device: &str,
+    session: &str,
+    minutes: u32,
+) -> Res<Option<Value>> {
     let c = job.and_then(|j| j.get("claim"));
-    let Some(c) = c.filter(|c| truthy(Some(c)) && !mine(c, device, session)) else { return Ok(None) };
+    let Some(c) = c.filter(|c| truthy(Some(c)) && !mine(c, device, session)) else {
+        return Ok(None);
+    };
     Ok((seen_age(c)? < f64::from(minutes) * 60.0).then(|| c.clone()))
 }
 
@@ -262,12 +345,17 @@ fn same_board(before: &Value, after: &Value, device: &str, session: &str) -> Res
 }
 
 fn earlier_moves(m: &Value) -> Vec<&Value> {
-    m.get("earlier").and_then(Value::as_array).map(|e| e.iter().filter(|x| x.is_object()).collect()).unwrap_or_default()
+    m.get("earlier")
+        .and_then(Value::as_array)
+        .map(|e| e.iter().filter(|x| x.is_object()).collect())
+        .unwrap_or_default()
 }
 
 /// True when the dashboard moved this job away from this holder's session.
 pub(crate) fn moved_away(job: Option<&Value>, device: &str, session: &str) -> bool {
-    let Some(m) = job.and_then(|j| j.get("move")).filter(|m| m.is_object()) else { return false };
+    let Some(m) = job.and_then(|j| j.get("move")).filter(|m| m.is_object()) else {
+        return false;
+    };
     std::iter::once(m)
         .chain(earlier_moves(m))
         .any(|x| get_str(x, "from") == Some(device) && get_str(x, "session") == Some(session))
@@ -283,12 +371,20 @@ pub(crate) fn moved_message(job_id: &str, m: &Value) -> String {
 
 pub(crate) fn held_by(job_id: &str, c: &Value) -> String {
     let field = |k: &str| py_str(or_null(c.get(k)));
-    format!("{job_id} is held by {} session {} since {}, last seen {}", field("device"), field("session"), field("since"), field("seen"))
+    format!(
+        "{job_id} is held by {} session {} since {}, last seen {}",
+        field("device"),
+        field("session"),
+        field("since"),
+        field("seen")
+    )
 }
 
 /// True when the dashboard queued a close that pickup has not done yet.
 pub(crate) fn closing(j: &Value) -> bool {
-    j.get("close").and_then(Value::as_object).is_some_and(|c| c.get("at").is_some_and(Value::is_string) && !c.contains_key("closed"))
+    j.get("close")
+        .and_then(Value::as_object)
+        .is_some_and(|c| c.get("at").is_some_and(Value::is_string) && !c.contains_key("closed"))
 }
 
 pub(crate) fn closing_message(job_id: &str) -> String {
@@ -311,39 +407,63 @@ pub(crate) fn open_stacked(data: &Value, lead_id: &str) -> Vec<Value> {
 }
 
 fn check_refs(refs: Option<&Value>) -> Res<()> {
-    let Some(refs) = refs.filter(|r| !r.is_null()) else { return Ok(()) };
+    let Some(refs) = refs.filter(|r| !r.is_null()) else {
+        return Ok(());
+    };
     let good = |r: &Value| {
-        r.as_object().is_some_and(|m| m.len() == 2 && m.contains_key("id") && m.contains_key("kind"))
+        r.as_object()
+            .is_some_and(|m| m.len() == 2 && m.contains_key("id") && m.contains_key("kind"))
             && get_str(r, "id").is_some_and(|id| JOB_ID.is_full(id))
             && is_one_of(r.get("kind"), REF_KINDS)
     };
     if refs.as_array().is_some_and(|list| list.iter().all(good)) {
         return Ok(());
     }
-    Err(fail(format!(r#"refs must be a list of {{"id": "<job-id>", "kind": "{}"}}"#, REF_KINDS.join(" | ")), 2))
+    Err(fail(
+        format!(
+            r#"refs must be a list of {{"id": "<job-id>", "kind": "{}"}}"#,
+            REF_KINDS.join(" | ")
+        ),
+        2,
+    ))
 }
 
 fn check_build(build: Option<&Value>) -> Res<()> {
-    let Some(build) = build.filter(|b| !b.is_null()) else { return Ok(()) };
+    let Some(build) = build.filter(|b| !b.is_null()) else {
+        return Ok(());
+    };
     let good = build.as_object().is_some_and(|m| {
         m.keys().all(|k| k == "state" || k == "runs")
-            && m.get("state").map_or(true, |s| is_one_of(Some(s), BUILD_STATES))
+            && m.get("state")
+                .map_or(true, |s| is_one_of(Some(s), BUILD_STATES))
             && match m.get("runs") {
                 None | Some(Value::Null) => true,
-                Some(Value::Array(runs)) => runs.iter().all(|u| u.as_str().is_some_and(|u| u.starts_with("https://"))),
+                Some(Value::Array(runs)) => runs
+                    .iter()
+                    .all(|u| u.as_str().is_some_and(|u| u.starts_with("https://"))),
                 _ => false,
             }
     });
     if good {
         return Ok(());
     }
-    Err(fail(format!(r#"build must be {{"state": "{}", "runs": ["https://..."]}}"#, BUILD_STATES.join(" | ")), 2))
+    Err(fail(
+        format!(
+            r#"build must be {{"state": "{}", "runs": ["https://..."]}}"#,
+            BUILD_STATES.join(" | ")
+        ),
+        2,
+    ))
 }
 
 fn check_tracer(value: Option<&Value>) -> Res<()> {
-    let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(()) };
+    let Some(value) = value.filter(|v| !v.is_null()) else {
+        return Ok(());
+    };
     let good = value.as_object().is_some_and(|m| {
-        m.iter().all(|(k, v)| (k == "follow" || k == "gather") && (v.is_null() || py_eq(v, &Value::Bool(true))))
+        m.iter().all(|(k, v)| {
+            (k == "follow" || k == "gather") && (v.is_null() || py_eq(v, &Value::Bool(true)))
+        })
     });
     if good {
         return Ok(());
@@ -355,23 +475,39 @@ fn check_tracer(value: Option<&Value>) -> Res<()> {
 }
 
 fn check_pipeline(value: Option<&Value>) -> Res<()> {
-    let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(()) };
+    let Some(value) = value.filter(|v| !v.is_null()) else {
+        return Ok(());
+    };
     let natural = |v: &Value| py_int(v).is_some_and(|d| !d.starts_with('-')) && v.is_number();
     let good = value.as_object().is_some_and(|m| {
-        m.len() == 2 && m.contains_key("global") && m.contains_key("project") && m.values().all(natural)
+        m.len() == 2
+            && m.contains_key("global")
+            && m.contains_key("project")
+            && m.values().all(natural)
     });
     if good {
         return Ok(());
     }
-    Err(fail(r#"pipeline must be {"global": <version>, "project": <version>}"#, 2))
+    Err(fail(
+        r#"pipeline must be {"global": <version>, "project": <version>}"#,
+        2,
+    ))
 }
 
 fn check_not_before(value: Option<&Value>) -> Res<()> {
-    let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(()) };
-    if value.as_str().is_some_and(|s| NOT_BEFORE.is_full(s) && parse_stamp(s).is_some()) {
+    let Some(value) = value.filter(|v| !v.is_null()) else {
+        return Ok(());
+    };
+    if value
+        .as_str()
+        .is_some_and(|s| NOT_BEFORE.is_full(s) && parse_stamp(s).is_some())
+    {
         return Ok(());
     }
-    Err(fail("not_before must be a UTC time like 2026-11-17T09:00:00Z, or null. Nothing was written.", 2))
+    Err(fail(
+        "not_before must be a UTC time like 2026-11-17T09:00:00Z, or null. Nothing was written.",
+        2,
+    ))
 }
 
 /// Each present artifact's first line, refusing any linked file, parent or job folder.
@@ -381,13 +517,23 @@ pub(crate) fn job_file_lines(folder: &Path, artifacts: &[String]) -> Res<Vec<(St
         let path = folder.join(artifact);
         for node in [path.as_path(), path.parent().unwrap_or(folder), folder] {
             if is_link(node).map_err(|e| fail(os_error(&e, Some(node)), 1))? {
-                return Err(fail(format!("{} is a symlink or junction; nothing was read through it", node.display()), 6));
+                return Err(fail(
+                    format!(
+                        "{} is a symlink or junction; nothing was read through it",
+                        node.display()
+                    ),
+                    6,
+                ));
             }
         }
         if path.is_file() {
             let bytes = fs::read(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
             let text = universal_newlines(String::from_utf8_lossy(&bytes).into_owned());
-            let first = splitlines(&text, false).first().copied().unwrap_or("").to_string();
+            let first = splitlines(&text, false)
+                .first()
+                .copied()
+                .unwrap_or("")
+                .to_string();
             lines.push((artifact.clone(), first));
         }
     }
@@ -396,11 +542,22 @@ pub(crate) fn job_file_lines(folder: &Path, artifacts: &[String]) -> Res<Vec<(St
 
 /// Why a rounds patch cannot be written, or None. It may keep the stored rounds and append pending ones; only
 /// round rewrite_round may differ from the stored entry.
-pub(crate) fn rounds_refusal(job_id: &str, found: Option<&Value>, rounds: &Value, rewrite_round: Option<usize>) -> Option<String> {
+pub(crate) fn rounds_refusal(
+    job_id: &str,
+    found: Option<&Value>,
+    rounds: &Value,
+    rewrite_round: Option<usize>,
+) -> Option<String> {
     let Some(rounds) = rounds.as_array() else {
-        return Some(format!("{job_id} rounds must be a list of review rounds. Nothing was written."));
+        return Some(format!(
+            "{job_id} rounds must be a list of review rounds. Nothing was written."
+        ));
     };
-    let stored = found.and_then(|f| f.get("rounds")).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    let stored = found
+        .and_then(|f| f.get("rounds"))
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     if rounds.len() < stored.len() {
         return Some(format!(
             "{job_id} cannot drop review rounds: the board has {} and the patch sends {}. Nothing was written.",
@@ -408,7 +565,12 @@ pub(crate) fn rounds_refusal(job_id: &str, found: Option<&Value>, rounds: &Value
             rounds.len()
         ));
     }
-    let pending = Value::Object(REVIEWERS.iter().map(|r| (r.to_string(), Value::from("pending"))).collect());
+    let pending = Value::Object(
+        REVIEWERS
+            .iter()
+            .map(|r| (r.to_string(), Value::from("pending")))
+            .collect(),
+    );
     for (i, entry) in rounds.iter().enumerate() {
         if i < stored.len() && !py_eq(entry, &stored[i]) && Some(i + 1) != rewrite_round {
             return Some(format!(
@@ -429,12 +591,22 @@ pub(crate) fn rounds_refusal(job_id: &str, found: Option<&Value>, rounds: &Value
 
 /// Why the board cannot record value for reviewer in round n, or None: anything but pending needs
 /// round-<n>/review-<reviewer>.md in the job folder to start with that VERDICT: line.
-pub(crate) fn verdict_file_refusal(home: &Path, slug: &str, job_id: &str, n: usize, reviewer: &str, value: &str) -> Res<Option<String>> {
+pub(crate) fn verdict_file_refusal(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    n: usize,
+    reviewer: &str,
+    value: &str,
+) -> Res<Option<String>> {
     if value == "pending" {
         return Ok(None);
     }
     let name = format!("round-{n}/review-{reviewer}.md");
-    let lines = job_file_lines(&home.join("jobs").join(slug).join(job_id), std::slice::from_ref(&name))?;
+    let lines = job_file_lines(
+        &home.join("jobs").join(slug).join(job_id),
+        std::slice::from_ref(&name),
+    )?;
     Ok(match lines.first() {
         None => Some(format!("{job_id} round {n} {reviewer} cannot be {value}: {name} is not in the job folder. Nothing was written.")),
         Some((_, line)) if *line != format!("VERDICT: {value}") => Some(format!(
@@ -445,10 +617,22 @@ pub(crate) fn verdict_file_refusal(home: &Path, slug: &str, job_id: &str, n: usi
 }
 
 /// Why a board write cannot move the job to approve or set automerge true, or None.
-pub(crate) fn move_refusal(home: &Path, job_id: &str, found: Option<&Value>, patch: &Map<String, Value>) -> Option<String> {
+pub(crate) fn move_refusal(
+    home: &Path,
+    job_id: &str,
+    found: Option<&Value>,
+    patch: &Map<String, Value>,
+) -> Option<String> {
     if patch.get("stage").and_then(Value::as_str) == Some("approve") {
-        let rounds = if patch.contains_key("rounds") { patch.get("rounds") } else { found.and_then(|f| f.get("rounds")) };
-        let last = rounds.and_then(Value::as_array).and_then(|r| r.last()).filter(|r| r.is_object());
+        let rounds = if patch.contains_key("rounds") {
+            patch.get("rounds")
+        } else {
+            found.and_then(|f| f.get("rounds"))
+        };
+        let last = rounds
+            .and_then(Value::as_array)
+            .and_then(|r| r.last())
+            .filter(|r| r.is_object());
         let Some(last) = last else {
             return Some(format!("{job_id} cannot move to approve: it has no review round on the board. Nothing was written."));
         };
@@ -466,13 +650,21 @@ pub(crate) fn move_refusal(home: &Path, job_id: &str, found: Option<&Value>, pat
         }
     }
     if patch.get("automerge") == Some(&Value::Bool(true)) {
-        let slug = if patch.contains_key("project") { patch.get("project") } else { found.and_then(|f| f.get("project")) };
+        let slug = if patch.contains_key("project") {
+            patch.get("project")
+        } else {
+            found.and_then(|f| f.get("project"))
+        };
         let Some(slug) = slug.and_then(Value::as_str).filter(|s| SLUG.is_full(s)) else {
             return Some(format!(
                 "{job_id} cannot set automerge true: it has no project, so there is no decision.md to check. Nothing was written."
             ));
         };
-        let decision = home.join("jobs").join(slug).join(job_id).join("decision.md");
+        let decision = home
+            .join("jobs")
+            .join(slug)
+            .join(job_id)
+            .join("decision.md");
         let unreadable = format!("{job_id} cannot set automerge true: its decision.md cannot be read. Nothing was written.");
         if is_link(&decision).unwrap_or(true) {
             return Some(unreadable);
@@ -486,7 +678,11 @@ pub(crate) fn move_refusal(home: &Path, job_id: &str, found: Option<&Value>, pat
             }
             Err(_) => return Some(unreadable),
         };
-        let first = splitlines(&text, false).into_iter().map(strip).find(|l| !l.is_empty()).unwrap_or("");
+        let first = splitlines(&text, false)
+            .into_iter()
+            .map(strip)
+            .find(|l| !l.is_empty())
+            .unwrap_or("");
         if APPROVE.match_start(first).is_none() {
             let head: String = first.chars().take(40).collect();
             return Some(format!(
@@ -501,7 +697,10 @@ pub(crate) fn move_refusal(home: &Path, job_id: &str, found: Option<&Value>, pat
 /// True when a patch holds a job at the spec-approval gate after a person already approved its scope in Tracer.
 fn tracer_gate_passed(job: &Value, patch: &Map<String, Value>) -> bool {
     is_one_of(patch.get("stage"), &["needs-human"])
-        && is_one_of(patch.get("note"), &["gate: spec-approval", TRACER_GATE_NOTE])
+        && is_one_of(
+            patch.get("note"),
+            &["gate: spec-approval", TRACER_GATE_NOTE],
+        )
         && job.get("tracer").and_then(|t| get_str(t, "scope")) == Some("approved")
 }
 
@@ -522,15 +721,25 @@ pub(crate) fn tracer_ids(job: &Value) -> (String, String) {
 /// cas on the board with change(text, signed, sent), where change appends the job id to sent when it moves a
 /// job to build on Tracer's receipt. When the Worker refuses that write for its receipt, retry once unsigned so
 /// the job waits for a person.
-fn receipt_cas<T>(home: &Path, mut change: impl FnMut(Option<&str>, bool, &mut Vec<String>) -> Res<(Option<String>, T)>) -> Res<T> {
+fn receipt_cas<T>(
+    home: &Path,
+    mut change: impl FnMut(Option<&str>, bool, &mut Vec<String>) -> Res<(Option<String>, T)>,
+) -> Res<T> {
     let mut sent = Vec::new();
     match cas(home, "/api/board", |text| change(text, true, &mut sent)) {
-        Err(e) if !sent.is_empty() && e.status.as_ref().is_some_and(|(code, detail)| *code == 400 && detail.contains(RECEIPT_REFUSAL)) => {
+        Err(e)
+            if !sent.is_empty()
+                && e.status.as_ref().is_some_and(|(code, detail)| {
+                    *code == 400 && detail.contains(RECEIPT_REFUSAL)
+                }) =>
+        {
             eprint!("{}", e.stderr);
         }
         other => return other,
     }
-    let result = cas(home, "/api/board", |text| change(text, false, &mut Vec::new()))?;
+    let result = cas(home, "/api/board", |text| {
+        change(text, false, &mut Vec::new())
+    })?;
     eprintln!(
         "factory.py: the Worker refused Tracer's receipt (check tracer_receipt_key); {} waits at gate: spec-approval instead",
         sent.last().unwrap()
@@ -542,9 +751,12 @@ pub fn board(call: &Call) -> Res<()> {
     let mut stdin = std::io::stdin();
     let mut bytes = Vec::new();
     if !stdin.is_terminal() {
-        stdin.read_to_end(&mut bytes).map_err(|e| fail(os_error(&e, None), 1))?;
+        stdin
+            .read_to_end(&mut bytes)
+            .map_err(|e| fail(os_error(&e, None), 1))?;
     }
-    let raw = universal_newlines(String::from_utf8(bytes).map_err(|_| fail("stdin must be UTF-8", 2))?);
+    let raw =
+        universal_newlines(String::from_utf8(bytes).map_err(|_| fail("stdin must be UTF-8", 2))?);
     let raw = strip(&raw);
     if raw.is_empty() {
         return Err(fail(
@@ -554,10 +766,27 @@ pub fn board(call: &Call) -> Res<()> {
     }
     let patch = loads(raw).map_err(|e| {
         let msg = py_json_error(raw);
-        fail(format!("stdin is not JSON: {}", if msg.is_empty() { e.to_string() } else { msg }), 2)
+        fail(
+            format!(
+                "stdin is not JSON: {}",
+                if msg.is_empty() { e.to_string() } else { msg }
+            ),
+            2,
+        )
     })?;
-    let Value::Object(patch) = patch else { return Err(fail("stdin must be a JSON object", 2)) };
-    board_write(Path::new(&call.args[0]), &call.args[1], patch, &WriteOpts { show: true, verdict: None, rewrite_round: None })?;
+    let Value::Object(patch) = patch else {
+        return Err(fail("stdin must be a JSON object", 2));
+    };
+    board_write(
+        Path::new(&call.args[0]),
+        &call.args[1],
+        patch,
+        &WriteOpts {
+            show: true,
+            verdict: None,
+            rewrite_round: None,
+        },
+    )?;
     Ok(())
 }
 
@@ -582,13 +811,22 @@ enum Held {
 }
 
 /// Validate a board patch, then merge it into the job's row in one CAS write. Prints the job when opts.show.
-pub(crate) fn board_write(home: &Path, job_id: &str, mut patch: Map<String, Value>, opts: &WriteOpts) -> Res<Value> {
+pub(crate) fn board_write(
+    home: &Path,
+    job_id: &str,
+    mut patch: Map<String, Value>,
+    opts: &WriteOpts,
+) -> Res<Value> {
     for (key, non_null, why) in REFUSED {
         if patch.get(*key).is_some_and(|v| !(*non_null && v.is_null())) {
             return Err(fail(why, 2));
         }
     }
-    if let Some(note) = patch.get("note").and_then(Value::as_str).filter(|n| SPEC_APPROVED_NOTES.contains(n)) {
+    if let Some(note) = patch
+        .get("note")
+        .and_then(Value::as_str)
+        .filter(|n| SPEC_APPROVED_NOTES.contains(n))
+    {
         return Err(fail(
             format!("only a person approves a spec, on the dashboard or in Tracer, so factory.py board cannot set the note '{note}'. Nothing was written."),
             2,
@@ -597,8 +835,15 @@ pub(crate) fn board_write(home: &Path, job_id: &str, mut patch: Map<String, Valu
     if patch.contains_key("id") {
         return Err(fail("the job id comes from the <job-id> argument, so the patch cannot set id. Nothing was written.", 2));
     }
-    if patch.get("backlog").and_then(Value::as_object).is_some_and(|b| b.contains_key("notes_read")) {
-        return Err(fail("only factory.py deny-notes sets backlog.notes_read", 2));
+    if patch
+        .get("backlog")
+        .and_then(Value::as_object)
+        .is_some_and(|b| b.contains_key("notes_read"))
+    {
+        return Err(fail(
+            "only factory.py deny-notes sets backlog.notes_read",
+            2,
+        ));
     }
     for key in ["escalated", "automerge"] {
         let v = or_null(patch.get(key));
@@ -606,12 +851,19 @@ pub(crate) fn board_write(home: &Path, job_id: &str, mut patch: Map<String, Valu
             return Err(fail(format!("{key} must be true, false, or null"), 2));
         }
     }
-    if patch.get("needs").is_some_and(|n| !n.is_null() && !n.is_string()) {
+    if patch
+        .get("needs")
+        .is_some_and(|n| !n.is_null() && !n.is_string())
+    {
         return Err(fail("needs must be a string or null", 2));
     }
     check_refs(patch.get("refs"))?;
     let self_ref = json!({"id": job_id, "kind": "depends-on"});
-    if patch.get("refs").and_then(Value::as_array).is_some_and(|refs| refs.iter().any(|r| py_eq(r, &self_ref))) {
+    if patch
+        .get("refs")
+        .and_then(Value::as_array)
+        .is_some_and(|refs| refs.iter().any(|r| py_eq(r, &self_ref)))
+    {
         return Err(fail(format!("a job cannot depend on itself: drop the depends-on ref to {job_id}. Nothing was written."), 2));
     }
     check_build(patch.get("build"))?;
@@ -620,7 +872,11 @@ pub(crate) fn board_write(home: &Path, job_id: &str, mut patch: Map<String, Valu
     check_not_before(patch.get("not_before"))?;
     let (device, session, minutes) = holder(home)?;
     let paseo = paseo_session();
-    let resolved = if paseo.is_some() { Some(factory_home()?) } else { None };
+    let resolved = if paseo.is_some() {
+        Some(factory_home()?)
+    } else {
+        None
+    };
     let mirrors = opts.verdict.is_some()
         || patch.contains_key("stage")
         || patch.contains_key("rounds")
@@ -632,16 +888,41 @@ pub(crate) fn board_write(home: &Path, job_id: &str, mut patch: Map<String, Valu
         let mut data = load_board(text)?;
         jobs_of(&data)?;
         let before = data.clone();
-        let index = |data: &Value| data["jobs"].as_array().unwrap().iter().position(|j| get_str(j, "id") == Some(job_id));
+        let index = |data: &Value| {
+            data["jobs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .position(|j| get_str(j, "id") == Some(job_id))
+        };
         let found = index(&data).map(|i| data["jobs"][i].clone());
         let found = found.as_ref();
-        if let Some(Verdict { slug, n, reviewer, value }) = &opts.verdict {
+        if let Some(Verdict {
+            slug,
+            n,
+            reviewer,
+            value,
+        }) = &opts.verdict
+        {
             if let Some(f) = found.filter(|f| get_str(f, "project") != Some(slug)) {
-                return Err(fail(format!("{job_id} belongs to {}, not {slug}", py_str(or_null(f.get("project")))), 2));
+                return Err(fail(
+                    format!(
+                        "{job_id} belongs to {}, not {slug}",
+                        py_str(or_null(f.get("project")))
+                    ),
+                    2,
+                ));
             }
-            let rounds = found.and_then(|f| f.get("rounds")).and_then(Value::as_array);
-            let Some(rounds) = rounds.filter(|r| r.get(n.wrapping_sub(1)).is_some_and(Value::is_object)) else {
-                return Err(fail(format!("{job_id} has no rounds entry {n} on the board. Nothing was written."), 4));
+            let rounds = found
+                .and_then(|f| f.get("rounds"))
+                .and_then(Value::as_array);
+            let Some(rounds) =
+                rounds.filter(|r| r.get(n.wrapping_sub(1)).is_some_and(Value::is_object))
+            else {
+                return Err(fail(
+                    format!("{job_id} has no rounds entry {n} on the board. Nothing was written."),
+                    4,
+                ));
             };
             if let Some(refusal) = verdict_file_refusal(home, slug, job_id, *n, reviewer, value)? {
                 return Err(fail(refusal, 4));
@@ -684,11 +965,16 @@ pub(crate) fn board_write(home: &Path, job_id: &str, mut patch: Map<String, Valu
                 return Err(fail(closing_message(job_id), 6));
             }
             let i = index(&data).unwrap();
-            data["jobs"][i].as_object_mut().unwrap().shift_remove("claim");
+            data["jobs"][i]
+                .as_object_mut()
+                .unwrap()
+                .shift_remove("claim");
             patch_job(&mut data, job_id, &json!({}));
             return Ok((Some(dump_board(&data)), (None, Some(Held::Closing))));
         }
-        let origin = found.and_then(|f| f.get("origin")).filter(|o| o.is_object());
+        let origin = found
+            .and_then(|f| f.get("origin"))
+            .filter(|o| o.is_object());
         if let Some(origin) = origin {
             if get_str(origin, "gate") == Some("human")
                 && !truthy(origin.get("approved"))
@@ -700,12 +986,16 @@ pub(crate) fn board_write(home: &Path, job_id: &str, mut patch: Map<String, Valu
         }
         if patch.contains_key("stage") && !truthy(patch.get("stage")) {
             return Err(fail(
-                format!(r#"a board write cannot clear {job_id}'s stage. Close the job with {{"stage": "closed"}} instead. Nothing was written."#),
+                format!(
+                    r#"a board write cannot clear {job_id}'s stage. Close the job with {{"stage": "closed"}} instead. Nothing was written."#
+                ),
                 2,
             ));
         }
         let refusal = match patch.get("rounds") {
-            Some(rounds) if opts.verdict.is_none() => rounds_refusal(job_id, found, rounds, opts.rewrite_round),
+            Some(rounds) if opts.verdict.is_none() => {
+                rounds_refusal(job_id, found, rounds, opts.rewrite_round)
+            }
             _ => None,
         };
         if let Some(refusal) = refusal.or_else(|| move_refusal(home, job_id, found, &patch)) {
@@ -728,21 +1018,31 @@ pub(crate) fn board_write(home: &Path, job_id: &str, mut patch: Map<String, Valu
                 return Err(not_ported("board closing stacked pull requests"));
             }
         }
-        let (babysit, priority) = (found.and_then(|f| f.get("babysit")), found.and_then(|f| f.get("priority")));
+        let (babysit, priority) = (
+            found.and_then(|f| f.get("babysit")),
+            found.and_then(|f| f.get("priority")),
+        );
         let pressed = patch.get("babysit").is_some_and(Value::is_null)
             && babysit.is_some_and(Value::is_object)
             && priority.is_some_and(Value::is_object)
-            && py_eq(or_null(priority.unwrap().get("at")), or_null(babysit.unwrap().get("at")));
+            && py_eq(
+                or_null(priority.unwrap().get("at")),
+                or_null(babysit.unwrap().get("at")),
+            );
         patch_job(&mut data, job_id, &Value::Object(patch.clone()));
         let i = index(&data).unwrap();
         let job = data["jobs"][i].as_object_mut().unwrap();
         if pressed {
             job.shift_remove("priority");
         }
-        let held_here = |job: &Map<String, Value>| mine(or_null(job.get("claim")), &device, &session);
+        let held_here =
+            |job: &Map<String, Value>| mine(or_null(job.get("claim")), &device, &session);
         if is_one_of(patch.get("stage"), RELEASE) {
             job.shift_remove("claim");
-        } else if patch.get("not_before").is_some_and(Value::is_string) && !is_one_of(job.get("stage"), TERMINAL) && held_here(job) {
+        } else if patch.get("not_before").is_some_and(Value::is_string)
+            && !is_one_of(job.get("stage"), TERMINAL)
+            && held_here(job)
+        {
             job.shift_remove("claim");
         } else if held_here(job) {
             let updated = job["updated"].clone();
@@ -752,13 +1052,18 @@ pub(crate) fn board_write(home: &Path, job_id: &str, mut patch: Map<String, Valu
             }
         }
         if let Some(paseo) = &paseo {
-            if !job.get("paseo").is_some_and(Value::is_object) && !job.get("paseo_writer").is_some_and(|w| py_eq(w, paseo)) {
+            if !job.get("paseo").is_some_and(Value::is_object)
+                && !job.get("paseo_writer").is_some_and(|w| py_eq(w, paseo))
+            {
                 job.insert("paseo_writer".into(), paseo.clone());
             }
         }
         if tracer_gate_passed(&Value::Object(job.clone()), &patch) {
             if !signed {
-                job["tracer"].as_object_mut().unwrap().shift_remove("receipt");
+                job["tracer"]
+                    .as_object_mut()
+                    .unwrap()
+                    .shift_remove("receipt");
             }
             let tracer = job["tracer"].clone();
             if truthy(tracer.get("receipt")) {
@@ -777,7 +1082,12 @@ pub(crate) fn board_write(home: &Path, job_id: &str, mut patch: Map<String, Valu
             }
         }
         if same_board(&before, &data, &device, &session)? {
-            let row = before["jobs"].as_array().unwrap().iter().find(|j| get_str(j, "id") == Some(job_id)).cloned();
+            let row = before["jobs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|j| get_str(j, "id") == Some(job_id))
+                .cloned();
             return Ok((None, (row, None)));
         }
         let job = data["jobs"][i].clone();
@@ -818,14 +1128,18 @@ fn py_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Null, Value::Null) => true,
         (Value::String(x), Value::String(y)) => x == y,
-        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(x, y)| py_eq(x, y)),
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| py_eq(x, y))
+        }
         (Value::Object(x), Value::Object(y)) => {
             x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| py_eq(v, w)))
         }
-        (Value::Bool(_) | Value::Number(_), Value::Bool(_) | Value::Number(_)) => match (py_int(a), py_int(b)) {
-            (Some(x), Some(y)) => x == y,
-            _ => py_float(a) == py_float(b),
-        },
+        (Value::Bool(_) | Value::Number(_), Value::Bool(_) | Value::Number(_)) => {
+            match (py_int(a), py_int(b)) {
+                (Some(x), Some(y)) => x == y,
+                _ => py_float(a) == py_float(b),
+            }
+        }
         _ => false,
     }
 }
@@ -867,9 +1181,15 @@ fn py_repr(v: &Value) -> String {
         Value::Bool(false) => "False".into(),
         Value::Number(_) => dumps(v, DEFAULT),
         Value::String(s) => repr(s),
-        Value::Array(items) => format!("[{}]", items.iter().map(py_repr).collect::<Vec<_>>().join(", ")),
+        Value::Array(items) => format!(
+            "[{}]",
+            items.iter().map(py_repr).collect::<Vec<_>>().join(", ")
+        ),
         Value::Object(map) => {
-            let items: Vec<String> = map.iter().map(|(k, v)| format!("{}: {}", repr(k), py_repr(v))).collect();
+            let items: Vec<String> = map
+                .iter()
+                .map(|(k, v)| format!("{}: {}", repr(k), py_repr(v)))
+                .collect();
             format!("{{{}}}", items.join(", "))
         }
     }
@@ -905,10 +1225,16 @@ fn py_json_error(s: &str) -> String {
     } else {
         scan_value(&c, skip_ws(&c, 0)).and_then(|end| {
             let end = skip_ws(&c, end);
-            if end == c.len() { Ok(end) } else { Err(("Extra data", end)) }
+            if end == c.len() {
+                Ok(end)
+            } else {
+                Err(("Extra data", end))
+            }
         })
     };
-    let Err((msg, pos)) = found else { return String::new() };
+    let Err((msg, pos)) = found else {
+        return String::new();
+    };
     let lineno = c[..pos].iter().filter(|&&x| x == '\n').count() + 1;
     let colno = match c[..pos].iter().rposition(|&x| x == '\n') {
         Some(nl) => pos - nl,
@@ -918,9 +1244,13 @@ fn py_json_error(s: &str) -> String {
 }
 
 fn scan_value(c: &[char], idx: usize) -> Scan {
-    let Some(&first) = c.get(idx) else { return Err(("Expecting value", idx)) };
+    let Some(&first) = c.get(idx) else {
+        return Err(("Expecting value", idx));
+    };
     let rest = &c[idx..];
-    let word = |w: &str| rest.len() >= w.chars().count() && rest.iter().zip(w.chars()).all(|(a, b)| *a == b);
+    let word = |w: &str| {
+        rest.len() >= w.chars().count() && rest.iter().zip(w.chars()).all(|(a, b)| *a == b)
+    };
     match first {
         '"' => scan_string(c, idx + 1),
         '{' => scan_object(c, idx + 1),
@@ -980,7 +1310,11 @@ fn scan_number(c: &[char], start: usize) -> Scan {
 fn scan_string(c: &[char], mut end: usize) -> Scan {
     let begin = end - 1;
     let len = c.len();
-    let hex = |range: std::ops::Range<usize>| c[range].iter().try_fold(0u32, |n, d| Some(n * 16 + d.to_digit(16)?));
+    let hex = |range: std::ops::Range<usize>| {
+        c[range]
+            .iter()
+            .try_fold(0u32, |n, d| Some(n * 16 + d.to_digit(16)?))
+    };
     loop {
         let mut next = end;
         while next < len && !matches!(c[next], '"' | '\\') {
@@ -1012,10 +1346,15 @@ fn scan_string(c: &[char], mut end: usize) -> Scan {
         if end >= len {
             return Err(("Invalid \\uXXXX escape", next - 1));
         }
-        let Some(high) = hex(next..end) else { return Err(("Invalid \\uXXXX escape", end - 5)) };
-        if (0xd800..0xdc00).contains(&high) && end + 6 < len && c[end] == '\\' && c[end + 1] == 'u' {
+        let Some(high) = hex(next..end) else {
+            return Err(("Invalid \\uXXXX escape", end - 5));
+        };
+        if (0xd800..0xdc00).contains(&high) && end + 6 < len && c[end] == '\\' && c[end + 1] == 'u'
+        {
             end += 6;
-            let Some(low) = hex(end - 4..end) else { return Err(("Invalid \\uXXXX escape", end - 5)) };
+            let Some(low) = hex(end - 4..end) else {
+                return Err(("Invalid \\uXXXX escape", end - 5));
+            };
             if !(0xdc00..0xe000).contains(&low) {
                 end -= 6;
             }
@@ -1077,7 +1416,10 @@ mod tests {
     /// variables hold the same lock.
     fn with_env<T>(vars: &[(&str, &str)], f: impl FnOnce() -> T) -> T {
         let _lock = ENV.lock().unwrap_or_else(|e| e.into_inner());
-        let saved: Vec<_> = vars.iter().map(|(k, _)| (*k, std::env::var_os(k))).collect();
+        let saved: Vec<_> = vars
+            .iter()
+            .map(|(k, _)| (*k, std::env::var_os(k)))
+            .collect();
         for (k, v) in vars {
             std::env::set_var(k, v);
         }
@@ -1116,35 +1458,69 @@ mod tests {
             (json!([416]), 0),
             (Value::Null, 0),
         ] {
-            assert_eq!(archive_floor(&json!({"jobs": [], "archived": archived})), floor, "{archived}");
+            assert_eq!(
+                archive_floor(&json!({"jobs": [], "archived": archived})),
+                floor,
+                "{archived}"
+            );
         }
         assert_eq!(archive_floor(&json!({"jobs": []})), 0);
         assert_eq!(next_job_id(&["415-add-export".into()], "x", 416), "417-x");
         assert_eq!(next_job_id(&["420-later".into()], "x", 416), "421-x");
-        assert_eq!(next_job_id(&["sample".into(), "12-short".into()], "x", 0), "001-x");
+        assert_eq!(
+            next_job_id(&["sample".into(), "12-short".into()], "x", 0),
+            "001-x"
+        );
     }
 
     #[test]
     fn claim_puts_refs_on_the_stub() {
         let refs = json!([{"id": "041-recipe-import", "kind": "sub-job-of"}, {"id": "052-parse-recipe-urls", "kind": "depends-on"}]);
         let claim = new_claim("d", "s", None);
-        let stub = claim_stub("417-store-imported-recipes", "sample", "2026-11-01T00:00:00Z", claim.clone(), None, Some(refs.clone()));
+        let stub = claim_stub(
+            "417-store-imported-recipes",
+            "sample",
+            "2026-11-01T00:00:00Z",
+            claim.clone(),
+            None,
+            Some(refs.clone()),
+        );
         assert_eq!((&stub["refs"], stub.get("stage")), (&refs, None));
-        let bare = claim_stub("418-no-refs", "sample", "2026-11-01T00:00:00Z", claim, None, Some(json!([])));
+        let bare = claim_stub(
+            "418-no-refs",
+            "sample",
+            "2026-11-01T00:00:00Z",
+            claim,
+            None,
+            Some(json!([])),
+        );
         assert!(bare.get("refs").is_none());
-        assert_eq!(bare.as_object().unwrap().keys().collect::<Vec<_>>(), ["id", "project", "updated", "started", "claim"]);
+        assert_eq!(
+            bare.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["id", "project", "updated", "started", "claim"]
+        );
     }
 
     #[test]
     fn rewrite_round_opens_only_that_round() {
         let (r1, r2) = (json!({"code": "PASS"}), json!({"code": "CHANGES"}));
         let found = json!({"rounds": [r1, r2]});
-        assert_eq!(rounds_refusal("042-x", Some(&found), &json!([r1, {"code": "PASS"}]), Some(2)), None);
+        assert_eq!(
+            rounds_refusal(
+                "042-x",
+                Some(&found),
+                &json!([r1, {"code": "PASS"}]),
+                Some(2)
+            ),
+            None
+        );
         assert_eq!(
             rounds_refusal("042-x", Some(&found), &json!([{"code": "CHANGES"}, {"code": "PASS"}]), Some(2)).unwrap(),
             "042-x cannot rewrite round 1 in a board patch. Only factory.py verdict and round-wait change a recorded round. Nothing was written."
         );
-        assert!(rounds_refusal("042-x", Some(&found), &json!([r1, {"code": "PASS"}]), None).is_some());
+        assert!(
+            rounds_refusal("042-x", Some(&found), &json!([r1, {"code": "PASS"}]), None).is_some()
+        );
     }
 
     #[test]
@@ -1153,7 +1529,13 @@ mod tests {
             new_session();
             std::env::var("FACTORY_SESSION").unwrap()
         });
-        assert!(tag.len() == 6 && tag.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()), "{tag}");
+        assert!(
+            tag.len() == 6
+                && tag
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+            "{tag}"
+        );
         with_env(&[("FACTORY_SESSION", "kept")], || {
             new_session();
             assert_eq!(std::env::var("FACTORY_SESSION").unwrap(), "kept");
@@ -1164,13 +1546,26 @@ mod tests {
     fn tracer_json_is_not_ported() {
         let home = refused_home("claims-tracer");
         fs::write(home.join("tracer.json"), "{}").unwrap();
-        let opts = WriteOpts { show: false, verdict: None, rewrite_round: None };
+        let opts = WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: None,
+        };
         let patch = json!({"stage": "review"}).as_object().unwrap().clone();
         let e = with_env(NO_PASEO, || board_write(&home, "001-test", patch, &opts)).unwrap_err();
-        assert_eq!((e.code, e.stderr), (2, "factory.py: board with Tracer is not ported to the Rust binary yet\n".into()));
+        assert_eq!(
+            (e.code, e.stderr),
+            (
+                2,
+                "factory.py: board with Tracer is not ported to the Rust binary yet\n".into()
+            )
+        );
         let note = json!({"note": "x"}).as_object().unwrap().clone();
         let e = with_env(NO_PASEO, || board_write(&home, "001-test", note, &opts)).unwrap_err();
-        assert_eq!(e.code, 5, "a patch that skips the Tracer mirror reaches the Worker");
+        assert_eq!(
+            e.code, 5,
+            "a patch that skips the Tracer mirror reaches the Worker"
+        );
     }
 
     #[test]
@@ -1178,7 +1573,11 @@ mod tests {
         const BOARD: &str = r#"{"updated":"","jobs":[{"id":"001-lead","project":"sample","stage":"build"},{"id":"002-rider","project":"sample","stage":"build","stacked":true,"pr":"https://github.com/o/r/pull/2","refs":[{"id":"001-lead","kind":"batched-into"}]}]}"#;
         let (origin, seen) = serve(vec![(200, BOARD, vec![("ETag", "\"b\"")])]);
         let home = home_for("claims-stacked", &origin);
-        let opts = WriteOpts { show: false, verdict: None, rewrite_round: None };
+        let opts = WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: None,
+        };
         let patch = json!({"stage": "closed"}).as_object().unwrap().clone();
         let e = with_env(NO_PASEO, || board_write(&home, "001-lead", patch, &opts)).unwrap_err();
         assert_eq!(
@@ -1186,7 +1585,10 @@ mod tests {
             (2, "factory.py: board closing stacked pull requests is not ported to the Rust binary yet\n".into())
         );
         let seen = seen.lock().unwrap();
-        assert_eq!(seen.iter().map(|s| s.method.as_str()).collect::<Vec<_>>(), ["GET"]);
+        assert_eq!(
+            seen.iter().map(|s| s.method.as_str()).collect::<Vec<_>>(),
+            ["GET"]
+        );
     }
 
     const UNRESOLVED: &str = "factory.py: factory home must be absolute. Nothing was written.\n";
@@ -1195,9 +1597,18 @@ mod tests {
     fn board_resolves_home_before_the_write() {
         let paseo = paseo_home("claims-paseo-board");
         let home = refused_home("claims-home-board");
-        let opts = WriteOpts { show: false, verdict: None, rewrite_round: None };
+        let opts = WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: None,
+        };
         let patch = json!({"note": "checking"}).as_object().unwrap().clone();
-        let vars = [("PASEO_HOME", paseo.to_str().unwrap()), ("PASEO_AGENT_ID", "agent_new"), ("FACTORY_HOME", "relative"), ("FACTORY_SESSION", "s")];
+        let vars = [
+            ("PASEO_HOME", paseo.to_str().unwrap()),
+            ("PASEO_AGENT_ID", "agent_new"),
+            ("FACTORY_HOME", "relative"),
+            ("FACTORY_SESSION", "s"),
+        ];
         let e = with_env(&vars, || board_write(&home, "001-test", patch, &opts)).unwrap_err();
         assert_eq!((e.code, e.stderr.as_str()), (2, UNRESOLVED));
     }
@@ -1206,7 +1617,12 @@ mod tests {
     fn claim_id_resolves_home_before_the_write() {
         let paseo = paseo_home("claims-paseo-claim");
         let home = refused_home("claims-home-claim");
-        let vars = [("PASEO_HOME", paseo.to_str().unwrap()), ("PASEO_AGENT_ID", "agent_new"), ("FACTORY_HOME", "relative"), ("FACTORY_SESSION", "s")];
+        let vars = [
+            ("PASEO_HOME", paseo.to_str().unwrap()),
+            ("PASEO_AGENT_ID", "agent_new"),
+            ("FACTORY_HOME", "relative"),
+            ("FACTORY_SESSION", "s"),
+        ];
         let e = with_env(&vars, || claim_id(&home, "sample-export", "sample", None)).unwrap_err();
         assert_eq!((e.code, e.stderr.as_str()), (2, UNRESOLVED));
         assert!(!home.join("jobs").exists());
@@ -1216,7 +1632,12 @@ mod tests {
     fn claim_id_resolves_home_before_the_folder_and_session() {
         let paseo = paseo_home("claims-paseo-fresh");
         let fresh = temp_dir("claims-fresh").join("fresh");
-        let vars = [("PASEO_HOME", paseo.to_str().unwrap()), ("PASEO_AGENT_ID", "agent_new"), ("FACTORY_HOME", "relative"), ("FACTORY_SESSION", "")];
+        let vars = [
+            ("PASEO_HOME", paseo.to_str().unwrap()),
+            ("PASEO_AGENT_ID", "agent_new"),
+            ("FACTORY_HOME", "relative"),
+            ("FACTORY_SESSION", ""),
+        ];
         let session = with_env(&vars, || {
             assert!(claim_id(&fresh, "sample-export", "sample", None).is_err());
             std::env::var("FACTORY_SESSION").unwrap()
@@ -1229,20 +1650,41 @@ mod tests {
     fn py_json_error_matches_cpython() {
         for (text, want) in [
             ("nope", "Expecting value: line 1 column 1 (char 0)"),
-            ("{\"a\" 1}", "Expecting ':' delimiter: line 1 column 6 (char 5)"),
+            (
+                "{\"a\" 1}",
+                "Expecting ':' delimiter: line 1 column 6 (char 5)",
+            ),
             ("{} x", "Extra data: line 1 column 4 (char 3)"),
             ("\"\\q\"", "Invalid \\escape: line 1 column 2 (char 1)"),
-            ("\"a\tb\"", "Invalid control character at: line 1 column 3 (char 2)"),
+            (
+                "\"a\tb\"",
+                "Invalid control character at: line 1 column 3 (char 2)",
+            ),
             ("\n\n  [é", "Expecting value: line 3 column 4 (char 5)"),
             ("[1, 2", "Expecting ',' delimiter: line 1 column 6 (char 5)"),
-            ("{\"a\": 1,}", "Expecting property name enclosed in double quotes: line 1 column 9 (char 8)"),
-            ("\"abc", "Unterminated string starting at: line 1 column 1 (char 0)"),
-            ("\u{feff}{}", "Unexpected UTF-8 BOM (decode using utf-8-sig): line 1 column 1 (char 0)"),
+            (
+                "{\"a\": 1,}",
+                "Expecting property name enclosed in double quotes: line 1 column 9 (char 8)",
+            ),
+            (
+                "\"abc",
+                "Unterminated string starting at: line 1 column 1 (char 0)",
+            ),
+            (
+                "\u{feff}{}",
+                "Unexpected UTF-8 BOM (decode using utf-8-sig): line 1 column 1 (char 0)",
+            ),
             ("[", "Expecting value: line 1 column 2 (char 1)"),
             ("[1,]", "Expecting value: line 1 column 4 (char 3)"),
             ("1.e5", "Extra data: line 1 column 2 (char 1)"),
-            ("\"\\u12\"", "Invalid \\uXXXX escape: line 1 column 3 (char 2)"),
-            ("\"\\ud800\\uzzzz\"", "Invalid \\uXXXX escape: line 1 column 9 (char 8)"),
+            (
+                "\"\\u12\"",
+                "Invalid \\uXXXX escape: line 1 column 3 (char 2)",
+            ),
+            (
+                "\"\\ud800\\uzzzz\"",
+                "Invalid \\uXXXX escape: line 1 column 9 (char 8)",
+            ),
             ("[NaN, -Infinity, 1.5e3, \"\\ud800\\u0041\"]", ""),
         ] {
             assert_eq!(py_json_error(text), want, "{text:?}");
@@ -1251,12 +1693,29 @@ mod tests {
 
     #[test]
     fn py_eq_follows_python() {
-        assert!(py_eq(&json!(1), &json!(true)) && py_eq(&json!(0.0), &json!(false)) && py_eq(&json!(1), &json!(1.0)));
-        assert!(!py_eq(&json!(2), &json!(true)) && !py_eq(&json!("1"), &json!(1)) && !py_eq(&json!(null), &json!(false)));
-        assert!(py_eq(&json!({"a": [1, {"b": null}]}), &json!({"a": [true, {"b": null}]})));
+        assert!(
+            py_eq(&json!(1), &json!(true))
+                && py_eq(&json!(0.0), &json!(false))
+                && py_eq(&json!(1), &json!(1.0))
+        );
+        assert!(
+            !py_eq(&json!(2), &json!(true))
+                && !py_eq(&json!("1"), &json!(1))
+                && !py_eq(&json!(null), &json!(false))
+        );
+        assert!(py_eq(
+            &json!({"a": [1, {"b": null}]}),
+            &json!({"a": [true, {"b": null}]})
+        ));
         assert!(!py_eq(&json!({"a": 1}), &json!({"a": 1, "b": 2})));
         let big = serde_json::from_str::<Value>("123456789012345678901234567890").unwrap();
-        assert!(py_eq(&big, &big.clone()) && !py_eq(&big, &serde_json::from_str("123456789012345678901234567891").unwrap()));
+        assert!(
+            py_eq(&big, &big.clone())
+                && !py_eq(
+                    &big,
+                    &serde_json::from_str("123456789012345678901234567891").unwrap()
+                )
+        );
     }
 
     #[test]
@@ -1264,8 +1723,16 @@ mod tests {
         assert_eq!(py_str(&json!(null)), "None");
         assert_eq!(py_str(&json!("x")), "x");
         assert_eq!(py_str(&json!(1.0)), "1.0");
-        assert_eq!(py_str(&json!({"a": [true, "it's", null]})), r#"{'a': [True, "it's", None]}"#);
-        assert!(!truthy(None) && !truthy(Some(&json!(0))) && !truthy(Some(&json!(""))) && !truthy(Some(&json!({}))));
+        assert_eq!(
+            py_str(&json!({"a": [true, "it's", null]})),
+            r#"{'a': [True, "it's", None]}"#
+        );
+        assert!(
+            !truthy(None)
+                && !truthy(Some(&json!(0)))
+                && !truthy(Some(&json!("")))
+                && !truthy(Some(&json!({})))
+        );
         assert!(truthy(Some(&json!(0.5))) && truthy(Some(&json!([0]))));
     }
 }
