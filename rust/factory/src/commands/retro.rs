@@ -1993,10 +1993,7 @@ fn apply_edits(home: &Path, run: &str, edits: &[Value], agg: &mut Value) -> Res<
             results.push(json!({"scope": format!("edits[{i}]"), "stage": "", "result": format!("skipped: {at}: {problem}"), "summary": ""}));
             continue;
         }
-        let file = e
-            .get("file")
-            .and_then(Value::as_str)
-            .filter(|f| !f.is_empty());
+        let file = e.get("file").and_then(Value::as_str);
         let row = match file {
             Some(f) => json!({"scope": f, "stage": "", "summary": e["summary"]}),
             None => json!({"scope": e["scope"], "stage": e["stage"], "summary": e["summary"]}),
