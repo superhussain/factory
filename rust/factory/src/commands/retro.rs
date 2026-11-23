@@ -479,7 +479,7 @@ fn scan(path: &Path, main: bool) -> io::Result<Value> {
     let mut polls = [0i64; 3];
     let empty = Map::new();
     transcript_lines(path, |line| {
-        let Ok(Value::Object(e)) = serde_json::from_str::<Value>(line) else {
+        let Ok(Value::Object(e)) = loads_lenient(line) else {
             return;
         };
         if main && truthy(e.get("isSidechain")) {
@@ -805,13 +805,14 @@ fn rows(days: i64) -> Res<Vec<Value>> {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs_f64();
-    let home = std::env::home_dir().unwrap_or_default();
-    Ok(rows_in(
-        &root,
-        &host,
-        &home.to_string_lossy(),
-        now - days as f64 * 86400.0,
-    ))
+    let home = home_text(std::env::home_dir())?;
+    Ok(rows_in(&root, &host, &home, now - days as f64 * 86400.0))
+}
+
+/// `str(Path.home())`, which raises when there is no home directory.
+fn home_text(home: Option<PathBuf>) -> Res<String> {
+    home.map(|h| h.to_string_lossy().into_owned())
+        .ok_or_else(|| fail("could not determine the home directory", 1))
 }
 
 fn digest(days: i64) -> Res<()> {
@@ -877,6 +878,49 @@ fn push_outcome(status: u16, text: &str, hint: &str, env: &Path) -> Res<()> {
 
 /// A GET of a Worker path with its ok statuses.
 type Get<'a> = dyn FnMut(&str, &[u16]) -> Res<Response> + 'a;
+
+/// `json.loads` for transcript and digest lines: an unpaired UTF-16 surrogate escape, which Python
+/// accepts and serde_json refuses, is read as U+FFFD.
+fn loads_lenient(text: &str) -> Result<Value, serde_json::Error> {
+    loads(text).or_else(|e| {
+        let chars: Vec<char> = text.chars().collect();
+        let escape = |i: usize| -> Option<u32> {
+            if chars.get(i..i + 2)? != ['\\', 'u'] {
+                return None;
+            }
+            u32::from_str_radix(&chars.get(i + 2..i + 6)?.iter().collect::<String>(), 16).ok()
+        };
+        let (mut out, mut i) = (String::with_capacity(text.len()), 0);
+        let mut changed = false;
+        while i < chars.len() {
+            if chars[i] != '\\' {
+                out.push(chars[i]);
+                i += 1;
+                continue;
+            }
+            match escape(i) {
+                Some(0xD800..=0xDBFF) if matches!(escape(i + 6), Some(0xDC00..=0xDFFF)) => {
+                    out.extend(&chars[i..i + 12]);
+                    i += 12;
+                }
+                Some(0xD800..=0xDFFF) => {
+                    out.push_str("\\ufffd");
+                    changed = true;
+                    i += 6;
+                }
+                _ => {
+                    out.extend(chars.get(i..i + 2).unwrap_or(&chars[i..]));
+                    i += 2;
+                }
+            }
+        }
+        if changed {
+            loads(&out)
+        } else {
+            Err(e)
+        }
+    })
+}
 
 fn json_of(text: &str) -> Res<Value> {
     loads(text).map_err(|e| fail(format!("the Worker sent JSON that does not parse: {e}"), 1))
@@ -1388,7 +1432,7 @@ fn aggregate_in(home: &Path, today: &str, run: &str, days: i64, get: &mut Get) -
     for date in &dates {
         for (host, text) in fetch(date, get)? {
             for line in splitlines(&text, false) {
-                let Ok(mut row) = loads(line) else {
+                let Ok(mut row) = loads_lenient(line) else {
                     skipped += 1;
                     continue;
                 };
@@ -4330,6 +4374,39 @@ mod tests {
         assert!(out.contains("[redacted]"));
         assert!(all_clipped(&rows));
         assert_eq!(pattern(&"z".repeat(400)).chars().count(), 160);
+    }
+
+    #[test]
+    fn digest_lone_surrogate_escape_keeps_the_line() {
+        let path = projects("surrogate").join("lone.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                r#"{"type": "assistant", "timestamp": "2026-11-10T10:00:00Z", "message": {"id": "m1", "usage": {"input_tokens": 1}}}"#,
+                "\n",
+                r#"{"type": "assistant", "timestamp": "2026-11-10T10:05:00Z", "message": {"id": "m2", "usage": {"input_tokens": 1}, "content": "bad \ud83d end"}}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+        let scan = scan(&path, true).unwrap();
+        assert_eq!(scan["turns"], 2);
+        assert_eq!(scan["end"], "2026-11-10T10:05:00Z");
+        assert_eq!(
+            loads_lenient(r#"["a \ud83d b", "\ude00", "\\ud83d", "😀"]"#).unwrap(),
+            json!(["a \u{fffd} b", "\u{fffd}", "\\ud83d", "\u{1F600}"])
+        );
+        assert!(loads_lenient("not json").is_err());
+    }
+
+    #[test]
+    fn digest_needs_a_home_directory() {
+        let e = home_text(None).unwrap_err();
+        assert_eq!(e.code, 1);
+        assert_eq!(
+            home_text(Some(PathBuf::from("/home/u"))).unwrap(),
+            "/home/u"
+        );
     }
 
     #[test]
