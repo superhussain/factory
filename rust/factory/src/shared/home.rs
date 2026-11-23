@@ -389,6 +389,8 @@ mod tests {
             validate_home(&home, true).unwrap_err().stderr,
             "factory.py: Invalid local metadata: jobs/sample/001-x/.sync.json.\n"
         );
+        // The pointer check reads only the top level, so the bad manifest below it passes.
+        assert!(validate_home(&home, false).is_ok());
         fs::remove_dir_all(dir).unwrap();
     }
 
