@@ -76,12 +76,6 @@ static REPO_PATH: Pattern = Pattern::new("[A-Za-z0-9_./-]{1,200}", Re::ASCII);
 static CHECKOUT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Re::NONE);
 static BUNDLE_HASH: Pattern = Pattern::new("[0-9a-f]{7,64}", Re::NONE);
 static POSITIVE: Pattern = Pattern::new("[1-9][0-9]*", Re::NONE);
-// A pickup timer line: the program factory.py, or this binary (factory or factory.exe), then
-// optional --flag value pairs, then the pickup subcommand. The timer runs the binary.
-static CRON_PICKUP: Pattern = Pattern::new(
-    r"(?:^|[\s/\\])factory(?:\.py|\.exe)?\s+(?:--\S+\s+\S+\s+)*pickup(?:\s|$)",
-    Re::NONE,
-);
 static ENV_ASSIGN: Pattern = Pattern::new("(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=", Re::NONE);
 static TRAILING_NUMBER: Pattern = Pattern::new(r"-\d+$", Re::NONE);
 
@@ -1658,11 +1652,7 @@ fn timer_installed(scheduler: &str) -> (bool, String) {
     }
     if scheduler == "cron" {
         let (code, out) = setup_run(&["crontab", "-l"], None);
-        if code != 0
-            || !splitlines(&out, false)
-                .iter()
-                .any(|l| CRON_PICKUP.search(l).is_some())
-        {
+        if code != 0 || !splitlines(&out, false).iter().any(|l| pickup_line(l)) {
             return (false, "no factory pickup line in the crontab".into());
         }
         if setup_run(&["pgrep", "-x", "cron"], None).0 != 0
@@ -1693,6 +1683,33 @@ fn cron_argv(line: &str) -> Option<Vec<String>> {
         .unwrap_or(words.len());
     words.truncate(end);
     Some(words)
+}
+
+/// True when a crontab line runs pickup: after the schedule and any VAR= prefixes, a token named
+/// factory.py, factory or factory.exe, then --flag value pairs, then pickup. Tokens are read as the
+/// shell reads them, so a quoted path or value timer_text wrote still matches. Python's
+/// `factory\.py.*\bpickup\b` also matched lines that only mention both words, such as a retro line
+/// logging to pickup.log, and install deleted them.
+fn pickup_line(line: &str) -> bool {
+    let Some(words) = cron_argv(line) else {
+        return false;
+    };
+    let program = |w: &str| {
+        let name = w.rsplit(['/', '\\']).next().unwrap_or(w);
+        ["factory.py", "factory", "factory.exe"].contains(&name)
+    };
+    words.iter().enumerate().any(|(at, w)| {
+        let mut rest = words[at + 1..].iter();
+        program(w)
+            && loop {
+                match rest.next() {
+                    Some(flag) if flag.starts_with("--") => {
+                        rest.next();
+                    }
+                    next => break next.is_some_and(|n| n == "pickup"),
+                }
+            }
+    })
 }
 
 /// None when the installed timer runs what --install would write, else what differs.
@@ -1727,7 +1744,7 @@ fn timer_drift(scheduler: &str, values: &TimerValues) -> Option<String> {
         let out = setup_run(&["crontab", "-l"], None).1;
         let lines: Vec<&str> = splitlines(&out, false)
             .into_iter()
-            .filter(|l| CRON_PICKUP.search(l).is_some())
+            .filter(|l| pickup_line(l))
             .collect();
         let argvs: Vec<Option<Vec<String>>> = lines.iter().map(|l| cron_argv(l)).collect();
         if argvs.iter().any(|a| a.as_ref() == Some(want)) {
@@ -1809,11 +1826,7 @@ fn install_timer(home: &Path, scheduler: &str) -> Res<String> {
         } else {
             Vec::new()
         };
-        let mut wanted: Vec<&str> = lines
-            .iter()
-            .copied()
-            .filter(|l| CRON_PICKUP.search(l).is_none())
-            .collect();
+        let mut wanted: Vec<&str> = lines.iter().copied().filter(|l| !pickup_line(l)).collect();
         wanted.push(&text);
         if lines == wanted {
             return Ok("timer already installed: crontab".into());
@@ -16378,7 +16391,9 @@ exit "$archive_code"
             let old = [
                 "*/5 * * * * python3 /old/runtime/factory.py --home /h pickup >> /h/logs/pickup.log 2>&1",
                 "*/5 * * * * /old/skill/runtime/factory --home /h pickup",
-                "*/5 * * * * C:\\skill\\runtime\\factory.exe pickup",
+                "*/5 * * * * /mnt/c/skill/runtime/factory.exe pickup",
+                "*/5 * * * * PATH=/usr/bin '/home/u/my skills/runtime/factory' --home /h pickup >> /h/logs/pickup.log 2>&1",
+                "*/5 * * * * /opt/skill/runtime/factory --home '/home/u/my dir/f' pickup",
             ];
             *st.crontab.borrow_mut() = format!("{}\n{}\n", kept.join("\n"), old.join("\n"));
             assert_eq!(st.setup(&["--install"]).0, 0);
@@ -16387,11 +16402,18 @@ exit "$archive_code"
                 format!("{}\n{}\n", kept.join("\n"), st.cron_line())
             );
             for line in kept {
-                assert!(CRON_PICKUP.search(line).is_none(), "{line}");
+                assert!(!pickup_line(line), "{line}");
             }
             for line in old {
-                assert!(CRON_PICKUP.search(line).is_some(), "{line}");
+                assert!(pickup_line(line), "{line}");
+                *st.crontab.borrow_mut() = format!("{line}\n");
+                assert_eq!(
+                    timer_installed("cron"),
+                    (true, "crontab runs pickup every 5 minutes".to_string()),
+                    "{line}"
+                );
             }
+            assert!(!pickup_line("*/5 * * * * factory 'open pickup"));
         }
 
         #[test]
