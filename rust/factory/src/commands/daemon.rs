@@ -584,13 +584,33 @@ pub(crate) fn running(home: &Path) -> Option<bool> {
     }
 }
 
-/// The pid the daemon that holds the lock wrote.
+/// The pid the daemon wrote beside its lock, when it is a real process id: 1 to i32::MAX. kill
+/// reads 0 as this process group and a value past i32::MAX as a negative group or every process,
+/// so anything else in the file is no pid.
 pub(crate) fn pid(home: &Path) -> Option<u32> {
-    std::fs::read_to_string(lock_dir(home).join("daemon.pid"))
+    let n: i64 = std::fs::read_to_string(lock_dir(home).join("daemon.pid"))
         .ok()?
         .trim()
         .parse()
-        .ok()
+        .ok()?;
+    (1..=i64::from(i32::MAX)).contains(&n).then_some(n as u32)
+}
+
+/// The pid of the daemon that holds the lock: None when no daemon holds it, an error when one
+/// does but its pid file holds no valid pid.
+pub(crate) fn locked_pid(home: &Path) -> Result<Option<u32>, String> {
+    if running(home) != Some(true) {
+        return Ok(None);
+    }
+    pid(home)
+        .map(Some)
+        .ok_or_else(|| "a daemon runs, but its pid file holds no valid pid".to_string())
+}
+
+/// The file that ends the Windows restart loop: the `.cmd` exits instead of starting the daemon
+/// again while it exists.
+pub(crate) fn stop_marker(home: &Path) -> std::path::PathBuf {
+    lock_dir(home).join("stop")
 }
 
 #[cfg(test)]
@@ -906,6 +926,31 @@ mod tests {
         assert!(take_lock(&home).unwrap().is_none());
         assert_eq!(running(&home), Some(true));
         assert_eq!(pid(&home), Some(std::process::id()));
+    }
+
+    #[test]
+    fn pid_rejects_values_kill_would_misread() {
+        let home = temp_dir("daemon-pid");
+        let file = lock_dir(&home).join("daemon.pid");
+        std::fs::create_dir_all(lock_dir(&home)).unwrap();
+        for (text, want) in [
+            ("0\n", None),
+            ("-1\n", None),
+            ("2147483648\n", None),
+            ("4294967295\n", None),
+            ("99999999999999999999\n", None),
+            ("12ab\n", None),
+            ("", None),
+            ("2147483647\n", Some(i32::MAX as u32)),
+            ("4242\n", Some(4242)),
+        ] {
+            std::fs::write(&file, text).unwrap();
+            assert_eq!(pid(&home), want, "{text:?}");
+        }
+        assert_eq!(locked_pid(&home), Ok(None), "no lock, no pid to signal");
+        let _lock = take_lock(&home).unwrap().unwrap();
+        std::fs::write(&file, "0\n").unwrap();
+        assert!(locked_pid(&home).is_err());
     }
 
     /// A second daemon for the same home, as a service restart or the cron line starts, returns

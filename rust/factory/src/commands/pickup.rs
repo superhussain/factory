@@ -1703,13 +1703,41 @@ pub(crate) fn timer_values(home: &Path, unit: &'static Unit) -> TimerValues {
     }
 }
 
-/// systemd's quoting for one ExecStart word: double quotes with C escapes, `%` and `$` doubled.
-fn systemd_quote(s: &str) -> String {
-    let escaped = s.replace('%', "%%").replace('$', "$$");
+/// systemd's quoting for one unit value: `%` doubled, since every value expands specifiers, and
+/// in ExecStart `$` doubled too, since only there systemd expands variables. Quoted with C escapes
+/// when it holds space, a quote, a backslash or `;`.
+fn systemd_quote(s: &str, exec: bool) -> String {
+    let mut escaped = s.replace('%', "%%");
+    if exec {
+        escaped = escaped.replace('$', "$$");
+    }
     if !s.is_empty() && !s.contains(|c: char| c.is_whitespace() || "\"'\\;".contains(c)) {
         return escaped;
     }
     format!("\"{}\"", escaped.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Refuses a unit whose home, binary, log or PATH holds a line break: systemd and cron read one
+/// line per setting, so the rest would become a setting or a crontab line of its own.
+fn check_unit_paths(scheduler: &str, values: &TimerValues) -> Res<()> {
+    if scheduler != "systemd" && scheduler != "cron" {
+        return Ok(());
+    }
+    let broken = values
+        .argv
+        .iter()
+        .chain([&values.log, &values.path])
+        .any(|v| v.contains(['\n', '\r']));
+    if broken {
+        return Err(fail(
+            format!(
+                "the factory home or binary path holds a line break, so a {scheduler} {} cannot run it; move it to a path without one",
+                values.unit.noun
+            ),
+            2,
+        ));
+    }
+    Ok(())
 }
 
 fn timer_text(scheduler: &str, values: &TimerValues) -> String {
@@ -1741,21 +1769,25 @@ fn timer_text(scheduler: &str, values: &TimerValues) -> String {
         return plist_dumps(&doc);
     }
     if scheduler == "systemd" {
-        let exec: Vec<String> = argv.iter().map(|a| systemd_quote(a)).collect();
+        let exec: Vec<String> = argv.iter().map(|a| systemd_quote(a, true)).collect();
         return format!(
             "[Unit]\nDescription=factory {command}\n\n[Service]\nExecStart={}\nEnvironment={}\n\
              Restart=always\nRestartSec=10\nStandardOutput=append:{log}\nStandardError=append:{log}\n\n\
              [Install]\nWantedBy=default.target\n",
             exec.join(" "),
-            systemd_quote(&format!("PATH={path}")),
+            systemd_quote(&format!("PATH={path}"), false),
             command = unit.command,
+            log = log.replace('%', "%%"),
         );
     }
     let run = format!("{} >> \"{log}\" 2>&1", list2cmdline(argv));
     if unit.keep_alive {
-        // Task Scheduler starts it once at logon; the loop restarts it 10 seconds after it ends.
+        // Task Scheduler starts it once at logon; the loop restarts it 10 seconds after it ends,
+        // until uninstall writes the stop marker.
+        let stop = daemon::stop_marker(Path::new(&argv[2]));
+        let stop = stop.display();
         return format!(
-            "@echo off\r\nset \"PATH={path};%PATH%\"\r\n:run\r\n{run}\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n"
+            "@echo off\r\nset \"PATH={path};%PATH%\"\r\n:run\r\nif exist \"{stop}\" exit /b 0\r\n{run}\r\nif exist \"{stop}\" exit /b 0\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n"
         );
     }
     format!("@echo off\r\nset \"PATH={path};%PATH%\"\r\n{run}\r\n")
@@ -1991,8 +2023,10 @@ fn crontab_lines() -> Res<Vec<String>> {
 
 /// Write and load a unit; one line saying what changed. A unit that already matches is left alone.
 fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -> Res<String> {
+    let values = timer_values(home, unit);
+    check_unit_paths(scheduler, &values)?;
     mkdirs(&home.join("logs"))?;
-    let text = timer_text(scheduler, &timer_values(home, unit));
+    let text = timer_text(scheduler, &values);
     let noun = unit.noun;
     let (code, out, done);
     if scheduler == "launchd" {
@@ -2055,6 +2089,9 @@ fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -> Res<Strin
         done = format!("installed cron {noun}: crontab");
     } else {
         let cmd = timer_path(scheduler, unit);
+        if unit.keep_alive {
+            clear_stop_marker(home)?;
+        }
         if fs::read(&cmd).ok().as_deref() == Some(text.as_bytes())
             && setup_run(&["schtasks", "/Query", "/TN", unit.task], None).0 == 0
         {
@@ -2091,7 +2128,7 @@ fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -> Res<Strin
 }
 
 /// Stop and remove a unit; one line saying what changed.
-fn uninstall_timer(scheduler: &str, unit: &Unit) -> Res<String> {
+fn uninstall_timer(home: &Path, scheduler: &str, unit: &Unit) -> Res<String> {
     let noun = unit.noun;
     let fail_with = |out: &str| {
         fail(
@@ -2159,6 +2196,12 @@ fn uninstall_timer(scheduler: &str, unit: &Unit) -> Res<String> {
         remove(&cmd)?;
         return Ok(format!("no scheduled task {} to remove", unit.task));
     }
+    if unit.keep_alive {
+        // /End can leave the .cmd loop running; the marker makes it exit instead of restarting.
+        let marker = daemon::stop_marker(home);
+        mkdirs(marker.parent().unwrap())?;
+        write_file(&marker, "")?;
+    }
     setup_run(&["schtasks", "/End", "/TN", unit.task], None);
     let (code, out) = setup_run(&["schtasks", "/Delete", "/TN", unit.task, "/F"], None);
     if code != 0 {
@@ -2181,7 +2224,14 @@ fn timer_fix(scheduler: &str, home: &Path, unit: &'static Unit) -> Vec<String> {
         lines.extend(text.lines().map(String::from));
         return lines;
     }
-    let mut lines = vec![format!("Save as {}:", path.display())];
+    let mut lines = vec![if scheduler == "schtasks" && unit.keep_alive {
+        format!(
+            "First save this restart loop as {}; the task runs it:",
+            path.display()
+        )
+    } else {
+        format!("Save as {}:", path.display())
+    }];
     lines.extend(splitlines(&text, false).into_iter().map(String::from));
     lines.push(match scheduler {
         "launchd" => format!(
@@ -2508,21 +2558,88 @@ pub(crate) fn daemon_state(home: &Path) -> &'static str {
     service_state(installed, daemon::running(home))
 }
 
-/// Ends the daemon that holds the lock, for schedulers that do not stop it themselves.
-fn stop_daemon(home: &Path) -> Option<String> {
-    if daemon::running(home) != Some(true) {
+#[cfg(test)]
+pub(crate) fn test_uid() -> u32 {
+    getuid()
+}
+
+/// Removes the Windows stop marker, so the restart loop runs the daemon again.
+fn clear_stop_marker(home: &Path) -> Res<()> {
+    let marker = daemon::stop_marker(home);
+    match fs::remove_file(&marker) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(fail(os_error(&e, Some(&marker)), 1)),
+        _ => Ok(()),
+    }
+}
+
+/// The command that ends one process, or None for a pid kill would misread: 0 is this process
+/// group, and past i32::MAX the value wraps to a negative group or every process.
+fn kill_argv(pid: u32) -> Option<Vec<String>> {
+    if pid == 0 || pid > i32::MAX as u32 {
         return None;
     }
-    let Some(pid) = daemon::pid(home) else {
-        return Some("a daemon still runs, but its pid file is unreadable; stop it by hand".into());
-    };
     let pid = pid.to_string();
     let argv: &[&str] = if WINDOWS {
         &["taskkill", "/PID", &pid, "/T", "/F"]
     } else {
         &["kill", &pid]
     };
-    Some(match setup_run(argv, None) {
+    Some(argv.iter().map(|a| a.to_string()).collect())
+}
+
+/// The kill command for the daemon that holds the lock: None when no daemon holds it.
+fn locked_kill(home: &Path) -> Result<Option<Vec<String>>, String> {
+    match daemon::locked_pid(home)? {
+        None => Ok(None),
+        Some(pid) => kill_argv(pid)
+            .map(Some)
+            .ok_or_else(|| format!("refusing to signal pid {pid}")),
+    }
+}
+
+/// The commands that restart an installed daemon service so it runs a newly installed binary, in
+/// order; empty when there is nothing to restart. Cron has no service, so it ends the daemon that
+/// holds the lock and the */5 line starts the new binary. On Windows /End can leave the .cmd loop
+/// and its daemon running, so the daemon is ended by pid before /Run starts the task again.
+pub(crate) fn daemon_restart_argvs(
+    scheduler: &str,
+    home: &Path,
+) -> Result<Vec<Vec<String>>, String> {
+    let argv = |parts: &[&str]| parts.iter().map(|p| p.to_string()).collect::<Vec<String>>();
+    Ok(match scheduler {
+        "launchd" => vec![argv(&[
+            "launchctl",
+            "kickstart",
+            "-k",
+            &format!("gui/{}/{}", getuid(), DAEMON.label),
+        ])],
+        "systemd" => vec![argv(&[
+            "systemctl",
+            "--user",
+            "restart",
+            &format!("{}.service", DAEMON.task),
+        ])],
+        "schtasks" => {
+            clear_stop_marker(home).map_err(|e| message(&e))?;
+            let mut argvs = vec![argv(&["schtasks", "/End", "/TN", DAEMON.task])];
+            argvs.extend(locked_kill(home)?);
+            argvs.push(argv(&["schtasks", "/Run", "/TN", DAEMON.task]));
+            argvs
+        }
+        _ => locked_kill(home)?.into_iter().collect(),
+    })
+}
+
+/// Ends the daemon that holds the lock, for schedulers that do not stop it themselves.
+fn stop_daemon(home: &Path) -> Option<String> {
+    let argv = match locked_kill(home) {
+        Ok(None) => return None,
+        Ok(Some(argv)) => argv,
+        Err(e) => return Some(format!("{e}; stop it by hand")),
+    };
+    let pid = argv[if WINDOWS { 2 } else { 1 }].clone();
+    let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+    Some(match setup_run(&args, None) {
         (0, _) => format!("stopped the running daemon (pid {pid})"),
         (_, out) => format!("could not stop the daemon (pid {pid}): {}", strip(&out)),
     })
@@ -2577,10 +2694,11 @@ pub(crate) fn daemon_setup_cmd(args: &[String]) -> Res<()> {
 /// first. Exits 0 when the service is current (or, after uninstall, gone), else 3.
 fn daemon_setup(io: &mut Io, home: &Path, action: ServiceAction, overridden: bool) -> Res<()> {
     let scheduler = daemon_scheduler();
+    check_unit_paths(scheduler, &timer_values(home, &DAEMON))?;
     match action {
         ServiceAction::Install => outln!(io, "{}", install_timer(home, scheduler, &DAEMON)?),
         ServiceAction::Uninstall => {
-            outln!(io, "{}", uninstall_timer(scheduler, &DAEMON)?);
+            outln!(io, "{}", uninstall_timer(home, scheduler, &DAEMON)?);
             if scheduler == "cron" || scheduler == "schtasks" {
                 if let Some(line) = stop_daemon(home) {
                     outln!(io, "{line}");
@@ -2615,11 +2733,13 @@ fn daemon_setup(io: &mut Io, home: &Path, action: ServiceAction, overridden: boo
         }
         outln!(io, "    Or run: {run} daemon setup --install");
     }
-    outln!(
-        io,
-        "    log: {}",
-        home.join("logs").join("daemon.log").display()
-    );
+    if installed || action != ServiceAction::Uninstall {
+        outln!(
+            io,
+            "    log: {}",
+            home.join("logs").join("daemon.log").display()
+        );
+    }
     let ok = if action == ServiceAction::Uninstall {
         !installed
     } else {
@@ -18848,6 +18968,7 @@ exit "$archive_code"
             assert!(ds.ran(&["launchctl", "bootout", &target]));
             assert!(!plist.exists());
             assert!(out.contains("launchd): not installed\n"));
+            assert!(!out.contains("log:"), "{out}");
             let (code, out, _) = ds.run(Uninstall);
             assert_eq!(code, 0);
             assert!(out.starts_with("no launchd service factory.daemon to remove\n"));
@@ -19015,7 +19136,9 @@ exit "$archive_code"
             ]));
             assert!(ds.ran(&["schtasks", "/Run", "/TN", "factory-daemon"]));
             let text = fs::read_to_string(&cmd).unwrap();
-            assert!(text.contains(&format!("\r\n:run\r\n\"/opt/my skill/runtime/factory\" --home {} daemon >> \"{}\" 2>&1\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n", ds.fx.home.display(), ds.log())), "{text:?}");
+            let stop = daemon::stop_marker(&ds.fx.home);
+            let check = format!("if exist \"{}\" exit /b 0", stop.display());
+            assert!(text.contains(&format!("\r\n:run\r\n{check}\r\n\"/opt/my skill/runtime/factory\" --home {} daemon >> \"{}\" 2>&1\r\n{check}\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n", ds.fx.home.display(), ds.log())), "{text:?}");
 
             ds.sched.borrow_mut().runs.clear();
             let (code, out, _) = ds.run(Install);
@@ -19023,15 +19146,35 @@ exit "$archive_code"
             assert!(out.starts_with(&format!("service current: {}\n", cmd.display())));
             assert!(!ds.sched.borrow().runs.iter().any(|a| a[1] == "/Create"));
 
+            // Uninstall writes the stop marker before /End, so a loop /End leaves behind exits, and
+            // ends the loop's daemon by its pid.
+            let _lock = daemon::take_lock(&ds.fx.home).unwrap().unwrap();
+            let fake = ds.sched.clone();
+            let marked = Rc::new(RefCell::new(None));
+            let seen = marked.clone();
+            let stop2 = stop.clone();
+            ds.fx.set_fakes(|f| {
+                f.setup_run = Some(Rc::new(move |argv, stdin| {
+                    if argv[..2] == ["schtasks", "/End"] {
+                        *seen.borrow_mut() = Some(stop2.exists());
+                    }
+                    fake.borrow_mut().answer(argv, stdin)
+                }))
+            });
             let (code, out, _) = ds.run(Uninstall);
             assert_eq!(code, 0, "{out}");
+            assert_eq!(*marked.borrow(), Some(true));
             assert!(
                 ds.at(&["schtasks", "/End", "/TN", "factory-daemon"])
                     < ds.at(&["schtasks", "/Delete", "/TN", "factory-daemon", "/F"])
             );
+            assert!(ds.ran(&["kill", &std::process::id().to_string()]));
             assert!(!cmd.exists());
+            assert!(!out.contains("log:"), "{out}");
+            ds.run(Install);
+            assert!(!stop.exists(), "install clears the stop marker");
             assert!(
-                out.contains("schtasks): not installed\n    no scheduled task factory-daemon\n"),
+                out.contains("schtasks): running\n    no scheduled task factory-daemon\n"),
                 "{out}"
             );
         }
@@ -19041,7 +19184,98 @@ exit "$archive_code"
             let ds = Ds::new("schtasks");
             let out = ds.run(Show).1;
             let cmd = ds.fx.root.join(".config/factory-daemon.cmd");
-            assert!(out.contains(&format!("    Then run: schtasks /Create /TN factory-daemon /SC ONLOGON /TR \"\\\"{}\\\"\" /F\n", cmd.display())), "{out}");
+            let save = out
+                .find(&format!(
+                    "    First save this restart loop as {}; the task runs it:\n    @echo off\n",
+                    cmd.display()
+                ))
+                .expect(&out);
+            let create = out.find(&format!("    Then run: schtasks /Create /TN factory-daemon /SC ONLOGON /TR \"\\\"{}\\\"\" /F\n", cmd.display())).expect(&out);
+            let looped = out.find("    goto run\n").expect(&out);
+            assert!(save < looped && looped < create, "{out}");
+        }
+
+        #[test]
+        fn systemd_doubles_percent_everywhere_and_dollar_only_in_exec_start() {
+            let values = TimerValues {
+                unit: &DAEMON,
+                argv: vec![
+                    "/opt/a$b%c/factory".into(),
+                    "--home".into(),
+                    "/h%x".into(),
+                    "daemon".into(),
+                ],
+                path: "/p$q%r:/usr/bin".into(),
+                log: "/h%x/logs/daemon.log".into(),
+                exe: String::new(),
+            };
+            let text = timer_text("systemd", &values);
+            assert!(
+                text.contains("\nExecStart=/opt/a$$b%%c/factory --home /h%%x daemon\n"),
+                "{text}"
+            );
+            assert!(
+                text.contains("\nEnvironment=PATH=/p$q%%r:/usr/bin\n"),
+                "{text}"
+            );
+            assert!(
+                text.contains("\nStandardOutput=append:/h%%x/logs/daemon.log\n"),
+                "{text}"
+            );
+            assert!(
+                text.contains("\nStandardError=append:/h%%x/logs/daemon.log\n"),
+                "{text}"
+            );
+        }
+
+        #[test]
+        fn a_line_break_in_the_binary_path_is_refused_for_systemd_and_cron() {
+            for scheduler in ["systemd", "cron"] {
+                let ds = Ds::new(scheduler);
+                ds.fx
+                    .set_fakes(|f| f.exe = Some("/opt/skill\n@reboot evil/runtime/factory".into()));
+                for action in [Install, Show] {
+                    let (code, out, err) = ds.run(action);
+                    assert_eq!((code, out.as_str()), (2, ""), "{scheduler}");
+                    assert!(err.contains("holds a line break"), "{err}");
+                }
+                assert!(!ds.ran(&["crontab", "-"]));
+                assert!(!ds.fx.root.join(".config/systemd").exists());
+                let pickup = install_timer(&ds.fx.home, scheduler, &PICKUP).unwrap_err();
+                assert_eq!(pickup.code, 2);
+            }
+            let ds = Ds::new("launchd");
+            ds.fx
+                .set_fakes(|f| f.exe = Some("/opt/skill\nx/factory".into()));
+            assert_ne!(
+                ds.run(Show).0,
+                2,
+                "launchd quotes a line break in the plist"
+            );
+        }
+
+        #[test]
+        fn kill_refuses_pids_kill_would_misread() {
+            assert_eq!(kill_argv(0), None);
+            assert_eq!(kill_argv(i32::MAX as u32 + 1), None);
+            assert_eq!(kill_argv(u32::MAX), None);
+            assert_eq!(kill_argv(4242).unwrap().last().unwrap(), "4242");
+            let ds = Ds::new("cron");
+            let pid_file = ds.fx.home.join("logs/daemon/daemon.pid");
+            for text in ["0", "-1", "2147483648", "garbage"] {
+                let _lock = daemon::take_lock(&ds.fx.home).unwrap().unwrap();
+                fs::write(&pid_file, text).unwrap();
+                assert_eq!(
+                    stop_daemon(&ds.fx.home).unwrap(),
+                    "a daemon runs, but its pid file holds no valid pid; stop it by hand"
+                );
+                assert!(daemon_restart_argvs("cron", &ds.fx.home).is_err(), "{text}");
+            }
+            assert!(!ds.sched.borrow().runs.iter().any(|a| a[0] == "kill"));
+            fs::write(&pid_file, "4242").unwrap();
+            assert_eq!(stop_daemon(&ds.fx.home), None, "the lock is free: no kill");
+            assert_eq!(daemon_restart_argvs("cron", &ds.fx.home), Ok(Vec::new()));
+            assert!(!ds.sched.borrow().runs.iter().any(|a| a[0] == "kill"));
         }
 
         #[test]
