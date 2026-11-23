@@ -1,15 +1,152 @@
 //! claim and board, plus the claim helpers hold, handoff and other slices share. hold and handoff wait for the
 //! sync slice.
 
-use serde_json::Value;
+use std::collections::hash_map::RandomState;
+use std::fs;
+use std::hash::{BuildHasher, Hasher};
+use std::path::{Path, PathBuf};
+
+use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::exit::Res;
-use crate::shared::py::repr;
+use crate::shared::board::{dump_board, load_board};
+use crate::shared::consts::{JOB_ID, PASEO_ID, SLUG};
+use crate::shared::exit::{fail, Res};
+use crate::shared::home::{factory_home, holder};
+use crate::shared::http::cas;
+use crate::shared::py::{os_error, repr, strip, universal_newlines};
 use crate::shared::pyjson::{dumps, DEFAULT};
+use crate::shared::pyre::{Flags, Pattern};
+use crate::shared::time::now;
 
-pub fn claim(_call: &Call) -> Res<()> {
-    Err(not_ported("claim"))
+static ID_DIGITS: Pattern = Pattern::new(r"(\d{3,})-", Flags::ASCII);
+
+/// Give a session that has no tag a fresh one, and tell the orchestrator to reuse it.
+pub(crate) fn new_session() {
+    if std::env::var("FACTORY_SESSION").unwrap_or_default().is_empty() {
+        let tag = format!("{:06x}", RandomState::new().build_hasher().finish() & 0xff_ffff);
+        std::env::set_var("FACTORY_SESSION", &tag);
+        eprintln!("new session {tag}: pass --session {tag} to every later claim, next, hold, and board call");
+    }
+}
+
+/// This host's Paseo server id, else None.
+fn paseo_server() -> Option<String> {
+    let base = match std::env::var_os("PASEO_HOME").filter(|v| !v.is_empty()) {
+        Some(home) => PathBuf::from(home),
+        None => std::env::home_dir()?.join(".paseo"),
+    };
+    let text = String::from_utf8(fs::read(base.join("server-id")).ok()?).ok()?;
+    let server = strip(&universal_newlines(text)).to_string();
+    PASEO_ID.is_full(&server).then_some(server)
+}
+
+/// {"server", "agent"} of the Paseo session running this process, else None.
+pub(crate) fn paseo_session() -> Option<Value> {
+    let agent = std::env::var("PASEO_AGENT_ID").unwrap_or_default();
+    let agent = strip(&agent);
+    let server = paseo_server()?;
+    (PASEO_ID.is_full(agent) && !agent.starts_with('-')).then(|| json!({"server": server, "agent": agent}))
+}
+
+/// <home>/paseo-claims/<job-id>/<agent>, the marker that this host's Paseo session claimed the job.
+pub(crate) fn paseo_claim_path(home: &Path, job_id: &str, agent: &str) -> Option<PathBuf> {
+    let ok = JOB_ID.is_full(job_id) && !job_id.contains("..") && PASEO_ID.is_full(agent) && !agent.starts_with('-');
+    ok.then(|| home.join("paseo-claims").join(job_id).join(agent))
+}
+
+pub(crate) fn record_paseo_claim(home: &Path, job_id: &str, paseo: &Value) {
+    let Some(path) = paseo.get("agent").and_then(Value::as_str).and_then(|a| paseo_claim_path(home, job_id, a)) else {
+        return;
+    };
+    if fs::create_dir_all(path.parent().unwrap()).is_ok() {
+        let _ = fs::OpenOptions::new().create(true).append(true).open(&path);
+    }
+}
+
+pub(crate) fn new_claim(device: &str, session: &str, since: Option<&str>) -> Value {
+    let stamp = now();
+    json!({"device": device, "session": session, "since": since.filter(|s| !s.is_empty()).unwrap_or(&stamp), "seen": stamp})
+}
+
+/// The highest id the Worker has archived off the board, so no new job reuses it.
+pub(crate) fn archive_floor(data: &Value) -> u128 {
+    let Some(Value::Number(n)) = data.get("archived").and_then(|a| a.get("max_id")) else { return 0 };
+    let text = n.to_string();
+    if text.bytes().all(|b| b.is_ascii_digit()) { text.parse().unwrap_or(u128::MAX) } else { 0 }
+}
+
+pub(crate) fn next_job_id(names: &[String], feature_slug: &str, floor: u128) -> String {
+    let used = names.iter().filter_map(|n| ID_DIGITS.match_start(n)).map(|m| m[1].parse().unwrap_or(u128::MAX));
+    format!("{:03}-{feature_slug}", used.chain([floor]).max().unwrap_or(0).saturating_add(1))
+}
+
+fn claim_stub(job_id: &str, project: &str, stamp: &str, claim: Value, paseo: Option<&Value>, refs: Option<Value>) -> Value {
+    let mut stub = json!({"id": job_id, "project": project, "updated": stamp, "started": stamp, "claim": claim});
+    if let Some(paseo) = paseo {
+        stub["paseo"] = paseo.clone();
+    }
+    if let Some(refs) = refs.filter(|r| truthy(Some(r))) {
+        stub["refs"] = refs;
+    }
+    stub
+}
+
+fn listing(folder: &Path) -> Vec<PathBuf> {
+    fs::read_dir(folder).map(|d| d.filter_map(|e| Some(e.ok()?.path())).collect()).unwrap_or_default()
+}
+
+fn name_of(p: &Path) -> String {
+    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// Reserve the next id on the shared board with a stageless stub. Ids are unique across the whole factory, so
+/// `#<id>` links and board lookups stay unambiguous. refs, when given, go on the stub.
+pub(crate) fn claim_id(home: &Path, feature_slug: &str, project_slug: &str, refs: Option<Value>) -> Res<String> {
+    for slug in [feature_slug, project_slug] {
+        if !SLUG.is_full(slug) {
+            return Err(fail(format!("bad slug {}: use letters, digits, - and _", repr(slug)), 2));
+        }
+    }
+    let paseo = paseo_session();
+    let resolved = if paseo.is_some() { Some(factory_home()?) } else { None };
+    let jobs = home.join("jobs");
+    fs::create_dir_all(&jobs).map_err(|e| fail(os_error(&e, Some(&jobs)), 1))?;
+    let mut local = Vec::new();
+    for entry in listing(&jobs) {
+        local.push(name_of(&entry));
+        local.extend(listing(&entry).iter().map(|p| name_of(p)));
+    }
+    new_session();
+    let (device, session, _) = holder(home)?;
+    let job_id = cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let rows = jobs_of(&data)?;
+        let mut names = local.clone();
+        names.extend(rows.iter().map(|j| py_str(j.get("id").unwrap_or(&json!("")))));
+        let job_id = next_job_id(&names, feature_slug, archive_floor(&data));
+        let stamp = now();
+        data["updated"] = Value::from(stamp.clone());
+        let stub = claim_stub(&job_id, project_slug, &stamp, new_claim(&device, &session, None), paseo.as_ref(), refs.clone());
+        data["jobs"].as_array_mut().unwrap().push(stub);
+        Ok((Some(dump_board(&data)), job_id))
+    })?;
+    if let (Some(paseo), Some(resolved)) = (&paseo, &resolved) {
+        record_paseo_claim(resolved, &job_id, paseo);
+    }
+    let folder = jobs.join(project_slug).join(&job_id);
+    fs::create_dir_all(&folder).map_err(|e| fail(os_error(&e, Some(&folder)), 1))?;
+    Ok(job_id)
+}
+
+pub fn claim(call: &Call) -> Res<()> {
+    println!("{}", claim_id(Path::new(&call.args[0]), &call.args[1], &call.args[2], None)?);
+    Ok(())
+}
+
+/// The board's jobs list. Python raises when it is missing; the binary fails 1.
+fn jobs_of(data: &Value) -> Res<&Vec<Value>> {
+    data.get("jobs").and_then(Value::as_array).ok_or_else(|| fail("the board has no jobs list", 1))
 }
 
 pub fn board(_call: &Call) -> Res<()> {
