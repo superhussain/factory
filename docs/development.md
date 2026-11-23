@@ -84,7 +84,7 @@ runs `format:check`, the workflow contracts and the affected `auth`, `protocol`,
 `assets`, `deploy` and `local` targets. The `python` job runs the cached `cli`,
 `install` and `verify` targets via `nx run-many` on every pull request. Four
 `browser` jobs each run the affected `browser` target on a quarter of the
-suites, picked by `FACTORY_BROWSER_SHARD=<n>/4`; unset runs them all. The `paseo-plugin` job installs `paseo-plugin/` from its own lockfile, then runs its `typecheck` and `pnpm run test:paseo-plugin`, which also checks that every plugin lockfile entry has a public registry tarball URL. `paseo-plugin/.npmrc` pins `registry=https://registry.npmjs.org/`, because the plugin is its own pnpm workspace and does not read the root `.npmrc`. A user `~/.npmrc` that names a mirror would otherwise fail every plugin install with `ERR_PNPM_TARBALL_URL_MISMATCH`. Its packages are not in the cached store, so that install downloads them each run. The `ci`
+suites, picked by `FACTORY_BROWSER_SHARD=<n>/4`; unset runs them all. The `paseo-plugin` job installs `paseo-plugin/` from its own lockfile, then runs its `typecheck` and `pnpm run test:paseo-plugin`, which also checks that every plugin lockfile entry has a public registry tarball URL. `paseo-plugin/.npmrc` pins `registry=https://registry.npmjs.org/`, because the plugin is its own pnpm workspace and does not read the root `.npmrc`. A user `~/.npmrc` that names a mirror would otherwise fail every plugin install with `ERR_PNPM_TARBALL_URL_MISMATCH`. Its packages are not in the cached store, so that install downloads them each run. The `rust` job builds and tests the `rust/` crate for linux-x64 with the toolchain pinned in `rust/rust-toolchain.toml`, runs `cargo check` for the `aarch64-apple-darwin` and `x86_64-pc-windows-gnu` targets, then runs the parity ratchet and `startup.py` (see Parity harness). The `ci`
 job runs unless the run was cancelled, prints each job's name with its result,
 and passes only when every other job succeeds. `local` binds
 `127.0.0.1:8220`/`8221`/`8222` and `browser` binds owned ephemeral ports,
@@ -134,6 +134,23 @@ lists the four projects. The `device-bundle` Python suites run as the cached
 `cli`/`install` targets (and `tooling:verify`) through `nx run-many` — they are
 not part of the `affected` selection; `tools/verify.py` still
 runs them directly with no Node. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
+
+## Parity harness
+
+The parity harness proves a `factory` binary against the Python CLI, one argv at a time. It runs on POSIX hosts only.
+
+```sh
+python3 tests/parity/run.py [--bin PATH] [--ids FILE] [--case ID]...
+python3 tests/parity/run.py --bin rust/target/release/factory --ids rust/parity.txt
+```
+
+- `tests/parity/cases.json` holds the hand-written cases. The runner adds an `arity/<command>/<n>` case for each argument count just outside a command's range in `tests/fixtures/cli-v1.json`.
+- Each case runs twice, once on `python3 skills/factory/runtime/factory.py` and once on the binary, each in its own temp root with `home/`, `bin/` and `stub/`. `home/` starts as a copy of `tests/parity/homes/<home>`, or empty. The runner compares the exit code, stdout, stderr, the home tree and each stub's call log, with the home path and temp root written as `{home}` and `{tmp}`.
+- The binary is `--bin`, else `FACTORY_BIN`, else Python, which checks that the runner is deterministic. `FACTORY_BIN` also points `support.invoke_process` in `tests/cli` at a binary.
+- `bin/gh`, `bin/paseo` and `bin/git` run `tests/parity/stub.py`, which replays the first entry in the case's `stubs` map whose `argv` matches, logs every call, and exits 127 with `stub: no recorded response for ...` otherwise.
+- `--ids` reads one `fnmatch` pattern per line, with `#` comments. `rust/parity.txt` lists the cases the Rust binary must pass; each port slice adds its lines. A pattern that matches nothing exits 2.
+- `python3 tests/parity/startup.py --bin PATH` times 20 no-argument runs on each side and exits 1 unless the binary's median is at most a tenth of Python's.
+- `rust/factory/src/usage.txt` is Python's no-argument stderr. When the runtime docstring changes, regenerate it with `python3 -B skills/factory/runtime/factory.py 2> rust/factory/src/usage.txt`.
 
 ## Visual captures
 
