@@ -42,7 +42,7 @@ context see [cloudflare.md](cloudflare.md), [device.md](device.md) and
 ## Pull or sync fails
 
 - "the Worker returned no ETag" for a job with walkthrough.html: the deployed Worker predates the no-transform fix, so Cloudflare's edge rewrote the HTML and dropped its ETag. Deploy the current Worker, then pull again.
-- "CERTIFICATE_VERIFY_FAILED": this Python found no CA bundle. On macOS the runtime retries with /etc/ssl/cert.pem unless SSL_CERT_FILE or SSL_CERT_DIR is set. Elsewhere, set SSL_CERT_FILE to your system CA bundle, for example /etc/ssl/certs/ca-certificates.crt on Ubuntu, then rerun.
+- "CERTIFICATE_VERIFY_FAILED": the factory binary found no CA bundle. On macOS the runtime retries with /etc/ssl/cert.pem unless SSL_CERT_FILE or SSL_CERT_DIR is set. Elsewhere, set SSL_CERT_FILE to your system CA bundle, for example /etc/ssl/certs/ca-certificates.crt on Ubuntu, then rerun.
 
 ## Occupied ports
 

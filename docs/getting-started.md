@@ -24,13 +24,13 @@ Open the origin and sign in with an allowed email, such as `ada@example.test`. T
 
 ```sh
 python3 tools/install.py --destination "$HOME/.claude/skills"
-FACTORY="$HOME/.claude/skills/factory/runtime/factory.py"
-python3 "$FACTORY" init --agents claude
+FACTORY="$HOME/.claude/skills/factory/runtime/factory"
+"$FACTORY" init --agents claude
 ```
 
 - The destination is the skills root your agent reads. Use `$HOME/.agents/skills` for a shared folder.
 - `--agents` takes `claude`, `opencode`, `both` or `none`.
-- On Windows use `py -3` instead of `python3`.
+- On Windows the binary is `...\runtime\factory.exe`. Use `py -3` instead of `python3` for `tools/install.py`.
 - Run steps 3 to 5 in the same terminal. In a new terminal, set `FACTORY` again first.
 
 See [device.md](device.md) for the full device setup.
@@ -38,7 +38,7 @@ See [device.md](device.md) for the full device setup.
 ## 4. Check the connection
 
 ```sh
-python3 "$FACTORY" doctor
+"$FACTORY" doctor
 ```
 
 Every check says `pass`. On a `fail`, see [troubleshooting.md](troubleshooting.md). `up` already wrote `api_url` and the `.env` credentials. Never paste them into chat.
@@ -46,7 +46,7 @@ Every check says `pass`. On a `fail`, see [troubleshooting.md](troubleshooting.m
 ## 5. Register a project
 
 ```sh
-python3 "$FACTORY" init "$HOME/src/example-app"
+"$FACTORY" init "$HOME/src/example-app"
 ```
 
 The slug comes from the checkout's `origin` remote, so `example-org/example-app` becomes `example-app`. Then open Settings, Projects, pick `example-app`, fill each section of the project file and Save. `gh auth status` must pass for the factory to open PRs.
@@ -91,7 +91,7 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | --- | --- | --- |
 | Hold PRs for a person, change review rounds, require spec approval, add stage notes, including Babysit PR instructions | Settings, Pipeline | [autonomy.md](autonomy.md) |
 | Add another computer | `bootstrap.py up` on it, then Settings, Hosts | [device.md](device.md#host-registration) |
-| Let hosts pick up ideas on a timer | `factory.py pickup setup` on each host, then `pickup setup --install` | [pickup.md](../skills/factory/references/pickup.md) |
+| Let hosts pick up ideas on a timer | `factory pickup setup` on each host, then `pickup setup --install` | [pickup.md](../skills/factory/references/pickup.md) |
 | Let a model triage the backlog | Settings, Pipeline, Backlog triage | [autonomy.md](autonomy.md#backlog-triage) |
 | Archive finished jobs | Settings, Pipeline, Archive old jobs | [configuration.md](configuration.md) |
 | Keep project notes, decisions and a runbook | Settings, Projects, document tabs | [configuration.md](configuration.md) |
@@ -103,11 +103,11 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | Open the board inside Paseo | `paseo plugin install <checkout>/paseo-plugin`, then Paseo Settings, Plugins, Factory, then `embed_origins` and an `up` rerun | [integrations.md](integrations.md#paseo-plugin) |
 | Make a job wait for another job or a time | `Depends on:` backlog lines, `depends-on` refs, `not_before` | [autonomy.md](autonomy.md#waiting-on-other-jobs) |
 | Let agents manage the instance, such as Access settings or an `up` rerun | `CLOUDFLARE_API_TOKEN` in the factory home `.env` | [cloudflare.md](cloudflare.md#device-token) |
-| Upgrade later | `factory.py catch-up` on each host | [upgrade.md](upgrade.md) |
+| Upgrade later | `factory catch-up` on each host | [upgrade.md](upgrade.md) |
 
 ![The Inbox with a question row](screenshots/inbox.png)
 
-Automatic pickup: run `python3 <installed-skill>/runtime/factory.py pickup setup` on each host and fix each missing line until it prints 7 of 7 ok. A stored Paseo or Claude schedule prompt does not pick up ideas.
+Automatic pickup: run `<installed-skill>/runtime/factory pickup setup` on each host and fix each missing line until it prints 7 of 7 ok. A stored Paseo or Claude schedule prompt does not pick up ideas.
 
 ## Set up with an agent
 

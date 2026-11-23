@@ -8,7 +8,8 @@ Working on the repository itself: tests, tooling and docs. For deployment see
 - mise for the pinned tools in `mise.toml`
 - Node `>=22.18.0`, development pinned to `24.14.0` (`.node-version`)
 - pnpm `11.9.0` (`package.json` `packageManager`)
-- Python `3.8+` (standard library only)
+- Rust toolchain (rustup). `tools/install.py` builds the factory binary with cargo, which must be on PATH
+- Python `3.8+` for `tools/install.py` and the other `tools/*.py` scripts (still needed until those scripts move off Python)
 - Git
 
 ## Install and browser provisioning
@@ -65,7 +66,7 @@ mise exec -- python3 tools/verify.py all       # device then hosted, each leaf o
 
 `--json` prints a one-line pass/fail summary as the last stdout line. The first
 failing command stops the run with exit 1; invalid arguments or a missing pnpm
-exit 2. The `device` group and installed Python bundle need no Node, pnpm or mise.
+exit 2. The `device` group and the installed bundle need no Node, pnpm or mise.
 
 CLI tests import `support` from `tests/cli`. A command that names one test file,
 class or method needs the `PYTHONPATH` prefix in the first line below. On Windows,
