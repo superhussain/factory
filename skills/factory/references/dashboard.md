@@ -39,11 +39,12 @@ leaves needs you for pr-open with a Babysitting chip, and pickup launches
 The drawer's top bar, the job actions menu, the card menu and the inbox show Approve
 spec on a `needs-human` job with the note `gate: spec-approval` that is not a batch
 rider, paused or closing. After a confirm it moves the job to `build`, sets the note
-`spec approved on the dashboard`, deletes `needs` and stamps `updated`, in one board
-write. A row that changed meanwhile is checked again and never forced. Pickup then
-launches `/factory recover <id>`, which starts the builder, as [pickup](pickup.md)
-describes. The Worker refuses that note from a device token, and `factory.py board`
-refuses both approval notes, so only a signed-in person sets it.
+`spec approved on the dashboard`, deletes `needs`, sets `spec_approval` to
+`{decider: "person", via: "dashboard", at}` and stamps `updated`, in one board write.
+A row that changed meanwhile is checked again and never forced. Pickup then launches
+`/factory recover <id>`, which starts the builder, as [pickup](pickup.md) describes. The
+Worker refuses that note from a device token, and `factory.py board` refuses both approval
+notes, so only a signed-in person sets it.
 
 ## Rework and Approve as is
 
