@@ -433,8 +433,14 @@ fn read_loop(
             let _ = tx.send(Event::Closed("stopped".to_string()));
             return;
         }
-        if let (Some(b), Some(at)) = (&board, retry) {
-            if Instant::now() >= at {
+        // A failed fetch retries after REFETCH; a mirror with no fetch or frame for
+        // mirror::REFRESH, say after a lost announcement, refetches once.
+        if let Some(b) = &board {
+            let due = match retry {
+                Some(at) => Instant::now() >= at,
+                None => b.stale(),
+            };
+            if due {
                 retry = refetch(b, &tx);
             }
         }

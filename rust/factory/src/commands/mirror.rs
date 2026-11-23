@@ -4,7 +4,9 @@
 //! is the mirror's ETag. A frame that doesn't follow, a `changed` frame for the board, or a
 //! reconnect refetches it. A private snapshot at `<home>/cache/board.json` lets a restarted daemon
 //! answer from the last board while its first fetch runs. While the socket is down the mirror
-//! answers nothing, so commands read the Worker.
+//! answers nothing, so commands read the Worker. A mirror that has neither fetched nor applied a
+//! frame for REFRESH is refetched, and one that hasn't for MAX_AGE answers nothing, so a lost
+//! announcement or a snapshot that can't be refreshed never serves an old board for long.
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -14,7 +16,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 
-use crate::shared::board_client::{addr_path, socket_path, view, Stream, PROTOCOL};
+use crate::commands::catch_up::random_hex;
+use crate::shared::board_client::{
+    addr_path, proof, same_secret, socket_path, view, Stream, PROTOCOL,
+};
 use crate::shared::fs::write_atomic;
 use crate::shared::http::api;
 use crate::shared::pyjson::{dumps, loads, COMPACT};
@@ -25,6 +30,10 @@ const SEEN: usize = 32;
 const OWN_FRAME: Duration = Duration::from_secs(2);
 /// The longest request line: a 1 MiB PATCH body, escaped.
 const MAX_REQUEST: u64 = 4 * 1024 * 1024;
+/// How long the mirror goes without a fetch or applied frame before the reader refetches it.
+pub const REFRESH: Duration = Duration::from_secs(300);
+/// How long after its last fetch or applied frame the mirror still answers.
+const MAX_AGE: Duration = Duration::from_secs(360);
 
 #[derive(Default)]
 struct State {
@@ -36,6 +45,8 @@ struct State {
     live: bool,
     /// ETags the mirror has held, newest last.
     seen: VecDeque<String>,
+    /// When the mirror last matched the Worker: a fetch, an applied frame, or the snapshot's save.
+    synced: Option<Instant>,
 }
 
 pub struct Mirror {
@@ -64,6 +75,11 @@ impl Mirror {
                 state.etag = etag.to_string();
                 state.patch = snap["patch"] == true;
                 state.seen.push_back(etag.to_string());
+                state.synced = std::fs::metadata(snapshot_path(home))
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|at| at.elapsed().ok())
+                    .and_then(|age| Instant::now().checked_sub(age));
             }
         }
         Arc::new(Mirror {
@@ -85,6 +101,15 @@ impl Mirror {
         self.state.lock().unwrap().live = false;
     }
 
+    /// True when the mirror has gone REFRESH without a fetch or applied frame.
+    pub fn stale(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .synced
+            .is_none_or(|at| at.elapsed() >= REFRESH)
+    }
+
     /// Fetches the whole board. Returns how many jobs it holds, or the failure.
     pub fn fetch(&self) -> Result<usize, String> {
         let _turn = self.fetching.lock().unwrap();
@@ -103,6 +128,7 @@ impl Mirror {
         // A frame applied while this fetch ran already moved past the version it read.
         if s.etag != etag && s.seen.contains(&etag) {
             s.live = true;
+            s.synced = Some(Instant::now());
             return Ok(jobs);
         }
         s.patch = r.header("Accept-Patch").is_some();
@@ -113,7 +139,8 @@ impl Mirror {
     }
 
     /// Applies a rows frame. False when it doesn't follow the mirror's version, so the caller
-    /// refetches.
+    /// refetches. A new row goes at the end, where the Worker puts it: the Worker sends `changed`
+    /// instead of rows for a write that inserts or reorders rows anywhere else.
     pub fn apply(&self, frame: &Value) -> bool {
         let (Some(etag), Some(prev)) = (frame["etag"].as_str(), frame["prev"].as_str()) else {
             return false;
@@ -163,6 +190,7 @@ impl Mirror {
     fn moved_to(&self, s: &mut State, etag: String) {
         s.etag = etag.clone();
         s.live = true;
+        s.synced = Some(Instant::now());
         s.seen.push_back(etag);
         if s.seen.len() > SEEN {
             s.seen.pop_front();
@@ -198,7 +226,7 @@ impl Mirror {
     /// The board reply: its header and text, filtered when the request names a job or project.
     fn board(&self, request: &Value) -> Option<(Value, Arc<String>)> {
         let s = self.state.lock().unwrap();
-        if !s.live {
+        if !s.live || s.synced.is_none_or(|at| at.elapsed() >= MAX_AGE) {
             return None;
         }
         let head = json!({"v": PROTOCOL, "ok": true, "etag": s.etag, "patch": s.patch});
@@ -236,11 +264,39 @@ impl Mirror {
         }
     }
 
-    /// Answers one request on stream. token is the secret a loopback request must carry.
+    /// Answers one request on stream. With a token, as on the loopback endpoint, the first line
+    /// must be a `hello` whose `auth` proves the client holds it; the reply proves the daemon does.
     pub fn handle(&self, stream: Box<dyn Stream>, token: Option<&str>) {
         let _ = stream.limit(Duration::from_secs(60));
         let mut reader = BufReader::new(stream);
+        let refused = |error: &str| json!({"v": PROTOCOL, "ok": false, "error": error});
         let mut line = String::new();
+        if let Some(token) = token {
+            if (&mut reader).take(4096).read_line(&mut line).is_err() {
+                return;
+            }
+            let hello: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
+            let nonce = hello["nonce"].as_str().unwrap_or_default();
+            let auth = hello["auth"].as_str().unwrap_or_default();
+            if hello["op"] != "hello"
+                || nonce.is_empty()
+                || !same_secret(auth, &proof(token, "client", nonce))
+            {
+                let _ = reader
+                    .get_mut()
+                    .write_all(format!("{}\n", refused("bad token")).as_bytes());
+                return;
+            }
+            let reply = json!({"v": PROTOCOL, "ok": true, "proof": proof(token, "daemon", nonce)});
+            if reader
+                .get_mut()
+                .write_all(format!("{reply}\n").as_bytes())
+                .is_err()
+            {
+                return;
+            }
+            line.clear();
+        }
         if (&mut reader)
             .take(MAX_REQUEST)
             .read_line(&mut line)
@@ -249,10 +305,7 @@ impl Mirror {
             return;
         }
         let request: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
-        let refused = |error: &str| json!({"v": PROTOCOL, "ok": false, "error": error});
-        let reply = if token.is_some_and(|t| request["token"].as_str() != Some(t)) {
-            refused("bad token")
-        } else if request["v"] != PROTOCOL {
+        let reply = if request["v"] != PROTOCOL {
             refused("unknown protocol version")
         } else {
             match request["op"].as_str() {
@@ -284,23 +337,11 @@ impl Mirror {
     }
 }
 
-/// A random 128-bit token in hex.
-#[cfg_attr(unix, allow(dead_code))]
-fn token() -> String {
-    use std::hash::{BuildHasher, Hasher};
-    let half = || {
-        std::collections::hash_map::RandomState::new()
-            .build_hasher()
-            .finish()
-    };
-    format!("{:016x}{:016x}", half(), half())
-}
-
 /// Serves the loopback endpoint and writes `<address> <token>` to `daemon.addr`, 0600.
 #[cfg_attr(unix, allow(dead_code))]
 pub fn listen_tcp(mirror: Arc<Mirror>) -> io::Result<()> {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
-    let secret = token();
+    let secret = random_hex(16);
     write_atomic(
         &addr_path(&mirror.home),
         format!("{} {secret}\n", listener.local_addr()?).as_bytes(),
@@ -532,11 +573,12 @@ mod tests {
         assert!(!socket_path(&home).exists());
     }
 
-    /// The Windows endpoint: loopback TCP with a token from a 0600 file. A request without the
-    /// token gets nothing.
+    /// The Windows endpoint: loopback TCP with a token from a 0600 file. Each side proves it
+    /// holds the token without sending it, so a wrong proof gets nothing, and a stale file that
+    /// points at another process's port is not trusted.
     #[test]
     fn loopback_endpoint_needs_the_token() {
-        let (m, seen) = fetched("tcp", vec![(200, "ok", vec![("ETag", "\"e2\"")])]);
+        let (m, _) = fetched("tcp", vec![]);
         listen_tcp(m.clone()).unwrap();
         let (addr, secret) = board_client::tcp_endpoint(&m.home).unwrap();
         assert_eq!(secret.len(), 32);
@@ -550,52 +592,118 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600);
         }
         let mut stream = std::net::TcpStream::connect(&addr).unwrap();
-        stream
-            .write_all(b"{\"v\":1,\"op\":\"board\",\"token\":\"wrong\"}\n")
-            .unwrap();
+        let hello =
+            json!({"v": 1, "op": "hello", "nonce": "n1", "auth": proof("wrong", "client", "n1")});
+        stream.write_all(format!("{hello}\n").as_bytes()).unwrap();
         let mut reply = String::new();
         BufReader::new(stream).read_line(&mut reply).unwrap();
         assert_eq!(
             serde_json::from_str::<Value>(&reply).unwrap()["error"],
             "bad token"
         );
-        let (mut stream, token) = board_client::connect_tcp(&m.home).unwrap();
-        stream
-            .write_all(
-                format!(
-                    "{{\"v\":1,\"op\":\"board\",\"token\":\"{}\"}}\n",
-                    token.unwrap()
-                )
-                .as_bytes(),
-            )
+        let mut reader = board_client::connect_tcp(&m.home).unwrap();
+        reader
+            .get_mut()
+            .write_all(b"{\"v\":1,\"op\":\"board\"}\n")
             .unwrap();
-        let mut reader = BufReader::new(stream);
         let mut head = String::new();
         reader.read_line(&mut head).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&head).unwrap()["ok"], true);
-        drop(seen);
+
+        // Another process now holds the port the file names: it never sees the token, and its
+        // made-up proof is refused.
+        let impostor = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = impostor.local_addr().unwrap();
+        let heard = std::thread::spawn(move || {
+            let (stream, _) = impostor.accept().unwrap();
+            let mut line = String::new();
+            let mut reader = BufReader::new(stream);
+            reader.read_line(&mut line).unwrap();
+            let _ = reader
+                .get_mut()
+                .write_all(b"{\"v\":1,\"ok\":true,\"proof\":\"made-up\"}\n");
+            line
+        });
+        std::fs::write(addr_path(&m.home), format!("{port} {secret}\n")).unwrap();
+        assert!(board_client::connect_tcp(&m.home).is_none());
+        assert!(!heard.join().unwrap().contains(&secret));
     }
 
     #[test]
     fn unknown_version_and_op_are_refused() {
         let (m, _) = fetched("refused", vec![]);
         listen_tcp(m.clone()).unwrap();
-        let (addr, secret) = board_client::tcp_endpoint(&m.home).unwrap();
         for (request, error) in [
-            (
-                json!({"v": 2, "op": "board", "token": secret}),
-                "unknown protocol version",
-            ),
-            (json!({"v": 1, "op": "drop", "token": secret}), "unknown op"),
+            (json!({"v": 2, "op": "board"}), "unknown protocol version"),
+            (json!({"v": 1, "op": "drop"}), "unknown op"),
         ] {
-            let mut stream = std::net::TcpStream::connect(&addr).unwrap();
-            stream.write_all(format!("{request}\n").as_bytes()).unwrap();
+            let mut reader = board_client::connect_tcp(&m.home).unwrap();
+            reader
+                .get_mut()
+                .write_all(format!("{request}\n").as_bytes())
+                .unwrap();
             let mut reply = String::new();
-            BufReader::new(stream).read_line(&mut reply).unwrap();
+            reader.read_line(&mut reply).unwrap();
             assert_eq!(
                 serde_json::from_str::<Value>(&reply).unwrap()["error"],
                 error
             );
         }
+    }
+
+    /// A mirror with no fetch or frame for REFRESH asks for a refetch, and one past MAX_AGE, such
+    /// as an old snapshot whose first fetch keeps failing, answers nothing.
+    #[test]
+    fn an_old_mirror_refetches_and_then_goes_quiet() {
+        let (m, _) = fetched("age", vec![]);
+        assert!(!m.stale());
+        assert!(m.board(&json!({})).is_some());
+        m.state.lock().unwrap().synced = Instant::now().checked_sub(REFRESH);
+        assert!(m.stale());
+        assert!(m.board(&json!({})).is_some());
+        m.state.lock().unwrap().synced = Instant::now().checked_sub(MAX_AGE);
+        assert!(m.board(&json!({})).is_none());
+        // A restart seeds from the snapshot's save time.
+        let again = Mirror::new(&m.home);
+        again.connected();
+        assert!(!again.stale() && again.board(&json!({})).is_some());
+    }
+
+    /// A PATCH through the daemon that gets 409 makes the client read the Worker directly and
+    /// write there, since the mirror may not have the other write yet.
+    #[cfg(unix)]
+    #[test]
+    fn a_conflict_through_the_daemon_retries_on_the_worker() {
+        let later = r#"{"updated":"2026-11-23T10:00:01Z","jobs":[{"id":"1999-synthetic-build","stage":"review"},{"id":"2000-synthetic-spec","stage":"spec"}]}"#;
+        let (m, seen) = fetched(
+            "conflict",
+            vec![
+                (409, r#"{"error":"conflict"}"#, vec![]),
+                (
+                    200,
+                    later,
+                    vec![("ETag", "\"e2\""), ("Accept-Patch", "application/json")],
+                ),
+                (200, "ok", vec![("ETag", "\"e3\"")]),
+            ],
+        );
+        listen(m.clone()).unwrap();
+        let mut stages = Vec::new();
+        board_client::cas(&m.home, |text| {
+            let mut b = loads(text.unwrap()).unwrap();
+            stages.push(b["jobs"][0]["stage"].clone());
+            b["jobs"][1]["stage"] = "build".into();
+            Ok((Some(dumps(&b, COMPACT)), ()))
+        })
+        .unwrap();
+        assert_eq!(stages, ["build", "review"]);
+        let methods: Vec<String> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.method.clone())
+            .collect();
+        assert_eq!(methods, ["GET", "PATCH", "GET", "PATCH"]);
+        unlisten(&m.home);
     }
 }

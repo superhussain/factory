@@ -239,6 +239,22 @@ fn cas<T>(
     ))
 }
 
+/// The board `cas` for a claim under an in-flight cap. The cap counts rows the write doesn't
+/// touch, so each open row goes in as a read and the Worker refuses the write if one changed.
+fn claim_cas<T>(
+    home: &Path,
+    change: impl FnMut(Option<&str>) -> Res<(Option<String>, T)>,
+) -> Res<T> {
+    #[cfg(test)]
+    return cas(home, "/api/board", change);
+    #[cfg(not(test))]
+    crate::shared::board_client::cas_reading(
+        home,
+        Some(&crate::shared::board_client::open_row),
+        change,
+    )
+}
+
 #[cfg(test)]
 fn shared_read_board(home: &Path) -> Res<Value> {
     let r = api(home, "GET", "/api/board", None, &[200, 404], &[])?;
@@ -3815,7 +3831,7 @@ fn claim_ideas(
         let limits = read_limits(home)?;
         exp_limited = lookup(&limits, &experiment.name).is_some_and(|u| u > now().as_str());
     }
-    cas(home, "/api/board", |text| {
+    claim_cas(home, |text| {
         let mut data = load_board(text)?;
         let mut picked: Vec<Entry> = Vec::new();
         let count = match pick.max_inflight {
