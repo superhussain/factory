@@ -104,7 +104,9 @@ Each run, in order:
   replaces a batch line for the same idea. Set it in the dashboard under
   Settings, Pipeline, Review backpressure. The board shows
   "Paused: <n> waiting on you" on each idea card pickup holds this way, in
-  place of its batch chip.
+  place of its batch chip. Until the board has read the project's effective
+  pipeline, it shows no Paused chip, and a held idea reads
+  "Held for batching". A failed read falls back to the defaults.
 - Skips a project whose checkout fails the `unsafe checkout` check, when pickup
   is on and lists this host. It fetches `origin/<base>` (with
   `GIT_TERMINAL_PROMPT=0` and a 60 s limit, so a remote that asks for
