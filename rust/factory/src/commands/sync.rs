@@ -21,6 +21,7 @@ use crate::shared::project::{
 use crate::shared::py::{os_error, printable_line, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, INDENT2_SORTED};
 use crate::shared::pyre::{Flags, Pattern};
+use crate::shared::pyval::{py_str, truthy};
 use crate::shared::time::now;
 
 pub(crate) type Manifest = serde_json::Map<String, Value>;
@@ -67,29 +68,6 @@ fn walk(folder: &Path) -> io::Result<Vec<(String, PathBuf)>> {
         .into_iter()
         .map(|(parts, p)| (parts.join("/"), p))
         .collect())
-}
-
-/// Python truthiness of a value that may be missing.
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Array(a)) => !a.is_empty(),
-        Some(Value::Object(o)) => !o.is_empty(),
-        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
-    }
-}
-
-/// `f"{v}"` for a board field that may be missing.
-fn py_str(v: Option<&Value>) -> String {
-    match v {
-        None | Some(Value::Null) => "None".into(),
-        Some(Value::Bool(true)) => "True".into(),
-        Some(Value::Bool(false)) => "False".into(),
-        Some(Value::String(s)) => s.clone(),
-        Some(other) => other.to_string(),
-    }
 }
 
 /// A project file minus its frontmatter path: line, since each device keeps its own.
@@ -264,7 +242,7 @@ pub(crate) fn sync_problems(
         }
     }
     for (rel, path) in &local {
-        let Some(entry) = manifest.get(rel).filter(|e| truthy(Some(e))) else {
+        let Some(entry) = manifest.get(rel).filter(|e| truthy(Some(*e))) else {
             problems.push(format!(
                 "{rel} is local-only; the sync manifest has no entry for it"
             ));
@@ -427,7 +405,7 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
         (0, Vec::new(), false, false);
     for (rel, path) in rels {
         let data = fs::read(&path).map_err(|e| os_fail(e, &path))?;
-        let entry = manifest.get(&rel).filter(|e| truthy(Some(e))).cloned();
+        let entry = manifest.get(&rel).filter(|e| truthy(Some(*e))).cloned();
         if dot_remote(&path).exists() {
             conflicts.push(rel);
             continue;
@@ -539,7 +517,7 @@ pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Ve
     for (rel, tag) in &remote {
         let path = folder.join(rel);
         let data = local_bytes(&path);
-        let entry = manifest.get(rel).filter(|e| truthy(Some(e))).cloned();
+        let entry = manifest.get(rel).filter(|e| truthy(Some(*e))).cloned();
         let tag_value = Value::from(tag.as_str());
         let stored = |key: &str| entry.as_ref().and_then(|e| e.get(key));
         if dot_remote(&path).exists() {

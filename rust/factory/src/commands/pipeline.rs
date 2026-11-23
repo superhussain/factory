@@ -9,6 +9,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::cli::{not_ported, Call};
+use crate::commands::claims::{self, mine};
 use crate::shared::board::{
     dump_board, escalated, lead_of, load_board, patch_job, read_board, riders_of,
 };
@@ -20,9 +21,12 @@ use crate::shared::consts::{
     ROUTE_EFFORTS, ROUTE_MODEL, SLUG, TERMINAL,
 };
 use crate::shared::exit::{fail, Res};
-use crate::shared::fs::{is_link, mkdir_private, read_text, resolve, write_atomic};
+use crate::shared::fs::{
+    contained, is_link, make_job_temp, mkdir_private, read_text, resolve, write_atomic,
+};
 use crate::shared::home::{factory_home, holder};
 use crate::shared::http::{access_message, api, cas};
+use crate::shared::paseo::{paseo_server, paseo_session};
 use crate::shared::proc::capture;
 use crate::shared::project::{project_files, r2_target, safe_job_folder};
 use crate::shared::py::{
@@ -31,6 +35,7 @@ use crate::shared::py::{
 };
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2, NO_ASCII};
 use crate::shared::pyre::{translate, Flags, Pattern};
+use crate::shared::pyval::{py_str, truthy};
 use crate::shared::time::{format_stamp, now, parse_stamp, unix_now};
 use crate::shared::unicode::nfkc;
 
@@ -59,7 +64,6 @@ fn flushed(inner: impl FnOnce(&mut Out) -> Res<()>) -> Res<()> {
 #[cfg(test)]
 thread_local! {
     static FETCH_URL: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
-    static TEMP_ROOT: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
     static CHECK_TIMEOUT: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
 }
 
@@ -71,24 +75,6 @@ fn project_fetch_url(repo: &str) -> String {
         return url.replace("{repo}", repo);
     }
     format!("https://github.com/{repo}.git")
-}
-
-/// `tempfile.gettempdir()`.
-#[allow(dead_code)]
-fn temp_root() -> PathBuf {
-    #[cfg(test)]
-    if let Some(root) = TEMP_ROOT.with(|r| r.borrow().clone()) {
-        return root;
-    }
-    if cfg!(windows) {
-        return std::env::temp_dir();
-    }
-    ["TMPDIR", "TEMP", "TMP"]
-        .iter()
-        .filter_map(std::env::var_os)
-        .find(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
 /// `PRE_REVIEW_TIMEOUT`, in seconds.
@@ -208,19 +194,6 @@ fn experiment_arm(id: &str, percent: u32) -> &'static str {
         "b"
     } else {
         "a"
-    }
-}
-
-/// Python truthiness of a JSON value that may be missing.
-#[allow(dead_code)]
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Array(a)) => !a.is_empty(),
-        Some(Value::Object(o)) => !o.is_empty(),
-        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
     }
 }
 
@@ -3134,58 +3107,6 @@ fn pre_review_tail(_log_text: &str, _env: &crate::shared::conf::Conf) -> Res<Vec
     Err(not_ported("pre-review"))
 }
 
-/// The user id that owns this process.
-#[cfg(unix)]
-fn own_uid() -> u32 {
-    extern "C" {
-        fn getuid() -> u32;
-    }
-    // SAFETY: getuid takes no arguments, cannot fail and touches no Rust memory.
-    unsafe { getuid() }
-}
-
-/// Create the job's temp folder private to this account, refusing a name someone else holds.
-fn make_job_temp(slug: &str, job_id: &str) -> Res<PathBuf> {
-    let path = temp_root().join(format!("factory-{slug}-{job_id}"));
-    let refused = || {
-        fail(
-            format!(
-                "{} is a link or a file; remove it, then run prompt again",
-                path.display()
-            ),
-            6,
-        )
-    };
-    let link = is_link(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
-    if link || std::fs::symlink_metadata(&path).is_ok() && !path.is_dir() {
-        return Err(refused());
-    }
-    mkdir_private(&path).map_err(|e| match e.kind() {
-        std::io::ErrorKind::AlreadyExists => refused(),
-        _ => fail(os_error(&e, Some(&path)), 1),
-    })?;
-    let meta = std::fs::symlink_metadata(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
-    if is_link(&path).unwrap_or(true) || !meta.is_dir() {
-        return Err(refused());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{MetadataExt, PermissionsExt};
-        if meta.uid() != own_uid() {
-            return Err(fail(
-                format!(
-                    "{} belongs to another account; remove it, then run prompt again",
-                    path.display()
-                ),
-                6,
-            ));
-        }
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
-            .map_err(|_| refused())?;
-    }
-    Ok(path)
-}
-
 /// The raw id of the job's batched-into ref, as Python's `lead_of` returns it.
 fn lead_value(j: &Value) -> Option<Value> {
     j.get("refs")?
@@ -3625,9 +3546,7 @@ fn ground_citation(
         let (Ok(root), Ok(real)) = (resolve(root), resolve(&file)) else {
             return false;
         };
-        file.is_file()
-            && !is_link(&file).unwrap_or(true)
-            && real.ancestors().skip(1).any(|a| a == root)
+        file.is_file() && !is_link(&file).unwrap_or(true) && real != root && contained(&root, &real)
     };
     let files: Option<Vec<String>> = if regular(wt, path) {
         Some(vec![path.to_string()])
@@ -3868,33 +3787,8 @@ static AUDIT_CONTROL: Pattern = Pattern::new(
 static ID_NUMBER: Pattern = Pattern::new(r"^(\d{3,})-", Flags::NONE);
 static WORD: Pattern = Pattern::new("[a-z0-9]+", Flags::NONE);
 
-/// Python's `str(v)` for a JSON value.
-fn py_str(v: Option<&Value>) -> String {
-    match v {
-        None | Some(Value::Null) => "None".into(),
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Bool(b)) => if *b { "True" } else { "False" }.into(),
-        Some(other) => other.to_string(),
-    }
-}
-
 fn audit_clean(text: &str) -> String {
     AUDIT_CONTROL.replace_all(text, |_| "?".into())
-}
-
-fn mine(c: &Value, device: &str, session: &str) -> bool {
-    c.get("device").and_then(Value::as_str) == Some(device)
-        && c.get("session").and_then(Value::as_str) == Some(session)
-}
-
-/// The job's claim if another session holds it and checked in within the last minutes.
-fn blocking(j: &Value, device: &str, session: &str, minutes: u32) -> Option<Value> {
-    let c = j.get("claim").filter(|c| truthy(Some(c)))?;
-    if mine(c, device, session) {
-        return None;
-    }
-    let seen = stamp_of(c.get("seen"))?;
-    (unix_now() - seen < i64::from(minutes) * 60).then(|| c.clone())
 }
 
 /// True while a job waits on a human: it has an ask, or it is an unapproved explorer card.
@@ -4184,11 +4078,14 @@ fn batch_problem(
     if j.get("tracer").is_some() {
         return Some("follows Tracer".into());
     }
-    let backlog = j.get("backlog").filter(|b| truthy(Some(b)));
+    let backlog = j.get("backlog").filter(|b| truthy(Some(*b)));
     if backlog.and_then(|b| b.get("decision")) == Some(&json!("rework")) {
         return Some("marked for rework".into());
     }
-    if let Some(held) = blocking(j, device, session, minutes) {
+    if let Some(held) = claims::blocking(Some(j), device, session, minutes)
+        .ok()
+        .flatten()
+    {
         return Some(format!(
             "held by {} session {}",
             py_str(held.get("device")),
@@ -4603,7 +4500,7 @@ fn stack(home: &Path, _slug: &str, lead_id: &str, rider_id: &str, o: &mut Out) -
         };
         if !mine(
             lead.get("claim")
-                .filter(|c| truthy(Some(c)))
+                .filter(|c| truthy(Some(*c)))
                 .unwrap_or(&json!({})),
             &device,
             &session,
@@ -5032,7 +4929,7 @@ fn record_agent(
             }
         }
         if let Some((device, session)) = claimant {
-            let c = job.get("claim").filter(|c| truthy(Some(c)));
+            let c = job.get("claim").filter(|c| truthy(Some(*c)));
             let Some(c) = c else {
                 return Err(fail(
                     format!("{job_id} has no claim from this session; run hold first"),
@@ -5069,26 +4966,6 @@ fn record_agent(
         patch_job(&mut data, job_id, &json!({"agents": rows}));
         Ok((Some(dump_board(&data)), Some(full)))
     })
-}
-
-/// This host's Paseo server id, else None.
-fn paseo_server() -> Option<String> {
-    let base = match std::env::var_os("PASEO_HOME").filter(|v| !v.is_empty()) {
-        Some(h) => PathBuf::from(h),
-        None => std::env::home_dir()?.join(".paseo"),
-    };
-    let text = std::fs::read(base.join("server-id")).ok()?;
-    let server = strip(&universal_newlines(String::from_utf8(text).ok()?)).to_string();
-    PASEO_ID.is_full(&server).then_some(server)
-}
-
-/// {"server", "agent"} of the Paseo session running this process, else None.
-fn paseo_session() -> Option<Value> {
-    let agent = std::env::var("PASEO_AGENT_ID").unwrap_or_default();
-    let agent = strip(&agent);
-    let server = paseo_server()?;
-    (PASEO_ID.is_full(agent) && !agent.starts_with('-'))
-        .then(|| json!({"server": server, "agent": agent}))
 }
 
 /// Set paseo on each of job's agents rows that session recorded and no session has linked yet.
@@ -6764,7 +6641,7 @@ mod tests {
                 fs::create_dir_all(&folder).unwrap();
                 let tmp = home.join("tmp");
                 fs::create_dir(&tmp).unwrap();
-                TEMP_ROOT.with(|r| *r.borrow_mut() = Some(tmp.clone()));
+                crate::shared::fs::TEMP_ROOT.with(|r| *r.borrow_mut() = Some(tmp.clone()));
                 let logs = tmp.join(format!("factory-sample-{JOB}/pre-review"));
                 let wt = home.join("worktrees/sample").join(JOB);
                 fs::create_dir_all(&wt).unwrap();

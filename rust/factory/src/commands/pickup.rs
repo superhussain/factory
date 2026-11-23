@@ -1,6 +1,8 @@
 //! `pickup` and `pickup setup`: launchers, detached launches, stall takeover, the host timer and the
 //! board passes.
 
+use crate::commands::claims::{self, mine};
+use crate::shared::pyval::truthy;
 #[cfg(test)]
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -390,7 +392,7 @@ fn token_hex3() -> String {
 
 /// Seconds east of UTC of this host's local time at utc.
 #[cfg(unix)]
-fn local_offset(utc: i64) -> i64 {
+pub(crate) fn local_offset(utc: i64) -> i64 {
     #[repr(C)]
     struct Tm {
         sec: i32,
@@ -419,7 +421,7 @@ fn local_offset(utc: i64) -> i64 {
 }
 
 #[cfg(windows)]
-fn local_offset(utc: i64) -> i64 {
+pub(crate) fn local_offset(utc: i64) -> i64 {
     #[repr(C)]
     #[derive(Default)]
     struct SystemTime {
@@ -2846,35 +2848,6 @@ fn new_claim(device: &str, session: &str) -> Value {
     json!({"device": device, "session": session, "since": stamp, "seen": stamp})
 }
 
-fn mine(c: &Value, device: &str, session: &str) -> bool {
-    get_str(c, "device") == Some(device) && get_str(c, "session") == Some(session)
-}
-
-/// Python truthiness of a JSON value.
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Array(a)) => !a.is_empty(),
-        Some(Value::Object(o)) => !o.is_empty(),
-        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
-    }
-}
-
-/// The job's claim when another session holds it and checked in within the last minutes. A
-/// claim whose seen stamp does not parse counts as held, where Python stops with a traceback.
-fn blocking(job: &Value, device: &str, session: &str, minutes: u32) -> Option<Value> {
-    let c = job.get("claim").filter(|c| truthy(Some(c)))?;
-    if mine(c, device, session) {
-        return None;
-    }
-    match get_str(c, "seen").and_then(parse_stamp) {
-        Some(seen) if unix_now() - seen >= i64::from(minutes) * 60 => None,
-        _ => Some(c.clone()),
-    }
-}
-
 fn claimed_by(c: &Value) -> String {
     format!(
         "claimed by {} session {}",
@@ -3059,7 +3032,9 @@ fn claim_ideas(
             };
             if pick.project.is_some_and(|p| p != project)
                 || pick.skip_ids.contains(&id)
-                || blocking(j, device, session, minutes).is_some()
+                || claims::blocking(Some(j), device, session, minutes)
+                    .unwrap_or_else(|_| j.get("claim").cloned())
+                    .is_some()
             {
                 continue;
             }
@@ -3255,7 +3230,7 @@ fn release_claim(home: &Path, job_id: &str, device: &str, session: &str) -> Res<
                 6,
             ));
         }
-        let claim = job.get("claim").filter(|c| truthy(Some(c)));
+        let claim = job.get("claim").filter(|c| truthy(Some(*c)));
         if !claim.is_some_and(|c| mine(c, device, session)) {
             return Err(fail(format!("{job_id} has no claim from this session"), 6));
         }
@@ -4355,7 +4330,9 @@ fn pickup_pass(
         if tracer_building(j) {
             return Some(format!("skip {id} {project}: building in Tracer"));
         }
-        if let Some(c) = blocking(j, device, "", minutes) {
+        if let Some(c) = claims::blocking(Some(j), device, "", minutes)
+            .unwrap_or_else(|_| j.get("claim").cloned())
+        {
             return Some(format!("skip {id} {project}: {}", claimed_by(&c)));
         }
         if let (Some(e), Some(until)) = (&experiment, &exp_limited) {
@@ -5203,19 +5180,13 @@ fn auto_babysit_limit() -> usize {
     AUTO_BABYSIT_LIMIT
 }
 
-/// This host's Paseo server id, else None. Never fails, since most hosts may lack Paseo.
-fn paseo_server() -> Option<String> {
+/// This host's Paseo server id, else None, through the seam the tests patch.
+fn host_paseo_server() -> Option<String> {
     #[cfg(test)]
     if let Some(f) = fake!(paseo_server) {
         return f();
     }
-    let home = std::env::var_os("PASEO_HOME")
-        .filter(|h| !h.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::home_dir().map(|h| h.join(".paseo")))?;
-    let text = fs::read_to_string(home.join("server-id")).ok()?;
-    let server = strip(&text);
-    PASEO_ID.is_full(server).then(|| server.to_string())
+    crate::shared::paseo::paseo_server()
 }
 
 /// The end of an archive-by-hand hint for agent: "" when agent is unsafe to print as an argument.
@@ -5424,7 +5395,7 @@ fn claim_stalled(
         let job = at.map_or(&empty, |i| &data["jobs"][i]);
         let claim = job
             .get("claim")
-            .filter(|c| truthy(Some(c)))
+            .filter(|c| truthy(Some(*c)))
             .cloned()
             .unwrap_or(json!({}));
         let paseo = job.get("paseo").filter(|p| p.is_object()).cloned();
@@ -5589,7 +5560,7 @@ fn takeover(
         };
         let job_id = safe_id(&job).unwrap().to_string();
         let slug = get_str(&job, "project").map(String::from);
-        let claim = job.get("claim").filter(|c| truthy(Some(c))).cloned();
+        let claim = job.get("claim").filter(|c| truthy(Some(*c))).cloned();
         if claim.as_ref().and_then(|c| get_str(c, "device")) != Some(device) {
             let line = claim.as_ref().map_or("unclaimed".into(), claimed_by);
             skipped(io, session, &job_id, &line);
@@ -5812,7 +5783,9 @@ fn claim_for(
         if !rule(j)
             || gated(j)
             || !has_checkout(paths, get_str(j, "project"))
-            || blocking(j, device, "", minutes).is_some()
+            || claims::blocking(Some(j), device, "", minutes)
+                .unwrap_or_else(|_| j.get("claim").cloned())
+                .is_some()
         {
             return Ok((None, None));
         }
@@ -6009,7 +5982,9 @@ fn one_launch_skip(
     if pause_and_close && closing(j) {
         return Ok(Some(format!("{head}: closing")));
     }
-    if let Some(c) = blocking(j, device, "", minutes) {
+    if let Some(c) =
+        claims::blocking(Some(j), device, "", minutes).unwrap_or_else(|_| j.get("claim").cloned())
+    {
         return Ok(Some(format!("{head}: {}", claimed_by(&c))));
     }
     if let Some(problem) = problem {
@@ -6344,7 +6319,7 @@ fn babysit_pass(
         let Some(agent) = paseo_agent(j) else {
             return (None, None);
         };
-        let same = match (j["paseo"].get("server"), paseo_server()) {
+        let same = match (j["paseo"].get("server"), host_paseo_server()) {
             (None | Some(Value::Null), None) => true,
             (Some(Value::String(s)), Some(here)) => *s == here,
             _ => false,
@@ -6431,7 +6406,9 @@ fn babysit_pass(
                     line = Some(format!("{head}: paused"));
                 } else if closing(j) {
                     line = Some(format!("{head}: closing"));
-                } else if let Some(c) = blocking(j, device, "", minutes) {
+                } else if let Some(c) = claims::blocking(Some(j), device, "", minutes)
+                    .unwrap_or_else(|_| j.get("claim").cloned())
+                {
                     line = Some(format!("{head}: {}", claimed_by(&c)));
                 } else {
                     let (agent, state) = job_agent(j);
@@ -6590,7 +6567,7 @@ fn move_stop_pass(
         }
         let (mut archives, mut kept, mut refused): (Vec<String>, Vec<String>, Vec<String>) =
             Default::default();
-        let server = paseo_server();
+        let server = host_paseo_server();
         for x in &mine {
             let agent = get_str(x, "agent").filter(|a| !a.is_empty());
             let same_server = server.is_some() && get_str(x, "server").map(String::from) == server;
@@ -6768,7 +6745,7 @@ fn session_stop_pass(
     device: &str,
     dry: bool,
 ) -> Res<()> {
-    let server = paseo_server();
+    let server = host_paseo_server();
     let cutoff = format_stamp(unix_now() - SESSION_STOP_CLOSED_HOURS * 3600);
     let stopped_here = |entry: Option<&Value>| {
         entry
@@ -7008,7 +6985,9 @@ fn close_pass(
             errln!(io, "factory.py: pickup skips the close of {job_id}: its reason must be 1 to 200 characters, with no line breaks or control characters");
             continue;
         };
-        if let Some(c) = blocking(&j, device, "", minutes) {
+        if let Some(c) = claims::blocking(Some(&j), device, "", minutes)
+            .unwrap_or_else(|_| j.get("claim").cloned())
+        {
             if dry {
                 outln!(io, "skip close {job_id} {project}: {}", claimed_by(&c));
             }
@@ -7058,7 +7037,9 @@ fn close_pass(
             if !closing(found)
                 || found["close"].get("at").cloned() != at
                 || get_str(found, "stage").is_some_and(|s| TERMINAL.contains(&s))
-                || blocking(found, device, "", minutes).is_some()
+                || claims::blocking(Some(found), device, "", minutes)
+                    .unwrap_or_else(|_| found.get("claim").cloned())
+                    .is_some()
             {
                 return Ok((None, false));
             }
@@ -7156,7 +7137,7 @@ fn priority_nudge_pass(
     dry: bool,
 ) -> Res<()> {
     let _ = device;
-    let server = paseo_server();
+    let server = host_paseo_server();
     let due = |j: &Value| {
         let stage = get_str(j, "stage");
         let p = j.get("priority");
@@ -7264,7 +7245,7 @@ fn claimed_here(j: &Value, device: &str) -> bool {
 /// board job sit unchanged for IDLE_NUDGE_MINUTES, and move it to needs-human when they stay
 /// unchanged that long again.
 fn idle_watch_pass(io: &mut Io, home: &Path, data: &mut Value, device: &str, dry: bool) -> Res<()> {
-    let server = paseo_server();
+    let server = host_paseo_server();
     let due = |j: &Value| {
         claimed_here(j, device)
             && server.is_some()
@@ -7597,7 +7578,7 @@ fn token_cap_pass(io: &mut Io, home: &Path, data: &mut Value, device: &str, dry:
         }
         outln!(io, "{line}");
         let link = j.get("paseo").filter(|l| l.is_object());
-        let server = paseo_server();
+        let server = host_paseo_server();
         if park
             && server.is_some()
             && link.and_then(|l| get_str(l, "server")).map(String::from) == server
@@ -7660,7 +7641,9 @@ fn pr_sync_pass(
             continue;
         };
         let (job_id, project) = (get_str(&j, "id").unwrap(), get_str(&j, "project").unwrap());
-        if let Some(c) = blocking(&j, device, "", minutes) {
+        if let Some(c) = claims::blocking(Some(&j), device, "", minutes)
+            .unwrap_or_else(|_| j.get("claim").cloned())
+        {
             if dry {
                 outln!(io, "skip sync {job_id} {project}: {}", claimed_by(&c));
             }
@@ -7775,7 +7758,9 @@ fn auto_babysit_pass(
             continue;
         }
         let head = format!("skip auto-babysit {job_id} {project}");
-        if let Some(c) = blocking(&j, device, "", minutes) {
+        if let Some(c) = claims::blocking(Some(&j), device, "", minutes)
+            .unwrap_or_else(|_| j.get("claim").cloned())
+        {
             if dry {
                 outln!(io, "{head}: {}", claimed_by(&c));
             }

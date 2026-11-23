@@ -1,6 +1,7 @@
 //! wait and watch: block until job artifacts carry a valid first line. round-wait is not ported yet.
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -9,15 +10,17 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 
-use crate::cli::{not_ported, Call};
-use crate::commands::claims;
+use crate::cli::Call;
+use crate::commands::{checks, claims};
 use crate::shared::board::read_board;
+use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::is_link;
-use crate::shared::project::r2_target;
+use crate::shared::project::{project_files, r2_target};
 use crate::shared::py::{os_error, printable_line, repr, splitlines, strip, universal_newlines};
 use crate::shared::pyjson::{dumps, DEFAULT};
 use crate::shared::pyre::{Flags, Pattern};
+use crate::shared::pyval::{py_eq, truthy};
 
 static WAIT_ARTIFACT: Pattern = Pattern::new(
     r"spec\.md|spec-evidence\.md|build\.md|decision\.md|round-[1-9][0-9]*/review-(security|ux|ui|code)\.md",
@@ -28,6 +31,10 @@ const WAIT_USAGE: &str = "usage: wait <project-slug>/<job-id> <artifact>... [--t
 const WATCH_USAGE: &str =
     "usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]";
 const WATCH_TIMEOUT: u64 = 540;
+const PR_STATE_INTERVAL: f64 = 30.0;
+const ROUND_WAIT_USAGE: &str = "usage: round-wait <project-slug>/<job-id> <round> [--timeout S]";
+const REVIEWERS: [&str; 4] = ["security", "ux", "ui", "code"];
+static ROUND: Pattern = Pattern::new("[1-9][0-9]*", Flags::NONE);
 
 /// True when line is a finished first line for artifact.
 fn wait_valid(artifact: &str, line: &str) -> bool {
@@ -165,20 +172,22 @@ fn wait_run(
     }
 }
 
+fn real_hold(target: &str) -> Res<()> {
+    claims::hold_target(target, None)
+}
+
+/// A set, non-empty FACTORY_SESSION, read as raw OS bytes so a non-UTF-8 value still counts.
+fn session_set(value: Option<OsString>) -> bool {
+    value.is_some_and(|s| !s.is_empty())
+}
+
 pub fn wait_cmd(call: &Call) -> Res<()> {
     let (home, slug, job_id) = r2_target(&call.args[0], true)?;
-    let hold = |target: &str| {
-        claims::hold(&Call {
-            args: vec![target.to_string()],
-            agents: None,
-            connection: None,
-        })
-    };
     let origin = Instant::now();
     let now = || origin.elapsed().as_secs_f64();
     let sleep = |s: f64| thread::sleep(Duration::from_secs_f64(s));
     let io = Io {
-        hold: &hold,
+        hold: &real_hold,
         now: &now,
         sleep: &sleep,
     };
@@ -260,12 +269,24 @@ fn watch_run(
         }
     }
     let folder = home.join("jobs").join(slug).join(job_id);
-    if watch_pr {
-        return Err(not_ported("watch --pr"));
-    }
+    let mut pr_leg = if watch_pr {
+        let mut host = checks::System::new();
+        let pr = checks::board_pr(home, slug, job_id, true)?;
+        let md = project_files(home, slug)?.0;
+        let meta = frontmatter(&md)
+            .map_err(|e| fail(os_error(&e, Some(&md)), 1))?
+            .0;
+        let base = checks::pr_base(&mut host, &meta, &pr)?;
+        let handled = checks::job_handled(home, job_id)?;
+        let org = fm_get(&meta, "buildkite_org").unwrap_or("").to_string();
+        Some((host, pr, base, handled, org))
+    } else {
+        None
+    };
     let start = (io.now)();
     let deadline = start + timeout.unwrap_or(WATCH_TIMEOUT) as f64;
     let mut bad_before: BTreeMap<String, String> = BTreeMap::new();
+    let (mut reading, mut read_at) = (Value::Null, start);
     loop {
         let lines = job_file_lines(&folder, &artifacts)?;
         let bad: BTreeMap<String, String> = artifacts
@@ -277,6 +298,12 @@ fn watch_run(
                     .map(|l| (a.to_string(), l.clone()))
             })
             .collect();
+        if let Some((host, pr, base, handled, org)) = &mut pr_leg {
+            if (io.now)() >= read_at {
+                reading = checks::pr_reading(host, home, pr, base, org, handled)?;
+                read_at = (io.now)() + PR_STATE_INTERVAL;
+            }
+        }
         let event = if !artifacts.is_empty()
             && artifacts
                 .iter()
@@ -285,6 +312,10 @@ fn watch_run(
             "files"
         } else if bad.iter().any(|(a, line)| bad_before.get(a) == Some(line)) {
             "malformed"
+        } else if truthy(&reading)
+            && !matches!(reading["next"].as_str(), Some("wait" | "wait-base"))
+        {
+            "pr"
         } else if (io.now)() >= deadline {
             "timeout"
         } else {
@@ -302,26 +333,19 @@ fn watch_run(
             );
         }
         let elapsed = ((io.now)() - start) as i64;
-        let out = json!({"event": event, "files": files, "pr": null, "elapsed": elapsed});
+        let out = json!({"event": event, "files": files, "pr": reading, "elapsed": elapsed});
         return Ok(format!("{}\n", dumps(&out, DEFAULT)));
     }
 }
 
 pub fn watch_cmd(call: &Call) -> Res<()> {
     let (home, slug, job_id) = r2_target(&call.args[0], true)?;
-    let session = std::env::var("FACTORY_SESSION").is_ok_and(|s| !s.is_empty());
-    let hold = |target: &str| {
-        claims::hold(&Call {
-            args: vec![target.to_string()],
-            agents: None,
-            connection: None,
-        })
-    };
+    let session = session_set(std::env::var_os("FACTORY_SESSION"));
     let origin = Instant::now();
     let now = || origin.elapsed().as_secs_f64();
     let sleep = |s: f64| thread::sleep(Duration::from_secs_f64(s));
     let io = Io {
-        hold: &hold,
+        hold: &real_hold,
         now: &now,
         sleep: &sleep,
     };
@@ -340,8 +364,150 @@ pub fn watch_cmd(call: &Call) -> Res<()> {
     Ok(())
 }
 
-pub fn round_wait_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("round-wait"))
+/// Run hold once, then wait until all four review files of round N have a valid first line, writing the
+/// board's rounds entry each time its verdicts change, and return one JSON line. A file that keeps an
+/// invalid non-empty first line for two reads, or --timeout passing, also ends it.
+fn round_wait_run(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    target: &str,
+    args: &[String],
+    io: &Io,
+) -> Res<String> {
+    if !ROUND.is_full(&args[0]) {
+        return Err(fail(
+            format!("bad round {}. {ROUND_WAIT_USAGE}", repr(&args[0])),
+            2,
+        ));
+    }
+    let n: usize = args[0].parse().unwrap_or(usize::MAX);
+    let rest = &args[1..];
+    let mut timeout = WATCH_TIMEOUT;
+    if !rest.is_empty() {
+        match timeout_arg(rest.get(1), WATCH_TIMEOUT, 1) {
+            Some(t) if rest.len() == 2 && rest[0] == "--timeout" => timeout = t,
+            _ => {
+                return Err(fail(
+                    format!("--timeout takes one value from 1 to 540 seconds. {ROUND_WAIT_USAGE}"),
+                    2,
+                ))
+            }
+        }
+    }
+    (io.hold)(target)?;
+    let board_rounds = || -> Res<Vec<Value>> {
+        let board = read_board(home)?;
+        let job = board["jobs"].as_array().and_then(|jobs| {
+            jobs.iter()
+                .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
+        });
+        match job.and_then(|j| j.get("rounds")).and_then(Value::as_array) {
+            Some(rounds) if rounds.len() >= n => Ok(rounds.clone()),
+            _ => Err(fail(
+                format!("{job_id} has no rounds entry {n} on the board. Nothing was written."),
+                4,
+            )),
+        }
+    };
+    let reviewers_of = |entry: &Value| -> Map<String, Value> {
+        entry
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(k, _)| REVIEWERS.contains(&k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    };
+    let mut written = Value::Object(reviewers_of(&board_rounds()?[n - 1]));
+    let folder = home.join("jobs").join(slug).join(job_id);
+    let artifacts: Vec<String> = REVIEWERS
+        .iter()
+        .map(|r| format!("round-{n}/review-{r}.md"))
+        .collect();
+    let names: Vec<&str> = artifacts.iter().map(String::as_str).collect();
+    let start = (io.now)();
+    let deadline = start + timeout as f64;
+    let mut bad_before: BTreeMap<String, String> = BTreeMap::new();
+    loop {
+        let lines = job_file_lines(&folder, &names)?;
+        let valid: BTreeMap<&str, &String> = names
+            .iter()
+            .filter_map(|a| lines.get(*a).filter(|l| wait_valid(a, l)).map(|l| (*a, l)))
+            .collect();
+        let mut verdicts = Map::new();
+        for (r, a) in REVIEWERS.iter().zip(&names) {
+            let v = valid.get(a).map_or("pending", |l| &l["VERDICT: ".len()..]);
+            verdicts.insert(r.to_string(), Value::from(v));
+        }
+        let verdicts = Value::Object(verdicts);
+        if !py_eq(&verdicts, &written) {
+            let mut rounds = board_rounds()?;
+            let mut entry: Map<String, Value> = rounds[n - 1]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter(|(k, _)| !REVIEWERS.contains(&k.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            entry.extend(verdicts.as_object().unwrap().clone());
+            rounds[n - 1] = Value::Object(entry);
+            let mut patch = Map::new();
+            patch.insert("rounds".into(), Value::Array(rounds));
+            let opts = claims::WriteOpts {
+                show: false,
+                verdict: None,
+                rewrite_round: Some(n),
+            };
+            claims::board_write(home, job_id, patch, &opts)?;
+            written = verdicts.clone();
+        }
+        let bad: BTreeMap<String, String> = lines
+            .iter()
+            .filter(|(a, l)| !strip(l).is_empty() && !valid.contains_key(a.as_str()))
+            .map(|(a, l)| (a.clone(), l.clone()))
+            .collect();
+        let event = if valid.len() == names.len() {
+            "round"
+        } else if bad.iter().any(|(a, line)| bad_before.get(a) == Some(line)) {
+            "malformed"
+        } else if (io.now)() >= deadline {
+            "timeout"
+        } else {
+            bad_before = bad;
+            (io.sleep)(1.0);
+            continue;
+        };
+        let mut files = Map::new();
+        for a in &names {
+            files.insert(
+                a.to_string(),
+                lines
+                    .get(*a)
+                    .map_or(Value::Null, |l| Value::from(l.as_str())),
+            );
+        }
+        let elapsed = ((io.now)() - start) as i64;
+        let out = json!({"event": event, "round": n, "verdicts": verdicts, "files": files, "elapsed": elapsed});
+        return Ok(format!("{}\n", dumps(&out, DEFAULT)));
+    }
+}
+
+pub fn round_wait_cmd(call: &Call) -> Res<()> {
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    let origin = Instant::now();
+    let now = || origin.elapsed().as_secs_f64();
+    let sleep = |s: f64| thread::sleep(Duration::from_secs_f64(s));
+    let io = Io {
+        hold: &real_hold,
+        now: &now,
+        sleep: &sleep,
+    };
+    print!(
+        "{}",
+        round_wait_run(&home, &slug, &job_id, &call.args[0], &call.args[1..], &io)?
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -349,6 +515,17 @@ mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
     use std::path::PathBuf;
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_session_counts_as_set() {
+        use std::os::unix::ffi::OsStrExt;
+        assert!(session_set(Some(
+            std::ffi::OsStr::from_bytes(b"\xff").to_os_string()
+        )));
+        assert!(!session_set(Some(OsString::new())));
+        assert!(!session_set(None));
+    }
 
     use crate::shared::exit::exit;
     use crate::shared::fs::temp_dir;
@@ -605,21 +782,46 @@ mod tests {
     }
 
     #[test]
-    fn watch_pr_not_ported() {
-        let (home, _) = home("watch-pr", "042-sample-export");
+    fn round_wait_refuses_bad_round_and_timeout() {
+        let (home, _) = home("round-args", "042-sample-export");
         let io = Io {
             hold: &no_hold,
             now: &|| 0.0,
             sleep: &|_| {},
         };
-        let e = watch(&home, &["--pr"], &io).unwrap_err();
+        let run = |args: &[&str]| {
+            let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+            round_wait_run(
+                &home,
+                "sample",
+                "042-sample-export",
+                "sample/042-sample-export",
+                &args,
+                &io,
+            )
+            .unwrap_err()
+        };
+        let e = run(&["0"]);
         assert_eq!(
-            (e.code, e.stderr.as_str()),
+            (e.code, e.stderr),
             (
                 2,
-                "factory.py: watch --pr is not ported to the Rust binary yet\n"
+                format!("factory.py: bad round '0'. {ROUND_WAIT_USAGE}\n")
             )
         );
+        for args in [
+            &["1", "--timeout"][..],
+            &["1", "--timeout", "0"],
+            &["1", "--timeout", "541"],
+            &["1", "-t", "5"],
+        ] {
+            let e = run(args);
+            assert_eq!(
+                (e.code, e.stderr),
+                (2, format!("factory.py: --timeout takes one value from 1 to 540 seconds. {ROUND_WAIT_USAGE}\n")),
+                "{args:?}"
+            );
+        }
         fs::remove_dir_all(home).unwrap();
     }
 

@@ -11,19 +11,20 @@ use serde_json::{json, Map, Value};
 use crate::cli::{not_ported, Call};
 use crate::shared::board::{dump_board, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
-use crate::shared::consts::{JOB_ID, NEW_JOB_ID, NOTE_SECRETS, PASEO_ID, ROUTE_MODEL, SLUG};
+use crate::shared::consts::{JOB_ID, NEW_JOB_ID, PASEO_ID, ROUTE_MODEL, SLUG};
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::read_text;
 use crate::shared::home::{device_name, factory_home};
 use crate::shared::http::{access_message, api, cas};
+use crate::shared::paseo::paseo_server;
 use crate::shared::proc::{hostname, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
 use crate::shared::py::{
-    is_space, os_error, repr, round_half_even, round_int, rstrip, splitlines, strip,
-    universal_newlines,
+    is_space, os_error, round_half_even, round_int, rstrip, splitlines, strip, universal_newlines,
 };
-use crate::shared::pyjson::{dumps, float_repr, loads, DEFAULT, INDENT2};
+use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Captures, Flags, Pattern};
+use crate::shared::pyval::{py_str, truthy};
 use crate::shared::time::{now, parse_stamp, unix_now};
 
 static HOST_NAME: Pattern = Pattern::new(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", Flags::ASCII);
@@ -96,152 +97,8 @@ const AUDIT_FILE_TOOLS: &[&str] = &["Read", "Edit", "Write"];
 const AUDIT_MAX_BYTES: usize = 1 << 20;
 const AUDIT_WRITE_ONLY: &str = "audit rows are written only by the host's bound service token";
 
-macro_rules! secret_words {
-    () => {
-        "token|secret|password|passwd|api[_-]?key|credential|mysql_pwd|sshpass|rediscli_auth"
-    };
-}
-
-static RETRO_HEADERS: Pattern = Pattern::new(
-    r#"(?i)\b((?:proxy-)?authorization|(?:set-)?cookie|x-api-key|cf-access-client-(?:id|secret))(\\?[\"']?\s*[:=]\s*\\?[\"']?)(?:\\[^\r\n'\"]|[^\r\n'\"\\])+"#,
-    Flags::NONE,
-);
-static RETRO_URL_CREDS: Pattern = Pattern::new(r"(?i)(?<=[a-z0-9+.-])://[^/\s]+@", Flags::NONE);
-static RETRO_BEARER: Pattern = Pattern::new(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+", Flags::NONE);
-static RETRO_USER_PASS: Pattern = Pattern::new(
-    r"((?:^|\s)(?:-u|--user)(?:\s+|=)?)(?!=?\d+:\d+(?!\S))[^\s:]*:\S+",
-    Flags::NONE,
-);
-static RETRO_MYSQL: Pattern = Pattern::new(
-    r"(?<![\w.-])(?:mysql\w*|mariadb(?:-\w+)?)(?:\.exe)?(?![\w.-])",
-    Flags::NONE,
-);
-static RETRO_MYSQL_PASS: Pattern = Pattern::new(
-    r#"((?:^|\s)-p)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)"#,
-    Flags::NONE,
-);
-static RETRO_SSHPASS: Pattern =
-    Pattern::new(r"(?<![\w.-])sshpass(?:\.exe)?(?![\w.-])", Flags::NONE);
-static RETRO_SSHPASS_PASS: Pattern = Pattern::new(
-    r#"((?:^|\s)-p\s*)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)"#,
-    Flags::NONE,
-);
-static RETRO_REDIS: Pattern =
-    Pattern::new(r"(?<![\w.-])redis-cli(?:\.exe)?(?![\w.-])", Flags::NONE);
-static RETRO_REDIS_PASS: Pattern = Pattern::new(
-    r#"((?:^|\s)(?:-a\s*|--pass\s+))(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)"#,
-    Flags::NONE,
-);
-static RETRO_DOCKER_LOGIN: Pattern = Pattern::new(
-    r"(?<![\w.-])docker(?:\.exe)?\s+login(?![\w.-])",
-    Flags::NONE,
-);
-static RETRO_OPENSSL: Pattern =
-    Pattern::new(r"(?<![\w.-])openssl(?:\.exe)?(?![\w.-])", Flags::NONE);
-static RETRO_OPENSSL_PASS: Pattern = Pattern::new(
-    r#"((?:^|\s)-pass(?:in|out)?\s+pass:)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)"#,
-    Flags::NONE,
-);
-static RETRO_OPENSSL_K: Pattern = Pattern::new(
-    r#"((?:^|\s)-[kK]\s+)(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)"#,
-    Flags::NONE,
-);
-static RETRO_OPENSSL_BARE: Pattern = Pattern::new(
-    r#"((?:^|\s)-pass(?:in|out)?\s+)(?!(?:pass|env|file|fd):|stdin(?!\S))(\"[^\"]*\"|'[^']*'|[^\s\"']\S*)"#,
-    Flags::NONE,
-);
-static RETRO_COMMAND_SPLIT: Pattern = Pattern::new(
-    r#"(?:\"[^\"]*\"|'[^']*'|[^|;&\"']|[\"'])+|[|;&]+"#,
-    Flags::NONE,
-);
-static RETRO_PASSWORD_STDIN: Pattern =
-    Pattern::new(r"(?<![\w-])--password-stdin(?![\w-])", Flags::NONE);
-static RETRO_ECHO_PASS: Pattern = Pattern::new(
-    r#"((?:^|[\s;&(])echo\s+(?:-[neE]{1,3}\s+)?)(\"[^\"]*\"|'[^']*'|[^\s\"'|;&]+)(\s*\|\s*)$"#,
-    Flags::NONE,
-);
-static RETRO_SECRET_WORD: Pattern =
-    Pattern::new(concat!("(?i)(?:", secret_words!(), ")"), Flags::NONE);
-static RETRO_COUNT: Pattern = Pattern::new(r"\d{1,7}[,;)}\]]*", Flags::NONE);
-static RETRO_KEYVALUE: Pattern = Pattern::new(
-    concat!(
-        r"(?i)(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{0,64}?(?:",
-        secret_words!(),
-        r#")[A-Za-z0-9_-]{0,64})(\\?[\"']?\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|\S+)"#
-    ),
-    Flags::NONE,
-);
-static RETRO_FLAG: Pattern = Pattern::new(
-    concat!(
-        r"(?i)(?<![A-Za-z0-9_-])(--[A-Za-z0-9_-]{0,64}?(?:",
-        secret_words!(),
-        r")[A-Za-z0-9_-]{0,64})(\s+)(?!-)(\S+)"
-    ),
-    Flags::NONE,
-);
-static RETRO_LONG_KEYVALUE: Pattern = Pattern::new(
-    r#"(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{65,})(\\?[\"']?\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|\S+)"#,
-    Flags::NONE,
-);
-static RETRO_LONG_FLAG: Pattern = Pattern::new(
-    r"(?<![A-Za-z0-9_-])(--[A-Za-z0-9_-]{65,})(\s+)(?!-)(\S+)",
-    Flags::NONE,
-);
 static WORD_DOT_DASH: Pattern = Pattern::new(r"[\w.-]", Flags::NONE);
 static WORD_DASH: Pattern = Pattern::new(r"[\w-]", Flags::NONE);
-
-/// Python truthiness of a value that may be missing.
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Array(a)) => !a.is_empty(),
-        Some(Value::Object(o)) => !o.is_empty(),
-    }
-}
-
-/// Python's `str()` of a value that may be missing.
-fn py_str(v: Option<&Value>) -> String {
-    match v {
-        Some(Value::String(s)) => s.clone(),
-        Some(v) => py_repr(v),
-        None => "None".into(),
-    }
-}
-
-/// Python's `repr()` of a parsed JSON value.
-fn py_repr(v: &Value) -> String {
-    match v {
-        Value::Null => "None".into(),
-        Value::Bool(b) => if *b { "True" } else { "False" }.into(),
-        Value::Number(n) => {
-            let text = n.to_string();
-            if !text.contains(['.', 'e', 'E']) {
-                return if text == "-0" { "0".into() } else { text };
-            }
-            let x: f64 = text.parse().unwrap();
-            if x.is_infinite() {
-                if x > 0.0 { "inf" } else { "-inf" }.into()
-            } else {
-                float_repr(x)
-            }
-        }
-        Value::String(s) => repr(s),
-        Value::Array(items) => format!(
-            "[{}]",
-            items.iter().map(py_repr).collect::<Vec<_>>().join(", ")
-        ),
-        Value::Object(map) => format!(
-            "{{{}}}",
-            map.iter()
-                .map(|(k, v)| format!("{}: {}", repr(k), py_repr(v)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    }
-}
 
 /// The value when `type(v) is int` and it fits i64.
 fn int_of(v: Option<&Value>) -> Option<i64> {
@@ -400,123 +257,10 @@ fn group<'t>(c: &Captures<'t>, n: usize) -> &'t str {
     c.get(n).map_or("", |m| m.as_str())
 }
 
-/// `pattern.sub(f, s, count=count)`, where count 0 replaces every match.
-fn sub(pattern: &Pattern, s: &str, count: usize, f: impl Fn(&Captures) -> String) -> String {
-    if count == 0 {
-        return pattern.replace_all(s, |c| f(c));
-    }
-    match pattern.search(s) {
-        Some(c) => {
-            let m = c.get(0).unwrap();
-            format!("{}{}{}", &s[..m.start()], f(&c), &s[m.end()..])
-        }
-        None => s.to_string(),
-    }
-}
-
-/// Whether every secret word in name is token followed by s, as in max_tokens.
-fn retro_count_name(name: &str) -> bool {
-    RETRO_SECRET_WORD
-        .find_iter(name)
-        .all(|m| m.as_str().to_lowercase() == "token" && name[m.end()..].starts_with(['s', 'S']))
-}
-
-fn retro_secret_pair(c: &Captures) -> String {
-    let (name, sep, value) = (group(c, 1), group(c, 2), group(c, 3));
-    if RETRO_SECRET_WORD.search(name).is_none()
-        || (RETRO_COUNT.is_full(value) && retro_count_name(name))
-    {
-        return group(c, 0).to_string();
-    }
-    format!("{name}{sep}[redacted]")
-}
-
-/// One command with every -k, -K and bare -pass, -passin or -passout value after its openssl as
-/// [redacted].
-fn retro_openssl_part(part: &str) -> String {
-    let Some(hit) = RETRO_OPENSSL.search(part) else {
-        return part.to_string();
-    };
-    let end = hit.get(0).unwrap().end();
-    let redact = |c: &Captures| format!("{}[redacted]", group(c, 1));
-    let rest = sub(
-        &RETRO_OPENSSL_BARE,
-        &sub(&RETRO_OPENSSL_K, &part[end..], 0, redact),
-        0,
-        redact,
-    );
-    format!("{}{rest}", &part[..end])
-}
-
-/// line with each tool's password argument as [redacted], as Python's `retro_tool_pass` does.
-fn retro_tool_pass(line: &str) -> String {
-    let mut line = line.to_string();
-    let redact = |c: &Captures| format!("{}[redacted]", group(c, 1));
-    for (tool, flag, count) in [
-        (&RETRO_MYSQL, &RETRO_MYSQL_PASS, 0),
-        (&RETRO_SSHPASS, &RETRO_SSHPASS_PASS, 1),
-        (&RETRO_REDIS, &RETRO_REDIS_PASS, 1),
-        (&RETRO_DOCKER_LOGIN, &RETRO_SSHPASS_PASS, 1),
-        (&RETRO_OPENSSL, &RETRO_OPENSSL_PASS, 0),
-    ] {
-        if let Some(hit) = tool.search(&line) {
-            let end = hit.get(0).unwrap().end();
-            line = format!("{}{}", &line[..end], sub(flag, &line[end..], count, redact));
-        }
-    }
-    line = RETRO_COMMAND_SPLIT
-        .find_iter(&line)
-        .map(|m| retro_openssl_part(m.as_str()))
-        .collect();
-    if let Some(hit) = RETRO_DOCKER_LOGIN.search(&line) {
-        let hit = hit.get(0).unwrap();
-        if RETRO_PASSWORD_STDIN
-            .find_iter(&line)
-            .any(|m| m.start() >= hit.end())
-        {
-            let head = sub(&RETRO_ECHO_PASS, &line[..hit.start()], 0, |c| {
-                format!("{}[redacted]{}", group(c, 1), group(c, 3))
-            });
-            line = format!("{head}{}", &line[hit.start()..]);
-        }
-    }
-    line
-}
-
-fn retro_redact(text: &str) -> String {
-    let text = sub(&RETRO_HEADERS, text, 0, |c| {
-        format!("{}{}[redacted]", group(c, 1), group(c, 2))
-    });
-    let text = sub(&RETRO_URL_CREDS, &text, 0, |_| "://[redacted]@".into());
-    let text = sub(&RETRO_BEARER, &text, 0, |c| {
-        format!("{}[redacted]", group(c, 1))
-    });
-    let text = sub(&RETRO_USER_PASS, &text, 0, |c| {
-        format!("{}[redacted]", group(c, 1))
-    });
-    let mut text = text
-        .split('\n')
-        .map(retro_tool_pass)
-        .collect::<Vec<_>>()
-        .join("\n");
-    for pattern in [
-        &RETRO_KEYVALUE,
-        &RETRO_FLAG,
-        &RETRO_LONG_KEYVALUE,
-        &RETRO_LONG_FLAG,
-    ] {
-        text = sub(pattern, &text, 0, retro_secret_pair);
-    }
-    for pattern in &NOTE_SECRETS {
-        text = sub(pattern, &text, 0, |_| "[redacted]".into());
-    }
-    text
-}
-
 /// raw as it prints: home as ~, retro-redacted, whitespace collapsed, control characters as ?, at
 /// most 120 characters.
 fn audit_target(raw: &str, home: &str) -> String {
-    let redacted = retro_redact(&fold_home(raw, home));
+    let redacted = crate::commands::retro::retro_redact(&fold_home(raw, home));
     redacted
         .split(is_space)
         .filter(|w| !w.is_empty())
@@ -539,13 +283,6 @@ fn env_dir(var: &str, fallback: &str) -> Option<PathBuf> {
         Some(v) => Some(PathBuf::from(v)),
         None => std::env::home_dir().map(|h| h.join(fallback)),
     }
-}
-
-/// This host's Paseo server id, else None.
-fn paseo_server() -> Option<String> {
-    let text = read_text(&env_dir("PASEO_HOME", ".paseo")?.join("server-id")).ok()?;
-    let server = strip(&text);
-    PASEO_ID.is_full(server).then(|| server.to_string())
 }
 
 /// A message or tool_result content as text: a string, or its joined text blocks.
@@ -2084,6 +1821,7 @@ pub fn bench_cmd(call: &Call) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::pyval::py_repr;
     use serde_json::json;
 
     #[test]

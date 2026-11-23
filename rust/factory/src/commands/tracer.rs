@@ -10,17 +10,18 @@ use serde_json::{json, Value};
 use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use ureq::Agent;
 
-use crate::cli::{not_ported, Call};
+use crate::cli::Call;
 use crate::shared::board::{dump_board, load_board, read_board};
 use crate::shared::consts::{IDEA, IN_FLIGHT, JOB_ID, NOTE_INVISIBLE, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
 use crate::shared::fs::{read_text, regular_metadata};
 use crate::shared::home::factory_home;
-use crate::shared::http::{api, api_url, cas, urlopen_error};
+use crate::shared::http::{api, api_url, cas, urlopen_error, MAX_BODY_BYTES};
 use crate::shared::project::{r2_target, safe_job_folder};
 use crate::shared::py::{is_space, repr, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, DEFAULT};
 use crate::shared::pyre::{Flags, Pattern};
+use crate::shared::pyval::{py_str, truthy};
 use crate::shared::time::now;
 
 const TRACER_TIMEOUT: Duration = Duration::from_secs(5);
@@ -85,29 +86,6 @@ const PY_KINDS: [&str; 6] = [
     "OSError",
 ];
 
-/// Python truthiness.
-fn truthy(v: &Value) -> bool {
-    match v {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::String(s) => !s.is_empty(),
-        Value::Array(a) => !a.is_empty(),
-        Value::Object(o) => !o.is_empty(),
-        Value::Number(n) => n.as_f64() != Some(0.0),
-    }
-}
-
-/// Python `str()` of a JSON value; arrays and objects come out as JSON.
-fn py_str(v: &Value) -> String {
-    match v {
-        Value::Null => "None".to_string(),
-        Value::Bool(true) => "True".to_string(),
-        Value::Bool(false) => "False".to_string(),
-        Value::String(s) => s.clone(),
-        other => dumps(other, DEFAULT),
-    }
-}
-
 /// `" ".join(s.split())`.
 fn squash(s: &str) -> String {
     s.split(is_space)
@@ -146,7 +124,7 @@ fn chars(s: &str, n: usize) -> String {
 
 /// `str(v or "")`.
 fn text_of(v: Option<&Value>) -> String {
-    v.filter(|v| truthy(v)).map(py_str).unwrap_or_default()
+    v.filter(|v| truthy(*v)).map(py_str).unwrap_or_default()
 }
 
 /// `str(v or "").strip().upper()` for a ticket.
@@ -454,7 +432,7 @@ fn tracer_enabled(home: &Path) -> Res<bool> {
     if !doc.is_object() {
         return Err(py_error("AttributeError"));
     }
-    match doc.get("tracer").filter(|t| truthy(t)) {
+    match doc.get("tracer").filter(|t| truthy(*t)) {
         None => Ok(false),
         Some(Value::Object(t)) => Ok(is_true(t.get("enabled"))),
         Some(_) => Err(py_error("AttributeError")),
@@ -617,7 +595,7 @@ fn tracer_send(
     let body = response
         .into_body()
         .with_config()
-        .limit(u64::MAX)
+        .limit(MAX_BODY_BYTES)
         .read_to_vec()?;
     Ok((status, body))
 }
@@ -853,7 +831,7 @@ fn tracer_mirror(
         &[200, 201],
     )?;
     let tasks = spec_tasks(&spec);
-    let listed: &[Value] = match feature.get("tasks").filter(|t| truthy(t)) {
+    let listed: &[Value] = match feature.get("tasks").filter(|t| truthy(*t)) {
         None => &[],
         Some(Value::Array(a)) => a,
         Some(_) => return Err(py_error("TypeError")),
@@ -947,7 +925,7 @@ fn tracer_mirror(
         let last = format!("t{}", tasks.len());
         let runs: &[Value] = match task_of(tasks.len())
             .and_then(|t| t.get("test_runs"))
-            .filter(|r| truthy(r))
+            .filter(|r| truthy(*r))
         {
             None => &[],
             Some(Value::Array(a)) => a,
@@ -959,7 +937,7 @@ fn tracer_mirror(
             let Value::Object(run) = r else {
                 return Err(py_error("AttributeError"));
             };
-            let output = match run.get("output").filter(|o| truthy(o)) {
+            let output = match run.get("output").filter(|o| truthy(*o)) {
                 None => "",
                 Some(Value::String(s)) => s,
                 Some(_) => return Err(py_error("TypeError")),
@@ -1279,7 +1257,6 @@ fn tracer_stop_build(home: &Path, slug: &str, job: &Value, cfg: &TracerCfg) -> R
 /// Mirror the job a board patch just changed, when its project is configured. A pending Tracer
 /// build stop runs first, and the stage mirror still follows it. A Tracer failure costs one
 /// warning line on stderr, never the board change.
-#[allow(dead_code)] // The board command in the claims slice calls it.
 pub(crate) fn tracer_after_board(home: &Path, job: &Value) {
     after_board_to(home, job, &mut std::io::stderr().lock());
 }
@@ -1363,11 +1340,6 @@ fn after_board_steps(
     Ok(())
 }
 
-/// Stands in for the sync slice's `pull_job` until that slice lands.
-fn deferred_pull_job(_home: &Path, _slug: &str, _job_id: &str) -> Res<()> {
-    Err(not_ported("pull"))
-}
-
 /// Mirror each followed job that has no Tracer link yet, pulling its spec.md first when this
 /// device lacks it. A job that gathers in Tracer, or asks to, is gathered or polled without a
 /// pull. Silent on a device without tracer.json.
@@ -1412,7 +1384,7 @@ fn follow_pass_to(home: &Path, err: &mut dyn Write) -> Res<()> {
         let spec = home.join("jobs").join(slug).join(&job_id).join("spec.md");
         if !gathering && !spec.is_file() {
             // Python ignores every pull failure here.
-            let _ = deferred_pull_job(home, slug, &job_id);
+            let _ = crate::commands::sync::pull_job(home, slug, &job_id);
         }
         after_board_to(home, job, err);
     }

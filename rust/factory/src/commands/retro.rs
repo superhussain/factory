@@ -23,8 +23,9 @@ use crate::shared::home::factory_home;
 use crate::shared::http::{access_message, api, cas, Response};
 use crate::shared::proc::hostname;
 use crate::shared::py::{is_space, os_error, printable_line, repr, round_int, splitlines, strip};
-use crate::shared::pyjson::{dumps, float_repr, loads, DEFAULT, INDENT2};
+use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Captures, Flags, Pattern};
+use crate::shared::pyval::{py_repr, py_str, truthy};
 use crate::shared::time::{format_stamp, now, parse_stamp, unix_now};
 use crate::shared::unicode::nfkc;
 
@@ -345,7 +346,7 @@ fn tool_pass(line: &str) -> String {
     line
 }
 
-fn redact(text: &str) -> String {
+pub(crate) fn retro_redact(text: &str) -> String {
     let text = RETRO_HEADERS.replace_all(text, |c| {
         format!("{}{}[redacted]", group(c, 1), group(c, 2))
     });
@@ -399,7 +400,7 @@ fn clip(v: Value) -> Value {
 }
 
 fn pattern(text: &str) -> String {
-    let joined = redact(text)
+    let joined = retro_redact(text)
         .split(is_space)
         .filter(|w| !w.is_empty())
         .collect::<Vec<_>>()
@@ -1879,7 +1880,7 @@ fn trial_valid(t: &Value) -> bool {
 
 fn trials(data: &Value) -> impl Iterator<Item = &Value> {
     data.get("trials")
-        .filter(|t| truthy(Some(t)))
+        .filter(|t| truthy(Some(*t)))
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
@@ -2697,61 +2698,9 @@ fn check_untrusted(text: &str) -> Option<String> {
         .map(|(rule, _)| format!("reads like an instruction to override factory rules ({rule})"))
 }
 
-/// Python truthiness of a value that may be missing.
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Array(a)) => !a.is_empty(),
-        Some(Value::Object(o)) => !o.is_empty(),
-        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
-    }
-}
-
 /// `type(v) is int` for a parsed JSON value.
 fn is_int(v: &Value) -> bool {
     matches!(v, Value::Number(n) if !n.to_string().contains(['.', 'e', 'E']))
-}
-
-/// `str(x)` on a parsed JSON value.
-fn py_str(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        _ => py_repr(v),
-    }
-}
-
-/// `repr(x)` on a parsed JSON value.
-fn py_repr(v: &Value) -> String {
-    match v {
-        Value::Null => "None".into(),
-        Value::Bool(b) => if *b { "True" } else { "False" }.into(),
-        Value::Number(n) => {
-            let text = n.to_string();
-            if is_int(v) {
-                if text == "-0" {
-                    "0".into()
-                } else {
-                    text
-                }
-            } else {
-                float_repr(text.parse().unwrap())
-            }
-        }
-        Value::String(s) => repr(s),
-        Value::Array(items) => format!(
-            "[{}]",
-            items.iter().map(py_repr).collect::<Vec<_>>().join(", ")
-        ),
-        Value::Object(map) => format!(
-            "{{{}}}",
-            map.iter()
-                .map(|(k, v)| format!("{}: {}", repr(k), py_repr(v)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    }
 }
 
 /// `f"{n:,}"`.
@@ -2936,62 +2885,9 @@ fn when(v: Option<&Value>) -> Option<i128> {
 }
 
 /// `datetime.now().date().isoformat()`.
-#[cfg(unix)]
 fn local_today() -> String {
-    #[repr(C)]
-    struct Tm {
-        sec: std::ffi::c_int,
-        min: std::ffi::c_int,
-        hour: std::ffi::c_int,
-        mday: std::ffi::c_int,
-        mon: std::ffi::c_int,
-        year: std::ffi::c_int,
-        rest: [u64; 6],
-    }
-    extern "C" {
-        fn localtime_r(t: *const i64, out: *mut Tm) -> *mut Tm;
-    }
     let now = unix_now();
-    let mut tm = Tm {
-        sec: 0,
-        min: 0,
-        hour: 0,
-        mday: 0,
-        mon: 0,
-        year: 0,
-        rest: [0; 6],
-    };
-    // SAFETY: now is a valid time_t, and tm is larger than the platform's struct tm, which
-    // localtime_r fills and does not keep.
-    unsafe { localtime_r(&now, &mut tm) };
-    format!("{:04}-{:02}-{:02}", tm.year + 1900, tm.mon + 1, tm.mday)
-}
-
-/// `datetime.now().date().isoformat()`.
-#[cfg(windows)]
-fn local_today() -> String {
-    #[repr(C)]
-    struct SystemTime {
-        year: u16,
-        month: u16,
-        day_of_week: u16,
-        day: u16,
-        rest: [u16; 4],
-    }
-    #[link(name = "kernel32")]
-    extern "system" {
-        fn GetLocalTime(out: *mut SystemTime);
-    }
-    let mut st = SystemTime {
-        year: 0,
-        month: 0,
-        day_of_week: 0,
-        day: 0,
-        rest: [0; 4],
-    };
-    // SAFETY: st is a SYSTEMTIME that GetLocalTime fills and does not keep.
-    unsafe { GetLocalTime(&mut st) };
-    format!("{:04}-{:02}-{:02}", st.year, st.month, st.day)
+    format_stamp(now + crate::commands::pickup::local_offset(now))[..10].to_string()
 }
 
 /// A new run name: the UTC stamp, then 6 random hex digits.
@@ -3144,7 +3040,7 @@ mod tests {
             ("--api_key hunter2", "hunter"),
             ("-u ci:hunter2 https://example.test", "hunter"), // gitleaks:allow
         ] {
-            let out = redact(text);
+            let out = retro_redact(text);
             assert!(
                 !out.contains(secret) && out.contains("[redacted]"),
                 "{text}: {out}"
@@ -3155,7 +3051,7 @@ mod tests {
             ("CF_API_TOKEN=xyz curl", "CF_API_TOKEN=[redacted] curl"),
             ("git push -u origin main", "git push -u origin main"),
         ] {
-            assert_eq!(redact(text), kept);
+            assert_eq!(retro_redact(text), kept);
         }
     }
 
@@ -3166,7 +3062,7 @@ mod tests {
             "docker run --user=0:0 img",
             "docker run -u=1000:1000 img",
         ] {
-            assert_eq!(redact(text), text);
+            assert_eq!(retro_redact(text), text);
         }
         for text in [
             "docker run -u ci:hunter2 img", // gitleaks:allow
@@ -3174,7 +3070,7 @@ mod tests {
             "docker run --user=1000:pw img",
             "docker run -u 1000:1000x img",
         ] {
-            assert!(redact(text).contains("[redacted]"), "{text}");
+            assert!(retro_redact(text).contains("[redacted]"), "{text}");
         }
     }
 
@@ -3262,7 +3158,7 @@ mod tests {
                 "echo -n [redacted] | docker login ghcr.io -u me --password-stdin",
             ),
         ] {
-            assert_eq!(redact(text), out, "{text}");
+            assert_eq!(retro_redact(text), out, "{text}");
         }
     }
 
@@ -3280,7 +3176,7 @@ mod tests {
                 "sshpass -f pw.txt ssh -p [redacted] host",
             ),
         ] {
-            assert_eq!(redact(text), out, "{text}");
+            assert_eq!(retro_redact(text), out, "{text}");
         }
         for text in [
             "redis-cli -h h -p 6379 ping",
@@ -3298,7 +3194,7 @@ mod tests {
             "echo hunter2 | grep h",
             "echo hi; docker login ghcr.io",
         ] {
-            assert_eq!(redact(text), text);
+            assert_eq!(retro_redact(text), text);
         }
     }
 
@@ -3314,12 +3210,12 @@ mod tests {
             format!("\"{a}"),
         ] {
             let start = Instant::now();
-            assert_eq!(redact(&text), text);
+            assert_eq!(retro_redact(&text), text);
             assert!(start.elapsed() < Duration::from_secs(1), "{}", &text[..3]);
         }
         let x = "x".repeat(63);
         assert_eq!(
-            redact(&format!("{x}_token=xyz")),
+            retro_redact(&format!("{x}_token=xyz")),
             format!("{x}_token=[redacted]")
         );
     }
@@ -3330,7 +3226,7 @@ mod tests {
         let a = "a".repeat(30000);
         let start = Instant::now();
         assert_eq!(
-            redact(&format!("{a}https://u:p@host")),
+            retro_redact(&format!("{a}https://u:p@host")),
             format!("{a}https://[redacted]@host")
         );
         assert!(start.elapsed() < Duration::from_secs(1));
@@ -3387,7 +3283,7 @@ mod tests {
                 "https://[redacted]@host/a@b".into(),
             ),
         ] {
-            assert_eq!(redact(&text), out, "{}", cut(&text, 20));
+            assert_eq!(retro_redact(&text), out, "{}", cut(&text, 20));
         }
     }
 
@@ -3504,7 +3400,7 @@ mod tests {
                 );
             }
             let start = Instant::now();
-            redact(&text);
+            retro_redact(&text);
             assert!(
                 start.elapsed() < Duration::from_secs(1),
                 "redact on {unit:?}"
@@ -5073,8 +4969,11 @@ mod tests {
         assert_eq!(py_str(&json!(true)), "True");
         assert_eq!(py_str(&json!("x")), "x");
         assert_eq!(py_str(&json!(1017)), "1017");
-        assert_eq!(py_str(&serde_json::from_str("2.50").unwrap()), "2.5");
-        assert_eq!(py_str(&serde_json::from_str("-0").unwrap()), "0");
+        assert_eq!(
+            py_str(&serde_json::from_str::<Value>("2.50").unwrap()),
+            "2.5"
+        );
+        assert_eq!(py_str(&serde_json::from_str::<Value>("-0").unwrap()), "0");
         assert_eq!(
             py_str(&json!([1, "a", null, {"k": false, "it's": 1e16}])),
             "[1, 'a', None, {'k': False, \"it's\": 1e+16}]"

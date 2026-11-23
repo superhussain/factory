@@ -1,7 +1,5 @@
 //! The prompt command: one role's full agent prompt, printed or written to a private file.
 
-use std::fs;
-use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
@@ -16,13 +14,16 @@ use crate::shared::consts::{
     STEER_SENTENCE,
 };
 use crate::shared::exit::{fail, Exit, Res};
-use crate::shared::fs::{is_link, mkdir_private, resolve, write_atomic};
+use crate::shared::fs::{
+    contained, io_fail, is_link, make_job_temp, mkdir_private, normpath, resolve, write_atomic,
+};
 use crate::shared::home::skill_root;
 use crate::shared::http::api;
 use crate::shared::project::{project_files, r2_target};
 use crate::shared::py::{os_error, repr};
-use crate::shared::pyjson::{dumps, loads, DEFAULT};
+use crate::shared::pyjson::loads;
 use crate::shared::pyre::{Flags as ReFlags, Pattern};
+use crate::shared::pyval::{py_str, truthy};
 use crate::shared::time::parse_stamp;
 use crate::shared::unicode::nfkc;
 
@@ -116,43 +117,13 @@ fn parse_flags(role: &str, flags: &[String]) -> Res<Flags> {
     Ok(options)
 }
 
-/// `posixpath.normpath`.
-fn normpath(p: &str) -> String {
-    if p.is_empty() {
-        return ".".into();
-    }
-    let slashes = if p.starts_with("//") && !p.starts_with("///") {
-        "//"
-    } else if p.starts_with('/') {
-        "/"
-    } else {
-        ""
-    };
-    let mut parts: Vec<&str> = Vec::new();
-    for part in p.split('/') {
-        if part.is_empty() || part == "." {
-            continue;
-        }
-        if part != ".." || (slashes.is_empty() && parts.is_empty()) || parts.last() == Some(&"..") {
-            parts.push(part);
-        } else if !parts.is_empty() {
-            parts.pop();
-        }
-    }
-    let path = format!("{slashes}{}", parts.join("/"));
-    if path.is_empty() {
-        ".".into()
-    } else {
-        path
-    }
-}
-
 /// An absolute path strictly below prompts. A `..` left over after normpath, as a backslash path
 /// keeps on Windows, is refused because `ancestors` does not collapse it.
 fn under_prompts(prompts: &Path, out: &Path) -> bool {
     out.is_absolute()
         && !out.components().any(|c| c == Component::ParentDir)
-        && out.ancestors().skip(1).any(|a| a == prompts)
+        && out != prompts
+        && contained(prompts, out)
 }
 
 fn out_path(home: &Path, out: &str) -> Res<PathBuf> {
@@ -165,29 +136,6 @@ fn out_path(home: &Path, out: &str) -> Res<PathBuf> {
         ));
     }
     Ok(out)
-}
-
-/// Python truthiness.
-fn truthy(v: &Value) -> bool {
-    match v {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64() != Some(0.0),
-        Value::String(s) => !s.is_empty(),
-        Value::Array(a) => !a.is_empty(),
-        Value::Object(o) => !o.is_empty(),
-    }
-}
-
-/// `str(v)` for what the board holds. Arrays and objects print as JSON, not as Python's repr.
-fn py_str(v: &Value) -> String {
-    match v {
-        Value::Null => "None".into(),
-        Value::Bool(true) => "True".into(),
-        Value::Bool(false) => "False".into(),
-        Value::String(s) => s.clone(),
-        other => dumps(other, DEFAULT),
-    }
 }
 
 /// The decimal text of a JSON int, or None for anything else, floats and bools included.
@@ -562,165 +510,6 @@ fn trial_champion(home: &Path, trial: &Value) -> Res<String> {
     Ok(note.and_then(Value::as_str).unwrap_or_default().to_string())
 }
 
-/// `os.path.abspath` on this platform.
-fn abspath(dir: &str, cwd: &Path) -> PathBuf {
-    if cfg!(windows) {
-        std::path::absolute(cwd.join(dir)).unwrap_or_else(|_| cwd.join(dir))
-    } else if dir.starts_with('/') {
-        PathBuf::from(normpath(dir))
-    } else {
-        PathBuf::from(normpath(&format!("{}/{dir}", cwd.display())))
-    }
-}
-
-/// `tempfile.gettempdir()`: the first candidate folder a probe file can be written to.
-fn temp_root() -> Res<PathBuf> {
-    let mut dirs: Vec<String> = ["TMPDIR", "TEMP", "TMP"]
-        .iter()
-        .filter_map(|name| std::env::var(name).ok().filter(|v| !v.is_empty()))
-        .collect();
-    if cfg!(windows) {
-        let profile = std::env::var("USERPROFILE").unwrap_or_else(|_| "~".into());
-        let root = std::env::var("SYSTEMROOT").unwrap_or_else(|_| "%SYSTEMROOT%".into());
-        dirs.push(format!(r"{profile}\AppData\Local\Temp"));
-        dirs.push(format!(r"{root}\Temp"));
-        dirs.extend([r"c:\temp", r"c:\tmp", r"\temp", r"\tmp"].map(String::from));
-    } else {
-        dirs.extend(["/tmp", "/var/tmp", "/usr/tmp"].map(String::from));
-    }
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    dirs.push(cwd.to_string_lossy().into_owned());
-    for dir in &dirs {
-        let dir = abspath(dir, &cwd);
-        for n in 0..100 {
-            let probe = dir.join(format!(".factory-probe-{}-{n}", std::process::id()));
-            match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&probe)
-            {
-                Ok(mut file) => {
-                    let wrote = io::Write::write_all(&mut file, b"blat");
-                    drop(file);
-                    if fs::remove_file(&probe).is_ok() && wrote.is_ok() {
-                        return Ok(dir);
-                    }
-                    break;
-                }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(e)
-                    if cfg!(windows)
-                        && e.kind() == io::ErrorKind::PermissionDenied
-                        && dir.is_dir() =>
-                {
-                    continue
-                }
-                Err(_) => break,
-            }
-        }
-    }
-    let listed: Vec<String> = dirs.iter().map(|d| repr(d)).collect();
-    Err(fail(
-        format!(
-            "No usable temporary directory found in [{}]",
-            listed.join(", ")
-        ),
-        1,
-    ))
-}
-
-fn refused(path: &Path) -> Exit {
-    fail(
-        format!(
-            "{} is a link or a file; remove it, then run prompt again",
-            path.display()
-        ),
-        6,
-    )
-}
-
-fn io_fail(e: io::Error, path: &Path) -> Exit {
-    fail(os_error(&e, Some(path)), 1)
-}
-
-#[cfg(unix)]
-extern "C" {
-    fn getuid() -> u32;
-}
-
-#[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
-const O_DIRECTORY_NOFOLLOW: i32 = 0o40000 | 0o100000;
-#[cfg(all(
-    target_os = "linux",
-    not(any(target_arch = "aarch64", target_arch = "arm"))
-))]
-const O_DIRECTORY_NOFOLLOW: i32 = 0o200000 | 0o400000;
-#[cfg(target_os = "macos")]
-const O_DIRECTORY_NOFOLLOW: i32 = 0x100000 | 0x100;
-
-/// Create the job's temp folder private to this account, refusing a name someone else holds.
-fn make_job_temp(slug: &str, job_id: &str) -> Res<PathBuf> {
-    let path = temp_root()?.join(format!("factory-{slug}-{job_id}"));
-    if is_link(&path).map_err(|e| io_fail(e, &path))?
-        || fs::symlink_metadata(&path).is_ok() && !path.is_dir()
-    {
-        return Err(refused(&path));
-    }
-    // SAFETY: getuid takes no arguments, cannot fail and touches no memory.
-    #[cfg(unix)]
-    let uid = Some(unsafe { getuid() });
-    #[cfg(not(unix))]
-    let uid = None;
-    create_and_secure(&path, uid)?;
-    Ok(path)
-}
-
-/// Make path a 0700 folder, then refuse it unless it is a real folder, owned by uid when given.
-fn create_and_secure(path: &Path, uid: Option<u32>) -> Res<()> {
-    match mkdir_private(path) {
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Err(refused(path)),
-        Err(e) => return Err(io_fail(e, path)),
-        Ok(()) => {}
-    }
-    let st = fs::symlink_metadata(path).map_err(|e| io_fail(e, path))?;
-    if is_link(path).map_err(|e| io_fail(e, path))? || !st.is_dir() {
-        return Err(refused(path));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
-        if uid.is_some_and(|uid| st.uid() != uid) {
-            return Err(fail(
-                format!(
-                    "{} belongs to another account; remove it, then run prompt again",
-                    path.display()
-                ),
-                6,
-            ));
-        }
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(O_DIRECTORY_NOFOLLOW)
-            .open(path)
-            .map_err(|_| refused(path))?;
-        let opened = file.metadata().map_err(|e| io_fail(e, path))?;
-        if (opened.dev(), opened.ino()) != (st.dev(), st.ino()) {
-            return Err(refused(path));
-        }
-        file.set_permissions(fs::Permissions::from_mode(0o700))
-            .map_err(|e| io_fail(e, path))?;
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = uid;
-        let mut perms = st.permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
-        perms.set_readonly(false);
-        fs::set_permissions(path, perms).map_err(|e| io_fail(e, path))?;
-    }
-    Ok(())
-}
-
 /// Write the prompt to out, refusing a link below home and making missing folders 0700.
 fn write_out(home: &Path, out: &Path, text: &str) -> Res<()> {
     for node in out.ancestors() {
@@ -745,7 +534,8 @@ fn write_out(home: &Path, out: &Path, text: &str) -> Res<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(out, fs::Permissions::from_mode(0o600)).map_err(|e| io_fail(e, out))?;
+        std::fs::set_permissions(out, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| io_fail(e, out))?;
     }
     Ok(())
 }
@@ -929,6 +719,7 @@ mod tests {
     #[cfg(unix)]
     use crate::shared::fs::temp_dir;
     use serde_json::json;
+    use std::fs;
 
     #[test]
     fn normpath_matches_python() {
@@ -1004,78 +795,6 @@ mod tests {
     fn experiment_arm_matches_python() {
         assert_eq!(experiment_arm("sample-spec-v8/2100-job", 50), 'b');
         assert_eq!(experiment_arm("sample-spec-v8/2102-job", 50), 'a');
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn temp_refuses_link() {
-        let real = temp_dir("prompt-link");
-        let job = format!("{}-link", std::process::id());
-        let path = temp_root()
-            .unwrap()
-            .join(format!("factory-prompt-test-{job}"));
-        let _ = fs::remove_file(&path);
-        std::os::unix::fs::symlink(&real, &path).unwrap();
-        let e = make_job_temp("prompt-test", &job).unwrap_err();
-        let want = format!(
-            "factory.py: {} is a link or a file; remove it, then run prompt again\n",
-            path.display()
-        );
-        assert_eq!((e.code, e.stderr), (6, want));
-        assert!(fs::symlink_metadata(&path)
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        fs::remove_file(&path).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn temp_refuses_link_after_precheck() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = temp_dir("prompt-planted-link");
-        let real = dir.join("elsewhere");
-        fs::create_dir(&real).unwrap();
-        fs::set_permissions(&real, fs::Permissions::from_mode(0o755)).unwrap();
-        let path = dir.join("factory-sample-001");
-        std::os::unix::fs::symlink(&real, &path).unwrap();
-        assert_eq!(create_and_secure(&path, None).unwrap_err().code, 6);
-        assert_eq!(
-            fs::metadata(&real).unwrap().permissions().mode() & 0o777,
-            0o755
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn temp_refuses_file_after_precheck() {
-        let dir = temp_dir("prompt-planted-file");
-        let path = dir.join("factory-sample-001");
-        fs::write(&path, "x\n").unwrap();
-        assert_eq!(create_and_secure(&path, None).unwrap_err().code, 6);
-        assert_eq!(fs::read_to_string(&path).unwrap(), "x\n");
-        fs::remove_file(&path).unwrap();
-        std::os::unix::fs::symlink(dir.join("missing"), &path).unwrap();
-        assert_eq!(create_and_secure(&path, None).unwrap_err().code, 6);
-        assert!(fs::symlink_metadata(&path)
-            .unwrap()
-            .file_type()
-            .is_symlink());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn temp_refuses_other_owner() {
-        let path = temp_dir("prompt-owner").join("factory-sample-001");
-        // SAFETY: getuid takes no arguments, cannot fail and touches no memory.
-        let uid = unsafe { getuid() };
-        let e = create_and_secure(&path, Some(uid + 1)).unwrap_err();
-        let want = format!(
-            "factory.py: {} belongs to another account; remove it, then run prompt again\n",
-            path.display()
-        );
-        assert_eq!((e.code, e.stderr), (6, want));
-        create_and_secure(&path, Some(uid)).unwrap();
     }
 
     #[cfg(unix)]

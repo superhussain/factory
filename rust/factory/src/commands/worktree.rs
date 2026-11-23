@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use crate::cli::Call;
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{exit, fail, Res};
-use crate::shared::fs::{is_link, resolve};
+use crate::shared::fs::{contained, is_link, resolve};
 use crate::shared::home::device_name;
 use crate::shared::http::api;
 use crate::shared::proc::{capture, git, git_ok, origin_git, which};
@@ -415,7 +415,7 @@ fn prebuild_with(
             continue;
         }
         let inside = match (resolve(wt), resolve(&folder)) {
-            (Ok(root), Ok(inner)) => inner != root && inner.starts_with(&root),
+            (Ok(root), Ok(inner)) => inner != root && contained(&root, &inner),
             _ => false,
         };
         if !inside {
@@ -622,8 +622,7 @@ fn worktree_pids(wt: &str, _proc_root: &Path, _lsof: Option<&Path>) -> Vec<u32> 
 /// PIDs whose cwd is inside wt, from proc_root, else from lsof.
 #[cfg(not(windows))]
 fn worktree_pids(wt: &str, proc_root: &Path, lsof: Option<&Path>) -> Vec<u32> {
-    let sep = format!("{wt}{}", std::path::MAIN_SEPARATOR);
-    let inside = |path: &str| path == wt || path.starts_with(&sep);
+    let inside = |path: &str| contained(Path::new(wt), Path::new(path));
     let mut found = Vec::new();
     if proc_root.is_dir() {
         for entry in fs::read_dir(proc_root).into_iter().flatten().flatten() {

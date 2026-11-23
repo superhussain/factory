@@ -12,13 +12,15 @@ use crate::shared::board::read_board;
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{PASEO_ID, TERMINAL};
 use crate::shared::exit::{exit, fail, Res};
-use crate::shared::fs::{is_link, resolve};
+use crate::shared::fs::{is_link, normpath, resolve, temp_root};
 use crate::shared::home::{factory_home, holder};
+use crate::shared::paseo::paseo_session;
 use crate::shared::proc::{capture, git, paseo_run, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
-use crate::shared::py::{os_error, repr, splitlines, strip, universal_newlines};
+use crate::shared::py::{os_error, splitlines};
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
+use crate::shared::pyval::{py_str, truthy};
 
 const USAGE_CLEAN: &str =
     "usage: clean <project-slug>/<job-id> node_modules | scratch <name> | temp";
@@ -56,135 +58,10 @@ pub fn pr_handled_cmd(call: &Call) -> Res<()> {
     Err(not_ported("pr-handled"))
 }
 
-/// Python truthiness of a value that may be missing.
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Array(a)) => !a.is_empty(),
-        Some(Value::Object(o)) => !o.is_empty(),
-        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
-    }
-}
-
-/// An f-string `{value}`: text as is, None, True, False, else its JSON.
-fn py_str(v: Option<&Value>) -> String {
-    match v {
-        None | Some(Value::Null) => "None".into(),
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Bool(true)) => "True".into(),
-        Some(Value::Bool(false)) => "False".into(),
-        Some(v) => dumps(v, DEFAULT),
-    }
-}
-
-/// `os.path.normpath`, plus `os.path.normcase` on Windows.
-fn normpath(p: &str) -> String {
-    let (text, sep) = if cfg!(windows) {
-        (p.to_lowercase().replace('/', "\\"), '\\')
-    } else {
-        (p.to_string(), '/')
-    };
-    if text.is_empty() {
-        return ".".into();
-    }
-    let lead: String = text.chars().take_while(|&c| c == sep).collect();
-    let lead = if lead.len() == 2 {
-        lead
-    } else {
-        lead.chars().take(1).collect()
-    };
-    let mut parts: Vec<&str> = Vec::new();
-    for part in text.split(sep) {
-        if part.is_empty() || part == "." {
-            continue;
-        }
-        if part != ".." || (lead.is_empty() && parts.is_empty()) || parts.last() == Some(&"..") {
-            parts.push(part);
-        } else if !parts.is_empty() {
-            parts.pop();
-        }
-    }
-    let path = format!("{lead}{}", parts.join(&sep.to_string()));
-    if path.is_empty() {
-        ".".into()
-    } else {
-        path
-    }
-}
-
 /// The last part of a path normpath gave.
 fn basename(p: &str) -> &str {
     let sep = if cfg!(windows) { '\\' } else { '/' };
     p.rsplit(sep).next().unwrap_or(p)
-}
-
-/// `os.path.abspath` on this platform.
-fn abspath(dir: &str, cwd: &Path) -> PathBuf {
-    if cfg!(windows) {
-        std::path::absolute(cwd.join(dir)).unwrap_or_else(|_| cwd.join(dir))
-    } else if dir.starts_with('/') {
-        PathBuf::from(normpath(dir))
-    } else {
-        PathBuf::from(normpath(&format!("{}/{dir}", cwd.display())))
-    }
-}
-
-/// `tempfile.gettempdir()`: the first candidate folder a probe file can be written to.
-fn temp_root() -> Res<PathBuf> {
-    let mut dirs: Vec<String> = ["TMPDIR", "TEMP", "TMP"]
-        .iter()
-        .filter_map(|name| std::env::var(name).ok().filter(|v| !v.is_empty()))
-        .collect();
-    if cfg!(windows) {
-        let profile = std::env::var("USERPROFILE").unwrap_or_else(|_| "~".into());
-        let root = std::env::var("SYSTEMROOT").unwrap_or_else(|_| "%SYSTEMROOT%".into());
-        dirs.push(format!(r"{profile}\AppData\Local\Temp"));
-        dirs.push(format!(r"{root}\Temp"));
-        dirs.extend([r"c:\temp", r"c:\tmp", r"\temp", r"\tmp"].map(String::from));
-    } else {
-        dirs.extend(["/tmp", "/var/tmp", "/usr/tmp"].map(String::from));
-    }
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    dirs.push(cwd.to_string_lossy().into_owned());
-    for dir in &dirs {
-        let dir = abspath(dir, &cwd);
-        for n in 0..100 {
-            let probe = dir.join(format!(".factory-probe-{}-{n}", std::process::id()));
-            match fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&probe)
-            {
-                Ok(mut file) => {
-                    let wrote = file.write_all(b"blat");
-                    drop(file);
-                    if fs::remove_file(&probe).is_ok() && wrote.is_ok() {
-                        return Ok(dir);
-                    }
-                    break;
-                }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(e)
-                    if cfg!(windows)
-                        && e.kind() == io::ErrorKind::PermissionDenied
-                        && dir.is_dir() =>
-                {
-                    continue
-                }
-                Err(_) => break,
-            }
-        }
-    }
-    let listed: Vec<String> = dirs.iter().map(|d| repr(d)).collect();
-    Err(fail(
-        format!(
-            "No usable temporary directory found in [{}]",
-            listed.join(", ")
-        ),
-        1,
-    ))
 }
 
 /// `exc.strerror or str(exc)`.
@@ -657,24 +534,6 @@ pub fn orphans_cmd(_call: &Call) -> Res<()> {
     Ok(())
 }
 
-fn paseo_server() -> Option<String> {
-    let base = match std::env::var_os("PASEO_HOME").filter(|v| !v.is_empty()) {
-        Some(home) => PathBuf::from(home),
-        None => std::env::home_dir()?.join(".paseo"),
-    };
-    let text = String::from_utf8(fs::read(base.join("server-id")).ok()?).ok()?;
-    let server = strip(&universal_newlines(text)).to_string();
-    PASEO_ID.is_full(&server).then_some(server)
-}
-
-/// (server, agent) of the Paseo session running this process, else None.
-fn paseo_session() -> Option<(String, String)> {
-    let agent = std::env::var("PASEO_AGENT_ID").unwrap_or_default();
-    let agent = strip(&agent);
-    let server = paseo_server()?;
-    (PASEO_ID.is_full(agent) && !agent.starts_with('-')).then(|| (server, agent.to_string()))
-}
-
 /// Why archive-workspace stops before reading the board, if it does.
 fn early_reason(session: bool, paseo: Option<&Path>) -> Option<&'static str> {
     if !session {
@@ -763,7 +622,7 @@ pub fn archive_workspace(call: &Call) -> Res<()> {
         );
         return Ok(());
     }
-    let (_, agent) = session.unwrap();
+    let agent = py_str(&session.unwrap()["agent"]);
     let board = read_board(&home)?;
     let found = board["jobs"]
         .as_array()

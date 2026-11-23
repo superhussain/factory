@@ -8,17 +8,19 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use crate::cli::{not_ported, Call};
+use crate::commands::claims::{self, held_by, mine};
 use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, read_env_ordered};
 use crate::shared::consts::{
     tag_lookalike, BACKLOG_LINE, BACKLOG_NOTES_TAG, BACKLOG_TEMPLATE, IDEA, IN_FLIGHT, JOB_ID,
-    NOTES_SENTENCE, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, PASEO_ID,
-    RELEASE, SLUG, TERMINAL,
+    NOTES_SENTENCE, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, RELEASE, SLUG,
+    TERMINAL,
 };
 use crate::shared::exit::{exit, fail, Exit, Res};
 use crate::shared::fs::{is_link, read_text, write_atomic};
 use crate::shared::home::{factory_home, holder};
 use crate::shared::http::{api, api_url, cas};
+use crate::shared::paseo::paseo_server;
 use crate::shared::proc::{capture, git, which};
 use crate::shared::project::{local_bytes, r2_target, read_paths, safe_job_folder, sha};
 use crate::shared::py::{
@@ -27,6 +29,7 @@ use crate::shared::py::{
 };
 use crate::shared::pyjson::{dumps, float_repr, loads, DEFAULT, INDENT2, NO_ASCII, SORTED};
 use crate::shared::pyre::{Flags, Pattern};
+use crate::shared::pyval::{py_repr, py_str, truthy};
 use crate::shared::time::{format_stamp, now, parse_stamp, unix_now};
 use crate::shared::unicode::nfkc;
 
@@ -208,59 +211,8 @@ fn home_and<T>(f: impl FnOnce(&Path) -> Res<T>) -> Res<T> {
     f(&factory_home()?)
 }
 
-/// Python truthiness of a value that may be missing.
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Array(a)) => !a.is_empty(),
-        Some(Value::Object(o)) => !o.is_empty(),
-        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
-    }
-}
-
 fn get_str<'a>(j: &'a Value, key: &str) -> Option<&'a str> {
     j.get(key).and_then(Value::as_str)
-}
-
-/// Python's `repr` of a parsed JSON value.
-fn py_repr(v: &Value) -> String {
-    match v {
-        Value::String(s) => repr(s),
-        other => py_str(other),
-    }
-}
-
-/// Python's `str` of a parsed JSON value.
-fn py_str(v: &Value) -> String {
-    match v {
-        Value::Null => "None".into(),
-        Value::Bool(true) => "True".into(),
-        Value::Bool(false) => "False".into(),
-        Value::Number(n) => {
-            let text = n.to_string();
-            if text.contains(['.', 'e', 'E']) {
-                float_repr(text.parse().unwrap())
-            } else if text == "-0" {
-                "0".into()
-            } else {
-                text
-            }
-        }
-        Value::String(s) => s.clone(),
-        Value::Array(items) => format!(
-            "[{}]",
-            items.iter().map(py_repr).collect::<Vec<_>>().join(", ")
-        ),
-        Value::Object(map) => format!(
-            "{{{}}}",
-            map.iter()
-                .map(|(k, v)| format!("{}: {}", repr(k), py_repr(v)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    }
 }
 
 /// `str(x)` of a value that may be missing, where missing reads as None.
@@ -510,40 +462,6 @@ fn chat_quote(text: Option<&str>, flag: &str) -> Res<Option<String>> {
 }
 
 // ---- claims ----
-
-fn mine(c: &Value, device: &str, session: &str) -> bool {
-    get_str(c, "device") == Some(device) && get_str(c, "session") == Some(session)
-}
-
-/// The job's claim if another session holds it and checked in within the last minutes.
-fn blocking(job: &Value, device: &str, session: &str, minutes: u32) -> Res<Option<Value>> {
-    let Some(c) = job.get("claim").filter(|c| truthy(Some(c))) else {
-        return Ok(None);
-    };
-    if mine(c, device, session) {
-        return Ok(None);
-    }
-    let seen = stamp_of(c.get("seen")).ok_or_else(|| {
-        fail(
-            format!(
-                "time data {} does not match format '%Y-%m-%dT%H:%M:%SZ'",
-                py_opt(c.get("seen"))
-            ),
-            1,
-        )
-    })?;
-    Ok((unix_now() - seen < i64::from(minutes) * 60).then(|| c.clone()))
-}
-
-fn held_by(job_id: &str, c: &Value) -> String {
-    format!(
-        "{job_id} is held by {} session {} since {}, last seen {}",
-        py_opt(c.get("device")),
-        py_opt(c.get("session")),
-        py_opt(c.get("since")),
-        py_opt(c.get("seen"))
-    )
-}
 
 /// Drop this session's claim on an idea in one board write, so the idea waits again.
 fn release_claim(home: &Path, job_id: &str, device: &str, session: &str) -> Res<()> {
@@ -815,7 +733,7 @@ fn deny_notes_cmd_in(home: &Path, args: &[String]) -> Res<()> {
     let result = cas(home, "/api/board", |text| {
         let mut data = load_board(text)?;
         let j = due(&mut data)?;
-        if let Some(held) = blocking(&j, &device, &session, minutes)? {
+        if let Some(held) = claims::blocking(Some(&j), &device, &session, minutes)? {
             return Err(fail(
                 format!("{}. Nothing was written.", held_by(job_id, &held)),
                 6,
@@ -2356,7 +2274,7 @@ fn inflight_count(data: &Value, project: Option<&str>, minutes: u32) -> usize {
             }
             let stamp = if get_str(j, "stage") == Some(IDEA) || approved_start(j) {
                 j.get("claim")
-                    .filter(|c| truthy(Some(c)))
+                    .filter(|c| truthy(Some(*c)))
                     .and_then(|c| c.get("seen"))
             } else if has_str(IN_FLIGHT, j.get("stage"))
                 || get_str(j, "stage") == Some("pr-open") && !escalated(j)
@@ -2414,7 +2332,7 @@ fn claim_ideas(
                 || project.is_some_and(|p| get_str(j, "project") != Some(p))
                 || !JOB_ID.is_full(id)
                 || id.contains("..")
-                || blocking(j, device, session, minutes)?.is_some()
+                || claims::blocking(Some(j), device, session, minutes)?.is_some()
             {
                 continue;
             }
@@ -4654,7 +4572,7 @@ fn write_move(job: &mut Value, to: &Value, stamp: &str, record: &Value) {
     let mut earlier = m.as_ref().map(earlier_moves).unwrap_or_default();
     if let Some(m) = m
         .as_ref()
-        .filter(|m| truthy(Some(m)) && truthy(m.get("from")) && !truthy(Some(&prior)))
+        .filter(|m| truthy(Some(*m)) && truthy(m.get("from")) && !truthy(Some(&prior)))
     {
         let mut entry = json!({});
         for k in ["from", "session", "agent", "server", "at"] {
@@ -5327,17 +5245,6 @@ fn halt_line(record: &Value) -> String {
     )
 }
 
-/// This host's Paseo server id, else None.
-fn paseo_server() -> Option<String> {
-    let base = match std::env::var("PASEO_HOME").ok().filter(|v| !v.is_empty()) {
-        Some(home) => std::path::PathBuf::from(home),
-        None => std::env::home_dir()?.join(".paseo"),
-    };
-    let text = read_text(&base.join("server-id")).ok()?;
-    let server = strip(&text);
-    PASEO_ID.is_full(server).then(|| server.to_string())
-}
-
 /// {agent id: status} from this host's Paseo daemon, or None when paseo can't answer.
 fn paseo_statuses() -> Option<Vec<(Value, Value)>> {
     let exe = which("paseo")?;
@@ -5473,7 +5380,7 @@ fn stop_verdict(home: &Path, job: &Value, state: &Value) -> Res<(bool, String, b
 
 /// A stamp that may be missing or not a string, as `bool(stamp) and stamp < cutoff` reads it.
 fn stamp_text(v: Option<&Value>) -> Option<String> {
-    v.filter(|v| truthy(Some(v))).map(py_str)
+    v.filter(|v| truthy(Some(*v))).map(py_str)
 }
 
 /// `a or b` for two values that may be missing.

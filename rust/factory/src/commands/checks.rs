@@ -3,12 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read, Write};
 use std::path::Path;
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
-use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
-use ureq::Agent;
 
 use crate::cli::Call;
 use crate::shared::board::{dump_board, escalated, load_board, patch_job, read_board};
@@ -16,12 +13,14 @@ use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::SLUG;
 use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{is_link, read_text};
-use crate::shared::http::{cas, urlopen_error};
+use crate::shared::http::{api_url, cas, platform_agent, urlopen_detail};
 use crate::shared::proc::{capture, which};
 use crate::shared::project::{project_files, r2_target, sha};
 use crate::shared::py::{os_error, printable_line, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, DEFAULT};
 use crate::shared::pyre::{Flags, Pattern};
+use crate::shared::pyval::{py_str, truthy};
+use crate::shared::redact::redact_values;
 use crate::shared::time::{parse_stamp, unix_now};
 
 const CHECKS_USAGE: &str = "usage: checks <project-slug>/<job-id> [--timeout S]";
@@ -149,32 +148,9 @@ impl Host for System {
     }
 }
 
-/// Python's `str()` of a JSON value.
-fn py_str(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        Value::Null => "None".into(),
-        Value::Bool(true) => "True".into(),
-        Value::Bool(false) => "False".into(),
-        other => dumps(other, DEFAULT),
-    }
-}
-
-/// Python's `bool()` of a JSON value.
-fn truthy(v: &Value) -> bool {
-    match v {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::String(s) => !s.is_empty(),
-        Value::Array(a) => !a.is_empty(),
-        Value::Object(o) => !o.is_empty(),
-        Value::Number(n) => n.as_f64() != Some(0.0),
-    }
-}
-
 /// `str(v or "")`.
 fn str_or_empty(v: Option<&Value>) -> String {
-    v.filter(|v| truthy(v)).map(py_str).unwrap_or_default()
+    v.filter(|v| truthy(*v)).map(py_str).unwrap_or_default()
 }
 
 /// `int(s)` for text that fully matches `[0-9]+`, else None. Past 18 digits it saturates.
@@ -878,40 +854,15 @@ pub(crate) fn job_handled(home: &Path, job_id: &str) -> Res<Map<String, Value>> 
 
 /// The body of one Buildkite GET, at most max + 1 bytes, or the problem line. The token goes only into its header.
 fn buildkite_get(url: &str, token: &str, max: usize) -> Result<Vec<u8>, String> {
-    static AGENT: OnceLock<Agent> = OnceLock::new();
-    let agent = AGENT.get_or_init(|| {
-        let tls = TlsConfig::builder()
-            .provider(TlsProvider::NativeTls)
-            .root_certs(RootCerts::PlatformVerifier)
-            .build();
-        Agent::config_builder()
-            .max_redirects(0)
-            .max_redirects_will_error(false)
-            .http_status_as_error(false)
-            .user_agent("factory")
-            .accept("")
-            .timeout_connect(Some(Duration::from_secs(30)))
-            .timeout_send_request(Some(Duration::from_secs(30)))
-            .timeout_recv_response(Some(Duration::from_secs(30)))
-            .timeout_per_read(Some(Duration::from_secs(30)))
-            .timeout_per_write(Some(Duration::from_secs(30)))
-            .tls_config(tls)
-            .build()
-            .new_agent()
-    });
-    let unreachable = |text: String| {
-        format!(
-            "can't reach Buildkite: {}",
-            printable_line(&text.replace(token, "[token]"), 200)
-        )
-    };
+    let agent = platform_agent("https://api.buildkite.com");
+    let unreachable = |text: &str| buildkite_unreachable(text, token);
     let response = agent
         .get(url)
         .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/json")
         .header("User-Agent", "factory")
         .call()
-        .map_err(|e| unreachable(urlopen_error(&e)))?;
+        .map_err(|e| unreachable(&urlopen_detail(&e)))?;
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
         let scopes = if status == 401 || status == 403 {
@@ -927,37 +878,16 @@ fn buildkite_get(url: &str, token: &str, max: usize) -> Result<Vec<u8>, String> 
         .into_reader()
         .take(max as u64 + 1)
         .read_to_end(&mut body)
-        .map_err(|e| unreachable(e.to_string()))?;
+        .map_err(|e| unreachable(&e.to_string()))?;
     Ok(body)
 }
 
-/// text with every occurrence of each secret replaced by one [redacted]. Overlapping or touching
-/// matches merge first, so a secret that extends another leaves nothing visible.
-fn redact<'a>(text: &str, secrets: impl Iterator<Item = &'a String>) -> String {
-    let mut spans: Vec<(usize, usize)> = Vec::new();
-    for secret in secrets {
-        let mut from = 0;
-        while let Some(at) = text[from..].find(secret.as_str()) {
-            let start = from + at;
-            spans.push((start, start + secret.len()));
-            from = start + text[start..].chars().next().unwrap().len_utf8();
-        }
-    }
-    spans.sort();
-    let mut merged: Vec<(usize, usize)> = Vec::new();
-    for (start, end) in spans {
-        match merged.last_mut() {
-            Some(last) if start <= last.1 => last.1 = last.1.max(end),
-            _ => merged.push((start, end)),
-        }
-    }
-    let (mut out, mut last) = (String::new(), 0);
-    for (start, end) in merged {
-        out.push_str(&text[last..start]);
-        out.push_str("[redacted]");
-        last = end;
-    }
-    out + &text[last..]
+/// The Buildkite problem line for an error's full text. The token goes before truncation, so no part of it shows.
+fn buildkite_unreachable(text: &str, token: &str) -> String {
+    format!(
+        "can't reach Buildkite: {}",
+        printable_line(&text.replace(token, "[token]"), 200)
+    )
 }
 
 /// ci_log for a failing check that links to a Buildkite build: the failed job's name and the stripped,
@@ -1051,7 +981,7 @@ fn buildkite_log(home: &Path, check: &Check, org: &str, api: &str, max: usize) -
     let text = BUILDKITE_STRIP
         .replace_all(content, |_| String::new())
         .replace("\r\n", "\n");
-    let text = redact(
+    let text = redact_values(
         &text,
         env.values().filter(|v| v.chars().count() >= ENV_SECRET_MIN),
     );
@@ -1079,14 +1009,14 @@ fn py_int(digits: &str) -> Value {
 fn login(item: &Value) -> String {
     str_or_empty(
         item.get("author")
-            .filter(|a| truthy(a))
+            .filter(|a| truthy(*a))
             .and_then(|a| a.get("login")),
     )
 }
 
 /// `(v or {}).get("nodes") or []`, as a list.
 fn nodes(v: Option<&Value>) -> &[Value] {
-    v.filter(|v| truthy(v))
+    v.filter(|v| truthy(*v))
         .and_then(|v| v.get("nodes"))
         .and_then(Value::as_array)
         .map_or(&[], Vec::as_slice)
@@ -1134,7 +1064,7 @@ pub(crate) fn pr_reading(
     };
     let target = view
         .get("baseRefName")
-        .filter(|t| truthy(t))
+        .filter(|t| truthy(*t))
         .cloned()
         .unwrap_or_else(|| Value::from(base));
     let Some(target) = target
@@ -1161,7 +1091,7 @@ pub(crate) fn pr_reading(
     } else {
         "none"
     };
-    let head = match view.get("commits").filter(|c| truthy(c)) {
+    let head = match view.get("commits").filter(|c| truthy(*c)) {
         None | Some(Value::String(_)) => String::new(),
         Some(Value::Array(commits)) => match commits.last() {
             Some(last @ Value::Object(_)) => str_or_empty(last.get("committedDate")),
@@ -1201,7 +1131,7 @@ pub(crate) fn pr_reading(
         .iter()
         .filter(|r| {
             r.get("author")
-                .filter(|a| truthy(a))
+                .filter(|a| truthy(*a))
                 .and_then(|a| a.get("__typename"))
                 .and_then(Value::as_str)
                 == Some("Bot")
@@ -1257,7 +1187,7 @@ pub(crate) fn pr_reading(
             ) || unanswered;
         }
     }
-    let decision = view.get("reviewDecision").filter(|d| truthy(d));
+    let decision = view.get("reviewDecision").filter(|d| truthy(*d));
     let approved = decision.and_then(Value::as_str) == Some("APPROVED")
         || (decision.is_none()
             && human
@@ -1284,7 +1214,7 @@ pub(crate) fn pr_reading(
         let first = comments[0];
         let bot = first
             .get("author")
-            .filter(|a| truthy(a))
+            .filter(|a| truthy(*a))
             .and_then(|a| a.get("__typename"))
             .and_then(Value::as_str)
             == Some("Bot");
@@ -1646,9 +1576,603 @@ pub fn pr_queue_cmd(call: &Call) -> Res<()> {
     pr_queue_run(&mut System::new(), &pr, base, number, &mut io::stdout())
 }
 
+const CI_FAILED: &[&str] = &[
+    "FAILURE",
+    "TIMED_OUT",
+    "STARTUP_FAILURE",
+    "ACTION_REQUIRED",
+    "CANCELLED",
+    "ERROR",
+];
+const PR_CLOSE_COMMENT: &str = "> \u{1f916} **Agent-authored report** \u{2014} written by factory.py pickup on the owner's behalf, posted automatically. Tests not run.\n\nThe owner closed factory job `{id}` from the dashboard, so this pull request will not merge. The decision page at {link} records the reason.";
+const STACKED_CLOSE_COMMENT: &str = "> \u{1f916} **Agent-authored report** \u{2014} written by factory.py on the owner's behalf, posted automatically. Tests not run.\n\nThis pull request was stacked on factory job `{lead}`, which closed without merging, so this pull request will not merge. Factory job `{id}` went back to the ideas column.";
+
+fn stacked_close_note(state: &str) -> &'static str {
+    match state {
+        "closed" => "closed with a comment",
+        "already closed" => "was already closed",
+        _ => "was already merged",
+    }
+}
+
+/// gh's answer on this host, or None without gh.
+fn gh_cli(args: &[&str]) -> Option<GhOut> {
+    System::new().gh(args)
+}
+
+/// data.repository of one gh api graphql answer for repo, or why it is missing.
+fn graphql_repository(
+    owner: &str,
+    name: &str,
+    body: &str,
+    device: &str,
+) -> Result<Map<String, Value>, String> {
+    let q =
+        format!("query=query {{ repository(owner: \"{owner}\", name: \"{name}\") {{ {body}}} }}");
+    let Some(r) = gh_cli(&["api", "graphql", "-f", &q]) else {
+        return Err(format!("gh is not installed on {device}"));
+    };
+    let code = match r.code {
+        GhCode::Timeout => {
+            return Err(format!(
+                "gh api graphql timed out after 60 seconds on {device}"
+            ))
+        }
+        GhCode::Exit(code) => code,
+    };
+    let found = loads(&r.stdout)
+        .ok()
+        .and_then(|v| v.get("data")?.get("repository")?.as_object().cloned());
+    match found {
+        Some(found) => Ok(found),
+        None if code != 0 => Err(format!(
+            "gh api graphql exited {code} (check gh auth status on {device})"
+        )),
+        None => Err(format!("gh api graphql returned no repository (check the project file's repo and gh auth status on {device})")),
+    }
+}
+
+/// The states and head commits of repo's pull requests from one gh api graphql call, or why not. A pull
+/// request GitHub returns null for is left out.
+pub(crate) fn pr_states(
+    repo: &str,
+    numbers: &[u64],
+    device: &str,
+) -> Result<BTreeMap<u64, (Value, Value)>, String> {
+    let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
+    let body: String = numbers
+        .iter()
+        .map(|n| format!("p{n}: pullRequest(number: {n}) {{ state headRefOid }} "))
+        .collect();
+    let found = graphql_repository(owner, name, &body, device)?;
+    Ok(numbers
+        .iter()
+        .filter_map(|n| {
+            let p = found.get(&format!("p{n}")).filter(|p| p.is_object())?;
+            let field = |k: &str| p.get(k).cloned().unwrap_or(Value::Null);
+            Some((*n, (field("state"), field("headRefOid"))))
+        })
+        .collect())
+}
+
+/// The merge commit of each of repo's merged pull requests, None when GitHub reports none, from one gh api
+/// graphql call for each 50 numbers, or why not.
+pub(crate) fn pr_merge_commits(
+    repo: &str,
+    numbers: &[u64],
+    device: &str,
+) -> Result<BTreeMap<u64, Option<String>>, String> {
+    let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
+    let mut oids = BTreeMap::new();
+    for chunk in numbers.chunks(50) {
+        let body: String = chunk
+            .iter()
+            .map(|n| format!("p{n}: pullRequest(number: {n}) {{ state mergeCommit {{ oid }} }} "))
+            .collect();
+        let found = graphql_repository(owner, name, &body, device)?;
+        for n in chunk {
+            let pr = found.get(&format!("p{n}")).filter(|p| p.is_object());
+            let oid = pr
+                .filter(|p| p.get("state").and_then(Value::as_str) == Some("MERGED"))
+                .and_then(|p| p.get("mergeCommit")?.get("oid")?.as_str())
+                .filter(|oid| COMMIT.is_full(oid));
+            oids.insert(*n, oid.map(String::from));
+        }
+    }
+    Ok(oids)
+}
+
+/// The head commit and pr_signal of each of repo's pull requests from one gh api graphql call, or why not.
+/// handled maps each number to its job's handled entries.
+pub(crate) fn pr_signals(
+    repo: &str,
+    numbers: &[u64],
+    device: &str,
+    handled: &BTreeMap<u64, Map<String, Value>>,
+) -> Result<BTreeMap<u64, (Value, Option<&'static str>)>, String> {
+    let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
+    let parts: Vec<String> = numbers
+        .iter()
+        .map(|n| format!("p{n}: pullRequest(number: {n}) {{ state mergeable headRefOid baseRefName author {{ login }} reviewThreads(last: 50) {{ nodes {{ isResolved path comments(first: 20) {{ nodes {{ authorAssociation body author {{ __typename login }} }} }} }} }} commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ contexts(first: 50) {{ nodes {{ __typename ... on CheckRun {{ name conclusion isRequired(pullRequestNumber: {n}) }} ... on StatusContext {{ context state isRequired(pullRequestNumber: {n}) }} }} }} }} }} }} }} }}"))
+        .collect();
+    let found = graphql_repository(owner, name, &format!("{} ", parts.join(" ")), device)?;
+    Ok(numbers
+        .iter()
+        .filter_map(|n| {
+            let p = found.get(&format!("p{n}")).filter(|p| p.is_object())?;
+            let head = p.get("headRefOid").cloned().unwrap_or(Value::Null);
+            Some((*n, (head, pr_signal(p, handled.get(n)))))
+        })
+        .collect())
+}
+
+/// The nodes list under v[key], or none.
+fn nodes_under<'a>(v: Option<&'a Value>, key: &str) -> &'a [Value] {
+    v.filter(|v| truthy(*v))
+        .and_then(|v| v.get(key))
+        .and_then(|c| c.get("nodes"))
+        .and_then(Value::as_array)
+        .map_or(&[], Vec::as_slice)
+}
+
+/// `str(v or "")`.
+fn text_or_empty(v: Option<&Value>) -> String {
+    v.filter(|v| truthy(*v)).map(py_str).unwrap_or_default()
+}
+
+/// What an open pull request needs from babysit, in pr_reading's order: fix-reviews for an open counted
+/// review thread, rebase for a merge conflict, fix-ci for a failed required check, else None. A handled
+/// thread is skipped, and a conflict or check worked HANDLED_CAP times is no signal.
+pub(crate) fn pr_signal(
+    pull: &Value,
+    handled: Option<&Map<String, Value>>,
+) -> Option<&'static str> {
+    if pull.get("state").and_then(Value::as_str) != Some("OPEN") {
+        return None;
+    }
+    let empty = Map::new();
+    let handled = handled.unwrap_or(&empty);
+    let capped = |kind: &str, part: &str| {
+        handled
+            .get(&handled_sig(kind, &[part]))
+            .and_then(|e| e.get("count"))
+            .and_then(Value::as_f64)
+            .is_some_and(|c| c >= HANDLED_CAP as f64)
+    };
+    let login = |item: &Value| text_or_empty(item.get("author").and_then(|a| a.get("login")));
+    let author = login(pull);
+    for thread in nodes_under(Some(pull), "reviewThreads") {
+        if !thread.is_object() || truthy(thread.get("isResolved")) {
+            continue;
+        }
+        let comments: Vec<&Value> = nodes_under(Some(thread), "comments")
+            .iter()
+            .filter(|c| c.is_object())
+            .collect();
+        if comments.is_empty() || comments.iter().any(|c| login(c) == author) {
+            continue;
+        }
+        let first = comments[0];
+        let bot = first
+            .get("author")
+            .and_then(|a| a.get("__typename"))
+            .and_then(Value::as_str)
+            == Some("Bot");
+        let member = first
+            .get("authorAssociation")
+            .and_then(Value::as_str)
+            .is_some_and(|a| PR_REVIEWERS.contains(&a));
+        if !bot && !member {
+            continue;
+        }
+        let sig = handled_sig(
+            "thread",
+            &[
+                &text_or_empty(thread.get("path")),
+                &text_or_empty(first.get("body")),
+            ],
+        );
+        if !handled.contains_key(&sig) {
+            return Some("fix-reviews");
+        }
+    }
+    if pull.get("mergeable").and_then(Value::as_str) == Some("CONFLICTING")
+        && !capped("conflict", &text_or_empty(pull.get("baseRefName")))
+    {
+        return Some("rebase");
+    }
+    for node in nodes_under(Some(pull), "commits") {
+        let rollup = node.get("commit").and_then(|c| c.get("statusCheckRollup"));
+        for c in nodes_under(rollup, "contexts") {
+            let outcome = c
+                .get("conclusion")
+                .filter(|v| truthy(*v))
+                .or_else(|| c.get("state"))
+                .and_then(Value::as_str);
+            let name = c
+                .get("name")
+                .filter(|v| truthy(*v))
+                .or_else(|| c.get("context"));
+            if c.get("isRequired") == Some(&Value::Bool(true))
+                && outcome.is_some_and(|o| CI_FAILED.contains(&o))
+                && !capped("check", &text_or_empty(name))
+            {
+                return Some("fix-ci");
+            }
+        }
+    }
+    None
+}
+
+/// (state, why) after closing the job's open PR with a comment, PR_CLOSE_COMMENT unless one is given.
+pub(crate) fn close_pull_request(
+    home: &Path,
+    j: &Value,
+    device: &str,
+    comment: Option<&str>,
+) -> Res<(&'static str, String)> {
+    let pr = py_str(&j["pr"]);
+    let project = py_str(&j["project"]);
+    let md = project_files(home, &project)?.0;
+    if !md.exists() {
+        return Ok((
+            "open",
+            format!("there is no project file for {project} on {device}"),
+        ));
+    }
+    let meta = frontmatter(&md)
+        .map_err(|e| fail(os_error(&e, Some(&md)), 1))?
+        .0;
+    let repo = fm_get(&meta, "repo").unwrap_or("").to_string();
+    let m = j["pr"].as_str().and_then(|p| GH_PR.fullmatch(p));
+    if repo.is_empty() {
+        return Ok(("open", "the project file names no repo".into()));
+    }
+    if !m.is_some_and(|m| m[1].to_lowercase() == repo.to_lowercase()) {
+        return Ok(("open", format!("its URL is not a pull request in {repo}")));
+    }
+    let view = gh_cli(&[
+        "pr",
+        "view",
+        &pr,
+        "--json",
+        "state,isCrossRepository,headRefName",
+        "--jq",
+        ".state + \" \" + (.isCrossRepository | tostring) + \" \" + .headRefName",
+    ]);
+    let Some(view) = view else {
+        return Ok(("open", format!("gh is not installed on {device}")));
+    };
+    match view.code {
+        GhCode::Timeout => {
+            return Ok((
+                "open",
+                format!("gh pr view timed out after 60 seconds on {device}"),
+            ))
+        }
+        GhCode::Exit(0) => {}
+        GhCode::Exit(code) => {
+            return Ok((
+                "open",
+                format!("gh pr view exited {code} (check gh auth status on {device})"),
+            ))
+        }
+    }
+    let line = strip(&view.stdout);
+    let (state, rest) = line.split_once(' ').unwrap_or((line, ""));
+    let (cross, head) = rest.split_once(' ').unwrap_or((rest, ""));
+    if state == "MERGED" {
+        return Ok(("merged", String::new()));
+    }
+    if state == "CLOSED" {
+        return Ok(("already closed", String::new()));
+    }
+    if head.is_empty() {
+        return Ok(("open", "gh pr view reported no head branch".into()));
+    }
+    if cross != "false" {
+        return Ok((
+            "open",
+            format!("its head branch {head} comes from another repository, not {repo}"),
+        ));
+    }
+    let branch = text_or_empty(j.get("branch"));
+    if branch.is_empty() {
+        return Ok(("open", "the job has no branch".into()));
+    }
+    if head != branch {
+        return Ok((
+            "open",
+            format!("its head branch {head} is not the job's branch {branch}"),
+        ));
+    }
+    if state != "OPEN" {
+        return Ok(("open", format!("gh pr view reported state {state}")));
+    }
+    let comment = match comment {
+        Some(c) => c.to_string(),
+        None => {
+            let id = py_str(&j["id"]);
+            let link = format!("{}/#{id}/decision", api_url(home)?);
+            PR_CLOSE_COMMENT
+                .replace("{id}", &id)
+                .replace("{link}", &link)
+        }
+    };
+    let Some(close) = gh_cli(&["pr", "close", &pr, "--comment", &comment]) else {
+        return Ok(("open", format!("gh is not installed on {device}")));
+    };
+    Ok(match close.code {
+        GhCode::Timeout => (
+            "open",
+            format!("gh pr close timed out after 60 seconds on {device}"),
+        ),
+        GhCode::Exit(0) => ("closed", String::new()),
+        GhCode::Exit(code) => (
+            "open",
+            format!("gh pr close exited {code} (check gh auth status on {device})"),
+        ),
+    })
+}
+
+/// Close each stacked rider's open PR after its lead closed, then rewrite the note of every rider whose PR
+/// is no longer open in one board write.
+pub(crate) fn close_stacked_prs(
+    home: &Path,
+    lead_id: &str,
+    riders: &[Value],
+    device: &str,
+) -> Res<()> {
+    let mut done = Vec::new();
+    for r in riders {
+        let (job_id, pr) = (py_str(&r["id"]), py_str(&r["pr"]));
+        let mut rider = r.clone();
+        rider["branch"] = Value::from(format!("factory/{job_id}"));
+        let comment = STACKED_CLOSE_COMMENT
+            .replace("{lead}", lead_id)
+            .replace("{id}", &job_id);
+        let (state, why) = close_pull_request(home, &rider, device, Some(&comment))?;
+        if state == "open" {
+            eprintln!("factory.py: leaves stacked pull request {pr} of {job_id} open: {why}");
+            continue;
+        }
+        eprintln!(
+            "factory.py: stacked pull request {pr} of {job_id} {}",
+            stacked_close_note(state)
+        );
+        done.push((
+            job_id,
+            format!("unbatched: {lead_id} closed; stacked PR {pr} "),
+            state,
+        ));
+    }
+    if done.is_empty() {
+        return Ok(());
+    }
+    cas(home, "/api/board", |text| {
+        let mut board = load_board(text)?;
+        let mut hit = false;
+        for (job_id, note, state) in &done {
+            let found = find_job(&board, job_id);
+            if found.and_then(|f| f.get("note"))
+                != Some(&Value::from(format!("{note}is still open")))
+            {
+                continue;
+            }
+            patch_job(
+                &mut board,
+                job_id,
+                &json!({"note": format!("{note}{}", stacked_close_note(state))}),
+            );
+            hit = true;
+        }
+        Ok((hit.then(|| dump_board(&board)), ()))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pull(
+        state: &str,
+        threads: Vec<Vec<Value>>,
+        mergeable: &str,
+        contexts: Vec<Value>,
+        base: &str,
+    ) -> Value {
+        let threads: Vec<Value> = threads
+            .into_iter()
+            .map(|t| json!({"isResolved": false, "path": "web/app.js", "comments": {"nodes": t}}))
+            .collect();
+        json!({"state": state, "mergeable": mergeable, "headRefOid": "abc", "baseRefName": base,
+               "author": {"login": "bot-author"}, "reviewThreads": {"nodes": threads},
+               "commits": {"nodes": [{"commit": {"statusCheckRollup": {"contexts": {"nodes": contexts}}}}]}})
+    }
+
+    fn comment(login: &str, association: &str, kind: &str, body: &str) -> Value {
+        json!({"authorAssociation": association, "body": body, "author": {"__typename": kind, "login": login}})
+    }
+
+    fn failed() -> Value {
+        json!({"__typename": "CheckRun", "name": "lint", "conclusion": "FAILURE", "isRequired": true})
+    }
+
+    fn with(mut v: Value, key: &str, value: Value) -> Value {
+        v[key] = value;
+        v
+    }
+
+    const BODY: &str = "Drop the unused import.";
+
+    #[test]
+    fn pr_signals_follow_the_reading_order() {
+        let reviewer = vec![comment("reviewer-a", "MEMBER", "User", BODY)];
+        let bot = vec![comment("review-bot", "NONE", "Bot", BODY)];
+        let mut both = reviewer.clone();
+        both.push(comment("bot-author", "OWNER", "User", BODY));
+        let error = json!({"__typename": "StatusContext", "state": "ERROR", "isRequired": true});
+        for (node, reason) in [
+            (
+                pull(
+                    "OPEN",
+                    vec![reviewer.clone()],
+                    "CONFLICTING",
+                    vec![failed()],
+                    "main",
+                ),
+                Some("fix-reviews"),
+            ),
+            (
+                pull("OPEN", vec![bot], "MERGEABLE", vec![], "main"),
+                Some("fix-reviews"),
+            ),
+            (
+                pull("OPEN", vec![], "CONFLICTING", vec![failed()], "main"),
+                Some("rebase"),
+            ),
+            (
+                pull("OPEN", vec![], "MERGEABLE", vec![failed()], "main"),
+                Some("fix-ci"),
+            ),
+            (
+                pull("OPEN", vec![], "MERGEABLE", vec![error], "main"),
+                Some("fix-ci"),
+            ),
+            (pull("OPEN", vec![both], "MERGEABLE", vec![], "main"), None),
+            (
+                pull(
+                    "OPEN",
+                    vec![vec![comment("stranger-a", "NONE", "User", BODY)]],
+                    "MERGEABLE",
+                    vec![],
+                    "main",
+                ),
+                None,
+            ),
+            (
+                pull(
+                    "OPEN",
+                    vec![],
+                    "MERGEABLE",
+                    vec![with(failed(), "isRequired", json!(false))],
+                    "main",
+                ),
+                None,
+            ),
+            (
+                pull(
+                    "OPEN",
+                    vec![],
+                    "MERGEABLE",
+                    vec![with(failed(), "conclusion", json!("SUCCESS"))],
+                    "main",
+                ),
+                None,
+            ),
+            (
+                pull("MERGED", vec![], "CONFLICTING", vec![failed()], "main"),
+                None,
+            ),
+        ] {
+            assert_eq!(pr_signal(&node, None), reason, "{node}");
+        }
+    }
+
+    #[test]
+    fn pr_signal_skips_capped_and_handled_items() {
+        let capped = json!({"count": 3, "at": "2026-01-02T12:00:00Z"});
+        let once = json!({"count": 2, "at": "2026-01-02T12:00:00Z"});
+        let handled = |sig: &str, e: &Value| json!({sig: e}).as_object().unwrap().clone();
+        let lint = "check:da966368ea663ea5";
+        let conflict = handled_sig("conflict", &["main"]);
+        let other = with(failed(), "name", json!("test"));
+        for (node, h, reason) in [
+            (
+                pull("OPEN", vec![], "MERGEABLE", vec![failed()], "main"),
+                handled(lint, &capped),
+                None,
+            ),
+            (
+                pull("OPEN", vec![], "MERGEABLE", vec![failed()], "main"),
+                handled(lint, &once),
+                Some("fix-ci"),
+            ),
+            (
+                pull(
+                    "OPEN",
+                    vec![],
+                    "MERGEABLE",
+                    vec![failed(), other.clone()],
+                    "main",
+                ),
+                handled(lint, &capped),
+                Some("fix-ci"),
+            ),
+            (
+                pull("OPEN", vec![], "CONFLICTING", vec![], "main"),
+                handled(&conflict, &capped),
+                None,
+            ),
+            (
+                pull("OPEN", vec![], "CONFLICTING", vec![other], "main"),
+                handled(&conflict, &capped),
+                Some("fix-ci"),
+            ),
+            (
+                pull("OPEN", vec![], "CONFLICTING", vec![], "release"),
+                handled(&conflict, &capped),
+                Some("rebase"),
+            ),
+            (
+                pull("OPEN", vec![], "CONFLICTING", vec![], "main"),
+                handled(&conflict, &once),
+                Some("rebase"),
+            ),
+        ] {
+            assert_eq!(pr_signal(&node, Some(&h)), reason, "{node}");
+        }
+        let thread = "thread:892c9835f792e6f5";
+        let bot = vec![comment("review-bot", "NONE", "Bot", BODY)];
+        let later = vec![comment("review-bot", "NONE", "Bot", "Rename x.")];
+        let h = handled(thread, &json!({"count": 1, "at": "2026-01-02T12:00:00Z"}));
+        assert_eq!(
+            pr_signal(
+                &pull("OPEN", vec![bot.clone()], "MERGEABLE", vec![], "main"),
+                Some(&h)
+            ),
+            None
+        );
+        assert_eq!(
+            pr_signal(
+                &pull(
+                    "OPEN",
+                    vec![bot.clone(), later],
+                    "MERGEABLE",
+                    vec![],
+                    "main"
+                ),
+                Some(&h)
+            ),
+            Some("fix-reviews")
+        );
+        assert_eq!(
+            pr_signal(
+                &pull("OPEN", vec![bot], "MERGEABLE", vec![failed()], "main"),
+                Some(&h)
+            ),
+            Some("fix-ci")
+        );
+    }
+
+    #[test]
+    fn token_redacted_before_truncation() {
+        let token = "Z".repeat(24);
+        let text = format!("{}{token}{}", "x".repeat(190), "y".repeat(86));
+        assert_eq!(text.chars().count(), 300);
+        let line = buildkite_unreachable(&text, &token);
+        assert!(!line.contains('Z'), "{line}");
+    }
 
     const PR: &str = "https://github.com/example/sample/pull/42";
     const WARN: &str = "factory.py: warning: gh api graphql gave no usable check list (exited 1 with no check list)\n";

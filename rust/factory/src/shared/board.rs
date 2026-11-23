@@ -9,19 +9,8 @@ use super::consts::{BATCH_REF, IDEA, TERMINAL};
 use super::exit::{fail, Res};
 use super::http::api;
 use super::pyjson::{dumps, loads, COMPACT};
+use super::pyval::{py_str, truthy};
 use super::time::now;
-
-/// Python truthiness of a value that may be missing.
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Array(a)) => !a.is_empty(),
-        Some(Value::Object(o)) => !o.is_empty(),
-        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
-    }
-}
 
 pub fn load_board(text: Option<&str>) -> Res<Value> {
     match text.filter(|t| !t.is_empty()) {
@@ -239,14 +228,6 @@ pub fn mirror_batch(data: &mut Value, lead_id: &str) {
                    "note": format!("unbatched: {lead_id} merged before its stacked PR opened"), "needs": null})
         };
         patch_job(data, &rider_id, &change);
-    }
-}
-
-/// Python's `str(v)` for the values a PR field holds.
-fn py_str(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
     }
 }
 

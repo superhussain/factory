@@ -10,19 +10,26 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Map, Value};
 
-use crate::cli::{not_ported, Call};
-use crate::shared::board::{batch_refs, dump_board, lead_of, load_board, patch_job};
+use crate::cli::Call;
+use crate::commands::checks::close_stacked_prs;
+use crate::commands::sync::{conflict_exit, pull_job, push_target, sync_problems, sync_state};
+use crate::commands::tracer::tracer_after_board;
+use crate::shared::board::{batch_refs, dump_board, lead_of, load_board, patch_job, read_board};
 use crate::shared::consts::{
-    BUILD_STATES, IDEA, JOB_ID, NEW_JOB_ID, PASEO_ID, REF_KINDS, RELEASE, SLUG, TERMINAL,
+    BUILD_STATES, IDEA, IN_FLIGHT, JOB_ID, NEW_JOB_ID, PASEO_ID, REF_KINDS, RELEASE, SLUG, TERMINAL,
 };
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::{is_link, read_text};
 use crate::shared::home::{factory_home, holder};
 use crate::shared::http::cas;
+use crate::shared::paseo::paseo_session;
+use crate::shared::proc::{git_ok, origin_git};
+use crate::shared::project::{r2_target, safe_job_folder};
 use crate::shared::py::{os_error, repr, splitlines, strip, universal_newlines};
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
-use crate::shared::time::{now, parse_stamp};
+use crate::shared::pyval::{py_eq, py_int, py_repr, py_str, truthy};
+use crate::shared::time::{elapsed_seconds, now, parse_stamp};
 
 static ID_DIGITS: Pattern = Pattern::new(r"(\d{3,})-", Flags::ASCII);
 
@@ -39,26 +46,6 @@ pub(crate) fn new_session() {
         std::env::set_var("FACTORY_SESSION", &tag);
         eprintln!("new session {tag}: pass --session {tag} to every later claim, next, hold, and board call");
     }
-}
-
-/// This host's Paseo server id, else None.
-fn paseo_server() -> Option<String> {
-    let base = match std::env::var_os("PASEO_HOME").filter(|v| !v.is_empty()) {
-        Some(home) => PathBuf::from(home),
-        None => std::env::home_dir()?.join(".paseo"),
-    };
-    let text = String::from_utf8(fs::read(base.join("server-id")).ok()?).ok()?;
-    let server = strip(&universal_newlines(text)).to_string();
-    PASEO_ID.is_full(&server).then_some(server)
-}
-
-/// {"server", "agent"} of the Paseo session running this process, else None.
-pub(crate) fn paseo_session() -> Option<Value> {
-    let agent = std::env::var("PASEO_AGENT_ID").unwrap_or_default();
-    let agent = strip(&agent);
-    let server = paseo_server()?;
-    (PASEO_ID.is_full(agent) && !agent.starts_with('-'))
-        .then(|| json!({"server": server, "agent": agent}))
 }
 
 /// <home>/paseo-claims/<job-id>/<agent>, the marker that this host's Paseo session claimed the job.
@@ -302,7 +289,7 @@ pub(crate) fn blocking(
     minutes: u32,
 ) -> Res<Option<Value>> {
     let c = job.and_then(|j| j.get("claim"));
-    let Some(c) = c.filter(|c| truthy(Some(c)) && !mine(c, device, session)) else {
+    let Some(c) = c.filter(|c| truthy(Some(*c)) && !mine(c, device, session)) else {
         return Ok(None);
     };
     Ok((seen_age(c)? < f64::from(minutes) * 60.0).then(|| c.clone()))
@@ -881,10 +868,7 @@ pub(crate) fn board_write(
         || patch.contains_key("stage")
         || patch.contains_key("rounds")
         || patch.get("tracer").and_then(|t| t.get("follow")) == Some(&Value::Bool(true));
-    if mirrors && fs::symlink_metadata(home.join("tracer.json")).is_ok() {
-        return Err(not_ported("board with Tracer"));
-    }
-    let (job, held) = receipt_cas(home, |text, signed, sent| {
+    let (job, held, stacked) = receipt_cas(home, |text, signed, sent| {
         let mut data = load_board(text)?;
         jobs_of(&data)?;
         let before = data.clone();
@@ -955,7 +939,7 @@ pub(crate) fn board_write(
             }
         }
         if let Some(c) = blocking(found, &device, &session, minutes)? {
-            return Ok((None, (None, Some(Held::Claim(c)))));
+            return Ok((None, (None, Some(Held::Claim(c)), Vec::new())));
         }
         if moved_away(found, &device, &session) {
             return Err(fail(moved_message(job_id, &found.unwrap()["move"]), 6));
@@ -970,7 +954,10 @@ pub(crate) fn board_write(
                 .unwrap()
                 .shift_remove("claim");
             patch_job(&mut data, job_id, &json!({}));
-            return Ok((Some(dump_board(&data)), (None, Some(Held::Closing))));
+            return Ok((
+                Some(dump_board(&data)),
+                (None, Some(Held::Closing), Vec::new()),
+            ));
         }
         let origin = found
             .and_then(|f| f.get("origin"))
@@ -1009,15 +996,16 @@ pub(crate) fn board_write(
                 ));
             }
         }
-        if let Some(f) = found {
-            if is_one_of(patch.get("stage"), &["closed"])
-                && !is_one_of(f.get("stage"), TERMINAL)
-                && lead_of(f).is_none()
-                && !open_stacked(&data, job_id).is_empty()
+        let stacked = match found {
+            Some(f)
+                if is_one_of(patch.get("stage"), &["closed"])
+                    && !is_one_of(f.get("stage"), TERMINAL)
+                    && lead_of(f).is_none() =>
             {
-                return Err(not_ported("board closing stacked pull requests"));
+                open_stacked(&data, job_id)
             }
-        }
+            _ => Vec::new(),
+        };
         let (babysit, priority) = (
             found.and_then(|f| f.get("babysit")),
             found.and_then(|f| f.get("priority")),
@@ -1072,7 +1060,7 @@ pub(crate) fn board_write(
                 job.shift_remove("needs");
                 sent.push(job_id.to_string());
             } else {
-                let feature = match tracer.get("feature").filter(|f| truthy(Some(f))) {
+                let feature = match tracer.get("feature").filter(|f| truthy(Some(*f))) {
                     Some(f) => py_str(f),
                     None => tracer_ids(&Value::Object(job.clone())).1,
                 };
@@ -1088,10 +1076,10 @@ pub(crate) fn board_write(
                 .iter()
                 .find(|j| get_str(j, "id") == Some(job_id))
                 .cloned();
-            return Ok((None, (row, None)));
+            return Ok((None, (row, None, Vec::new())));
         }
         let job = data["jobs"][i].clone();
-        Ok((Some(dump_board(&data)), (Some(job), None)))
+        Ok((Some(dump_board(&data)), (Some(job), None, stacked)))
     })?;
     match held {
         Some(Held::Closing) => return Err(fail(closing_message(job_id), 6)),
@@ -1112,99 +1100,372 @@ pub(crate) fn board_write(
     if opts.show {
         println!("{}", dumps(&job, INDENT2));
     }
+    close_stacked_prs(home, job_id, &stacked, &device)?;
+    if mirrors {
+        tracer_after_board(home, &job);
+    }
     Ok(job)
 }
 
-pub fn hold(_call: &Call) -> Res<()> {
-    Err(not_ported("hold"))
+/// True when hold would only refresh this session's claim, seen within CLAIM_REFRESH_MINUTES, with no row left
+/// to link.
+fn fresh_hold(
+    job: &Value,
+    device: &str,
+    session: &str,
+    paseo: Option<&Value>,
+    take: Option<&str>,
+) -> Res<bool> {
+    let c = or_null(job.get("claim"));
+    if take.is_some() || !truthy(c) || !mine(c, device, session) || job.get("started").is_none() {
+        return Ok(false);
+    }
+    let ready = job
+        .get("handoff")
+        .and_then(|h| h.get("state"))
+        .and_then(Value::as_str)
+        == Some("ready");
+    if ready || !py_eq(or_null(job.get("paseo")), paseo.unwrap_or(&Value::Null)) {
+        return Ok(false);
+    }
+    let unlinked = job
+        .get("agents")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|row| {
+            row.is_object()
+                && get_str(row, "session") == Some(session)
+                && row.get("paseo").is_none()
+        });
+    if paseo.is_some() && unlinked {
+        return Ok(false);
+    }
+    seen_recently(c)
 }
 
-pub fn handoff(_call: &Call) -> Res<()> {
-    Err(not_ported("handoff"))
+/// Set paseo on each of job's agents rows that session recorded and no session has linked yet.
+fn link_agent_rows(job: &mut Value, session: &str, paseo: &Value) {
+    let Some(rows) = job.get_mut("agents").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for row in rows {
+        if row.is_object() && get_str(row, "session") == Some(session) && row.get("paseo").is_none()
+        {
+            row["paseo"] = paseo.clone();
+        }
+    }
 }
 
-/// Python's `==` on two JSON values: bools and numbers compare as numbers, ints exactly, dicts by key set.
-fn py_eq(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Null, Value::Null) => true,
-        (Value::String(x), Value::String(y)) => x == y,
-        (Value::Array(x), Value::Array(y)) => {
-            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| py_eq(x, y))
+enum Hold {
+    Missing,
+    Held(Value),
+    Ok(Option<Value>, Value, bool),
+}
+
+/// Claim target for this session, or take it over with take. released accepts a handoff packet.
+pub(crate) fn hold_target(target: &str, take: Option<&str>) -> Res<()> {
+    if !matches!(take, None | Some("take" | "released")) {
+        return Err(fail(
+            "usage: hold <project-slug>/<job-id> [take|released]",
+            2,
+        ));
+    }
+    let (home, slug, job_id) = r2_target(target, true)?;
+    new_session();
+    let (device, session, minutes) = holder(&home)?;
+    let paseo = paseo_session();
+    let result = cas(&home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(i) = jobs_of(&data)?
+            .iter()
+            .position(|j| get_str(j, "id") == Some(&job_id))
+        else {
+            return Ok((None, Hold::Missing));
+        };
+        let job = data["jobs"][i].clone();
+        if get_str(&job, "project") != Some(&slug) {
+            return Err(fail(
+                format!(
+                    "{job_id} belongs to {}, not {slug}",
+                    py_str(job.get("project"))
+                ),
+                2,
+            ));
         }
-        (Value::Object(x), Value::Object(y)) => {
-            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| py_eq(v, w)))
+        if take != Some("take") && moved_away(Some(&job), &device, &session) {
+            return Err(fail(moved_message(&job_id, &job["move"]), 6));
         }
-        (Value::Bool(_) | Value::Number(_), Value::Bool(_) | Value::Number(_)) => {
-            match (py_int(a), py_int(b)) {
-                (Some(x), Some(y)) => x == y,
-                _ => py_float(a) == py_float(b),
+        if closing(&job) {
+            return Err(fail(closing_message(&job_id), 6));
+        }
+        let stage = job.get("stage");
+        let asked = get_str(&job, "stage") == Some("pr-open")
+            && job
+                .get("babysit")
+                .is_some_and(|b| b.get("at").is_some_and(Value::is_string));
+        let in_flight = stage
+            .and_then(Value::as_str)
+            .is_some_and(|s| IN_FLIGHT.contains(&s));
+        if take == Some("released") && !in_flight {
+            return Err(fail(
+                format!(
+                    "hold released is only for {}; {} stays held",
+                    IN_FLIGHT.join(", "),
+                    py_str(stage)
+                ),
+                2,
+            ));
+        }
+        let packet = job
+            .get("handoff")
+            .filter(|h| truthy(*h))
+            .cloned()
+            .unwrap_or(json!({}));
+        let round = |v: &Value| v.get("round").cloned().unwrap_or(json!(0));
+        if take == Some("released")
+            && get_str(&packet, "state") == Some("ready")
+            && !(py_eq(or_null(packet.get("stage")), or_null(stage))
+                && py_eq(&round(&packet), &round(&job)))
+        {
+            return Err(fail(
+                format!(
+                    "the board moved since the handoff: it recorded stage {} round {}, but the board now has stage {} round {}. Nothing was claimed",
+                    py_str(packet.get("stage")),
+                    py_str(&round(&packet)),
+                    py_str(stage),
+                    py_str(&round(&job))
+                ),
+                6,
+            ));
+        }
+        let claim = or_null(job.get("claim"));
+        let mut held = blocking(Some(&job), &device, &session, minutes)?;
+        if take == Some("released") && truthy(claim) && !mine(claim, &device, &session) {
+            held = Some(claim.clone());
+        }
+        if let Some(held) = held.filter(|_| take != Some("take")) {
+            return Ok((None, Hold::Held(held)));
+        }
+        if fresh_hold(&job, &device, &session, paseo.as_ref(), take)? {
+            return Ok((None, Hold::Ok(None, job["started"].clone(), asked)));
+        }
+        let c = job
+            .get("claim")
+            .filter(|c| truthy(*c))
+            .cloned()
+            .unwrap_or(json!({}));
+        let keep = truthy(&c) && mine(&c, &device, &session);
+        data["jobs"][i]
+            .as_object_mut()
+            .unwrap()
+            .shift_remove("claim");
+        let since = if keep {
+            c.get("since").and_then(Value::as_str)
+        } else {
+            None
+        };
+        patch_job(
+            &mut data,
+            &job_id,
+            &json!({"claim": new_claim(&device, &session, since)}),
+        );
+        let job = &mut data["jobs"][i];
+        match &paseo {
+            Some(paseo) => {
+                job["paseo"] = paseo.clone();
+                link_agent_rows(job, &session, paseo);
+            }
+            None => {
+                job.as_object_mut().unwrap().shift_remove("paseo");
             }
         }
-        _ => false,
-    }
-}
-
-/// The digits of an int or bool, without a sign for zero, else None for a float.
-fn py_int(v: &Value) -> Option<String> {
-    let text = match v {
-        Value::Bool(b) => return Some(u8::from(*b).to_string()),
-        Value::Number(n) => n.to_string(),
-        _ => return None,
+        if get_str(or_null(job.get("handoff")), "state") == Some("ready") {
+            let handoff = job["handoff"].as_object_mut().unwrap();
+            handoff.insert("state".into(), json!("accepted"));
+            handoff.insert("to".into(), new_claim(&device, &session, None));
+            handoff.insert("accepted".into(), json!(now()));
+        }
+        let started = job["started"].clone();
+        let other = (!keep).then_some(c);
+        Ok((Some(dump_board(&data)), Hold::Ok(other, started, asked)))
+    })?;
+    let (other, started, asked) = match result {
+        Hold::Missing => {
+            return Err(fail(
+                format!("no job {job_id} on the board. Nothing was written."),
+                4,
+            ))
+        }
+        Hold::Held(c) => {
+            return Err(fail(
+                format!(
+                    "{}. Take it over only if the user says so, with hold {target} take",
+                    held_by(&job_id, &c)
+                ),
+                6,
+            ))
+        }
+        Hold::Ok(other, started, asked) => (other, started, asked),
     };
-    if text.contains(['.', 'e', 'E']) {
-        return None;
+    println!("held {target} as {device} session {session}");
+    if let Some(paseo) = &paseo {
+        record_paseo_claim(&home, &job_id, paseo);
     }
-    Some(if text == "-0" { "0".into() } else { text })
-}
-
-fn py_float(v: &Value) -> f64 {
-    match v {
-        Value::Bool(b) => f64::from(u8::from(*b)),
-        Value::Number(n) => n.as_f64().unwrap_or(f64::NAN),
-        _ => f64::NAN,
+    let elapsed = started
+        .as_str()
+        .and_then(elapsed_seconds)
+        .ok_or_else(|| fail(format!("bad started stamp {}", py_repr(&started)), 1))?;
+    println!("elapsed {elapsed}s");
+    if asked {
+        println!("babysit requested: Babysit PR was pressed on {job_id}; run /factory babysit {job_id} --session {session} in this session now");
     }
-}
-
-/// Python's `str()` of a JSON value, as an f-string prints it.
-fn py_str(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        other => py_repr(other),
+    if let Some(other) = other.filter(|o| truthy(o)) {
+        println!(
+            "took over from {} session {}, last seen {}",
+            py_str(other.get("device")),
+            py_str(other.get("session")),
+            py_str(other.get("seen"))
+        );
     }
-}
-
-/// Python's `repr()` of a JSON value.
-fn py_repr(v: &Value) -> String {
-    match v {
-        Value::Null => "None".into(),
-        Value::Bool(true) => "True".into(),
-        Value::Bool(false) => "False".into(),
-        Value::Number(_) => dumps(v, DEFAULT),
-        Value::String(s) => repr(s),
-        Value::Array(items) => format!(
-            "[{}]",
-            items.iter().map(py_repr).collect::<Vec<_>>().join(", ")
-        ),
-        Value::Object(map) => {
-            let items: Vec<String> = map
-                .iter()
-                .map(|(k, v)| format!("{}: {}", repr(k), py_repr(v)))
-                .collect();
-            format!("{{{}}}", items.join(", "))
+    let (line, conflicts) = pull_job(&home, &slug, &job_id)?;
+    println!("{line}");
+    if !conflicts.is_empty() {
+        return Err(conflict_exit(&conflicts));
+    }
+    if take == Some("released") {
+        let (folder, manifest, remote) = sync_state(&home, &slug, &job_id)?;
+        if let Some(problem) = sync_problems(&folder, &manifest, &remote)?.first() {
+            return Err(fail(
+                format!("this device's job artifacts do not match R2: {problem}. The claim may already be held by this session and is not rolled back. Reconcile the named artifacts locally (merge or delete, then push), or stop at needs-human. Do not dispatch any work on unsynced artifacts"),
+                6,
+            ));
         }
     }
+    Ok(())
 }
 
-/// Python truthiness of a value that may be missing.
-fn truthy(v: Option<&Value>) -> bool {
-    match v {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(Value::Array(a)) => !a.is_empty(),
-        Some(Value::Object(o)) => !o.is_empty(),
-        Some(Value::Number(n)) => n.as_f64() != Some(0.0),
+pub fn hold(call: &Call) -> Res<()> {
+    hold_target(&call.args[0], call.args.get(1).map(String::as_str))
+}
+
+pub fn handoff(call: &Call) -> Res<()> {
+    let target = &call.args[0];
+    let (home, slug, job_id) = r2_target(target, true)?;
+    let (device, session, _) = holder(&home)?;
+    let owned = |data: &Value| -> Res<usize> {
+        let i = jobs_of(data)?
+            .iter()
+            .position(|j| get_str(j, "id") == Some(&job_id));
+        let Some(i) = i.filter(|i| get_str(&data["jobs"][*i], "project") == Some(&slug)) else {
+            return Err(fail(format!("no job {target}"), 4));
+        };
+        let job = &data["jobs"][i];
+        let claim = job
+            .get("claim")
+            .filter(|c| truthy(*c))
+            .cloned()
+            .unwrap_or(json!({}));
+        if session.is_empty() || !mine(&claim, &device, &session) {
+            return Err(fail(
+                format!("handoff requires {target}'s current claim and --session tag"),
+                6,
+            ));
+        }
+        if !get_str(job, "stage").is_some_and(|s| IN_FLIGHT.contains(&s)) {
+            return Err(fail(
+                "handoff is only for spec, build, review, or approve; human and PR gates stay held",
+                2,
+            ));
+        }
+        Ok(i)
+    };
+    let board = read_board(&home)?;
+    let before = board["jobs"][owned(&board)?].clone();
+    let folder = safe_job_folder(&home, &slug, &job_id)?;
+    let checkpoint = folder.join("handoff.md");
+    let written = !is_link(&checkpoint).unwrap_or(true)
+        && checkpoint.is_file()
+        && !strip(&read_text(&checkpoint).map_err(|e| fail(os_error(&e, Some(&checkpoint)), 1))?)
+            .is_empty();
+    if !written {
+        return Err(fail(
+            format!(
+                "write a nonempty {} before handing off",
+                checkpoint.display()
+            ),
+            2,
+        ));
     }
+    let wt = home.join("worktrees").join(&slug).join(&job_id);
+    let branch = format!("factory/{job_id}");
+    if git_ok(&wt, &["branch", "--show-current"])? != branch {
+        return Err(fail(
+            format!("handoff needs {branch} checked out in {}", wt.display()),
+            6,
+        ));
+    }
+    if !git_ok(&wt, &["status", "--porcelain"])?.is_empty() {
+        return Err(fail(
+            format!(
+                "{} has uncommitted files; commit them before handoff",
+                wt.display()
+            ),
+            6,
+        ));
+    }
+    let head = git_ok(&wt, &["rev-parse", "HEAD"])?;
+    let remote = origin_git(
+        &wt,
+        &["ls-remote", "origin", &format!("refs/heads/{branch}")],
+    )?;
+    if remote.split_whitespace().next() != Some(head.as_str()) {
+        return Err(fail(
+            format!("push {branch} to origin before handoff; its remote head must match {head}"),
+            6,
+        ));
+    }
+    push_target(target)?;
+    let (folder, manifest, remote_files) = sync_state(&home, &slug, &job_id)?;
+    if let Some(problem) = sync_problems(&folder, &manifest, &remote_files)?.first() {
+        return Err(fail(
+            format!("{problem}; pull and reconcile before handing off"),
+            6,
+        ));
+    }
+    let without_goal = |j: &Value| {
+        let mut j = j.as_object().cloned().unwrap_or_default();
+        j.shift_remove("goal");
+        Value::Object(j)
+    };
+    let result = cas(&home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let i = owned(&data)?;
+        let job = data["jobs"][i].clone();
+        if !py_eq(&without_goal(&job), &without_goal(&before)) {
+            return Err(fail(
+                "job changed while publishing the handoff; inspect it before retrying",
+                6,
+            ));
+        }
+        let mut packet = json!({"state": "ready", "from": job["claim"], "head": head,
+            "stage": job["stage"], "round": job.get("round").cloned().unwrap_or(json!(0)), "at": now()});
+        if truthy(job.get("paseo")) {
+            packet["paseo"] = job["paseo"].clone();
+        }
+        data["jobs"][i]
+            .as_object_mut()
+            .unwrap()
+            .shift_remove("handoff");
+        let job = patch_job(
+            &mut data,
+            &job_id,
+            &json!({"claim": null, "handoff": packet}),
+        );
+        Ok((Some(dump_board(&data)), job))
+    })?;
+    println!("{}", dumps(&result, INDENT2));
+    Ok(())
 }
 
 type Scan = Result<usize, (&'static str, usize)>;
@@ -1540,55 +1801,6 @@ mod tests {
             new_session();
             assert_eq!(std::env::var("FACTORY_SESSION").unwrap(), "kept");
         });
-    }
-
-    #[test]
-    fn tracer_json_is_not_ported() {
-        let home = refused_home("claims-tracer");
-        fs::write(home.join("tracer.json"), "{}").unwrap();
-        let opts = WriteOpts {
-            show: false,
-            verdict: None,
-            rewrite_round: None,
-        };
-        let patch = json!({"stage": "review"}).as_object().unwrap().clone();
-        let e = with_env(NO_PASEO, || board_write(&home, "001-test", patch, &opts)).unwrap_err();
-        assert_eq!(
-            (e.code, e.stderr),
-            (
-                2,
-                "factory.py: board with Tracer is not ported to the Rust binary yet\n".into()
-            )
-        );
-        let note = json!({"note": "x"}).as_object().unwrap().clone();
-        let e = with_env(NO_PASEO, || board_write(&home, "001-test", note, &opts)).unwrap_err();
-        assert_eq!(
-            e.code, 5,
-            "a patch that skips the Tracer mirror reaches the Worker"
-        );
-    }
-
-    #[test]
-    fn stacked_close_is_not_ported() {
-        const BOARD: &str = r#"{"updated":"","jobs":[{"id":"001-lead","project":"sample","stage":"build"},{"id":"002-rider","project":"sample","stage":"build","stacked":true,"pr":"https://github.com/o/r/pull/2","refs":[{"id":"001-lead","kind":"batched-into"}]}]}"#;
-        let (origin, seen) = serve(vec![(200, BOARD, vec![("ETag", "\"b\"")])]);
-        let home = home_for("claims-stacked", &origin);
-        let opts = WriteOpts {
-            show: false,
-            verdict: None,
-            rewrite_round: None,
-        };
-        let patch = json!({"stage": "closed"}).as_object().unwrap().clone();
-        let e = with_env(NO_PASEO, || board_write(&home, "001-lead", patch, &opts)).unwrap_err();
-        assert_eq!(
-            (e.code, e.stderr),
-            (2, "factory.py: board closing stacked pull requests is not ported to the Rust binary yet\n".into())
-        );
-        let seen = seen.lock().unwrap();
-        assert_eq!(
-            seen.iter().map(|s| s.method.as_str()).collect::<Vec<_>>(),
-            ["GET"]
-        );
     }
 
     const UNRESOLVED: &str = "factory.py: factory home must be absolute. Nothing was written.\n";

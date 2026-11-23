@@ -18,7 +18,7 @@ use crate::shared::conf::{
 use crate::shared::consts::{REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL, SLUG};
 use crate::shared::exit::{exit, fail, Exit, Res};
 use crate::shared::fs::{
-    is_link, read_text, regular_metadata, resolve, same_path, seed, write_atomic,
+    contained, is_link, read_text, regular_metadata, resolve, same_path, seed, write_atomic,
 };
 use crate::shared::home::{
     config_root, factory_home, holder, read_location, skill_root, validate_home,
@@ -266,7 +266,7 @@ fn agent_dirs(home: &Path, runtimes: &[&str]) -> Res<Vec<(String, PathBuf)>> {
             }
         }
         let resolved = resolve(&directory).map_err(|_| preflight(&directory))?;
-        let overlaps = |other: &Path| resolved.starts_with(other) || other.starts_with(&resolved);
+        let overlaps = |other: &Path| contained(other, &resolved) || contained(&resolved, other);
         if overlaps(&source_root) || dirs.iter().any(|(_, d)| overlaps(d)) {
             return Err(preflight(&directory));
         }
