@@ -8615,6 +8615,744 @@
       },
       "exit": 5,
       "from": "tests/cli/test_trial.py::TrialResumeTest.test_generic_403_is_access_rejected"
+    },
+    {
+      "id": "pipeline/escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_sends_only_changes_reviews_and_prints_the_worker_verdict"
+    },
+    {
+      "id": "pipeline/escalation-a-worker-reply-with-decider-model-prints-the-same-verdict",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\", \"decider\": \"model\"}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_a_worker_reply_with_decider_model_prints_the_same_verdict"
+    },
+    {
+      "id": "pipeline/escalation-cuts-each-review-to-8000-characters",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-cuts-each-review-to-8000-characters",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_cuts_each_review_to_8000_characters"
+    },
+    {
+      "id": "pipeline/escalation-no-changes-prints-the-fixed-continue-without-a-request",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-no-changes-prints-the-fixed-continue-without-a-request",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_no_changes_prints_the_fixed_continue_without_a_request"
+    },
+    {
+      "id": "pipeline/escalation-a-missing-review-exits-4-and-a-bad-round-exits-2",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-a-missing-review-exits-4-and-a-bad-round-exits-2",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_a_missing_review_exits_4_and_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/escalation-a-missing-review-exits-4-and-a-bad-round-exits-2-2",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "0"],
+      "home": "pipeline-escalation-a-missing-review-exits-4-and-a-bad-round-exits-2",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_a_missing_review_exits_4_and_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/escalation-a-missing-review-exits-4-and-a-bad-round-exits-2-3",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "-1"],
+      "home": "pipeline-escalation-a-missing-review-exits-4-and-a-bad-round-exits-2",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_a_missing_review_exits_4_and_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/escalation-a-missing-review-exits-4-and-a-bad-round-exits-2-4",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "x"],
+      "home": "pipeline-escalation-a-missing-review-exits-4-and-a-bad-round-exits-2",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_a_missing_review_exits_4_and_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/escalation-a-missing-review-exits-4-and-a-bad-round-exits-2-5",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "01"],
+      "home": "pipeline-escalation-a-missing-review-exits-4-and-a-bad-round-exits-2",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_a_missing_review_exits_4_and_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/escalation-a-missing-review-exits-4-and-a-bad-round-exits-2-6",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1.5"],
+      "home": "pipeline-escalation-a-missing-review-exits-4-and-a-bad-round-exits-2",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_a_missing_review_exits_4_and_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/escalation-a-missing-review-exits-4-and-a-bad-round-exits-2-7",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", ""],
+      "home": "pipeline-escalation-a-missing-review-exits-4-and-a-bad-round-exits-2",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_a_missing_review_exits_4_and_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/escalation-a-missing-review-exits-4-and-a-bad-round-exits-2-8",
+      "argv": ["--home", "{home}", "escalation", "sample", "1"],
+      "home": "pipeline-escalation-a-missing-review-exits-4-and-a-bad-round-exits-2",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_a_missing_review_exits_4_and_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          400,
+          "reviews.code: contains the reserved review-findings tag"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-2",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [404, "not found"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-3",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [502, "the escalation model failed"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-4",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [502, "the escalation model failed\u001b[2J"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-5",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [502, "a‮b c\u0007"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-6",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          503,
+          "review escalation needs the Workers AI binding; deploy the current Worker"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-7",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [502, "  \n"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-8",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          502,
+          "line one\n\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-9",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [200, "not json"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-10",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"hold\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-11",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": \"91\", \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\"}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-12",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-sends-only-changes-reviews-and-prints-the-worker-verdict",
+      "stubs": {},
+      "routes": {
+        "POST /api/review/escalation": [
+          200,
+          "{\"decision\": \"escalate\", \"confidence\": 91, \"threshold\": 80, \"reason\": \"clef-flash rated the findings as needing a person.\", \"model\": \"@cf/cloudflare/clef-flash\", \"decider\": \"person\"}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/escalation-every-worker-or-network-failure-warns-and-continues-13",
+      "argv": ["--home", "{home}", "escalation", "sample/042-csv-export", "1"],
+      "home": "pipeline-escalation-every-worker-or-network-failure-warns-and-continues-13",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_review_escalation.py::ReviewEscalationTests.test_every_worker_or_network_failure_warns_and_continues"
+    },
+    {
+      "id": "pipeline/repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "2"],
+      "home": "pipeline-repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_the_same_reviewer_and_signature_in_two_rounds_is_a_repeat"
+    },
+    {
+      "id": "pipeline/repeats-a-bulleted-signature-line-counts",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "2"],
+      "home": "pipeline-repeats-a-bulleted-signature-line-counts",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_a_bulleted_signature_line_counts"
+    },
+    {
+      "id": "pipeline/repeats-round-1-continues-with-no-previous-round",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "1"],
+      "home": "pipeline-repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_round_1_continues_with_no_previous_round"
+    },
+    {
+      "id": "pipeline/repeats-a-missing-previous-round-continues",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "2"],
+      "home": "pipeline-repeats-a-missing-previous-round-continues",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_a_missing_previous_round_continues"
+    },
+    {
+      "id": "pipeline/repeats-changes-reviews-without-signatures-continue",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "2"],
+      "home": "pipeline-repeats-changes-reviews-without-signatures-continue",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_changes_reviews_without_signatures_continue"
+    },
+    {
+      "id": "pipeline/repeats-the-same-signature-from-a-different-reviewer-continues",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "2"],
+      "home": "pipeline-repeats-the-same-signature-from-a-different-reviewer-continues",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_the_same_signature_from_a_different_reviewer_continues"
+    },
+    {
+      "id": "pipeline/repeats-a-pass-previous-review-is-not-a-repeat",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "2"],
+      "home": "pipeline-repeats-a-pass-previous-review-is-not-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_a_pass_previous_review_is_not_a_repeat"
+    },
+    {
+      "id": "pipeline/repeats-a-pass-between-does-not-reset-a-signature",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "3"],
+      "home": "pipeline-repeats-a-pass-between-does-not-reset-a-signature",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_a_pass_between_does_not_reset_a_signature"
+    },
+    {
+      "id": "pipeline/repeats-a-bad-round-exits-2",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "0"],
+      "home": "pipeline-repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/repeats-a-bad-round-exits-2-2",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "-1"],
+      "home": "pipeline-repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/repeats-a-bad-round-exits-2-3",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "x"],
+      "home": "pipeline-repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/repeats-a-bad-round-exits-2-4",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "01"],
+      "home": "pipeline-repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/repeats-a-bad-round-exits-2-5",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "1.5"],
+      "home": "pipeline-repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/repeats-a-bad-round-exits-2-6",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", ""],
+      "home": "pipeline-repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_a_bad_round_exits_2"
+    },
+    {
+      "id": "pipeline/repeats-a-missing-review-exits-4",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "2"],
+      "home": "pipeline-repeats-a-missing-review-exits-4",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "sample",
+                "stage": "review"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_a_missing_review_exits_4"
+    },
+    {
+      "id": "pipeline/repeats-recording-never-changes-the-verdict",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "2"],
+      "home": "pipeline-repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": []
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_recording_never_changes_the_verdict"
+    },
+    {
+      "id": "pipeline/repeats-recording-never-changes-the-verdict-2",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "2"],
+      "home": "pipeline-repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "042-csv-export",
+                "project": "other"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_recording_never_changes_the_verdict"
+    },
+    {
+      "id": "pipeline/repeats-recording-never-changes-the-verdict-3",
+      "argv": ["--home", "{home}", "repeats", "sample/042-csv-export", "2"],
+      "home": "pipeline-repeats-the-same-reviewer-and-signature-in-two-rounds-is-a-repeat",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [500, "boom"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_repeats.py::RepeatsTest.test_recording_never_changes_the_verdict"
     }
   ]
 }

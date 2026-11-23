@@ -1,6 +1,7 @@
 //! The review and pipeline commands: pipeline, documents, verdict, escalation, repeats, review-plan,
 //! review-floor, pre-review, grounding, batch, stack, lesson, agent, trial, experiment and routes.
 
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -8,7 +9,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::board::{dump_board, escalated, load_board, read_board};
+use crate::shared::board::{dump_board, escalated, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{
     tag_lookalike, BABYSIT_SENTENCE, JOB_ID, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS,
@@ -19,11 +20,13 @@ use crate::shared::exit::{fail, Res};
 use crate::shared::fs::{is_link, read_text, write_atomic};
 use crate::shared::home::factory_home;
 use crate::shared::http::{access_message, api, cas};
-use crate::shared::project::project_files;
+use crate::shared::proc::capture;
+use crate::shared::project::{project_files, r2_target, safe_job_folder};
 use crate::shared::py::{
     is_space, os_error, printable_line, repr, round_half_even, splitlines, strip,
+    universal_newlines,
 };
-use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
+use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2, NO_ASCII};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::time::{format_stamp, now, parse_stamp, unix_now};
 use crate::shared::unicode::nfkc;
@@ -1717,6 +1720,388 @@ pub fn trial_cmd(call: &Call) -> Res<()> {
     }
 }
 
+// ---- escalation and repeats ----
+
+const ESCALATION_TEXT_LIMIT: usize = 8000;
+const REPEATED_MAX: usize = 20;
+const CHURN_ROUNDS: usize = 3;
+static ROUND: Pattern = Pattern::new("[1-9][0-9]*", Flags::NONE);
+static SIGNATURE: Pattern = Pattern::new(
+    r"(?:[-*] )?Signature: ([A-Za-z0-9._/-]{1,200}#[a-z0-9]+(?:-[a-z0-9]+){1,5})",
+    Flags::NONE,
+);
+static HEAD: Pattern = Pattern::new("[0-9a-f]{40}", Flags::NONE);
+
+/// The first line of text, as `text.splitlines()[:1]` holds it.
+fn first_line(text: &str) -> Option<&str> {
+    splitlines(text, false).into_iter().next()
+}
+
+/// The Worker's review escalation reply, or None when it is not one.
+fn escalation_verdict(text: &str) -> Option<Value> {
+    let reply = loads(text).ok()?;
+    let map = reply.as_object()?;
+    let ok = matches!(
+        map.get("decision").and_then(Value::as_str),
+        Some("escalate" | "continue")
+    ) && py_int(map.get("confidence")).is_some()
+        && py_int(map.get("threshold")).is_some()
+        && map.get("reason").is_some_and(Value::is_string)
+        && map.get("model").is_some_and(Value::is_string)
+        && map.get("decider").unwrap_or(&json!("model")) == "model";
+    if !ok {
+        return None;
+    }
+    let mut verdict = reply.clone();
+    verdict["decider"] = json!("model");
+    Some(verdict)
+}
+
+fn escalation(home: &Path, slug: &str, job_id: &str, round_text: &str, o: &mut Out) -> Res<()> {
+    let folder = safe_job_folder(home, slug, job_id)?.join(format!("round-{round_text}"));
+    let mut reviews = Map::new();
+    for name in TRACER_REVIEWERS {
+        let path = folder.join(format!("review-{name}.md"));
+        if !path.is_file() {
+            return Err(fail(
+                format!("{} is missing: the round is not complete", path.display()),
+                4,
+            ));
+        }
+        let text = read_text(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
+        if first_line(&text) == Some("VERDICT: CHANGES") {
+            let cut: String = text.chars().take(ESCALATION_TEXT_LIMIT).collect();
+            reviews.insert(name.into(), Value::from(cut));
+        }
+    }
+    let unchanged = json!({"decision": "continue", "confidence": null, "threshold": null,
+                           "reason": "no reviewer asked for changes", "model": null, "decider": "rule"});
+    if reviews.is_empty() {
+        writeln!(o.out, "{}", dumps(&unchanged, DEFAULT)).unwrap();
+        return Ok(());
+    }
+    let body = dumps(&json!({"reviews": reviews}), NO_ASCII);
+    let (status, text) = match api(
+        home,
+        "POST",
+        "/api/review/escalation",
+        Some(body.as_bytes()),
+        &[200, 400, 404, 502, 503],
+        &[("Content-Type", "application/json")],
+    ) {
+        Ok(r) => (
+            Some(r.status),
+            String::from_utf8_lossy(&r.body).into_owned(),
+        ),
+        Err(e) => {
+            let captured = printable_line(&e.stderr.replacen("factory.py: ", "", 1), 300);
+            let why = if captured.is_empty() {
+                "unknown error".to_string()
+            } else {
+                captured
+            };
+            writeln!(
+                o.err,
+                "factory.py: review escalation check failed ({why}); the review loop continues"
+            )
+            .unwrap();
+            let failed = json!({"decision": "continue", "confidence": null, "threshold": null,
+                                "reason": "the escalation check failed", "model": null, "decider": "rule"});
+            writeln!(o.out, "{}", dumps(&failed, DEFAULT)).unwrap();
+            return Ok(());
+        }
+    };
+    let verdict = if status == Some(200) {
+        escalation_verdict(&text)
+    } else {
+        None
+    };
+    let verdict = match verdict {
+        Some(v) => v,
+        None => {
+            let why = if status == Some(200) {
+                "malformed reply".to_string()
+            } else {
+                let detail = printable_line(&text, 200);
+                let status = status.unwrap();
+                if detail.is_empty() {
+                    status.to_string()
+                } else {
+                    format!("{status}: {detail}")
+                }
+            };
+            writeln!(
+                o.err,
+                "factory.py: review escalation check failed ({why}); the review loop continues"
+            )
+            .unwrap();
+            let mut failed = unchanged;
+            failed["reason"] = json!("the escalation check failed");
+            failed
+        }
+    };
+    writeln!(o.out, "{}", dumps(&verdict, DEFAULT)).unwrap();
+    Ok(())
+}
+
+/// Parse `<slug>/<job-id>` and a positive round number, as escalation and repeats do.
+fn job_round(call: &Call) -> Res<(PathBuf, String, String, String)> {
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    if !ROUND.is_full(&call.args[1]) {
+        return Err(fail("round must be a positive integer", 2));
+    }
+    Ok((home, slug, job_id, call.args[1].clone()))
+}
+
+/// Print one JSON verdict on whether round <round>'s CHANGES findings need a person.
+pub fn escalation_cmd(call: &Call) -> Res<()> {
+    let (home, slug, job_id, round_text) = job_round(call)?;
+    flushed(|o| escalation(&home, &slug, &job_id, &round_text, o))
+}
+
+/// The Signature: lines of a CHANGES review's text, or an empty set for any other review.
+fn changes_signatures(text: &str) -> BTreeSet<String> {
+    let lines = splitlines(text, false);
+    if lines.first() != Some(&"VERDICT: CHANGES") {
+        return BTreeSet::new();
+    }
+    lines
+        .iter()
+        .filter_map(|l| SIGNATURE.fullmatch(strip(l)))
+        .map(|m| m.get(1).unwrap().as_str().to_string())
+        .collect()
+}
+
+/// A file's text with undecodable bytes replaced, as `read_text(errors="replace")` gives it.
+fn read_lossy(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    Some(universal_newlines(
+        String::from_utf8_lossy(&bytes).into_owned(),
+    ))
+}
+
+/// The Signature: lines of a CHANGES review, or an empty set for any other or missing review.
+fn review_signatures(path: &Path) -> BTreeSet<String> {
+    if !path.is_file() {
+        return BTreeSet::new();
+    }
+    changes_signatures(&read_lossy(path).unwrap_or_default())
+}
+
+/// Save a round's repeats on the board job's repeated list, in one board write.
+fn record_repeats(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    round_n: u64,
+    repeats: &[Value],
+    o: &mut Out,
+) {
+    let at = now();
+    let new: Vec<Value> = repeats
+        .iter()
+        .map(|r| {
+            json!({"round": round_n, "first": r["first"], "reviewer": r["reviewer"],
+                   "signature": r["signature"], "at": at})
+        })
+        .collect();
+    let key = |r: &Value| {
+        (
+            r.get("round").cloned(),
+            r.get("reviewer").cloned(),
+            r.get("signature").cloned(),
+        )
+    };
+    let keys: Vec<_> = new.iter().map(key).collect();
+    let result = cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(job) = data["jobs"]
+            .as_array()
+            .and_then(|jobs| jobs.iter().find(|j| str_of(j, "id") == Some(job_id)))
+        else {
+            return Ok((None, ()));
+        };
+        if str_of(job, "project") != Some(slug) {
+            return Ok((None, ()));
+        }
+        let old = job
+            .get("repeated")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut rows: Vec<Value> = old
+            .iter()
+            .filter(|r| !r.is_object() || !keys.contains(&key(r)))
+            .cloned()
+            .chain(new.iter().cloned())
+            .collect();
+        if rows.len() > REPEATED_MAX {
+            rows.drain(..rows.len() - REPEATED_MAX);
+        }
+        if rows == old {
+            return Ok((None, ()));
+        }
+        patch_job(&mut data, job_id, &json!({"repeated": rows}));
+        Ok((Some(dump_board(&data)), ()))
+    });
+    if let Err(e) = result {
+        o.err.push_str(&e.stderr);
+        writeln!(
+            o.err,
+            "factory.py: {job_id} repeats were not recorded on the board; the review loop goes on"
+        )
+        .unwrap();
+    }
+}
+
+/// The paths the job's own commits change from old to new, or None when old is not an ancestor of new.
+fn round_own_files(wt: &Path, old: &str, new: &str) -> Option<Vec<String>> {
+    let wt = wt.to_string_lossy();
+    let ancestor = capture(
+        &["git", "-C", &wt, "merge-base", "--is-ancestor", old, new],
+        None,
+        &[],
+        None,
+    )
+    .ok()?;
+    if ancestor.code != 0 {
+        return None;
+    }
+    let range = format!("{old}..{new}");
+    let log = capture(
+        &[
+            "git",
+            "-C",
+            &wt,
+            "log",
+            "--first-parent",
+            "--no-merges",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            "--format=",
+            &range,
+        ],
+        None,
+        &[],
+        None,
+    )
+    .ok()?;
+    if log.code != 0 {
+        return None;
+    }
+    Some(
+        log.stdout
+            .split('\0')
+            .map(|p| p.trim_matches('\n'))
+            .filter(|p| !p.is_empty())
+            .map(String::from)
+            .collect(),
+    )
+}
+
+/// The head a review-plan.json records, or None for a missing, linked or malformed file.
+fn plan_head(path: &Path) -> Option<String> {
+    if !path.is_file() || is_link(path).unwrap_or(true) || is_link(path.parent()?).unwrap_or(true) {
+        return None;
+    }
+    let plan = loads(&read_text(path).ok()?).ok()?;
+    let head = plan.as_object()?.get("head")?.as_str()?;
+    HEAD.is_full(head).then(|| head.to_string())
+}
+
+/// The head round-k/review-plan.json records, or None for a missing, linked or malformed file.
+fn round_head(folder: &Path, k: usize) -> Option<String> {
+    plan_head(&folder.join(format!("round-{k}")).join("review-plan.json"))
+}
+
+/// The paths changed in each of the last CHURN_ROUNDS rounds up to n, sorted, or [] on any doubt.
+fn churn_files(folder: &Path, wt: &Path, n: usize) -> Vec<Value> {
+    let heads: Option<Vec<String>> = (n - CHURN_ROUNDS..=n)
+        .map(|k| round_head(folder, k))
+        .collect();
+    let Some(heads) = heads.filter(|_| wt.is_dir()) else {
+        return Vec::new();
+    };
+    let sets: Option<Vec<BTreeSet<String>>> = heads
+        .windows(2)
+        .map(|w| round_own_files(wt, &w[0], &w[1]).map(|v| v.into_iter().collect()))
+        .collect();
+    let Some(sets) = sets else {
+        return Vec::new();
+    };
+    let common = sets[1..].iter().fold(sets[0].clone(), |acc, s| {
+        acc.intersection(s).cloned().collect()
+    });
+    let rounds: Vec<usize> = (n - CHURN_ROUNDS + 1..=n).collect();
+    common
+        .into_iter()
+        .map(|path| json!({"path": path, "rounds": rounds}))
+        .collect()
+}
+
+fn repeats(home: &Path, slug: &str, job_id: &str, round_text: &str, o: &mut Out) -> Res<()> {
+    let n: usize = round_text
+        .parse()
+        .map_err(|_| fail("round must be a positive integer", 2))?;
+    let job = safe_job_folder(home, slug, job_id)?;
+    let folder = job.join(format!("round-{n}"));
+    for name in TRACER_REVIEWERS {
+        let path = folder.join(format!("review-{name}.md"));
+        if !path.is_file() {
+            return Err(fail(
+                format!("{} is missing: the round is not complete", path.display()),
+                4,
+            ));
+        }
+    }
+    let mut found: Vec<Value> = Vec::new();
+    for name in TRACER_REVIEWERS {
+        let now_signatures = review_signatures(&folder.join(format!("review-{name}.md")));
+        let mut first: std::collections::BTreeMap<String, usize> = Default::default();
+        for k in (1..n).rev() {
+            let earlier = review_signatures(
+                &job.join(format!("round-{k}"))
+                    .join(format!("review-{name}.md")),
+            );
+            for s in now_signatures.intersection(&earlier) {
+                first.insert(s.clone(), k);
+            }
+        }
+        found.extend(
+            first
+                .into_iter()
+                .map(|(s, k)| json!({"reviewer": name, "signature": s, "first": k})),
+        );
+    }
+    let wt = home.join("worktrees").join(slug).join(job_id);
+    let churn = if n >= 4 {
+        churn_files(&job, &wt, n)
+    } else {
+        Vec::new()
+    };
+    let decision = if !found.is_empty() {
+        "repeat"
+    } else if !churn.is_empty() {
+        "churn"
+    } else {
+        "continue"
+    };
+    if !found.is_empty() {
+        record_repeats(home, slug, job_id, n as u64, &found, o);
+    }
+    let previous = if n > 1 { json!(n - 1) } else { Value::Null };
+    let out = json!({"decision": decision, "round": n, "previous": previous, "repeats": found, "churn": churn});
+    writeln!(o.out, "{}", dumps(&out, DEFAULT)).unwrap();
+    Ok(())
+}
+
+/// Print one JSON verdict on whether a reviewer repeats a CHANGES signature from any earlier round.
+pub fn repeats_cmd(call: &Call) -> Res<()> {
+    let (home, slug, job_id, round_text) = job_round(call)?;
+    flushed(|o| repeats(&home, &slug, &job_id, &round_text, o))
+}
+
 // ---- not ported yet ----
 
 pub fn verdict_cmd(_call: &Call) -> Res<()> {
@@ -1725,14 +2110,6 @@ pub fn verdict_cmd(_call: &Call) -> Res<()> {
 
 pub fn lesson_cmd(_call: &Call) -> Res<()> {
     Err(not_ported("lesson"))
-}
-
-pub fn escalation_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("escalation"))
-}
-
-pub fn repeats_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("repeats"))
 }
 
 pub fn review_plan_cmd(_call: &Call) -> Res<()> {
@@ -2239,6 +2616,269 @@ mod tests {
             assert!(open_trial_for(&data, "sample", "spec").is_none());
             let good = json!({"trials": [trial(json!({"project": "sample"}))]});
             assert!(open_trial_for(&good, "sample", "spec").is_some());
+        }
+    }
+
+    /// A git command in dir with a clean config and a fixed author, as the Python tests run it.
+    #[cfg(unix)]
+    pub(super) fn git_in(dir: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    mod repeats {
+        use super::super::*;
+        use crate::shared::fs::temp_dir;
+        use crate::shared::http::tests::{home_for, serve};
+        use std::fs;
+
+        const PASS: &str = "VERDICT: PASS\n\nNothing to change.\n";
+        const CODE: &str = "VERDICT: CHANGES\n\nThe export route skips the person check.\nSignature: worker/export.js#missing-person-check\n\nNit: rename `rowsToCsv`.\n";
+        const SIGNATURES: [&str; 4] = [
+            "missing-csv-route",
+            "missing-person-check",
+            "csv-quote-escape",
+            "missing-header-row",
+        ];
+
+        fn write(home: &Path, n: usize, texts: &[(&str, &str)]) {
+            let folder = home.join(format!("jobs/sample/042-csv-export/round-{n}"));
+            fs::create_dir_all(&folder).unwrap();
+            for name in TRACER_REVIEWERS {
+                let text = texts
+                    .iter()
+                    .find(|(k, _)| *k == name)
+                    .map_or(PASS, |(_, v)| v);
+                fs::write(folder.join(format!("review-{name}.md")), text).unwrap();
+            }
+        }
+
+        fn check(home: &Path, round: &str) -> Value {
+            let mut o = Out::default();
+            repeats(home, "sample", "042-csv-export", round, &mut o).unwrap();
+            loads(&o.out).unwrap()
+        }
+
+        fn changes(slug: &str) -> String {
+            format!(
+                "VERDICT: CHANGES\n\nThe export still fails.\nSignature: worker/export.js#{slug}\n"
+            )
+        }
+
+        fn churned(decision: &str, churn: Value, repeats: Value) -> Value {
+            json!({"decision": decision, "round": 4, "previous": 3, "repeats": repeats, "churn": churn})
+        }
+
+        fn churn() -> Value {
+            json!([{"path": "worker/export.js", "rounds": [2, 3, 4]}])
+        }
+
+        /// Commit once per round, changing worker/export.js in every round but skip, and record each head.
+        #[cfg(unix)]
+        fn build(name: &str, skip: Option<usize>, merge_base: bool) -> (PathBuf, PathBuf) {
+            use super::git_in;
+            let home = temp_dir(name);
+            let wt = home.join("worktrees/sample/042-csv-export");
+            fs::create_dir_all(wt.join("worker")).unwrap();
+            fs::create_dir_all(wt.join("docs")).unwrap();
+            git_in(&wt, &["init", "-q"]);
+            for n in 1..=4 {
+                write(&home, n, &[("code", &changes(SIGNATURES[n - 1]))]);
+                if merge_base && n > 1 {
+                    git_in(&wt, &["checkout", "-q", "base"]);
+                    fs::write(wt.join("docs/base.md"), format!("base {n}\n")).unwrap();
+                    git_in(&wt, &["add", "-A"]);
+                    git_in(&wt, &["commit", "-q", "-m", &format!("base {n}")]);
+                    git_in(&wt, &["checkout", "-q", "-"]);
+                    git_in(&wt, &["merge", "-q", "--no-edit", "base"]);
+                }
+                if Some(n) != skip {
+                    fs::write(wt.join("worker/export.js"), format!("// round {n}\n")).unwrap();
+                }
+                fs::write(wt.join(format!("round-{n}.md")), format!("round {n}\n")).unwrap();
+                git_in(&wt, &["add", "-A"]);
+                git_in(&wt, &["commit", "-q", "-m", &format!("round {n}")]);
+                let head = git_in(&wt, &["rev-parse", "HEAD"]);
+                plan(&home, n, &head);
+                if merge_base && n == 1 {
+                    git_in(&wt, &["branch", "base"]);
+                }
+            }
+            (home, wt)
+        }
+
+        fn plan(home: &Path, n: usize, head: &str) {
+            fs::write(
+                home.join(format!(
+                    "jobs/sample/042-csv-export/round-{n}/review-plan.json"
+                )),
+                json!({"round": n, "head": head}).to_string(),
+            )
+            .unwrap();
+        }
+
+        #[test]
+        fn a_repeat_is_recorded_on_the_board() {
+            let board = r#"{"updated": "", "jobs": [{"id": "042-csv-export", "project": "sample", "stage": "review"}]}"#;
+            let (origin, seen) = serve(vec![
+                (200, board, vec![("ETag", "\"e1\"")]),
+                (200, "", vec![("ETag", "\"e2\"")]),
+            ]);
+            let home = home_for("repeats-record", &origin);
+            write(&home, 1, &[("code", CODE)]);
+            write(&home, 2, &[("code", CODE)]);
+            assert_eq!(check(&home, "2")["decision"], "repeat");
+            let put = loads(std::str::from_utf8(&seen.lock().unwrap()[1].body).unwrap()).unwrap();
+            let row = &put["jobs"][0]["repeated"];
+            assert_eq!(row.as_array().unwrap().len(), 1);
+            assert_eq!(
+                (
+                    &row[0]["round"],
+                    &row[0]["first"],
+                    &row[0]["reviewer"],
+                    &row[0]["signature"]
+                ),
+                (
+                    &json!(2),
+                    &json!(1),
+                    &json!("code"),
+                    &json!("worker/export.js#missing-person-check")
+                )
+            );
+            assert!(parse_stamp(row[0]["at"].as_str().unwrap()).is_some());
+            // The same round again keeps one row for the repeat, whatever second it lands in.
+            let again = put.to_string();
+            let again: &'static str = Box::leak(again.into_boxed_str());
+            let (origin, seen) = serve(vec![
+                (200, again, vec![("ETag", "\"e2\"")]),
+                (200, "", vec![("ETag", "\"e3\"")]),
+            ]);
+            let home2 = home_for("repeats-record-2", &origin);
+            write(&home2, 1, &[("code", CODE)]);
+            write(&home2, 2, &[("code", CODE)]);
+            assert_eq!(check(&home2, "2")["decision"], "repeat");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if let Some(put) = seen.lock().unwrap().get(1) {
+                let put = loads(std::str::from_utf8(&put.body).unwrap()).unwrap();
+                assert_eq!(put["jobs"][0]["repeated"].as_array().unwrap().len(), 1);
+            }
+            // A pass in round 1 ends the repeat and writes nothing.
+            let home3 = temp_dir("repeats-record-3");
+            write(&home3, 1, &[]);
+            write(&home3, 2, &[("code", CODE)]);
+            assert_eq!(check(&home3, "2")["decision"], "continue");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_file_changed_in_three_consecutive_rounds_is_churn() {
+            let (home, _) = build("churn-three", None, false);
+            assert_eq!(check(&home, "4"), churned("churn", churn(), json!([])));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn round_3_never_churns() {
+            let (home, _) = build("churn-round-3", None, false);
+            assert_eq!(
+                check(&home, "3"),
+                json!({"decision": "continue", "round": 3, "previous": 2, "repeats": [], "churn": []})
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_file_skipped_in_one_round_is_not_churn() {
+            let (home, _) = build("churn-skipped", Some(3), false);
+            assert_eq!(check(&home, "4"), churned("continue", json!([]), json!([])));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_missing_or_malformed_round_head_is_not_churn() {
+            let (home, _) = build("churn-malformed", None, false);
+            let path = home.join("jobs/sample/042-csv-export/round-3/review-plan.json");
+            let head = loads(&fs::read_to_string(&path).unwrap()).unwrap()["head"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            for text in [
+                None,
+                Some("{".to_string()),
+                Some(json!({"head": &head[..39]}).to_string()),
+                Some(json!(["x"]).to_string()),
+            ] {
+                let _ = fs::remove_file(&path);
+                if let Some(text) = &text {
+                    fs::write(&path, text).unwrap();
+                }
+                assert_eq!(
+                    check(&home, "4"),
+                    churned("continue", json!([]), json!([])),
+                    "{text:?}"
+                );
+            }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_non_ancestor_head_is_not_churn() {
+            use super::git_in;
+            let (home, wt) = build("churn-ancestor", None, false);
+            let tree = git_in(&wt, &["rev-parse", "HEAD^{tree}"]);
+            plan(
+                &home,
+                2,
+                &git_in(&wt, &["commit-tree", &tree, "-m", "rewritten"]),
+            );
+            assert_eq!(check(&home, "4"), churned("continue", json!([]), json!([])));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn no_worktree_is_not_churn() {
+            let (home, wt) = build("churn-no-worktree", None, false);
+            fs::remove_dir_all(&wt).unwrap();
+            assert_eq!(check(&home, "4"), churned("continue", json!([]), json!([])));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_repeat_wins_over_churn() {
+            let (home, _) = build("churn-repeat", None, false);
+            write(&home, 4, &[("code", &changes(SIGNATURES[2]))]);
+            let repeats = json!([{"reviewer": "code", "signature": "worker/export.js#csv-quote-escape", "first": 3}]);
+            assert_eq!(check(&home, "4"), churned("repeat", churn(), repeats));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_base_merge_is_not_churn() {
+            let (home, _) = build("churn-base-merge", Some(3), true);
+            assert_eq!(check(&home, "4"), churned("continue", json!([]), json!([])));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn own_churn_survives_base_merges() {
+            let (home, _) = build("churn-own", None, true);
+            assert_eq!(check(&home, "4"), churned("churn", churn(), json!([])));
         }
     }
 }
