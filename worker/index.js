@@ -67,7 +67,7 @@ import {
   triageConfidence,
   triageInput,
 } from "./triage.js";
-import { spendGet, spendNudgePass } from "./spend.js";
+import { recordSpendNudges, spendGet, spendNudgePass } from "./spend.js";
 
 export { BoardEvents } from "./events.js";
 
@@ -2790,24 +2790,27 @@ async function storedBoard(env) {
 
 // Spend nudges for the hour; a failure is logged so the stuck and stale pushes still go out.
 async function spendEvents(env, at) {
-  if (!pushKey(env)) return [];
+  if (!pushKey(env)) return { events: [], state: null };
   try {
     return await spendNudgePass(env, await weeklyBudgets(env), at);
   } catch (error) {
     if (error instanceof Error) console.warn(`spend nudge pass failed: ${error.message}`);
     else console.warn("spend nudge pass failed:", error);
-    return [];
+    return { events: [], state: null };
   }
 }
 
 // The hourly stuck, stale and spend push. A scheduled env has no config, so it is read here for VAPID.
+// Spend state is recorded only after a device accepts the push.
 async function pushHourly(env, at) {
+  const spend = await spendEvents(env, at);
   const { jobs } = await storedBoard(env);
-  return sendPushes({ ...env, config: readServerConfig(env) }, [
+  const delivered = await sendPushes({ ...env, config: readServerConfig(env) }, [
     ...stuckPushes(jobs, at),
     ...stalePushes(jobs, at),
-    ...(await spendEvents(env, at)),
+    ...spend.events,
   ]);
+  if (spend.events.length && delivered > 0) await recordSpendNudges(env, spend.state);
 }
 
 // JSON-quoted id with every char outside printable ASCII as \uXXXX, safe to echo to a terminal.
