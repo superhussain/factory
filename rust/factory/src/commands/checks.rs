@@ -893,6 +893,8 @@ fn buildkite_get(url: &str, token: &str, max: usize) -> Result<Vec<u8>, String> 
             .timeout_connect(Some(Duration::from_secs(30)))
             .timeout_send_request(Some(Duration::from_secs(30)))
             .timeout_recv_response(Some(Duration::from_secs(30)))
+            .timeout_per_read(Some(Duration::from_secs(30)))
+            .timeout_per_write(Some(Duration::from_secs(30)))
             .tls_config(tls)
             .build()
             .new_agent()
@@ -929,15 +931,46 @@ fn buildkite_get(url: &str, token: &str, max: usize) -> Result<Vec<u8>, String> 
     Ok(body)
 }
 
+/// text with every occurrence of each secret replaced by one [redacted]. Overlapping or touching
+/// matches merge first, so a secret that extends another leaves nothing visible.
+fn redact<'a>(text: &str, secrets: impl Iterator<Item = &'a String>) -> String {
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    for secret in secrets {
+        let mut from = 0;
+        while let Some(at) = text[from..].find(secret.as_str()) {
+            let start = from + at;
+            spans.push((start, start + secret.len()));
+            from = start + text[start..].chars().next().unwrap().len_utf8();
+        }
+    }
+    spans.sort();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in spans {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    let (mut out, mut last) = (String::new(), 0);
+    for (start, end) in merged {
+        out.push_str(&text[last..start]);
+        out.push_str("[redacted]");
+        last = end;
+    }
+    out + &text[last..]
+}
+
 /// ci_log for a failing check that links to a Buildkite build: the failed job's name and the stripped,
 /// redacted tail of its log, or a problem saying why there is none. Reads only the project's buildkite_org.
-fn buildkite_log(home: &Path, check: &Check, org: &str, api: &str, max: usize) -> Value {
+fn buildkite_log(home: &Path, check: &Check, org: &str, api: &str, max: usize) -> Res<Value> {
     let caps = BUILDKITE_BUILD
         .fullmatch(check.link.as_deref().unwrap_or(""))
         .unwrap();
     let (link_org, pipeline, number) = (&caps[1], &caps[2], &caps[3]);
     let job_id = caps.get(4).map(|m| m.as_str());
-    let reading = |job: &str, tail: &str, problem: &str| json!({"check": check.name, "job": job, "tail": tail, "problem": problem});
+    let reading = |job: &str, tail: &str, problem: &str| {
+        Ok(json!({"check": check.name, "job": job, "tail": tail, "problem": problem}))
+    };
     if org.is_empty() {
         return reading(
             "",
@@ -954,7 +987,7 @@ fn buildkite_log(home: &Path, check: &Check, org: &str, api: &str, max: usize) -
     }
     let env_file = home.join(".env");
     let env = if env_file.exists() {
-        read_conf(&env_file).unwrap_or_default()
+        read_conf(&env_file).map_err(|e| fail(os_error(&e, Some(&env_file)), 1))?
     } else {
         Default::default()
     };
@@ -1015,14 +1048,13 @@ fn buildkite_log(home: &Path, check: &Check, org: &str, api: &str, max: usize) -
         Ok(_) => return reading("", "", "Buildkite sent no usable log"),
         Err(problem) => return reading("", "", problem),
     };
-    let mut text = BUILDKITE_STRIP
+    let text = BUILDKITE_STRIP
         .replace_all(content, |_| String::new())
         .replace("\r\n", "\n");
-    for value in env.values() {
-        if value.chars().count() >= ENV_SECRET_MIN {
-            text = text.replace(value.as_str(), "[redacted]");
-        }
-    }
+    let text = redact(
+        &text,
+        env.values().filter(|v| v.chars().count() >= ENV_SECRET_MIN),
+    );
     let lines: Vec<&str> = text
         .trim_end_matches('\n')
         .split('\n')
@@ -1380,7 +1412,7 @@ pub(crate) fn pr_reading(
     });
     let ci_log = match failed {
         Some(c) if step == "fix-ci" => {
-            buildkite_log(home, c, org, BUILDKITE_API, BUILDKITE_MAX_BYTES)
+            buildkite_log(home, c, org, BUILDKITE_API, BUILDKITE_MAX_BYTES)?
         }
         _ => Value::Null,
     };
@@ -2398,7 +2430,8 @@ mod tests {
             "example-org",
             &format!("{origin}/v2"),
             BUILDKITE_MAX_BYTES,
-        );
+        )
+        .unwrap();
         let mut tail: Vec<String> = (23..100).map(|i| format!("step {i}")).collect();
         tail.extend([
             "progress 100%".into(),
@@ -2452,7 +2485,8 @@ mod tests {
             "example-org",
             &format!("{origin}/v2"),
             BUILDKITE_MAX_BYTES,
-        );
+        )
+        .unwrap();
         assert_eq!(
             got,
             json!({"check": "buildkite/sample-web", "job": "Lint frontend", "tail": "x".repeat(8000), "problem": ""})
@@ -2478,7 +2512,8 @@ mod tests {
             "example-org",
             &format!("{origin}/v2"),
             BUILDKITE_MAX_BYTES,
-        );
+        )
+        .unwrap();
         assert_eq!(got["problem"], "no failed job in build 812");
         assert_eq!(seen.lock().unwrap().len(), 1);
     }
@@ -2506,7 +2541,8 @@ mod tests {
                     "example-org",
                     &format!("{origin}/v2"),
                     BUILDKITE_MAX_BYTES,
-                );
+                )
+                .unwrap();
                 assert!(!got.to_string().contains(TOKEN));
                 assert_eq!(
                     (got["job"].as_str(), got["tail"].as_str()),
@@ -2571,12 +2607,83 @@ mod tests {
             "example-org",
             &format!("{origin}/v2"),
             64,
-        );
+        )
+        .unwrap();
         assert_eq!(
             (got["problem"].as_str(), got["tail"].as_str()),
             (Some("Buildkite sent no usable log"), Some(""))
         );
         assert_eq!(seen.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn buildkite_redacts_a_secret_that_extends_another() {
+        let home = bk_home(
+            "bk-overlap",
+            &format!(
+                "A_SECRET=abcdefghijkl\nBUILDKITE_API_TOKEN={TOKEN}\nB_SECRET=abcdefghijklMNOPQ\n"
+            ),
+        );
+        let build = build_jobs(&[("script", "failed", "Lint frontend")]);
+        let log =
+            leak(json!({"content": "long abcdefghijklMNOPQ short abcdefghijkl\n"}).to_string());
+        let (origin, _) =
+            crate::shared::http::tests::serve(vec![(200, build, vec![]), (200, log, vec![])]);
+        let got = buildkite_log(
+            &home,
+            &bk_check(&format!("{LINK}#{JOB_ID}")),
+            "example-org",
+            &format!("{origin}/v2"),
+            BUILDKITE_MAX_BYTES,
+        )
+        .unwrap();
+        assert_eq!(got["tail"], "long [redacted] short [redacted]");
+    }
+
+    #[test]
+    fn buildkite_unreadable_env_fails_1() {
+        let home = bk_home("bk-bad-env", "");
+        std::fs::write(home.join(".env"), b"BUILDKITE_API_TOKEN=\xff\n").unwrap();
+        let e = buildkite_log(
+            &home,
+            &bk_check(LINK),
+            "example-org",
+            "http://127.0.0.1:9/v2",
+            BUILDKITE_MAX_BYTES,
+        )
+        .unwrap_err();
+        assert_eq!(e.code, 1);
+        assert!(
+            e.stderr.starts_with("factory.py: ") && e.stderr.contains(".env"),
+            "{}",
+            e.stderr
+        );
+    }
+
+    #[test]
+    fn buildkite_stalled_body_times_out() {
+        use std::io::{BufRead, BufReader};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap() > 2 {
+                line.clear();
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{")
+                .unwrap();
+            std::thread::sleep(Duration::from_secs(60));
+        });
+        let started = Instant::now();
+        let got = buildkite_get(&format!("{origin}/v2/x"), TOKEN, BUILDKITE_MAX_BYTES);
+        let waited = started.elapsed().as_secs();
+        let problem = got.unwrap_err();
+        assert!(problem.starts_with("can't reach Buildkite: "), "{problem}");
+        assert!(!problem.contains(TOKEN));
+        assert!((29..40).contains(&waited), "waited {waited} s");
     }
 
     const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
