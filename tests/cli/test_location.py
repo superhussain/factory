@@ -194,6 +194,18 @@ class LocationTest(IsolatedTestCase):
             self.rejected(lambda: self.runtime.validate_home(self.home))
         self.assertIn("Invalid local metadata: jobs/sample/001-test/pipe.", err.getvalue())
 
+    def test_pointer_checks_only_the_top_level(self):
+        self.runtime.adopt_home(self.home, self.pointer)
+        manifest = self.home / "jobs/sample/001-test/.sync.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text("[]")
+        self.assertEqual(self.runtime.factory_home(), self.home)
+        self.rejected(lambda: self.runtime.adopt_home(self.home, self.pointer))
+        (self.home / "projects").write_text("not a folder")
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.rejected(self.runtime.factory_home)
+        self.assertIn("Invalid local metadata: projects.", err.getvalue())
+
     def test_unreadable_metadata_and_unlistable_tree(self):
         if os.name == "nt":
             self.skipTest("POSIX permission bits; Windows real junction test owns its filesystem check")

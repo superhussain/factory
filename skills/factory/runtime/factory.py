@@ -5566,6 +5566,8 @@ def install_timer(home, scheduler):
         plist.parent.mkdir(parents=True, exist_ok=True)
         write_atomic(plist, text)
         setup_run(["launchctl", "bootout", f"gui/{uid}/factory.pickup"])
+        # A disabled label makes bootstrap fail with "5: Input/output error".
+        setup_run(["launchctl", "enable", f"gui/{uid}/factory.pickup"])
         code, out = setup_run(["launchctl", "bootstrap", f"gui/{uid}", str(plist)])
         done = f"installed launchd timer: {plist}"
     elif scheduler == "cron":
@@ -5587,7 +5589,8 @@ def install_timer(home, scheduler):
                                "/TR", str(cmd), "/F"])
         done = f"installed schtasks timer: {cmd}"
     if code:
-        fail(f"could not install the {scheduler} timer: {out.strip()}", 1)
+        label = " factory.pickup" if scheduler == "launchd" else ""
+        fail(f"could not install the {scheduler} timer{label}: {out.strip()}", 1)
     return done
 
 
@@ -9735,7 +9738,7 @@ def read_location(pointer):
         home = Path(value["home"])
         if not home.is_absolute() or str(home.resolve()) != value["home"]:
             raise ValueError()
-        validate_home(home)
+        validate_home(home, deep=False)
         return home
     except (OSError, ValueError, UnicodeError, RuntimeError):
         fail(f"Invalid location pointer: {pointer}.", 2)
@@ -9787,7 +9790,10 @@ def closed_frontmatter(path):
     raise ValueError()
 
 
-def validate_home(home):
+def validate_home(home, deep=True):
+    """Exit 2 naming the first invalid piece of home. deep walks every file under projects/ and jobs/, which adopting
+    a home does; each command resolving the location pointer checks only the top level, since the walk costs
+    seconds on a large home."""
     home = Path(home)
     current = home
     try:
@@ -9806,6 +9812,8 @@ def validate_home(home):
                 continue
             if is_link(current) or not current.is_dir():
                 raise ValueError()
+            if not deep:
+                continue
             stack = [str(current)]
             while stack:
                 current = stack.pop()

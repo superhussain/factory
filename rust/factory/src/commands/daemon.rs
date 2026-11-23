@@ -9,7 +9,8 @@ use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use tungstenite::client::IntoClientRequest;
@@ -55,11 +56,71 @@ enum Event {
 
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 
+/// Reports the stop signal's name once one has arrived, else None.
+type Stop = fn() -> Option<&'static str>;
+
+/// How often the waits check for a stop signal.
+const POLL: Duration = Duration::from_millis(100);
+/// How long a running pickup child gets to finish after a stop signal before it is killed.
+const CHILD_GRACE: Duration = Duration::from_secs(30);
+
+/// The stop signal the handler saw, as an index into STOP_NAMES; 0 is none.
+static SIGNAL: AtomicUsize = AtomicUsize::new(0);
+const STOP_NAMES: [&str; 5] = ["", "SIGINT", "SIGTERM", "CTRL_C", "CTRL_BREAK"];
+
+fn signal_stop() -> Option<&'static str> {
+    Some(STOP_NAMES[SIGNAL.load(Ordering::SeqCst)]).filter(|name| !name.is_empty())
+}
+
+/// Routes SIGINT and SIGTERM to SIGNAL instead of ending the process.
+#[cfg(unix)]
+fn catch_stop_signals() {
+    extern "C" {
+        fn signal(sig: i32, handler: usize) -> usize;
+    }
+    extern "C" fn on_signal(sig: i32) {
+        SIGNAL.store(if sig == 2 { 1 } else { 2 }, Ordering::SeqCst);
+    }
+    // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
+    unsafe {
+        signal(2, on_signal as extern "C" fn(i32) as usize);
+        signal(15, on_signal as extern "C" fn(i32) as usize);
+    }
+}
+
+/// Routes CTRL_C and CTRL_BREAK to SIGNAL instead of ending the process.
+#[cfg(windows)]
+fn catch_stop_signals() {
+    extern "system" {
+        fn SetConsoleCtrlHandler(handler: extern "system" fn(u32) -> i32, add: i32) -> i32;
+    }
+    extern "system" fn on_ctrl(kind: u32) -> i32 {
+        match kind {
+            0 | 1 => {
+                SIGNAL.store(kind as usize + 3, Ordering::SeqCst);
+                1
+            }
+            _ => 0,
+        }
+    }
+    // SAFETY: the handler only stores to an atomic.
+    unsafe {
+        SetConsoleCtrlHandler(on_ctrl, 1);
+    }
+}
+
 pub fn daemon(_call: &Call) -> Res<()> {
-    let home = factory_home()?;
+    run(&factory_home()?)
+}
+
+/// The daemon for home. Returns Ok once a stop signal has closed the socket and any pickup child
+/// has ended; the lock is released as it returns.
+fn run(home: &Path) -> Res<()> {
+    let home = home.to_path_buf();
     let origin = api_url(&home)?;
     let headers = access_headers(&home, &origin)?;
     let _lock = take_lock(&home)?;
+    catch_stop_signals();
     let exe = std::env::current_exe().map_err(|e| fail(os_error(&e, None), 1))?;
     let url = host_url(&origin);
     println!(
@@ -72,6 +133,7 @@ pub fn daemon(_call: &Call) -> Res<()> {
         &headers,
         &LIVE,
         &home.join(".env"),
+        signal_stop,
         &|msg| {
             log_line(&home, msg);
             // A person watching the terminal sees why the socket never opens.
@@ -80,9 +142,13 @@ pub fn daemon(_call: &Call) -> Res<()> {
             }
         },
         &mut |_| {
-            let code = run_pickup(&exe, &home);
+            let (code, stopped) = run_pickup(&exe, &home, signal_stop);
             log_line(&home, &format!("pickup exited {code}"));
-            ControlFlow::Continue(())
+            if stopped {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
         },
     );
     Ok(())
@@ -223,11 +289,18 @@ fn tick(t: &Timing) -> Duration {
 }
 
 /// Reads frames until the socket closes. It sends `ping` after `ping_every` with no frame or
-/// ping, and always sends `Closed` before it stops.
-fn read_loop(mut socket: Socket, t: &Timing, tx: Sender<Event>) {
+/// ping, and always sends `Closed` before it stops. Once `stop` reports a signal it sends the
+/// Worker a close frame and stops.
+fn read_loop(mut socket: Socket, t: &Timing, stop: Stop, tx: Sender<Event>) {
     let mut last = Instant::now();
     let mut pinged = last;
     loop {
+        if stop().is_some() {
+            let _ = socket.close(None);
+            let _ = socket.flush();
+            let _ = tx.send(Event::Closed("stopped".to_string()));
+            return;
+        }
         let event = match socket.read() {
             Ok(Message::Close(frame)) => Event::Closed(format!(
                 "closed by the Worker ({})",
@@ -273,18 +346,25 @@ fn read_loop(mut socket: Socket, t: &Timing, tx: Sender<Event>) {
 }
 
 /// Keeps one socket open, reconnecting with backoff, and calls `pass` once per burst.
-/// Each connect queues a `connect` pass. Returns when `pass` breaks.
+/// Each connect queues a `connect` pass. Returns when `pass` breaks, or when `stop` reports a
+/// signal: then it logs `daemon: stopped (<signal>)` unless `pass` saw the signal first, and waits
+/// for the reader's close frame.
 fn serve(
     url: &str,
     headers: &[(String, String)],
     t: &Timing,
     env_file: &Path,
+    stop: Stop,
     log: &dyn Fn(&str),
     pass: &mut dyn FnMut(&str) -> ControlFlow<()>,
 ) {
     let mut attempt = 0;
     let mut last_start = None;
     loop {
+        if let Some(signal) = stop() {
+            log(&format!("daemon: stopped ({signal})"));
+            return;
+        }
         let socket = match connect(url, headers, t, env_file) {
             Ok(socket) => socket,
             Err(reason) => {
@@ -294,7 +374,7 @@ fn serve(
                     "connect failed: {reason}; retry in {:.1}s",
                     wait.as_secs_f64()
                 ));
-                std::thread::sleep(wait);
+                nap(wait, stop);
                 continue;
             }
         };
@@ -302,24 +382,40 @@ fn serve(
         let opened = Instant::now();
         let (tx, rx) = mpsc::channel();
         let timing = *t;
-        std::thread::spawn(move || read_loop(socket, &timing, tx));
+        std::thread::spawn(move || read_loop(socket, &timing, stop, tx));
         let mut pending = Some((opened, "connect".to_string()));
         let reason = loop {
-            let wait = pending.as_ref().map_or(Duration::MAX, |(first, _)| {
+            if let Some(signal) = stop() {
+                log(&format!("daemon: stopped ({signal})"));
+                wait_closed(&rx, t);
+                return;
+            }
+            let wait = pending.as_ref().map_or(POLL, |(first, _)| {
                 due(*first, last_start, t).saturating_duration_since(Instant::now())
             });
-            match rx.recv_timeout(wait) {
+            match rx.recv_timeout(wait.min(POLL)) {
                 Ok(Event::Changed(key)) => {
                     log(&format!("changed {key}"));
                     pending.get_or_insert_with(|| (Instant::now(), format!("changed {key}")));
                 }
                 Ok(Event::Ignored(n)) => log(&format!("frame ignored ({n} bytes)")),
+                // The reader closed for a stop signal; the check above logs it.
+                Ok(Event::Closed(_)) if stop().is_some() => {}
                 Ok(Event::Closed(reason)) => break reason,
                 Err(RecvTimeoutError::Timeout) => {
+                    if !pending
+                        .as_ref()
+                        .is_some_and(|(first, _)| due(*first, last_start, t) <= Instant::now())
+                    {
+                        continue;
+                    }
                     let (_, reason) = pending.take().unwrap();
                     last_start = Some(Instant::now());
                     log(&format!("pickup pass ({reason})"));
                     if pass(&reason).is_break() {
+                        if stop().is_some() {
+                            wait_closed(&rx, t);
+                        }
                         return;
                     }
                 }
@@ -337,7 +433,29 @@ fn serve(
             "closed: {reason}; retry in {:.1}s",
             wait.as_secs_f64()
         ));
-        std::thread::sleep(wait);
+        nap(wait, stop);
+    }
+}
+
+/// Sleeps for `wait`, or less once `stop` reports a signal.
+fn nap(wait: Duration, stop: Stop) {
+    let end = Instant::now() + wait;
+    while stop().is_none() {
+        let left = end.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        std::thread::sleep(left.min(POLL));
+    }
+}
+
+/// Waits for the reader to send its close frame, which it does within one read timeout.
+fn wait_closed(rx: &Receiver<Event>, t: &Timing) {
+    let end = Instant::now() + tick(t) + Duration::from_secs(1);
+    while let Ok(event) = rx.recv_timeout(end.saturating_duration_since(Instant::now())) {
+        if matches!(event, Event::Closed(_)) {
+            return;
+        }
     }
 }
 
@@ -358,9 +476,11 @@ fn log_line(home: &Path, msg: &str) {
     }
 }
 
-/// Runs `exe --home <home> pickup` with its output appended to the day log.
-fn run_pickup(exe: &Path, home: &Path) -> i32 {
-    let status = day_log(home).and_then(|log| {
+/// Runs `exe --home <home> pickup` with its output appended to the day log, and returns (exit
+/// code, whether a stop signal came while it ran). On a stop signal it logs `daemon: stopped
+/// (<signal>)`, gives the child CHILD_GRACE to finish, then kills it.
+fn run_pickup(exe: &Path, home: &Path, stop: Stop) -> (i32, bool) {
+    let child = day_log(home).and_then(|log| {
         Command::new(exe)
             .arg("--home")
             .arg(home)
@@ -368,14 +488,36 @@ fn run_pickup(exe: &Path, home: &Path) -> i32 {
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
-            .status()
+            .spawn()
     });
-    match status {
-        Ok(status) => status.code().unwrap_or(1),
+    let mut child = match child {
+        Ok(child) => child,
         Err(e) => {
             log_line(home, &os_error(&e, Some(exe)));
-            1
+            return (1, false);
         }
+    };
+    let mut deadline: Option<Instant> = None;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return (status.code().unwrap_or(1), deadline.is_some()),
+            Ok(None) => {}
+            Err(e) => {
+                log_line(home, &os_error(&e, Some(exe)));
+                return (1, deadline.is_some());
+            }
+        }
+        match (deadline, stop()) {
+            (None, Some(signal)) => {
+                log_line(home, &format!("daemon: stopped ({signal})"));
+                deadline = Some(Instant::now() + CHILD_GRACE);
+            }
+            (Some(end), _) if Instant::now() >= end => {
+                let _ = child.kill();
+            }
+            _ => {}
+        }
+        std::thread::sleep(POLL);
     }
 }
 
@@ -504,6 +646,57 @@ mod tests {
         text
     }
 
+    fn no_stop() -> Option<&'static str> {
+        None
+    }
+
+    /// A real SIGTERM to the daemon: it logs the stop line, sends the Worker a close frame and
+    /// returns Ok, which `cli::main` turns into exit 0. No pickup pass runs, since the signal
+    /// lands well inside the 2 s debounce after connect.
+    #[cfg(unix)]
+    #[test]
+    fn sigterm_logs_stop_closes_and_returns_ok() {
+        use std::sync::atomic::AtomicBool;
+        extern "C" {
+            fn kill(pid: i32, sig: i32) -> i32;
+            fn signal(sig: i32, handler: usize) -> usize;
+        }
+        let closed = Arc::new(AtomicBool::new(false));
+        let saw = closed.clone();
+        let (origin, _) = fake(None, move |mut socket| {
+            while let Ok(message) = socket.read() {
+                if let Message::Close(_) = message {
+                    saw.store(true, Ordering::SeqCst);
+                }
+            }
+        });
+        let home = home("sigterm", &origin);
+        let watched = home.clone();
+        let killer = std::thread::spawn(move || {
+            let dir = watched.join("logs").join("daemon");
+            while !(dir.is_dir() && log_text(&watched).contains(" connected ")) {
+                sleep(Duration::from_millis(20));
+            }
+            // SAFETY: kill sends SIGTERM to this process, whose handler only stores to an atomic.
+            unsafe { kill(std::process::id() as i32, 15) };
+        });
+        let result = super::run(&home);
+        killer.join().unwrap();
+        // SAFETY: SIG_DFL (0) restores the default action for the rest of the test process.
+        unsafe {
+            signal(2, 0);
+            signal(15, 0);
+        }
+        SIGNAL.store(0, Ordering::SeqCst);
+        assert!(result.is_ok());
+        let log = log_text(&home);
+        assert!(log.contains(" daemon: stopped (SIGTERM)\n"), "{log}");
+        assert!(!log.contains("pickup pass"), "{log}");
+        sleep(Duration::from_millis(200));
+        assert!(closed.load(Ordering::SeqCst));
+        take_lock(&home).unwrap();
+    }
+
     /// Runs `serve` against origin until `passes` passes have started, and returns their reasons.
     fn run(home: &Path, origin: &str, passes: usize) -> Vec<String> {
         let headers = access_headers(home, origin).unwrap();
@@ -513,6 +706,7 @@ mod tests {
             &headers,
             &TEST,
             &home.join(".env"),
+            no_stop,
             &|msg| log_line(home, msg),
             &mut |reason| {
                 seen.push(reason.to_string());
@@ -677,7 +871,7 @@ mod tests {
         let exe = home.join("fake-factory");
         std::fs::write(&exe, "#!/bin/sh\necho \"args: $*\"\nexit 7\n").unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(run_pickup(&exe, &home), 7);
+        assert_eq!(run_pickup(&exe, &home, no_stop), (7, false));
         assert!(log_text(&home).contains(&format!("args: --home {} pickup\n", home.display())));
         let dir = home.join("logs").join("daemon");
         for entry in std::fs::read_dir(dir).unwrap() {
@@ -759,7 +953,7 @@ mod tests {
         let socket = connect(&host_url(&origin), &[], &t, Path::new(".env")).unwrap();
         let (tx, rx) = mpsc::channel();
         let start = Instant::now();
-        std::thread::spawn(move || read_loop(socket, &t, tx));
+        std::thread::spawn(move || read_loop(socket, &t, no_stop, tx));
         let Ok(Event::Closed(reason)) = rx.recv() else {
             panic!("expected Closed")
         };

@@ -1,7 +1,7 @@
 //! Files as `factory.py` reads and writes them.
 
 use std::collections::hash_map::RandomState;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
@@ -104,13 +104,34 @@ pub fn regular_metadata(p: &Path) -> Result<(), ()> {
     Ok(())
 }
 
+/// `os.access(p, mode)`: access(2), which opens nothing. Opening every file of a large home cost
+/// seconds where an endpoint agent inspects each open.
+#[cfg(unix)]
+fn access(p: &Path, mode: i32) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    extern "C" {
+        fn access(path: *const std::ffi::c_char, mode: i32) -> i32;
+    }
+    let Ok(path) = std::ffi::CString::new(p.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: path is a NUL-terminated string that outlives the call.
+    unsafe { access(path.as_ptr(), mode) == 0 }
+}
+
 /// `os.access(p, os.R_OK)`.
 pub fn readable(p: &Path) -> bool {
-    File::open(p).is_ok()
+    #[cfg(unix)]
+    return access(p, 4);
+    #[cfg(not(unix))]
+    fs::File::open(p).is_ok()
 }
 
 /// `os.access(p, os.R_OK | os.X_OK)` for a directory.
 pub fn listable(p: &Path) -> bool {
+    #[cfg(unix)]
+    return access(p, 4 | 1);
+    #[cfg(not(unix))]
     fs::read_dir(p).is_ok()
 }
 

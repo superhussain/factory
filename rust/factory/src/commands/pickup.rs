@@ -1821,6 +1821,8 @@ fn install_timer(home: &Path, scheduler: &str) -> Res<String> {
         mkdirs(plist.parent().unwrap())?;
         write_file(&plist, &text)?;
         setup_run(&["launchctl", "bootout", &target], None);
+        // A disabled label makes bootstrap fail with "5: Input/output error".
+        setup_run(&["launchctl", "enable", &target], None);
         let shown = plist.to_string_lossy();
         (code, out) = setup_run(
             &["launchctl", "bootstrap", &format!("gui/{uid}"), &shown],
@@ -1874,8 +1876,16 @@ fn install_timer(home: &Path, scheduler: &str) -> Res<String> {
         done = format!("installed schtasks timer: {}", cmd.display());
     }
     if code != 0 {
+        let label = if scheduler == "launchd" {
+            " factory.pickup"
+        } else {
+            ""
+        };
         return Err(fail(
-            format!("could not install the {scheduler} timer: {}", strip(&out)),
+            format!(
+                "could not install the {scheduler} timer{label}: {}",
+                strip(&out)
+            ),
             1,
         ));
     }
@@ -2205,7 +2215,7 @@ fn doctor(home: &Path) -> Res<Value> {
         checks.push(json!({"name": name, "status": status, "message": message}));
     };
     check("location", true, "Location resolved.".into());
-    let mut config_error = match validate_home(&home) {
+    let mut config_error = match validate_home(&home, true) {
         Ok(()) => String::new(),
         Err(e) => strip(e.stderr.get("factory.py: ".len()..).unwrap_or("")).to_string(),
     };
@@ -18048,7 +18058,14 @@ exit "$archive_code"
                 format!("gui/{}", getuid()),
                 plist.display().to_string(),
             ];
-            assert!(st.runs.borrow().contains(&bootstrap));
+            let enable = vec![
+                "launchctl".to_string(),
+                "enable".into(),
+                format!("gui/{}/factory.pickup", getuid()),
+            ];
+            let runs = st.runs.borrow().clone();
+            let at = |argv: &Vec<String>| runs.iter().position(|a| a == argv).unwrap();
+            assert!(at(&enable) < at(&bootstrap));
             *st.loaded.borrow_mut() = true;
             let before = fs::metadata(&plist).unwrap().modified().unwrap();
             st.runs.borrow_mut().clear();
@@ -18060,6 +18077,27 @@ exit "$archive_code"
                 .borrow()
                 .iter()
                 .any(|a| a[..2] == ["launchctl", "bootstrap"]));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_install_launchd_bootstrap_failure_fails() {
+            let st = St::new();
+            st.launchd();
+            st.fx.set_fakes(|f| {
+                f.setup_run = Some(Rc::new(|argv, _| match argv[..2] {
+                    ["launchctl", "bootstrap"] => {
+                        (5, "Bootstrap failed: 5: Input/output error\n".into())
+                    }
+                    ["launchctl", "print"] => (113, String::new()),
+                    _ => (0, String::new()),
+                }))
+            });
+            let (code, out, err) = st.setup(&["--install"]);
+            assert_eq!((code, out.as_str()), (1, ""));
+            assert!(err.contains(
+                "could not install the launchd timer factory.pickup: Bootstrap failed: 5: Input/output error\n"
+            ));
         }
 
         #[test]

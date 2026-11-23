@@ -115,7 +115,7 @@ pub fn read_location(pointer: &Path) -> Res<PathBuf> {
             2,
         )
     })?;
-    validate_home(&home)?;
+    validate_home(&home, false)?;
     Ok(home)
 }
 
@@ -166,8 +166,9 @@ fn scan_tree(name: &str, top: &Path, current: &mut PathBuf) -> Option<()> {
             let entry = entry.ok()?;
             let path = entry.path();
             *current = path.clone();
-            let meta = fs::symlink_metadata(&path).ok()?;
-            if is_link(&path).ok()? {
+            // The entry's own type is not followed through a link and needs no lstat on Unix.
+            let meta = entry.file_type().ok()?;
+            if meta.is_symlink() || (cfg!(windows) && is_link(&path).ok()?) {
                 return None;
             }
             if meta.is_dir() {
@@ -192,7 +193,7 @@ fn scan_tree(name: &str, top: &Path, current: &mut PathBuf) -> Option<()> {
     Some(())
 }
 
-fn check_home(home: &Path, current: &mut PathBuf) -> Option<()> {
+fn check_home(home: &Path, deep: bool, current: &mut PathBuf) -> Option<()> {
     if !home.is_absolute() || !home.is_dir() || !listable(home) {
         return None;
     }
@@ -216,16 +217,21 @@ fn check_home(home: &Path, current: &mut PathBuf) -> Option<()> {
         if is_link(current).ok()? || !current.is_dir() {
             return None;
         }
+        if !deep {
+            continue;
+        }
         let top = current.clone();
         scan_tree(name, &top, current)?;
     }
     Some(())
 }
 
-/// Python's `validate_home`.
-pub fn validate_home(home: &Path) -> Res<()> {
+/// Python's `validate_home`. deep walks every file under projects/ and jobs/, which adopting a
+/// home does; each command resolving the location pointer checks only the top level, since the
+/// walk costs seconds on a large home.
+pub fn validate_home(home: &Path, deep: bool) -> Res<()> {
     let mut current = home.to_path_buf();
-    if check_home(home, &mut current).is_some() {
+    if check_home(home, deep, &mut current).is_some() {
         return Ok(());
     }
     let relative = match current.strip_prefix(home) {
@@ -369,7 +375,7 @@ mod tests {
         );
         fs::write(home.join("paths.md"), "---\nbad key: /x\n---\n").unwrap();
         assert_eq!(
-            validate_home(&home).unwrap_err().stderr,
+            validate_home(&home, true).unwrap_err().stderr,
             "factory.py: Invalid local metadata: paths.md.\n"
         );
         fs::write(home.join("paths.md"), "---\nsample: /x\n---\n").unwrap();
@@ -380,9 +386,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            validate_home(&home).unwrap_err().stderr,
+            validate_home(&home, true).unwrap_err().stderr,
             "factory.py: Invalid local metadata: jobs/sample/001-x/.sync.json.\n"
         );
+        // The pointer check reads only the top level, so the bad manifest below it passes.
+        assert!(validate_home(&home, false).is_ok());
         fs::remove_dir_all(dir).unwrap();
     }
 
