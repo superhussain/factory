@@ -6,7 +6,11 @@ use super::unicode_printable::NON_PRINTABLE;
 
 /// `str.__repr__`.
 pub fn repr(s: &str) -> String {
-    let quote = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
+    let quote = if s.contains('\'') && !s.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
     let mut out = String::with_capacity(s.len() + 2);
     out.push(quote);
     for c in s.chars() {
@@ -47,8 +51,18 @@ pub fn is_printable(c: char) -> bool {
 
 /// text on one line: non-printable characters become spaces, whitespace collapses, cut to limit chars.
 pub fn printable_line(text: &str, limit: usize) -> String {
-    let mapped: String = text.chars().map(|c| if is_printable(c) { c } else { ' ' }).collect();
-    mapped.split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ").chars().take(limit).collect()
+    let mapped: String = text
+        .chars()
+        .map(|c| if is_printable(c) { c } else { ' ' })
+        .collect();
+    mapped
+        .split(' ')
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(limit)
+        .collect()
 }
 
 /// `str.isspace` for one character.
@@ -82,12 +96,15 @@ pub fn splitlines(s: &str, keepends: bool) -> Vec<&str> {
                 }
                 _ => i + 1,
             },
-            '\n' | '\u{b}' | '\u{c}' | '\u{1c}' | '\u{1d}' | '\u{1e}' | '\u{85}' | '\u{2028}' | '\u{2029}' => {
-                i + c.len_utf8()
-            }
+            '\n' | '\u{b}' | '\u{c}' | '\u{1c}' | '\u{1d}' | '\u{1e}' | '\u{85}' | '\u{2028}'
+            | '\u{2029}' => i + c.len_utf8(),
             _ => continue,
         };
-        lines.push(if keepends { &s[start..end] } else { &s[start..i] });
+        lines.push(if keepends {
+            &s[start..end]
+        } else {
+            &s[start..i]
+        });
         start = end;
     }
     if start < s.len() {
@@ -110,7 +127,10 @@ pub fn os_error(e: &std::io::Error, path: Option<&Path>) -> String {
     let base = match e.raw_os_error() {
         Some(n) => {
             let suffix = format!(" (os error {n})");
-            format!("[Errno {n}] {}", text.strip_suffix(&suffix).unwrap_or(&text))
+            format!(
+                "[Errno {n}] {}",
+                text.strip_suffix(&suffix).unwrap_or(&text)
+            )
         }
         None => text,
     };
@@ -141,13 +161,21 @@ mod tests {
         assert_eq!(repr("a\tb\x00\u{200b}é"), "'a\\tb\\x00\\u200bé'");
         assert_eq!(repr("x\"y'z"), "'x\"y\\'z'");
         assert_eq!(repr("bad/x/y"), "'bad/x/y'");
-        assert_eq!(repr("\u{7f}\u{a0}\u{e0001}\\"), "'\\x7f\\xa0\\U000e0001\\\\'");
+        assert_eq!(
+            repr("\u{7f}\u{a0}\u{e0001}\\"),
+            "'\\x7f\\xa0\\U000e0001\\\\'"
+        );
     }
 
     #[test]
     fn printable_matches_python() {
         assert!(is_printable('a') && is_printable(' ') && is_printable('é') && is_printable('😀'));
-        assert!(!is_printable('\n') && !is_printable('\u{7f}') && !is_printable('\u{a0}') && !is_printable('\u{200b}'));
+        assert!(
+            !is_printable('\n')
+                && !is_printable('\u{7f}')
+                && !is_printable('\u{a0}')
+                && !is_printable('\u{200b}')
+        );
         assert_eq!(printable_line("  a\t\tb\u{3000}c\n", 200), "a b c");
         assert_eq!(printable_line("ééé", 2), "éé");
     }
@@ -157,7 +185,10 @@ mod tests {
         assert_eq!(strip("\u{1c} a \u{85}"), "a");
         assert_eq!(lstrip(" a "), "a ");
         assert_eq!(rstrip(" a "), " a");
-        assert_eq!(splitlines("a\r\nb\rc\u{2028}d\n", false), vec!["a", "b", "c", "d"]);
+        assert_eq!(
+            splitlines("a\r\nb\rc\u{2028}d\n", false),
+            vec!["a", "b", "c", "d"]
+        );
         assert_eq!(splitlines("a\r\nb\x0bc", true), vec!["a\r\n", "b\x0b", "c"]);
         assert_eq!(splitlines("", false), Vec::<&str>::new());
         assert_eq!(universal_newlines("a\r\nb\rc".into()), "a\nb\nc");
@@ -166,7 +197,10 @@ mod tests {
     #[test]
     fn os_error_matches_python() {
         let e = std::io::Error::from_raw_os_error(2);
-        assert_eq!(os_error(&e, Some(Path::new("/x"))), "[Errno 2] No such file or directory: '/x'");
+        assert_eq!(
+            os_error(&e, Some(Path::new("/x"))),
+            "[Errno 2] No such file or directory: '/x'"
+        );
     }
 
     #[test]
