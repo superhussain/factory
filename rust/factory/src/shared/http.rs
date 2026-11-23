@@ -459,12 +459,16 @@ pub(crate) fn jitter() -> Duration {
 }
 
 /// Python's `cas`: read-modify-write one R2 file, retrying when another device wrote it first.
-/// change(text, or None if absent) returns (new text or None to skip the write, result).
+/// change(text, or None if absent) returns (new text or None to skip the write, result). The
+/// board goes through `board_client`, which reads the daemon's mirror and writes rows.
 pub fn cas<T>(
     home: &Path,
     path: &str,
     mut change: impl FnMut(Option<&str>) -> Res<(Option<String>, T)>,
 ) -> Res<T> {
+    if path == "/api/board" {
+        return super::board_client::cas(home, change);
+    }
     for _ in 0..20 {
         let read = api(home, "GET", path, None, &[200, 404], &[])?;
         let cond = if read.status == 200 {
