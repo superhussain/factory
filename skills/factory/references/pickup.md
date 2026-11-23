@@ -31,6 +31,9 @@ When the installed skill is older than this setup, run
 `<installed-skill>/runtime/factory catch-up`, or install with
 `tools/install.py` if no skill exists yet. Catch-up backs up the skill, timer and
 home config, installs origin's skill and rewrites the pickup timer through it.
+On a host with the daemon service installed, it removes a leftover pickup timer
+instead and prints `pickup timer: replaced by the daemon`. It never installs the
+daemon itself.
 
 ## Set up and check
 
@@ -49,7 +52,7 @@ the exact fix for each missing one with this host's own paths:
 | 4 | `routes` | `routes.md` |
 | 5 | `launchers` | `launchers.json`, a launcher per route |
 | 6 | `pipeline` | each project's effective pipeline: pickup on and lists this exact host |
-| 7 | `timer` | the 5 minute timer in launchd, cron or Task Scheduler |
+| 7 | `timer` | the daemon service when it is installed (`scheduler: daemon`), else the 5 minute timer in launchd, cron or Task Scheduler |
 
 It exits 0 when all 7 are ok, 3 when any is missing, and 2 on bad arguments.
 It writes no factory file. Then install the 5 minute timer for this host's
@@ -375,6 +378,32 @@ otherwise end its turn on a status note, since nothing wakes an unattended
 session. Keep it out of interactive use.
 
 A standing instruction from the user, the person you are working for. It is about how your turns end. This factory session runs unattended: a message with no tool call in it ends your turn, nothing wakes you afterwards, and the job stalls until a sweep finds it. The user has seen you end turns in four ways while factory work was still owed, and does not want any of them. One: a summary that closes by announcing the next step, such as reviewers running and verdicts to be recorded as they land, with no tool call, so the next thing never starts. Two: an offer to carry on unless the user would prefer otherwise. Three: a list of decisions for the user when, by your own account, none of them blocks the rest of the work. Four: deciding that this is a good place to report, because the turn has been long or a stage is done. Status notes and recommendations are welcome, but put them in the same message as your next tool call. While an agent or background command you started is still running, wait for it and handle its result instead of ending the turn. Stop only at a real stop: the job is at needs-human, merged or closed, its PR waits at pr-open for a person, a step in these instructions says stop, or nothing can move without the user. This does not override the security floors, the confirmation a risky or destructive action needs, or any rule that holds work for a human.
+
+## The daemon as scheduler
+
+Where `factory daemon setup --install` has installed the daemon service, the
+daemon is the host's only pickup scheduler and no pickup timer exists.
+
+- `daemon setup --install` installs the service, then removes the pickup timer.
+  `daemon setup --uninstall` removes the service, then puts the timer back, so the
+  host always has exactly one scheduler.
+- The daemon starts a pass about 2 s after a board or backlog change, when a
+  local Paseo agent titled `factory <id>` stops running (it reads `paseo ls`
+  every 15 s), right after a pass that launched a job, and after 5 minutes with
+  no pass. Passes begin at least 30 s apart. The 5-minute pass covers stale
+  claims, takeover, `not before` schedules, retro and outcomes stamps, orphan
+  scans and the host status heartbeat.
+- `pickup setup` reports check 7 as `scheduler: daemon` and passes it, and
+  `--install` writes no timer. `daemon setup` and `doctor` at a terminal show the
+  daemon state and when its last pass began.
+- On a cron-only host the crontab's `@reboot` and `*/5` lines only start a dead
+  daemon; they never run pickup. launchd, systemd and the Windows loop restart
+  it themselves.
+- A manual `pickup` beside the daemon, or a leftover timer during migration, is
+  safe: pickup takes no host lock, but each claim is a board compare-and-swap
+  under a fresh session tag, so two runs never claim the same idea.
+
+Everywhere else, the 5-minute timer below runs pickup.
 
 ## Run it every 5 minutes
 

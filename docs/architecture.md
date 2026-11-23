@@ -389,7 +389,7 @@ An open dashboard socket sends `ping` every 25 s. The room answers `pong` throug
 | GET upgrade, service token with no such host (`boundHost` is null) | 403, and the room is not called |
 | user principal, POST, GET without `Upgrade: websocket`, or no `BoardEvents` binding | 404 |
 
-A device's `factory daemon` (`rust/factory/src/commands/daemon.rs`) opens one socket on `/events/host` with its service token. The Worker calls `connectEvents` without `exp`, and it drops any `X-Factory-Exp` the device sends, so the room stores `exp: 0` and that socket only ever gets `changed` frames, never board rows. Host sockets share the room's 100-socket cap and its `ping` to `pong` auto-response. The daemon runs `factory pickup` about 2 s after the first frame of a burst, at least 30 s after its last pass began, and once after each connect. The 5-minute pickup timer stays the fallback.
+A device's `factory daemon` (`rust/factory/src/commands/daemon.rs`) opens one socket on `/events/host` with its service token. The Worker calls `connectEvents` without `exp`, and it drops any `X-Factory-Exp` the device sends, so the room stores `exp: 0` and that socket only ever gets `changed` frames, never board rows. Host sockets share the room's 100-socket cap and its `ping` to `pong` auto-response. The daemon runs `factory pickup` about 2 s after the first frame of a burst, at least 30 s after its last pass began, and once after each connect. It also runs a pass when a local `factory <id>` Paseo agent stops running, right after a pass that launched a job, and after 5 minutes with no pass. Where its service is installed it is the only pickup scheduler and no pickup timer exists.
 
 ## Dashboard board writes
 
