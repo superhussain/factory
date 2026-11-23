@@ -525,4 +525,20 @@ mod tests {
         );
         assert!(p.search(&"git ".repeat(500)).is_none());
     }
+
+    #[test]
+    fn drop_lookaround_keeps_only_linear_parts() {
+        for (src, flags, linear) in [
+            (r"a(?=b(?!c))d", Flags::NONE, "ad"),
+            (r"(?<=x)a(?<!y)", Flags::NONE, "a"),
+            (r"\bx\B", Flags::ASCII, "(?:|)x(?:|)"),
+            (r"a$", Flags::NONE, "a"),
+            (r"a$", Flags::M, "(?m)a$"),
+            (r"[(?=]x\(?!", Flags::NONE, r"[(?=]x\(?!"),
+        ] {
+            let out = drop_lookaround(&translate(src, flags));
+            assert_eq!(out, linear, "{src}");
+            regex::Regex::new(&out).unwrap();
+        }
+    }
 }
