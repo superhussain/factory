@@ -40,15 +40,30 @@ The `hosted` group exercises assets, auth, protocol, local integration, browser
 and deployment tooling against the merged source (browser provisioning first if
 needed; see [development.md](development.md)).
 
-Then replace the installed skill bundle on each host from this checkout:
+Then bring each host up to date with one command (`py -3` on Windows):
 
 ```sh
-python3 tools/install.py --destination <absolute-directory> --replace
+python3 <installed-skill>/runtime/factory.py catch-up
 ```
 
-The installer deletes the old bundle once the new one is live. Older
-`factory.backup-<uuid>` folders stay until you remove them. See
-[device.md](device.md) for the lock and backup rules.
+It fetches the checkout's origin and installs the skill with origin's own
+`tools/install.py` from a temporary detached worktree. The new bundle then
+rewrites the pickup timer if the host has one, and catch-up checks the Worker's
+`deploy-main` run. A host with nothing new prints `catch-up: nothing new` and
+writes nothing.
+
+Before any local write it prints `backup: <home>/backups/catch-up-<stamp>`. That
+folder (mode 700) holds `skill/factory/`, `crontab.txt` on cron hosts,
+`LaunchAgents/factory.*.plist` on macOS, `config/factory-*.cmd` on Windows, and
+`home/` with `config.md`, `paths.md`, `routes.md`, `launchers.json` and `.env`.
+Catch-up never prunes these folders. To roll back:
+
+1. Copy `skill/factory` back over `factory` in the skills root.
+2. Restore the timer: `crontab <backup>/crontab.txt`, or copy the plists back to
+   `~/Library/LaunchAgents` (or the `.cmd` files back to `~/.config`).
+3. Copy the files in `home/` back into the factory home.
+
+See [device.md](device.md) for the installer's lock and backup rules.
 
 Settings, Hosts flags a host whose `bundle_behind_since` is more than a day
 old. Reinstall that host first.

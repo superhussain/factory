@@ -48,7 +48,8 @@
                                             pipeline lists this host, through launchers.json; silent
                                             when there is nothing to do. The backlog triage sweep
                                             runs at most every 30 minutes; --triage-now runs it now
-  factory.py pickup setup [--install]      check every pickup prerequisite on this host and print each fix; --install writes and loads the 5 minute timer
+  factory.py pickup setup [--install]       check every pickup prerequisite on this host and print each fix; --install writes and loads the 5 minute timer
+  factory.py catch-up                       bring this host to origin's skill, pickup timer and Worker, backing up first
   factory.py host pair <id> <code>          pair this device with a host added in Settings and set
                                             device: <id> in config.md
   factory.py pipeline <project-slug> [--board]
@@ -5690,6 +5691,197 @@ def pickup_setup(*args):
     print(f"{passed} of 7 ok." + ("" if passed == 7 else " Pickup does nothing on this host until every check is ok."))
     print("A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.")
     sys.exit(0 if passed == 7 else 3)
+
+
+CATCH_UP_HOME_FILES = ("config.md", "paths.md", "routes.md", "launchers.json", ".env")
+
+
+def catch_up_repo(home):
+    """(slug, repo) of the first paths.md checkout, by slug, that holds the factory installer and skill."""
+    for slug, repo in sorted(read_paths(home).items()):
+        if re.fullmatch(r"[A-Za-z0-9_-]+", slug) and os.path.isfile(os.path.join(repo, "tools", "install.py")) \
+                and os.path.isfile(os.path.join(repo, "skills", "factory", "SKILL.md")):
+            return slug, repo
+    fail("no factory checkout in paths.md; run factory.py init <factory checkout>", 1)
+
+
+def catch_up_entry(skill):
+    """The argv prefix that runs an installed bundle: its bundle.json entry when valid, else its runtime."""
+    try:
+        entry = json.loads(Path(skill, "bundle.json").read_text(encoding="utf-8")).get("entry")
+    except (OSError, ValueError, AttributeError):
+        entry = None
+    if isinstance(entry, list) and entry and all(isinstance(a, str) for a in entry) and entry[0] \
+            and not os.path.isabs(entry[0]) and ".." not in Path(entry[0]).parts:
+        return [str(Path(skill, entry[0])), *entry[1:]]
+    return [sys.executable, str(Path(skill, "runtime", "factory.py"))]
+
+
+def catch_up_backup(home, skill):
+    """A new private folder under <home>/backups holding the installed skill, this host's timers and
+    the home config."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:6]
+    folder = Path(home, "backups", f"catch-up-{stamp}")
+    folder.mkdir(parents=True)
+    folder.chmod(0o700)
+    shutil.copytree(skill, folder / "skill" / "factory", symlinks=True, ignore=shutil.ignore_patterns("__pycache__"))
+    if PICKUP_SCHEDULER == "cron":
+        code, out = setup_run(["crontab", "-l"])
+        if not code:
+            (folder / "crontab.txt").write_text(out, encoding="utf-8")
+    for source, pattern, name in ((Path.home() / "Library" / "LaunchAgents", "factory.*.plist", "LaunchAgents"),
+                                  (Path.home() / ".config", "factory-*.cmd", "config")):
+        for path in sorted(source.glob(pattern)):
+            (folder / name).mkdir(exist_ok=True)
+            shutil.copy2(path, folder / name)
+    (folder / "home").mkdir()
+    for name in CATCH_UP_HOME_FILES:
+        if Path(home, name).is_file():
+            shutil.copy2(Path(home, name), folder / "home" / name)
+    return folder
+
+
+def catch_up_gh(slug, *args):
+    """(returncode, output) of gh on the GitHub repository owner/name slug."""
+    return setup_run(["gh", *args, "-R", slug])
+
+
+def catch_up_cmd():
+    """Bring this host to origin's skill, pickup timer and Worker, backing up before any local write.
+    Exit 0 when done or nothing is new, 1 when a step failed, 5 when the fetch failed."""
+    home = factory_home()
+    here = Path(HERE).resolve()
+    skill = here.parent
+    slug, repo = catch_up_repo(home)
+    if Path(repo).resolve() in here.parents:
+        fail(f"catch-up runs from the installed skill, not from the checkout {repo}", 2)
+    project = project_files(home, slug)[0]
+    base = frontmatter(project)[0].get("base", "main") if project.exists() else "main"
+    if check_path(base) or base.startswith("-"):
+        fail(f"{slug} base {base} is not a safe branch name", 1)
+    origin_git(repo, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+    head = git(repo, "rev-parse", f"refs/remotes/origin/{base}")
+    print(f"catch-up: factory checkout {repo}, origin/{base} at {head[:7]}")
+    failed, wrote = 0, False
+
+    branch = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    why = "detached HEAD" if branch == "HEAD" else "dirty" if git(repo, "status", "--porcelain") \
+        else f"on branch {branch}" if branch != base else None
+    if why:
+        print(f"checkout: left as is ({why})")
+    elif git(repo, "rev-parse", "HEAD") == head:
+        print(f"checkout: already at {head[:7]}")
+    else:
+        r = subprocess.run(["git", "-C", repo, "merge", "-q", "--ff-only", head], capture_output=True, text=True)
+        if r.returncode:
+            failed += 1
+            lines = [line for line in r.stderr.splitlines() if line.strip()] or [""]
+            print("checkout: " + next((line for line in lines if line.startswith("fatal:")), lines[0]))
+        else:
+            wrote = True
+            print(f"checkout: fast-forwarded to {git(repo, 'rev-parse', 'HEAD')[:7]}")
+
+    stamp = bundle_stamp()
+    current = bool(stamp) and stamp["commit"] == head
+    timer = timer_installed(PICKUP_SCHEDULER, home)[0]
+    stale = timer and (not current or bool(timer_drift(PICKUP_SCHEDULER, timer_values(home))))
+    print(f"skill: current at {head[:7]}" if current else
+          f"skill: {stamp['commit'][:7] if stamp else 'unknown'} installed, {head[:7]} on origin/{base}")
+    if current and not stale:
+        print("pickup timer: current" if timer else "pickup timer: none on this host, left alone")
+    else:
+        try:
+            backup = catch_up_backup(home, skill)
+        except OSError as e:
+            backup = None
+            failed += 1
+            print(f"backup: {e}")
+        else:
+            wrote = True
+            print(f"backup: {backup}")
+        ok = backup is not None
+        if ok and not current:
+            tmp = tempfile.mkdtemp(prefix="factory-catch-up-")
+            src = Path(tmp, "src")
+            try:
+                r = subprocess.run(["git", "-C", repo, "worktree", "add", "-q", "--detach", str(src), head],
+                                   capture_output=True, text=True)
+                if not r.returncode:
+                    r = subprocess.run([sys.executable, "-B", str(src / "tools" / "install.py"), "--destination",
+                                        str(skill.parent), "--replace"], capture_output=True, text=True)
+            finally:
+                if src.exists():
+                    subprocess.run(["git", "-C", repo, "worktree", "remove", str(src)], capture_output=True)
+                if not src.exists():
+                    os.rmdir(tmp)
+            ok = not r.returncode
+            if ok:
+                print(f"skill: installed {head[:7]} into {skill}")
+            else:
+                failed += 1
+                print(f"skill: {(r.stderr or r.stdout).strip()}")
+        if backup and not ok and timer:
+            print("pickup timer: skipped, skill install failed")
+        elif ok and not timer:
+            print("pickup timer: none on this host, left alone")
+        elif ok:
+            argv = catch_up_entry(skill) + ["--home", str(home), "pickup", "setup", "--install"]
+            try:
+                r = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+                code, out = r.returncode, (r.stdout if r.returncode in (0, 3) else r.stderr + r.stdout).strip()
+            except (OSError, subprocess.TimeoutExpired) as e:
+                code, out = 1, str(e)
+            # pickup setup --install exits 3 after installing the timer while another pickup check is missing.
+            if code in (0, 3):
+                print("pickup timer: " + out.partition("\n")[0])
+                if code == 3:
+                    print("pickup timer: some pickup checks are missing; run factory.py pickup setup to see them")
+            else:
+                failed += 1
+                print(f"pickup timer: {out}")
+
+    url = git(repo, "config", "--get", "remote.origin.url")
+    found = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
+    workflow = f"{head}:.github/workflows/deploy-main.yml"
+    if not found:
+        print("worker: skipped, origin is not on GitHub")
+    elif subprocess.run(["git", "-C", repo, "cat-file", "-e", workflow], capture_output=True).returncode:
+        print(f"worker: skipped, origin/{base} has no .github/workflows/deploy-main.yml")
+    else:
+        code, out = catch_up_gh(found.group(1), "run", "list", "--workflow", "deploy-main.yml", "--commit", head,
+                                "--json", "databaseId,status,conclusion,attempt,url", "--limit", "1")
+        try:
+            runs = json.loads(out) if not code else None
+        except ValueError:
+            code = 1
+        if code == 127:
+            print(f"worker: skipped, gh did not run: {out.strip()}")
+        elif code:
+            failed += 1
+            print(f"worker: {out.strip()}")
+        elif not runs:
+            print(f"worker: no deploy run for {head[:7]} yet; run catch-up again later")
+        elif runs[0]["status"] != "completed":
+            print(f"worker: deploy run {runs[0]['url']} is {runs[0]['status']}")
+        elif runs[0]["conclusion"] == "success":
+            print(f"worker: deployed at {head[:7]}")
+        elif runs[0]["attempt"] < 2:
+            code, out = catch_up_gh(found.group(1), "run", "rerun", str(runs[0]["databaseId"]))
+            if code:
+                failed += 1
+                print(f"worker: {out.strip()}")
+            else:
+                wrote = True
+                print(f"worker: reran deploy run {runs[0]['url']}")
+        else:
+            failed += 1
+            print(f"worker: deploy run {runs[0]['url']} ended {runs[0]['conclusion']} after "
+                  f"{runs[0]['attempt']} attempts; check it by hand")
+
+    if failed:
+        print(f"catch-up: {failed} step(s) failed")
+        sys.exit(1)
+    print("catch-up: done" if wrote else "catch-up: nothing new")
 
 
 def launch_env(given, provider, model):
@@ -15103,6 +15295,7 @@ COMMANDS["tracer"] = (tracer_cmd, 1, 2)
 COMMANDS["archive-workspace"] = (archive_workspace, 1, 2)
 COMMANDS["orphans"] = (orphans_cmd, 0, 0)
 COMMANDS["escalation"] = (escalation_cmd, 2, 2)
+COMMANDS["catch-up"] = (catch_up_cmd, 0, 0)
 COMMANDS["repeats"] = (repeats_cmd, 2, 2)
 COMMANDS["review-plan"] = (review_plan_cmd, 2, 2)
 COMMANDS["review-floor"] = (review_floor_cmd, 1, 1)
