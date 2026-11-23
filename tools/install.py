@@ -3,7 +3,6 @@
 import argparse
 import errno
 import hashlib
-import importlib
 import json
 import os
 import re
@@ -154,9 +153,8 @@ def private_dir(path):
 
 def hold(lock):
     """Block until this process holds lock, an open file; closing it releases the lock."""
-    # Each lock module exists on one platform only, so neither is an import statement.
     if os.name == "nt":
-        msvcrt = importlib.import_module("msvcrt")
+        import msvcrt
         deadline = time.monotonic() + LOCK_WAIT
         while True:
             try:
@@ -166,7 +164,7 @@ def hold(lock):
                 # LK_LOCK gives up after 10 s while another install builds; anything else is a real error.
                 if e.errno not in (errno.EDEADLOCK, errno.EACCES) or time.monotonic() >= deadline:
                     raise
-    fcntl = importlib.import_module("fcntl")
+    import fcntl
     fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
 
 
