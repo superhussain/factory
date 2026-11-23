@@ -76,6 +76,7 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
     ("archive-workspace", ops::archive_workspace, 1, 2),
     ("orphans", ops::orphans_cmd, 0, 0),
     ("escalation", pipeline::escalation_cmd, 2, 2),
+    ("catch-up", catch_up, 0, 0),
     ("repeats", pipeline::repeats_cmd, 2, 2),
     ("review-plan", pipeline::review_plan_cmd, 2, 2),
     ("review-floor", pipeline::review_floor_cmd, 1, 1),
@@ -105,6 +106,10 @@ fn handler_for(name: &str, count: usize) -> Option<Handler> {
 
 pub fn not_ported(name: &str) -> Exit {
     fail(format!("{name} is not ported to the Rust binary yet"), 2)
+}
+
+fn catch_up(_call: &Call) -> Res<()> {
+    Err(not_ported("catch-up"))
 }
 
 fn run(args: Vec<OsString>) -> Res<()> {
@@ -273,7 +278,7 @@ mod tests {
             .iter()
             .map(|(n, _, lo, hi)| (n.to_string(), *lo, *hi))
             .collect();
-        assert_eq!(python.len(), 68);
+        assert_eq!(python.len(), 69);
         assert_eq!(rust, python);
     }
 
