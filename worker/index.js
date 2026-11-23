@@ -35,7 +35,7 @@ import {
   escalationInput,
   REVIEWERS,
 } from "./escalation.js";
-import { announce, connectEvents, EVENTS_PATH, HOST_EVENTS_PATH } from "./events.js";
+import { announce, connectEvents, EVENTS_PATH, HOST_EVENTS_PATH, revokeSeats } from "./events.js";
 import {
   boardPushes,
   pushKey,
@@ -1944,6 +1944,7 @@ async function hostPatch(request, env, principal, id) {
   }
   const headers = await hostSave(env, principal, next, cond);
   if (!headers) return reply("precondition failed", 412);
+  if (patch.state === "retired") await revokeSeats(env, host.token);
   return reply(JSON.stringify(hostView(next)), 200, "application/json", headers);
 }
 
@@ -3717,7 +3718,7 @@ export async function serveFactory(request, env, principal, ctx) {
       return notFound();
     // Only a paired or active host's token may take one of the room's shared slots.
     if (!(await boundHost(env, principal))) return reply("forbidden", 403);
-    return connectEvents(request, env, undefined, true);
+    return connectEvents(request, env, undefined, principal.client_id);
   }
   if (path.startsWith("/api/")) return api(request, env, path, principal, ctx);
   if (request.method !== "GET") return notFound();

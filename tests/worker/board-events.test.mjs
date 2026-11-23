@@ -148,7 +148,7 @@ test("a device's upgrade to /events/host reaches the room marked as a host, with
     ["sec-websocket-key", NONCE],
     ["sec-websocket-version", "13"],
     ["upgrade", "websocket"],
-    ["x-factory-host", "1"],
+    ["x-factory-host", device.client_id],
   ]);
 });
 
@@ -325,4 +325,33 @@ test("the room sets the ping auto-response once", async () => {
   const response = await room.fetch(new Request(EVENTS, { headers: { Upgrade: "websocket" } }));
   assert.equal(response.status, 503);
   assert.deepEqual(calls, [{ request: "ping", response: "pong" }]);
+});
+
+// Retiring a host through the hosts API asks the room to close that token's seats.
+test("retiring a host revokes its event seats", async () => {
+  const events = fakeEvents();
+  const bucket = await hostBucket();
+  const etag = bucket.objects.get("hosts/mac-a.json").httpEtag;
+  bucket.objects.get("hosts/mac-a.json").bytes = Buffer.from(
+    JSON.stringify({
+      id: "mac-a",
+      label: "Mac",
+      token: device.client_id,
+      state: "active",
+      version: 1,
+    }),
+  );
+  const response = await serveFactory(
+    new Request(ORIGIN + "/api/hosts/mac-a", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "If-Match": etag },
+      body: JSON.stringify({ state: "retired" }),
+    }),
+    { BUCKET: bucket, BoardEvents: events },
+    person,
+  );
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.deepEqual(events.fetches(), [
+    ["fetch", "POST", "https://board-events.invalid/revoke?token=" + device.client_id],
+  ]);
 });
