@@ -18,10 +18,11 @@ const doneAt = (job) => Date.parse(job?.done);
 const newestFirst = (a, b) =>
   doneAt(b) - doneAt(a) || (String(a.id) < String(b.id) ? 1 : String(a.id) > String(b.id) ? -1 : 0);
 
-/** Whether a row may leave the board: finished, and nothing on the device still needs it. */
+/** Whether a row may leave the board: finished, and nothing on the device still needs it.
+ * A stale `automerge` on a finished row does not keep it. */
 export function archivable(job, tracerOff = false) {
   if (!terminal(job) || !Number.isFinite(doneAt(job))) return false;
-  if (job.claim || job.needs || job.automerge) return false;
+  if (job.claim || job.needs) return false;
   if (job.escalated === true || /^escalated:/i.test(String(job.note ?? ""))) return false;
   if (job.build?.state === "queued" || job.build?.state === "running") return false;
   const backlog = job.backlog;

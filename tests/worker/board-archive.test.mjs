@@ -155,7 +155,7 @@ test("Off, an invalid setting and every keep rule leave the board alone", async 
     { ...old, id: "504-needs", needs: "a decision" },
     { ...old, id: "505-escalated", escalated: true },
     { ...old, id: "506-escalated-note", note: "Escalated: auth change" },
-    { ...old, id: "507-automerge", automerge: true },
+    { ...old, id: "507-automerge-open", stage: "pr-open", automerge: true },
     { ...old, id: "508-queued", build: { state: "queued" } },
     { ...old, id: "509-running", build: { state: "running" } },
     {
@@ -179,6 +179,19 @@ test("Off, an invalid setting and every keep rule leave the board alone", async 
   });
   assert.deepEqual((await done.run()).moved, ["510-deny-notes", "511-tracer"]);
   assert.equal(warn.mock.calls.length, 0);
+});
+
+test("a stale automerge keeps no finished row, and an open one stays", async () => {
+  const old = { project: "sample", done: "2026-01-01T00:00:00Z", automerge: true };
+  const s = setup({
+    jobs: [
+      { ...old, id: "521-merged-automerge", stage: "merged" },
+      { ...old, id: "522-closed-automerge", stage: "closed" },
+      { ...old, id: "523-open-automerge", stage: "pr-open" },
+    ],
+  });
+  assert.deepEqual((await s.run()).moved.sort(), ["521-merged-automerge", "522-closed-automerge"]);
+  assert.deepEqual(ids(s.read("board.json").jobs), ["523-open-automerge"]);
 });
 
 test("Tracer off lets a pending mirror go", async () => {
