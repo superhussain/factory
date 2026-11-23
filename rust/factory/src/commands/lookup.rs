@@ -19,7 +19,10 @@ use crate::shared::pyjson::{dumps, loads, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::time::{parse_stamp, unix_now};
 
-static GITHUB_REMOTE: Pattern = Pattern::new(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?\s", Flags::NONE);
+static GITHUB_REMOTE: Pattern = Pattern::new(
+    r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?\s",
+    Flags::NONE,
+);
 
 pub(crate) fn main_checkout(cwd: &Path) -> Option<PathBuf> {
     let common = git(cwd, &["rev-parse", "--git-common-dir"]);
@@ -56,9 +59,14 @@ pub fn where_cmd(call: &Call) -> Res<()> {
     let home = factory_home()?;
     let url = api_url(&home)?;
     let cwd = std::env::current_dir().map_err(|e| fail(os_error(&e, None), 1))?;
-    let main = if slug.is_none() { main_checkout(&cwd) } else { None };
+    let main = if slug.is_none() {
+        main_checkout(&cwd)
+    } else {
+        None
+    };
     let paths = read_paths(&home);
-    let listed = loads(&api(&home, "GET", "/projects.json", None, &[200], &[])?.text()?).map_err(json_error)?;
+    let listed = loads(&api(&home, "GET", "/projects.json", None, &[200], &[])?.text()?)
+        .map_err(json_error)?;
     let mut projects: Vec<(String, Value)> = Vec::new();
     for p in listed.as_array().into_iter().flatten() {
         let key = p["slug"].as_str().unwrap_or_default().to_string();
@@ -74,7 +82,14 @@ pub fn where_cmd(call: &Call) -> Res<()> {
             let names: Vec<String> = remotes(main).iter().map(|r| r.to_lowercase()).collect();
             slug = projects
                 .iter()
-                .find(|(_, m)| names.contains(&m.get("repo").and_then(Value::as_str).unwrap_or("").to_lowercase()))
+                .find(|(_, m)| {
+                    names.contains(
+                        &m.get("repo")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_lowercase(),
+                    )
+                })
                 .map(|(s, _)| s.clone());
             if slug.is_none() {
                 slug = projects
@@ -87,9 +102,20 @@ pub fn where_cmd(call: &Call) -> Res<()> {
             }
         }
     }
-    let Some((slug, project)) = slug.as_ref().and_then(|s| projects.iter().find(|(k, _)| k == s)) else {
-        let known = projects.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ");
-        let known = if known.is_empty() { "none".to_string() } else { known };
+    let Some((slug, project)) = slug
+        .as_ref()
+        .and_then(|s| projects.iter().find(|(k, _)| k == s))
+    else {
+        let known = projects
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let known = if known.is_empty() {
+            "none".to_string()
+        } else {
+            known
+        };
         let subject = match (&slug, &main) {
             (Some(s), _) if !s.is_empty() => s.clone(),
             (_, Some(m)) => m.display().to_string(),
@@ -101,10 +127,15 @@ pub fn where_cmd(call: &Call) -> Res<()> {
         ));
     };
     if pull_project(&home, slug)? {
-        return Err(fail(format!("Project has local edits. Push {slug} before continuing."), 6));
+        return Err(fail(
+            format!("Project has local edits. Push {slug} before continuing."),
+            6,
+        ));
     }
     let (project_file, _, _) = project_files(&home, slug)?;
-    let meta = frontmatter(&project_file).map_err(|e| fail(os_error(&e, Some(&project_file)), 1))?.0;
+    let meta = frontmatter(&project_file)
+        .map_err(|e| fail(os_error(&e, Some(&project_file)), 1))?
+        .0;
     let path = project["path"].as_str().unwrap_or("");
     if path.is_empty() {
         return Err(fail(
@@ -115,7 +146,9 @@ pub fn where_cmd(call: &Call) -> Res<()> {
             1,
         ));
     }
-    let runtime = std::env::current_exe().and_then(|p| resolve(&p)).map_err(|e| fail(os_error(&e, None), 1))?;
+    let runtime = std::env::current_exe()
+        .and_then(|p| resolve(&p))
+        .map_err(|e| fail(os_error(&e, None), 1))?;
     let text = |p: PathBuf| p.display().to_string();
     let out = json!({
         "factory": text(home.clone()),
@@ -137,16 +170,32 @@ pub fn job(call: &Call) -> Res<()> {
     let job_id = &call.args[0];
     let home = factory_home()?;
     let board = read_board(&home)?;
-    let found = board["jobs"].as_array().and_then(|jobs| jobs.iter().find(|j| j.get("id").and_then(Value::as_str) == Some(job_id)));
+    let found = board["jobs"].as_array().and_then(|jobs| {
+        jobs.iter()
+            .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
+    });
     let found = match found {
         Some(j) => j.clone(),
         None => {
-            let r = api(&home, "GET", &format!("/api/board/archive?id={}", quote(job_id)), None, &[200, 404], &[])?;
+            let r = api(
+                &home,
+                "GET",
+                &format!("/api/board/archive?id={}", quote(job_id)),
+                None,
+                &[200, 404],
+                &[],
+            )?;
             if r.status == 404 {
-                return Err(fail(format!("no job {job_id} on the board or in the archive. Nothing was written."), 4));
+                return Err(fail(
+                    format!("no job {job_id} on the board or in the archive. Nothing was written."),
+                    4,
+                ));
             }
             let archive = loads(&r.text()?).map_err(json_error)?;
-            archive["jobs"].get(0).cloned().ok_or_else(|| fail(format!("the archive answered with no job for {job_id}"), 1))?
+            archive["jobs"]
+                .get(0)
+                .cloned()
+                .ok_or_else(|| fail(format!("the archive answered with no job for {job_id}"), 1))?
         }
     };
     println!("{}", dumps(&found, INDENT2));
@@ -166,19 +215,44 @@ pub fn builds(call: &Call) -> Res<()> {
         .flatten()
         .filter(|j| j.get("project").and_then(Value::as_str) == Some(slug))
         .collect();
-    let fresh = |j: &Value| j.get("updated").and_then(Value::as_str).and_then(parse_stamp).is_some_and(|seen| seen > cutoff);
-    let build_state = |j: &Value| j.get("build").and_then(|b| b.get("state")).and_then(Value::as_str).map(String::from);
+    let fresh = |j: &Value| {
+        j.get("updated")
+            .and_then(Value::as_str)
+            .and_then(parse_stamp)
+            .is_some_and(|seen| seen > cutoff)
+    };
+    let build_state = |j: &Value| {
+        j.get("build")
+            .and_then(|b| b.get("state"))
+            .and_then(Value::as_str)
+            .map(String::from)
+    };
     let id = |j: &&Value| j.get("id").cloned().unwrap_or(Value::Null);
-    let stage = |j: &Value| j.get("stage").and_then(Value::as_str).unwrap_or("").to_string();
-    let queued: Vec<Value> = jobs.iter().filter(|j| build_state(j).as_deref() == Some("queued")).map(id).collect();
+    let stage = |j: &Value| {
+        j.get("stage")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    let queued: Vec<Value> = jobs
+        .iter()
+        .filter(|j| build_state(j).as_deref() == Some("queued"))
+        .map(id)
+        .collect();
     let moving: Vec<&Value> = jobs
         .iter()
         .copied()
-        .filter(|j| IN_FLIGHT.contains(&stage(j).as_str()) || stage(j) == "pr-open" && !escalated(j))
+        .filter(|j| {
+            IN_FLIGHT.contains(&stage(j).as_str()) || stage(j) == "pr-open" && !escalated(j)
+        })
         .collect();
     let flight: Vec<Value> = moving.iter().filter(|j| fresh(j)).map(id).collect();
     let stale: Vec<Value> = moving.iter().filter(|j| !fresh(j)).map(id).collect();
-    let running: Vec<Value> = jobs.iter().filter(|j| build_state(j).as_deref() == Some("running")).map(id).collect();
+    let running: Vec<Value> = jobs
+        .iter()
+        .filter(|j| build_state(j).as_deref() == Some("running"))
+        .map(id)
+        .collect();
     let due = !queued.is_empty() && flight.is_empty() && running.is_empty();
     let out = json!({"queued": queued, "in_flight": flight, "stale": stale, "running": running, "due": due});
     println!("{}", dumps(&out, INDENT2));

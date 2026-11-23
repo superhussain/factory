@@ -25,19 +25,27 @@ pub struct Response {
 impl Response {
     /// The first header with this name, compared case-insensitively.
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
     }
 
     /// The body as strict UTF-8.
     pub fn text(&self) -> Res<String> {
-        String::from_utf8(self.body.clone()).map_err(|_| fail("the Worker sent a body that is not UTF-8", 1))
+        String::from_utf8(self.body.clone())
+            .map_err(|_| fail("the Worker sent a body that is not UTF-8", 1))
     }
 }
 
 /// `int(s, 10)` for a port: optional sign, ASCII digits, single underscores between digits.
 fn parse_port(s: &str) -> Option<i64> {
     let digits = s.strip_prefix(['+', '-']).unwrap_or(s);
-    if digits.is_empty() || digits.starts_with('_') || digits.ends_with('_') || digits.contains("__") {
+    if digits.is_empty()
+        || digits.starts_with('_')
+        || digits.ends_with('_')
+        || digits.contains("__")
+    {
         return None;
     }
     let n: i64 = digits.replace('_', "").parse().ok()?;
@@ -57,7 +65,9 @@ pub fn normalized_origin(url: &str, https_only: bool) -> Result<String, ()> {
     if let Some(i) = url.find(':').filter(|&i| i > 0) {
         let head = &url[..i];
         let tail = &url[i + 1..];
-        if head.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+        if head
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
             && (tail.is_empty() || !tail.chars().all(|c| c.is_ascii_digit()))
         {
             scheme = head.to_ascii_lowercase();
@@ -68,7 +78,8 @@ pub fn normalized_origin(url: &str, https_only: bool) -> Result<String, ()> {
         Some(after) => after.split_at(after.find('/').unwrap_or(after.len())),
         None => ("", rest),
     };
-    if netloc.contains('[') != netloc.contains(']') || netloc.contains('@') || netloc.ends_with(':') {
+    if netloc.contains('[') != netloc.contains(']') || netloc.contains('@') || netloc.ends_with(':')
+    {
         return Err(());
     }
     let (host, port) = match netloc.strip_prefix('[') {
@@ -88,7 +99,9 @@ pub fn normalized_origin(url: &str, https_only: bool) -> Result<String, ()> {
             return Err(());
         }
     }
-    if scheme != "https" && !(!https_only && scheme == "http" && (host == "localhost" || host == "127.0.0.1")) {
+    if scheme != "https"
+        && !(!https_only && scheme == "http" && (host == "localhost" || host == "127.0.0.1"))
+    {
         return Err(());
     }
     Ok(url.strip_suffix('/').unwrap_or(url).to_string())
@@ -109,20 +122,31 @@ pub fn token_message(env_file: &Path) -> String {
 }
 
 pub fn access_message(env_file: &Path) -> String {
-    format!("Access rejected the service token; check FACTORY_ACCESS_CLIENT_ID/SECRET in {}", env_file.display())
+    format!(
+        "Access rejected the service token; check FACTORY_ACCESS_CLIENT_ID/SECRET in {}",
+        env_file.display()
+    )
 }
 
 /// Python's `api_url`: config.md's `api_url`, normalized.
 pub fn api_url(home: &Path) -> Res<String> {
     let config = home.join("config.md");
     let url = if config.exists() {
-        let meta = frontmatter(&config).map_err(|e| fail(os_error(&e, Some(&config)), 1))?.0;
+        let meta = frontmatter(&config)
+            .map_err(|e| fail(os_error(&e, Some(&config)), 1))?
+            .0;
         fm_get(&meta, "api_url").unwrap_or("").to_string()
     } else {
         String::new()
     };
     if url.is_empty() {
-        return Err(fail(format!("Set api_url in {}, then run /factory init again.", config.display()), 2));
+        return Err(fail(
+            format!(
+                "Set api_url in {}, then run /factory init again.",
+                config.display()
+            ),
+            2,
+        ));
     }
     normalized_origin(&url, false).map_err(|_| fail(endpoint_message(&config), 2))
 }
@@ -145,7 +169,11 @@ pub fn quote(s: &str) -> String {
 fn proxy_url(origin: &str, var: impl Fn(&str) -> Option<String>) -> Option<String> {
     let (scheme, host) = origin.split_once("://")?;
     let scheme = scheme.to_ascii_lowercase();
-    let env = |name: &str| var(&name.to_lowercase()).or_else(|| var(&name.to_uppercase())).filter(|v| !v.is_empty());
+    let env = |name: &str| {
+        var(&name.to_lowercase())
+            .or_else(|| var(&name.to_uppercase()))
+            .filter(|v| !v.is_empty())
+    };
     let proxy = env(&format!("{scheme}_proxy"))?;
     let no_proxy = env("no_proxy").unwrap_or_default();
     if no_proxy == "*" {
@@ -159,7 +187,11 @@ fn proxy_url(origin: &str, var: impl Fn(&str) -> Option<String>) -> Option<Strin
         let (h, name) = (h.to_lowercase(), name.to_lowercase());
         h == name || h.len() > name.len() + 1 && h.ends_with(&format!(".{name}"))
     };
-    for name in no_proxy.split(',').map(str::trim).map(|n| n.trim_start_matches('.')) {
+    for name in no_proxy
+        .split(',')
+        .map(str::trim)
+        .map(|n| n.trim_start_matches('.'))
+    {
         if !name.is_empty() && (names_host(host_only, name) || names_host(host, name)) {
             return None;
         }
@@ -168,8 +200,12 @@ fn proxy_url(origin: &str, var: impl Fn(&str) -> Option<String>) -> Option<Strin
 }
 
 fn new_agent(roots: RootCerts, origin: &str) -> Agent {
-    let tls = TlsConfig::builder().provider(TlsProvider::NativeTls).root_certs(roots).build();
-    let proxy = proxy_url(origin, |name| std::env::var(name).ok()).and_then(|url| ureq::Proxy::new(&url).ok());
+    let tls = TlsConfig::builder()
+        .provider(TlsProvider::NativeTls)
+        .root_certs(roots)
+        .build();
+    let proxy = proxy_url(origin, |name| std::env::var(name).ok())
+        .and_then(|url| ureq::Proxy::new(&url).ok());
     let limit = Some(Duration::from_secs(30));
     Agent::config_builder()
         .max_redirects(0)
@@ -224,7 +260,9 @@ fn chain(e: &dyn std::error::Error) -> String {
 
 fn cert_error(e: &ureq::Error) -> bool {
     let text = chain(e);
-    ["certificate verify failed", "UnknownIssuer", "not trusted"].iter().any(|s| text.contains(s))
+    ["certificate verify failed", "UnknownIssuer", "not trusted"]
+        .iter()
+        .any(|s| text.contains(s))
 }
 
 fn host_not_found() -> &'static str {
@@ -240,7 +278,9 @@ fn host_not_found() -> &'static str {
 /// What Python's urllib prints for a failed request, on one line of at most 200 characters.
 pub fn urlopen_error(e: &ureq::Error) -> String {
     let detail = match e {
-        ureq::Error::Io(io) if io.raw_os_error().is_some() => format!("<urlopen error {}>", os_error(io, None)),
+        ureq::Error::Io(io) if io.raw_os_error().is_some() => {
+            format!("<urlopen error {}>", os_error(io, None))
+        }
         ureq::Error::Timeout(ureq::Timeout::Connect) => "<urlopen error timed out>".to_string(),
         ureq::Error::Timeout(_) => "timed out".to_string(),
         ureq::Error::HostNotFound => host_not_found().to_string(),
@@ -249,7 +289,13 @@ pub fn urlopen_error(e: &ureq::Error) -> String {
     printable_line(&detail, 200)
 }
 
-fn send(agent: &Agent, method: &str, url: &str, headers: &[(String, String)], body: Option<&[u8]>) -> Result<Response, ureq::Error> {
+fn send(
+    agent: &Agent,
+    method: &str,
+    url: &str,
+    headers: &[(String, String)],
+    body: Option<&[u8]>,
+) -> Result<Response, ureq::Error> {
     let mut request = ureq::http::Request::builder().method(method).uri(url);
     for (name, value) in headers {
         request = request.header(name.as_str(), value.as_str());
@@ -263,15 +309,35 @@ fn send(agent: &Agent, method: &str, url: &str, headers: &[(String, String)], bo
         .headers()
         .iter()
         // http.client decodes header values as Latin-1.
-        .map(|(k, v)| (k.as_str().to_string(), v.as_bytes().iter().map(|&b| b as char).collect()))
+        .map(|(k, v)| {
+            (
+                k.as_str().to_string(),
+                v.as_bytes().iter().map(|&b| b as char).collect(),
+            )
+        })
         .collect();
-    let body = response.into_body().with_config().limit(u64::MAX).read_to_vec()?;
-    Ok(Response { status, headers: got, body })
+    let body = response
+        .into_body()
+        .with_config()
+        .limit(u64::MAX)
+        .read_to_vec()?;
+    Ok(Response {
+        status,
+        headers: got,
+        body,
+    })
 }
 
 /// Python's `api`: one request to the factory Worker. Fails 5 on an auth or network failure or a
 /// status outside ok. The service token goes only into the request headers.
-pub fn api(home: &Path, method: &str, path: &str, body: Option<&[u8]>, ok: &[u16], headers: &[(&str, &str)]) -> Res<Response> {
+pub fn api(
+    home: &Path,
+    method: &str,
+    path: &str,
+    body: Option<&[u8]>,
+    ok: &[u16],
+    headers: &[(&str, &str)],
+) -> Res<Response> {
     let env_file = home.join(".env");
     let env = if env_file.exists() {
         read_conf(&env_file).map_err(|e| fail(os_error(&e, Some(&env_file)), 1))?
@@ -286,20 +352,31 @@ pub fn api(home: &Path, method: &str, path: &str, body: Option<&[u8]>, ok: &[u16
     for (name, value) in headers {
         set(name, value);
     }
-    for (header, var) in [("CF-Access-Client-Id", "FACTORY_ACCESS_CLIENT_ID"), ("CF-Access-Client-Secret", "FACTORY_ACCESS_CLIENT_SECRET")] {
+    for (header, var) in [
+        ("CF-Access-Client-Id", "FACTORY_ACCESS_CLIENT_ID"),
+        ("CF-Access-Client-Secret", "FACTORY_ACCESS_CLIENT_SECRET"),
+    ] {
         if let Some(value) = env.get(var).filter(|v| !v.is_empty()) {
             set(header, value);
         }
     }
     // urllib gives every request with a body this Content-Type unless the caller set one.
-    if body.is_some() && !sent.iter().any(|(k, _)| k.eq_ignore_ascii_case("Content-Type")) {
-        sent.push(("Content-Type".into(), "application/x-www-form-urlencoded".into()));
+    if body.is_some()
+        && !sent
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("Content-Type"))
+    {
+        sent.push((
+            "Content-Type".into(),
+            "application/x-www-form-urlencoded".into(),
+        ));
     }
     let origin = api_url(home)?;
     let url = format!("{origin}{path}");
     let key = (origin, path.to_string());
     let cached = method == "GET" && READ_CACHED.is_full(path);
-    if method != "GET" && (path.starts_with("/api/pipeline/") || path.starts_with("/api/projects/")) {
+    if method != "GET" && (path.starts_with("/api/pipeline/") || path.starts_with("/api/projects/"))
+    {
         reads().lock().unwrap().clear();
     } else if cached {
         if let Some((at, hit)) = reads().lock().unwrap().get(&key) {
@@ -312,14 +389,25 @@ pub fn api(home: &Path, method: &str, path: &str, body: Option<&[u8]>, ok: &[u16
     if result.as_ref().is_err_and(cert_error) {
         let ssl_env = std::env::var_os("SSL_CERT_FILE").is_some_and(|v| !v.is_empty())
             || std::env::var_os("SSL_CERT_DIR").is_some_and(|v| !v.is_empty());
-        let fallback = if Path::new(FALLBACK_CA_FILE).is_file() && !ssl_env { fallback_agent(&key.0) } else { None };
+        let fallback = if Path::new(FALLBACK_CA_FILE).is_file() && !ssl_env {
+            fallback_agent(&key.0)
+        } else {
+            None
+        };
         if let Some(agent) = fallback {
             result = send(&agent, method, &url, &sent, body);
         }
     }
     if let Err(e) = &result {
-        let hint = if cert_error(e) { ". Set SSL_CERT_FILE to your system CA bundle and retry." } else { "" };
-        return Err(fail(format!("can't reach {url}: {}{hint}", urlopen_error(e)), 5));
+        let hint = if cert_error(e) {
+            ". Set SSL_CERT_FILE to your system CA bundle and retry."
+        } else {
+            ""
+        };
+        return Err(fail(
+            format!("can't reach {url}: {}{hint}", urlopen_error(e)),
+            5,
+        ));
     }
     let response = result.unwrap();
     let status = response.status;
@@ -336,7 +424,10 @@ pub fn api(home: &Path, method: &str, path: &str, body: Option<&[u8]>, ok: &[u16
         });
     }
     if cached && status == 200 {
-        reads().lock().unwrap().insert(key, (Instant::now(), response.clone()));
+        reads()
+            .lock()
+            .unwrap()
+            .insert(key, (Instant::now(), response.clone()));
     }
     Ok(response)
 }
@@ -349,24 +440,50 @@ fn jitter() -> Duration {
 
 /// Python's `cas`: read-modify-write one R2 file, retrying when another device wrote it first.
 /// change(text, or None if absent) returns (new text or None to skip the write, result).
-pub fn cas<T>(home: &Path, path: &str, mut change: impl FnMut(Option<&str>) -> Res<(Option<String>, T)>) -> Res<T> {
+pub fn cas<T>(
+    home: &Path,
+    path: &str,
+    mut change: impl FnMut(Option<&str>) -> Res<(Option<String>, T)>,
+) -> Res<T> {
     for _ in 0..20 {
         let read = api(home, "GET", path, None, &[200, 404], &[])?;
         let cond = if read.status == 200 {
-            let etag = read.header("ETag").ok_or_else(|| fail(format!("{path}: the Worker sent no ETag"), 1))?;
-            ("If-Match", etag.strip_prefix("W/").unwrap_or(etag).to_string())
+            let etag = read
+                .header("ETag")
+                .ok_or_else(|| fail(format!("{path}: the Worker sent no ETag"), 1))?;
+            (
+                "If-Match",
+                etag.strip_prefix("W/").unwrap_or(etag).to_string(),
+            )
         } else {
             ("If-None-Match", "*".to_string())
         };
-        let text = if read.status == 200 { Some(read.text()?) } else { None };
+        let text = if read.status == 200 {
+            Some(read.text()?)
+        } else {
+            None
+        };
         let (new, result) = change(text.as_deref())?;
         let Some(new) = new else { return Ok(result) };
-        if api(home, "PUT", path, Some(new.as_bytes()), &[200, 412], &[(cond.0, &cond.1)])?.status == 200 {
+        if api(
+            home,
+            "PUT",
+            path,
+            Some(new.as_bytes()),
+            &[200, 412],
+            &[(cond.0, &cond.1)],
+        )?
+        .status
+            == 200
+        {
             return Ok(result);
         }
         std::thread::sleep(jitter());
     }
-    Err(fail(format!("{path} kept changing under us; gave up after 20 tries"), 5))
+    Err(fail(
+        format!("{path} kept changing under us; gave up after 20 tries"),
+        5,
+    ))
 }
 
 #[cfg(test)]
@@ -386,12 +503,17 @@ pub(crate) mod tests {
 
     impl Seen {
         pub(crate) fn header(&self, name: &str) -> Option<&str> {
-            self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+            self.headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.as_str())
         }
     }
 
     /// A loopback server that answers each request with the next reply, as raw HTTP/1.0.
-    pub(crate) fn serve(replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>) -> (String, Arc<Mutex<Vec<Seen>>>) {
+    pub(crate) fn serve(
+        replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>,
+    ) -> (String, Arc<Mutex<Vec<Seen>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -403,7 +525,10 @@ pub(crate) mod tests {
                 let mut line = String::new();
                 reader.read_line(&mut line).unwrap();
                 let mut parts = line.split_whitespace();
-                let (method, path) = (parts.next().unwrap().to_string(), parts.next().unwrap().to_string());
+                let (method, path) = (
+                    parts.next().unwrap().to_string(),
+                    parts.next().unwrap().to_string(),
+                );
                 let mut headers = Vec::new();
                 loop {
                     let mut h = String::new();
@@ -415,15 +540,25 @@ pub(crate) mod tests {
                     let (k, v) = h.split_once(':').unwrap();
                     headers.push((k.to_string(), v.trim().to_string()));
                 }
-                let length = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("content-length")).map_or(0, |(_, v)| v.parse().unwrap());
+                let length = headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                    .map_or(0, |(_, v)| v.parse().unwrap());
                 let mut data = vec![0; length];
                 reader.read_exact(&mut data).unwrap();
-                log.lock().unwrap().push(Seen { method, path, headers, body: data });
+                log.lock().unwrap().push(Seen {
+                    method,
+                    path,
+                    headers,
+                    body: data,
+                });
                 let mut head = format!("HTTP/1.0 {status} X\r\n");
                 for (k, v) in extra {
                     head.push_str(&format!("{k}: {v}\r\n"));
                 }
-                stream.write_all(format!("{head}\r\n{body}").as_bytes()).unwrap();
+                stream
+                    .write_all(format!("{head}\r\n{body}").as_bytes())
+                    .unwrap();
             }
         });
         (origin, seen)
@@ -431,18 +566,33 @@ pub(crate) mod tests {
 
     pub(crate) fn home_for(name: &str, origin: &str) -> std::path::PathBuf {
         let home = temp_dir(name);
-        std::fs::write(home.join("config.md"), format!("---\napi_url: {origin}\n---\n")).unwrap();
-        std::fs::write(home.join(".env"), "FACTORY_ACCESS_CLIENT_ID=test-id\nFACTORY_ACCESS_CLIENT_SECRET=test-secret\n").unwrap();
+        std::fs::write(
+            home.join("config.md"),
+            format!("---\napi_url: {origin}\n---\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            home.join(".env"),
+            "FACTORY_ACCESS_CLIENT_ID=test-id\nFACTORY_ACCESS_CLIENT_SECRET=test-secret\n",
+        )
+        .unwrap();
         home
     }
 
     #[test]
     fn redirect_is_an_access_failure() {
-        let (origin, _) = serve(vec![(302, "", vec![("Location", "https://example.invalid/login")])]);
+        let (origin, _) = serve(vec![(
+            302,
+            "",
+            vec![("Location", "https://example.invalid/login")],
+        )]);
         let home = home_for("http-302", &origin);
         let e = api(&home, "GET", "/api/board", None, &[200], &[]).unwrap_err();
         assert_eq!(e.code, 5);
-        assert_eq!(e.stderr, format!("factory.py: {}\n", access_message(&home.join(".env"))));
+        assert_eq!(
+            e.stderr,
+            format!("factory.py: {}\n", access_message(&home.join(".env")))
+        );
         assert!(!e.stderr.contains("test-secret"));
     }
 
@@ -451,11 +601,17 @@ pub(crate) mod tests {
         let (origin, seen) = serve(vec![(500, "boom\nbang", vec![])]);
         let home = home_for("http-500", &origin);
         let e = api(&home, "GET", "/api/board", None, &[200], &[]).unwrap_err();
-        assert_eq!(e.stderr, format!("factory.py: GET {origin}/api/board returned 500: boom bang\n"));
+        assert_eq!(
+            e.stderr,
+            format!("factory.py: GET {origin}/api/board returned 500: boom bang\n")
+        );
         assert_eq!(e.status, Some((500, "boom bang".to_string())));
         let seen = seen.lock().unwrap();
         assert_eq!(seen[0].header("CF-Access-Client-Id"), Some("test-id"));
-        assert_eq!(seen[0].header("CF-Access-Client-Secret"), Some("test-secret"));
+        assert_eq!(
+            seen[0].header("CF-Access-Client-Secret"),
+            Some("test-secret")
+        );
         assert_eq!(seen[0].header("User-Agent"), Some("factory"));
         assert_eq!(seen[0].header("Accept"), None);
         assert_eq!(seen[0].header("Content-Type"), None);
@@ -466,9 +622,20 @@ pub(crate) mod tests {
         let (origin, seen) = serve(vec![(200, "", vec![]), (200, "", vec![])]);
         let home = home_for("http-ctype", &origin);
         api(&home, "PUT", "/api/x", Some(b"a=1"), &[200], &[]).unwrap();
-        api(&home, "PUT", "/api/x", Some(b"{}"), &[200], &[("Content-Type", "application/json")]).unwrap();
+        api(
+            &home,
+            "PUT",
+            "/api/x",
+            Some(b"{}"),
+            &[200],
+            &[("Content-Type", "application/json")],
+        )
+        .unwrap();
         let seen = seen.lock().unwrap();
-        assert_eq!(seen[0].header("Content-Type"), Some("application/x-www-form-urlencoded"));
+        assert_eq!(
+            seen[0].header("Content-Type"),
+            Some("application/x-www-form-urlencoded")
+        );
         assert_eq!(seen[0].body, b"a=1");
         assert_eq!(seen[1].header("Content-Type"), Some("application/json"));
     }
@@ -516,31 +683,99 @@ pub(crate) mod tests {
     #[test]
     fn proxy_follows_the_origin_scheme_like_urllib() {
         let pick = |origin: &str, env: &[(&str, &str)]| {
-            proxy_url(origin, |name| env.iter().find(|(k, _)| *k == name).map(|(_, v)| v.to_string()))
+            proxy_url(origin, |name| {
+                env.iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| v.to_string())
+            })
         };
         let p = "http://p:3128";
         assert_eq!(pick("http://127.0.0.1:9", &[("HTTPS_PROXY", p)]), None);
-        assert_eq!(pick("http://127.0.0.1:9", &[("HTTP_PROXY", p), ("NO_PROXY", "localhost,127.0.0.1")]), None);
-        assert_eq!(pick("http://127.0.0.1:9", &[("HTTP_PROXY", p)]).as_deref(), Some(p));
-        assert_eq!(pick("https://f.example", &[("HTTPS_PROXY", p)]).as_deref(), Some(p));
-        assert_eq!(pick("https://f.example", &[("https_proxy", "http://low:1"), ("HTTPS_PROXY", "http://up:2")]).as_deref(), Some("http://low:1"));
-        assert_eq!(pick("https://f.example", &[("HTTPS_PROXY", p), ("no_proxy", ".example")]), None);
-        assert_eq!(pick("https://f.example:8443", &[("HTTPS_PROXY", p), ("NO_PROXY", "*")]), None);
+        assert_eq!(
+            pick(
+                "http://127.0.0.1:9",
+                &[("HTTP_PROXY", p), ("NO_PROXY", "localhost,127.0.0.1")]
+            ),
+            None
+        );
+        assert_eq!(
+            pick("http://127.0.0.1:9", &[("HTTP_PROXY", p)]).as_deref(),
+            Some(p)
+        );
+        assert_eq!(
+            pick("https://f.example", &[("HTTPS_PROXY", p)]).as_deref(),
+            Some(p)
+        );
+        assert_eq!(
+            pick(
+                "https://f.example",
+                &[
+                    ("https_proxy", "http://low:1"),
+                    ("HTTPS_PROXY", "http://up:2")
+                ]
+            )
+            .as_deref(),
+            Some("http://low:1")
+        );
+        assert_eq!(
+            pick(
+                "https://f.example",
+                &[("HTTPS_PROXY", p), ("no_proxy", ".example")]
+            ),
+            None
+        );
+        assert_eq!(
+            pick(
+                "https://f.example:8443",
+                &[("HTTPS_PROXY", p), ("NO_PROXY", "*")]
+            ),
+            None
+        );
         assert_eq!(pick("https://f.example", &[("ALL_PROXY", p)]), None);
-        assert_eq!(pick("https://notexample", &[("HTTPS_PROXY", p), ("NO_PROXY", "example")]).as_deref(), Some(p));
+        assert_eq!(
+            pick(
+                "https://notexample",
+                &[("HTTPS_PROXY", p), ("NO_PROXY", "example")]
+            )
+            .as_deref(),
+            Some(p)
+        );
         assert_eq!(pick("https://f.example", &[("HTTPS_PROXY", "")]), None);
     }
 
     #[test]
     fn origins_match_python() {
-        for good in ["https://f.example", "https://f.example/", "HTTPS://F.example:443", "http://localhost:8787", "http://127.0.0.1:9/", "https://[::1]:8"] {
+        for good in [
+            "https://f.example",
+            "https://f.example/",
+            "HTTPS://F.example:443",
+            "http://localhost:8787",
+            "http://127.0.0.1:9/",
+            "https://[::1]:8",
+        ] {
             assert!(normalized_origin(good, false).is_ok(), "{good}");
         }
-        assert_eq!(normalized_origin("https://f.example/", false).unwrap(), "https://f.example");
+        assert_eq!(
+            normalized_origin("https://f.example/", false).unwrap(),
+            "https://f.example"
+        );
         for bad in [
-            "", "http://f.example", "https://f.example/x", "https://u@f.example", "https://f.example?x", "https://f.example#x",
-            "https://f.example:", "https://f.example:0", "https://f.example:70000", "https://f.example:x", "https://f\\x",
-            "https:// f.example", "https:///x", "ftp://f.example", "https://[::1", "f.example",
+            "",
+            "http://f.example",
+            "https://f.example/x",
+            "https://u@f.example",
+            "https://f.example?x",
+            "https://f.example#x",
+            "https://f.example:",
+            "https://f.example:0",
+            "https://f.example:70000",
+            "https://f.example:x",
+            "https://f\\x",
+            "https:// f.example",
+            "https:///x",
+            "ftp://f.example",
+            "https://[::1",
+            "f.example",
         ] {
             assert!(normalized_origin(bad, false).is_err(), "{bad}");
         }
