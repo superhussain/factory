@@ -1,4 +1,4 @@
-//! The ops commands: clean, orphans, archive-workspace and pr-handled. stop is not ported yet.
+//! The ops commands: stop, clean, orphans, archive-workspace and pr-handled.
 
 use std::fs;
 use std::io::{self, Write};
@@ -7,13 +7,15 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::cli::{not_ported, Call};
-use crate::shared::board::read_board;
+use crate::cli::Call;
+use crate::commands::{checks, claims, worktree};
+use crate::shared::board::{dump_board, load_board, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{PASEO_ID, TERMINAL};
 use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{is_link, normpath, resolve, temp_root};
 use crate::shared::home::{factory_home, holder};
+use crate::shared::http::cas;
 use crate::shared::paseo::paseo_session;
 use crate::shared::proc::{capture, git, paseo_run, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
@@ -21,6 +23,7 @@ use crate::shared::py::{os_error, splitlines};
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::pyval::{py_str, truthy};
+use crate::shared::time::now;
 
 const USAGE_CLEAN: &str =
     "usage: clean <project-slug>/<job-id> node_modules | scratch <name> | temp";
@@ -34,18 +37,25 @@ static CREATED: Pattern = Pattern::new("[0-9a-f]{40,64} branch: Created from .*"
 const ORPHAN_KINDS: &[&str] = &["branch", "pr", "worktree", "workspace"];
 const GIT_TIMEOUT: Duration = Duration::from_secs(20);
 
-pub fn stop(_call: &Call) -> Res<()> {
-    Err(not_ported("stop"))
+pub fn stop(call: &Call) -> Res<()> {
+    let alive = worktree::stop_pids(Path::new(&call.args[0])).unwrap_or_default();
+    for pid in &alive {
+        println!("{pid}");
+    }
+    if alive.is_empty() {
+        Ok(())
+    } else {
+        Err(exit(1))
+    }
 }
 
+/// Add 1 to the handled count of each signature and stamp its time, or with --rearm drop them, keeping the
+/// newest HANDLED_KEEP entries, in one CAS write that keeps the claim.
 pub fn pr_handled_cmd(call: &Call) -> Res<()> {
-    let (home, _slug, _job_id) = r2_target(&call.args[0], true)?;
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
     let args = &call.args[1..];
-    let sigs = if args[0] == "--rearm" {
-        &args[1..]
-    } else {
-        args
-    };
+    let rearm = args[0] == "--rearm";
+    let sigs = if rearm { &args[1..] } else { args };
     if !(1..=HANDLED_KEEP).contains(&sigs.len()) || !sigs.iter().all(|s| HANDLED_SIG.is_full(s)) {
         return Err(fail(
             format!(
@@ -54,8 +64,64 @@ pub fn pr_handled_cmd(call: &Call) -> Res<()> {
             2,
         ));
     }
-    holder(&home)?;
-    Err(not_ported("pr-handled"))
+    let (device, session, minutes) = holder(&home)?;
+    let result = cas(&home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let i = data["jobs"].as_array().and_then(|jobs| {
+            jobs.iter()
+                .position(|j| j.get("id").and_then(Value::as_str) == Some(&job_id))
+        });
+        let Some(i) = i else {
+            return Err(fail(
+                format!("no job {job_id} on the board. Nothing was written."),
+                4,
+            ));
+        };
+        let j = &data["jobs"][i];
+        if j.get("project").and_then(Value::as_str) != Some(&slug) {
+            return Err(fail(
+                format!(
+                    "{job_id} belongs to {}, not {slug}. Nothing was written.",
+                    py_str(j.get("project"))
+                ),
+                2,
+            ));
+        }
+        if let Some(held) = claims::blocking(Some(j), &device, &session, minutes)? {
+            return Err(fail(
+                format!("{}. Nothing was written.", claims::held_by(&job_id, &held)),
+                6,
+            ));
+        }
+        let mut handled = checks::valid_handled(j.get("handled"));
+        let stamp = now();
+        for sig in sigs {
+            if rearm {
+                handled.shift_remove(sig);
+            } else {
+                let count = handled
+                    .get(sig)
+                    .and_then(|e| e["count"].as_u64())
+                    .unwrap_or(0)
+                    + 1;
+                handled.insert(sig.clone(), json!({"count": count, "at": stamp}));
+            }
+        }
+        let mut entries: Vec<(String, Value)> = handled.into_iter().collect();
+        entries.sort_by(|a, b| b.1["at"].as_str().cmp(&a.1["at"].as_str()));
+        entries.truncate(HANDLED_KEEP);
+        let kept: serde_json::Map<String, Value> = entries.into_iter().collect();
+        let job = &mut data["jobs"][i];
+        job["handled"] = Value::Object(kept.clone());
+        job["updated"] = json!(stamp);
+        data["updated"] = json!(stamp);
+        Ok((
+            Some(dump_board(&data)),
+            json!({"id": job_id, "handled": kept}),
+        ))
+    })?;
+    println!("{}", dumps(&result, DEFAULT));
+    Ok(())
 }
 
 /// The last part of a path normpath gave.

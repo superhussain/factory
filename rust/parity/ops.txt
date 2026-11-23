@@ -1,5 +1,6 @@
-# Case ids the factory binary must pass for clean, orphans, archive-workspace and the pr-handled checks.
+# Case ids the factory binary must pass for stop, clean, orphans, archive-workspace and pr-handled.
 ops/clean-*
 ops/orphans-*
 ops/archive-*
-ops/handled-bad-*
+ops/handled-*
+ops/stop-*
