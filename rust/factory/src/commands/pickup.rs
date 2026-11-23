@@ -76,8 +76,12 @@ static REPO_PATH: Pattern = Pattern::new("[A-Za-z0-9_./-]{1,200}", Re::ASCII);
 static CHECKOUT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Re::NONE);
 static BUNDLE_HASH: Pattern = Pattern::new("[0-9a-f]{7,64}", Re::NONE);
 static POSITIVE: Pattern = Pattern::new("[1-9][0-9]*", Re::NONE);
-// The timer runs this binary, so the line it writes names factory without .py.
-static CRON_PICKUP: Pattern = Pattern::new(r"factory(?:\.py)?\b.*\bpickup\b", Re::NONE);
+// A pickup timer line: the program factory.py, or this binary (factory or factory.exe), then
+// optional --flag value pairs, then the pickup subcommand. The timer runs the binary.
+static CRON_PICKUP: Pattern = Pattern::new(
+    r"(?:^|[\s/\\])factory(?:\.py|\.exe)?\s+(?:--\S+\s+\S+\s+)*pickup(?:\s|$)",
+    Re::NONE,
+);
 static ENV_ASSIGN: Pattern = Pattern::new("(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=", Re::NONE);
 static TRAILING_NUMBER: Pattern = Pattern::new(r"-\d+$", Re::NONE);
 
@@ -6609,6 +6613,11 @@ fn move_stop_pass(
             }
             continue;
         }
+        // Stopping the worktree waits on the worktree slice; defer before any archive, so a run
+        // never archives sessions it cannot then record.
+        if home.join("worktrees").join(project).join(job_id).exists() {
+            return Err(deferred("worktree stop"));
+        }
         let mut failure = None;
         for a in &archives {
             let why = match adapter_run(adapter.unwrap(), &["archive", a, "--force"]) {
@@ -6621,9 +6630,6 @@ fn move_stop_pass(
                 failure = Some((a.clone(), why));
                 break;
             }
-        }
-        if home.join("worktrees").join(project).join(job_id).exists() {
-            return Err(deferred("worktree stop"));
         }
         if let Some((agent, why)) = failure {
             errln!(
@@ -9874,6 +9880,10 @@ exit "$archive_code"
                 )
             );
             assert_eq!(self.state.borrow().board, before);
+            assert!(
+                self.archives().is_empty(),
+                "the deferral comes before any archive"
+            );
             fs::remove_dir_all(&self.wt).unwrap();
             let _ = fs::remove_file(self.root.join("adapter-calls"));
             self.clear_calls();
@@ -16009,6 +16019,8 @@ exit "$archive_code"
                 st.doctor.clone(),
             );
             st.fx.set_fakes(|f| {
+                // The installed binary is <skill>/runtime/factory; the test binary has a hashed name.
+                f.exe = Some("/opt/skill/runtime/factory".into());
                 f.doctor = Some(Rc::new(move |_| Ok(doctor.borrow().clone())));
                 f.pickup_scheduler = Some("cron");
                 f.setup_run = Some(Rc::new(move |argv, stdin| {
@@ -16353,6 +16365,33 @@ exit "$archive_code"
             assert_eq!(code, 0);
             assert!(out.starts_with("timer already installed: crontab\n"));
             assert_eq!(st.writes(), 1);
+        }
+
+        #[test]
+        fn install_cron_keeps_lines_that_only_mention_factory_and_pickup() {
+            let st = St::new();
+            let kept = [
+                "0 9 * * 1-5 /usr/bin/python3 /opt/skill/runtime/factory.py retro push >> /home/u/factory/logs/pickup.log 2>&1",
+                "*/10 * * * * /usr/local/bin/backup --log /home/u/factory/logs/pickup.log",
+                "0 1 * * * true",
+            ];
+            let old = [
+                "*/5 * * * * python3 /old/runtime/factory.py --home /h pickup >> /h/logs/pickup.log 2>&1",
+                "*/5 * * * * /old/skill/runtime/factory --home /h pickup",
+                "*/5 * * * * C:\\skill\\runtime\\factory.exe pickup",
+            ];
+            *st.crontab.borrow_mut() = format!("{}\n{}\n", kept.join("\n"), old.join("\n"));
+            assert_eq!(st.setup(&["--install"]).0, 0);
+            assert_eq!(
+                *st.crontab.borrow(),
+                format!("{}\n{}\n", kept.join("\n"), st.cron_line())
+            );
+            for line in kept {
+                assert!(CRON_PICKUP.search(line).is_none(), "{line}");
+            }
+            for line in old {
+                assert!(CRON_PICKUP.search(line).is_some(), "{line}");
+            }
         }
 
         #[test]
