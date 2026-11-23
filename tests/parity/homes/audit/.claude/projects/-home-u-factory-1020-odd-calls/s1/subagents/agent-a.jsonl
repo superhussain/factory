@@ -1,0 +1,2 @@
+{"type": "assistant", "timestamp": "2026-11-10T10:00:02Z", "isSidechain": true, "message": {"content": [{"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "gh pr merge 7"}}]}}
+{"type": "assistant", "timestamp": "2026-11-10T10:00:03Z", "isSidechain": true, "message": {"content": [{"type": "tool_use", "id": "t3", "name": "Bash", "input": {"command": "ls"}}]}}

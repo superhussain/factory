@@ -582,6 +582,7 @@ Read a command's file before you run it.
 | `/factory recover <id>` | [recover](references/commands/recover.md) | The resume schedule or pickup recovers a job. |
 | `/factory build` | [build](references/commands/build.md) | You check or trigger the device build queue. |
 | `/factory init` | [init](references/commands/init.md) | You set up a device or register a project. |
+| `/factory catch-up` | [catch-up](references/commands/catch-up.md) | You bring this host up to date with main; run it first on every host. |
 | `/factory handoff <id>` | [handoff](references/commands/handoff.md) | You hand a job to another runtime. |
 | `/factory resume <id>` | [resume](references/commands/resume.md) | You continue a handed-off job. |
 | `/factory retro [--days N]` | [retro](references/commands/retro.md) | A person asks for a cross-host session retro. |
