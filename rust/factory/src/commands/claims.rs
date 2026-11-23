@@ -4,20 +4,23 @@
 use std::collections::hash_map::RandomState;
 use std::fs;
 use std::hash::{BuildHasher, Hasher};
+use std::io::{ErrorKind, IsTerminal, Read};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::board::{dump_board, load_board};
-use crate::shared::consts::{JOB_ID, PASEO_ID, SLUG};
+use crate::shared::board::{batch_refs, dump_board, lead_of, load_board, patch_job};
+use crate::shared::consts::{BUILD_STATES, IDEA, JOB_ID, NEW_JOB_ID, PASEO_ID, REF_KINDS, RELEASE, SLUG, TERMINAL};
 use crate::shared::exit::{fail, Res};
+use crate::shared::fs::{is_link, read_text};
 use crate::shared::home::{factory_home, holder};
 use crate::shared::http::cas;
-use crate::shared::py::{os_error, repr, strip, universal_newlines};
-use crate::shared::pyjson::{dumps, DEFAULT};
+use crate::shared::py::{os_error, repr, splitlines, strip, universal_newlines};
+use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
-use crate::shared::time::now;
+use crate::shared::time::{now, parse_stamp};
 
 static ID_DIGITS: Pattern = Pattern::new(r"(\d{3,})-", Flags::ASCII);
 
@@ -149,8 +152,657 @@ fn jobs_of(data: &Value) -> Res<&Vec<Value>> {
     data.get("jobs").and_then(Value::as_array).ok_or_else(|| fail("the board has no jobs list", 1))
 }
 
-pub fn board(_call: &Call) -> Res<()> {
-    Err(not_ported("board"))
+const CLAIM_REFRESH_MINUTES: f64 = 10.0;
+const REVIEWERS: [&str; 4] = ["security", "ux", "ui", "code"];
+const TRACER_GATE_NOTE: &str = "gate: tracer-scope";
+const TRACER_APPROVED_NOTE: &str = "spec approved in Tracer";
+const SPEC_APPROVED_NOTES: [&str; 2] = [TRACER_APPROVED_NOTE, "spec approved on the dashboard"];
+const RECEIPT_REFUSAL: &str = "without a Tracer-signed scope receipt";
+static NOT_BEFORE: Pattern = Pattern::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", Flags::NONE);
+static TRACER_JIRA: Pattern = Pattern::new(r"(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9]*-[1-9][0-9]*", Flags::NONE);
+static TRACER_DIGITS: Pattern = Pattern::new(r"(\d{1,7})-", Flags::ASCII);
+static APPROVE: Pattern = Pattern::new(r"APPROVE\b", Flags::NONE);
+
+/// Keys only factory.py, pickup or the dashboard set, in Python's order: (key, refused only when non-null, why).
+const REFUSED: &[(&str, bool, &str)] = &[
+    ("claim", true, r#"only hold sets a claim. {"claim": null} releases it"#),
+    ("paseo", false, "only factory.py sets paseo"),
+    ("paseo_writer", false, "only factory.py sets paseo_writer"),
+    ("handoff", false, "only factory.py sets handoff"),
+    ("done", false, "only factory.py sets done"),
+    ("resumes", false, "only factory.py sets resumes"),
+    ("stacked", false, "only factory.py stack sets stacked"),
+    ("origin", false, "only factory.py suggest sets origin"),
+    ("started", false, "only factory.py sets started"),
+    ("goal", false, "only factory.py push sets goal"),
+    ("agents", false, "only factory.py agent and pickup set agents"),
+    ("move", false, "only the dashboard, factory.py pickup and factory.py control set move. To relay a person's chat, run factory.py control <job-id> move <host>|rerun --chat-file <file>"),
+    ("priority", false, "only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's chat, run factory.py control <job-id> prioritize --chat-file <file>"),
+    ("paused", false, "only the dashboard and factory.py control set paused. To relay a person's chat, run factory.py control <job-id> pause|resume --chat-file <file>"),
+    ("babysit", true, "only the dashboard and factory.py control set babysit; a session clears it with null. To relay a person's chat, run factory.py control <job-id> babysit --chat-file <file>"),
+    ("resolve", true, "only the dashboard sets resolve; a session clears it with null. Nothing was written."),
+    ("steer", false, "only the dashboard sets steer. Nothing was written."),
+    ("close", false, "only the dashboard, factory.py pickup and factory.py control set close. To relay a person's chat, run factory.py control <job-id> close --reason-file <file> --chat-file <file>"),
+    ("github", false, "only factory.py pickup sets github. Nothing was written."),
+    ("token_cap", false, "only factory.py pickup sets token_cap. Nothing was written."),
+    ("auto_babysit", false, "only factory.py pickup sets auto_babysit. Nothing was written."),
+    ("launch_failure", false, "only factory.py pickup sets launch_failure. Nothing was written."),
+    ("repeated", false, "only factory.py repeats sets repeated. Nothing was written."),
+    ("handled", false, "only factory.py pr-handled sets handled. Nothing was written."),
+];
+
+fn get_str<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
+    v.get(key).and_then(Value::as_str)
+}
+
+/// `value in (a, b, ...)` for string choices.
+fn is_one_of(v: Option<&Value>, choices: &[&str]) -> bool {
+    v.and_then(Value::as_str).is_some_and(|s| choices.contains(&s))
+}
+
+fn or_null(v: Option<&Value>) -> &Value {
+    v.unwrap_or(&Value::Null)
+}
+
+pub(crate) fn mine(c: &Value, device: &str, session: &str) -> bool {
+    get_str(c, "device") == Some(device) && get_str(c, "session") == Some(session)
+}
+
+/// Seconds since the claim's seen stamp. Python raises on a bad stamp; the binary fails 1.
+fn seen_age(c: &Value) -> Res<f64> {
+    let seen = c.get("seen");
+    let Some(stamp) = seen.and_then(Value::as_str).and_then(parse_stamp) else {
+        return Err(fail(format!("bad claim seen stamp {}", py_repr(or_null(seen))), 1));
+    };
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    Ok(now - stamp as f64)
+}
+
+/// The job's claim if another session holds it and checked in within the last minutes.
+pub(crate) fn blocking(job: Option<&Value>, device: &str, session: &str, minutes: u32) -> Res<Option<Value>> {
+    let c = job.and_then(|j| j.get("claim"));
+    let Some(c) = c.filter(|c| truthy(Some(c)) && !mine(c, device, session)) else { return Ok(None) };
+    Ok((seen_age(c)? < f64::from(minutes) * 60.0).then(|| c.clone()))
+}
+
+/// True when the claim's seen stamp is under CLAIM_REFRESH_MINUTES old.
+pub(crate) fn seen_recently(c: &Value) -> Res<bool> {
+    Ok(seen_age(c)? < CLAIM_REFRESH_MINUTES * 60.0)
+}
+
+/// True when after differs from before only in updated stamps, and in claim.seen on rows this session holds
+/// whose stored claim was seen under CLAIM_REFRESH_MINUTES ago.
+fn same_board(before: &Value, after: &Value, device: &str, session: &str) -> Res<bool> {
+    let mut fresh = Vec::new();
+    for j in jobs_of(before)? {
+        let c = or_null(j.get("claim"));
+        if c.is_object() && mine(c, device, session) && seen_recently(c)? {
+            fresh.push(or_null(j.get("id")).clone());
+        }
+    }
+    let quiet = |data: &Value| -> Value {
+        let mut out = data.as_object().cloned().unwrap_or_default();
+        out.shift_remove("updated");
+        let rows = data["jobs"].as_array().into_iter().flatten().map(|j| {
+            let mut j = j.clone();
+            if let Some(row) = j.as_object_mut() {
+                row.shift_remove("updated");
+                if fresh.iter().any(|id| py_eq(id, or_null(row.get("id")))) {
+                    if let Some(c) = row.get_mut("claim").and_then(Value::as_object_mut) {
+                        c.shift_remove("seen");
+                    }
+                }
+            }
+            j
+        });
+        out.insert("jobs".into(), Value::Array(rows.collect()));
+        Value::Object(out)
+    };
+    Ok(py_eq(&quiet(before), &quiet(after)))
+}
+
+fn earlier_moves(m: &Value) -> Vec<&Value> {
+    m.get("earlier").and_then(Value::as_array).map(|e| e.iter().filter(|x| x.is_object()).collect()).unwrap_or_default()
+}
+
+/// True when the dashboard moved this job away from this holder's session.
+pub(crate) fn moved_away(job: Option<&Value>, device: &str, session: &str) -> bool {
+    let Some(m) = job.and_then(|j| j.get("move")).filter(|m| m.is_object()) else { return false };
+    std::iter::once(m)
+        .chain(earlier_moves(m))
+        .any(|x| get_str(x, "from") == Some(device) && get_str(x, "session") == Some(session))
+}
+
+pub(crate) fn moved_message(job_id: &str, m: &Value) -> String {
+    format!(
+        "{job_id} was moved to {} at {}. Nothing was written. Stop this session.",
+        py_str(or_null(m.get("to"))),
+        py_str(or_null(m.get("at")))
+    )
+}
+
+pub(crate) fn held_by(job_id: &str, c: &Value) -> String {
+    let field = |k: &str| py_str(or_null(c.get(k)));
+    format!("{job_id} is held by {} session {} since {}, last seen {}", field("device"), field("session"), field("since"), field("seen"))
+}
+
+/// True when the dashboard queued a close that pickup has not done yet.
+pub(crate) fn closing(j: &Value) -> bool {
+    j.get("close").and_then(Value::as_object).is_some_and(|c| c.get("at").is_some_and(Value::is_string) && !c.contains_key("closed"))
+}
+
+pub(crate) fn closing_message(job_id: &str) -> String {
+    format!("{job_id} has a close queued from the dashboard. Nothing else was written. Stop this session.")
+}
+
+/// The stacked riders of lead_id that still have a PR, read before a close clears it.
+pub(crate) fn open_stacked(data: &Value, lead_id: &str) -> Vec<Value> {
+    data["jobs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|r| lead_of(r).as_deref() == Some(lead_id))
+        .filter(|r| r.get("stacked") == Some(&Value::Bool(true)))
+        .filter(|r| get_str(r, "pr").is_some_and(|p| !p.is_empty()))
+        .filter(|r| get_str(r, "project").is_some_and(|p| SLUG.is_full(p)))
+        .filter(|r| !is_one_of(r.get("stage"), TERMINAL))
+        .map(|r| json!({"id": or_null(r.get("id")), "project": or_null(r.get("project")), "pr": or_null(r.get("pr"))}))
+        .collect()
+}
+
+fn check_refs(refs: Option<&Value>) -> Res<()> {
+    let Some(refs) = refs.filter(|r| !r.is_null()) else { return Ok(()) };
+    let good = |r: &Value| {
+        r.as_object().is_some_and(|m| m.len() == 2 && m.contains_key("id") && m.contains_key("kind"))
+            && get_str(r, "id").is_some_and(|id| JOB_ID.is_full(id))
+            && is_one_of(r.get("kind"), REF_KINDS)
+    };
+    if refs.as_array().is_some_and(|list| list.iter().all(good)) {
+        return Ok(());
+    }
+    Err(fail(format!(r#"refs must be a list of {{"id": "<job-id>", "kind": "{}"}}"#, REF_KINDS.join(" | ")), 2))
+}
+
+fn check_build(build: Option<&Value>) -> Res<()> {
+    let Some(build) = build.filter(|b| !b.is_null()) else { return Ok(()) };
+    let good = build.as_object().is_some_and(|m| {
+        m.keys().all(|k| k == "state" || k == "runs")
+            && m.get("state").map_or(true, |s| is_one_of(Some(s), BUILD_STATES))
+            && match m.get("runs") {
+                None | Some(Value::Null) => true,
+                Some(Value::Array(runs)) => runs.iter().all(|u| u.as_str().is_some_and(|u| u.starts_with("https://"))),
+                _ => false,
+            }
+    });
+    if good {
+        return Ok(());
+    }
+    Err(fail(format!(r#"build must be {{"state": "{}", "runs": ["https://..."]}}"#, BUILD_STATES.join(" | ")), 2))
+}
+
+fn check_tracer(value: Option<&Value>) -> Res<()> {
+    let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(()) };
+    let good = value.as_object().is_some_and(|m| {
+        m.iter().all(|(k, v)| (k == "follow" || k == "gather") && (v.is_null() || py_eq(v, &Value::Bool(true))))
+    });
+    if good {
+        return Ok(());
+    }
+    Err(fail(
+        r#"tracer must be {"follow": true} or null, optionally with "gather": true; only factory.py sets tracer.feature, tracer.url, tracer.scope, tracer.receipt, tracer.building, tracer.stopped and tracer.tasks"#,
+        2,
+    ))
+}
+
+fn check_pipeline(value: Option<&Value>) -> Res<()> {
+    let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(()) };
+    let natural = |v: &Value| py_int(v).is_some_and(|d| !d.starts_with('-')) && v.is_number();
+    let good = value.as_object().is_some_and(|m| {
+        m.len() == 2 && m.contains_key("global") && m.contains_key("project") && m.values().all(natural)
+    });
+    if good {
+        return Ok(());
+    }
+    Err(fail(r#"pipeline must be {"global": <version>, "project": <version>}"#, 2))
+}
+
+fn check_not_before(value: Option<&Value>) -> Res<()> {
+    let Some(value) = value.filter(|v| !v.is_null()) else { return Ok(()) };
+    if value.as_str().is_some_and(|s| NOT_BEFORE.is_full(s) && parse_stamp(s).is_some()) {
+        return Ok(());
+    }
+    Err(fail("not_before must be a UTC time like 2026-11-17T09:00:00Z, or null. Nothing was written.", 2))
+}
+
+/// Each present artifact's first line, refusing any linked file, parent or job folder.
+pub(crate) fn job_file_lines(folder: &Path, artifacts: &[String]) -> Res<Vec<(String, String)>> {
+    let mut lines = Vec::new();
+    for artifact in artifacts {
+        let path = folder.join(artifact);
+        for node in [path.as_path(), path.parent().unwrap_or(folder), folder] {
+            if is_link(node).map_err(|e| fail(os_error(&e, Some(node)), 1))? {
+                return Err(fail(format!("{} is a symlink or junction; nothing was read through it", node.display()), 6));
+            }
+        }
+        if path.is_file() {
+            let bytes = fs::read(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
+            let text = universal_newlines(String::from_utf8_lossy(&bytes).into_owned());
+            let first = splitlines(&text, false).first().copied().unwrap_or("").to_string();
+            lines.push((artifact.clone(), first));
+        }
+    }
+    Ok(lines)
+}
+
+/// Why a rounds patch cannot be written, or None. It may keep the stored rounds and append pending ones; only
+/// round rewrite_round may differ from the stored entry.
+pub(crate) fn rounds_refusal(job_id: &str, found: Option<&Value>, rounds: &Value, rewrite_round: Option<usize>) -> Option<String> {
+    let Some(rounds) = rounds.as_array() else {
+        return Some(format!("{job_id} rounds must be a list of review rounds. Nothing was written."));
+    };
+    let stored = found.and_then(|f| f.get("rounds")).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+    if rounds.len() < stored.len() {
+        return Some(format!(
+            "{job_id} cannot drop review rounds: the board has {} and the patch sends {}. Nothing was written.",
+            stored.len(),
+            rounds.len()
+        ));
+    }
+    let pending = Value::Object(REVIEWERS.iter().map(|r| (r.to_string(), Value::from("pending"))).collect());
+    for (i, entry) in rounds.iter().enumerate() {
+        if i < stored.len() && !py_eq(entry, &stored[i]) && Some(i + 1) != rewrite_round {
+            return Some(format!(
+                "{job_id} cannot rewrite round {} in a board patch. Only factory.py verdict and round-wait change a recorded round. Nothing was written.",
+                i + 1
+            ));
+        }
+        if i >= stored.len() && !py_eq(entry, &pending) {
+            return Some(format!(
+                "{job_id} cannot add round {} with verdicts. A new round starts as {}. Record verdicts with factory.py verdict. Nothing was written.",
+                i + 1,
+                dumps(&pending, DEFAULT)
+            ));
+        }
+    }
+    None
+}
+
+/// Why the board cannot record value for reviewer in round n, or None: anything but pending needs
+/// round-<n>/review-<reviewer>.md in the job folder to start with that VERDICT: line.
+pub(crate) fn verdict_file_refusal(home: &Path, slug: &str, job_id: &str, n: usize, reviewer: &str, value: &str) -> Res<Option<String>> {
+    if value == "pending" {
+        return Ok(None);
+    }
+    let name = format!("round-{n}/review-{reviewer}.md");
+    let lines = job_file_lines(&home.join("jobs").join(slug).join(job_id), std::slice::from_ref(&name))?;
+    Ok(match lines.first() {
+        None => Some(format!("{job_id} round {n} {reviewer} cannot be {value}: {name} is not in the job folder. Nothing was written.")),
+        Some((_, line)) if *line != format!("VERDICT: {value}") => Some(format!(
+            "{job_id} round {n} {reviewer} cannot be {value}: the first line of {name} is not VERDICT: {value}. Nothing was written."
+        )),
+        Some(_) => None,
+    })
+}
+
+/// Why a board write cannot move the job to approve or set automerge true, or None.
+pub(crate) fn move_refusal(home: &Path, job_id: &str, found: Option<&Value>, patch: &Map<String, Value>) -> Option<String> {
+    if patch.get("stage").and_then(Value::as_str) == Some("approve") {
+        let rounds = if patch.contains_key("rounds") { patch.get("rounds") } else { found.and_then(|f| f.get("rounds")) };
+        let last = rounds.and_then(Value::as_array).and_then(|r| r.last()).filter(|r| r.is_object());
+        let Some(last) = last else {
+            return Some(format!("{job_id} cannot move to approve: it has no review round on the board. Nothing was written."));
+        };
+        let failing: Vec<String> = REVIEWERS
+            .iter()
+            .filter(|r| !is_one_of(last.get(**r), &["PASS", "SKIPPED"]))
+            .map(|r| format!("{r} {}", last.get(*r).map_or("missing".to_string(), py_str)))
+            .collect();
+        if !failing.is_empty() {
+            return Some(format!(
+                "{job_id} cannot move to approve: round {} has {}. Every verdict in the latest round must be PASS or SKIPPED. Nothing was written.",
+                rounds.and_then(Value::as_array).map_or(0, Vec::len),
+                failing.join(", ")
+            ));
+        }
+    }
+    if patch.get("automerge") == Some(&Value::Bool(true)) {
+        let slug = if patch.contains_key("project") { patch.get("project") } else { found.and_then(|f| f.get("project")) };
+        let Some(slug) = slug.and_then(Value::as_str).filter(|s| SLUG.is_full(s)) else {
+            return Some(format!(
+                "{job_id} cannot set automerge true: it has no project, so there is no decision.md to check. Nothing was written."
+            ));
+        };
+        let decision = home.join("jobs").join(slug).join(job_id).join("decision.md");
+        let unreadable = format!("{job_id} cannot set automerge true: its decision.md cannot be read. Nothing was written.");
+        if is_link(&decision).unwrap_or(true) {
+            return Some(unreadable);
+        }
+        let text = match read_text(&decision) {
+            Ok(text) => text,
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                return Some(format!(
+                    "{job_id} cannot set automerge true: decision.md is not on this host. Run factory.py pull {slug}/{job_id}, then retry. Nothing was written."
+                ))
+            }
+            Err(_) => return Some(unreadable),
+        };
+        let first = splitlines(&text, false).into_iter().map(strip).find(|l| !l.is_empty()).unwrap_or("");
+        if APPROVE.match_start(first).is_none() {
+            let head: String = first.chars().take(40).collect();
+            return Some(format!(
+                "{job_id} cannot set automerge true: decision.md starts with {}, not APPROVE. Nothing was written.",
+                repr(&head)
+            ));
+        }
+    }
+    None
+}
+
+/// True when a patch holds a job at the spec-approval gate after a person already approved its scope in Tracer.
+fn tracer_gate_passed(job: &Value, patch: &Map<String, Value>) -> bool {
+    is_one_of(patch.get("stage"), &["needs-human"])
+        && is_one_of(patch.get("note"), &["gate: spec-approval", TRACER_GATE_NOTE])
+        && job.get("tracer").and_then(|t| get_str(t, "scope")) == Some("approved")
+}
+
+/// (ticket, feature id): the Jira key when the board has one, else FACTORY-<n> from the job id's leading
+/// digits, else the job id.
+pub(crate) fn tracer_ids(job: &Value) -> (String, String) {
+    if let Some(jira) = get_str(job, "jira").filter(|j| TRACER_JIRA.is_full(j)) {
+        return (jira.to_uppercase(), jira.to_lowercase());
+    }
+    let id = py_str(or_null(job.get("id")));
+    if let Some(m) = TRACER_DIGITS.match_start(&id) {
+        let n: u64 = m[1].parse().unwrap_or(0);
+        return (format!("FACTORY-{n}"), format!("factory-{n}"));
+    }
+    (id.to_uppercase(), id)
+}
+
+/// cas on the board with change(text, signed, sent), where change appends the job id to sent when it moves a
+/// job to build on Tracer's receipt. When the Worker refuses that write for its receipt, retry once unsigned so
+/// the job waits for a person.
+fn receipt_cas<T>(home: &Path, mut change: impl FnMut(Option<&str>, bool, &mut Vec<String>) -> Res<(Option<String>, T)>) -> Res<T> {
+    let mut sent = Vec::new();
+    match cas(home, "/api/board", |text| change(text, true, &mut sent)) {
+        Err(e) if !sent.is_empty() && e.status.as_ref().is_some_and(|(code, detail)| *code == 400 && detail.contains(RECEIPT_REFUSAL)) => {
+            eprint!("{}", e.stderr);
+        }
+        other => return other,
+    }
+    let result = cas(home, "/api/board", |text| change(text, false, &mut Vec::new()))?;
+    eprintln!(
+        "factory.py: the Worker refused Tracer's receipt (check tracer_receipt_key); {} waits at gate: spec-approval instead",
+        sent.last().unwrap()
+    );
+    Ok(result)
+}
+
+pub fn board(call: &Call) -> Res<()> {
+    let mut stdin = std::io::stdin();
+    let mut bytes = Vec::new();
+    if !stdin.is_terminal() {
+        stdin.read_to_end(&mut bytes).map_err(|e| fail(os_error(&e, None), 1))?;
+    }
+    let raw = universal_newlines(String::from_utf8(bytes).map_err(|_| fail("stdin must be UTF-8", 2))?);
+    let raw = strip(&raw);
+    if raw.is_empty() {
+        return Err(fail(
+            "usage: board <factory-home> <job-id> with a JSON object on stdin. stdin was empty, so nothing was written.",
+            2,
+        ));
+    }
+    let patch = loads(raw).map_err(|e| {
+        let msg = py_json_error(raw);
+        fail(format!("stdin is not JSON: {}", if msg.is_empty() { e.to_string() } else { msg }), 2)
+    })?;
+    let Value::Object(patch) = patch else { return Err(fail("stdin must be a JSON object", 2)) };
+    board_write(Path::new(&call.args[0]), &call.args[1], patch, &WriteOpts { show: true, verdict: None, rewrite_round: None })?;
+    Ok(())
+}
+
+/// One reviewer's verdict for round n, which the verdict command records through `board_write`.
+#[allow(dead_code)]
+pub(crate) struct Verdict {
+    pub slug: String,
+    pub n: usize,
+    pub reviewer: String,
+    pub value: String,
+}
+
+pub(crate) struct WriteOpts {
+    pub show: bool,
+    pub verdict: Option<Verdict>,
+    pub rewrite_round: Option<usize>,
+}
+
+enum Held {
+    Claim(Value),
+    Closing,
+}
+
+/// Validate a board patch, then merge it into the job's row in one CAS write. Prints the job when opts.show.
+pub(crate) fn board_write(home: &Path, job_id: &str, mut patch: Map<String, Value>, opts: &WriteOpts) -> Res<Value> {
+    for (key, non_null, why) in REFUSED {
+        if patch.get(*key).is_some_and(|v| !(*non_null && v.is_null())) {
+            return Err(fail(why, 2));
+        }
+    }
+    if let Some(note) = patch.get("note").and_then(Value::as_str).filter(|n| SPEC_APPROVED_NOTES.contains(n)) {
+        return Err(fail(
+            format!("only a person approves a spec, on the dashboard or in Tracer, so factory.py board cannot set the note '{note}'. Nothing was written."),
+            2,
+        ));
+    }
+    if patch.contains_key("id") {
+        return Err(fail("the job id comes from the <job-id> argument, so the patch cannot set id. Nothing was written.", 2));
+    }
+    if patch.get("backlog").and_then(Value::as_object).is_some_and(|b| b.contains_key("notes_read")) {
+        return Err(fail("only factory.py deny-notes sets backlog.notes_read", 2));
+    }
+    for key in ["escalated", "automerge"] {
+        let v = or_null(patch.get(key));
+        if !(v.is_null() || py_eq(v, &Value::Bool(true)) || py_eq(v, &Value::Bool(false))) {
+            return Err(fail(format!("{key} must be true, false, or null"), 2));
+        }
+    }
+    if patch.get("needs").is_some_and(|n| !n.is_null() && !n.is_string()) {
+        return Err(fail("needs must be a string or null", 2));
+    }
+    check_refs(patch.get("refs"))?;
+    let self_ref = json!({"id": job_id, "kind": "depends-on"});
+    if patch.get("refs").and_then(Value::as_array).is_some_and(|refs| refs.iter().any(|r| py_eq(r, &self_ref))) {
+        return Err(fail(format!("a job cannot depend on itself: drop the depends-on ref to {job_id}. Nothing was written."), 2));
+    }
+    check_build(patch.get("build"))?;
+    check_tracer(patch.get("tracer"))?;
+    check_pipeline(patch.get("pipeline"))?;
+    check_not_before(patch.get("not_before"))?;
+    let (device, session, minutes) = holder(home)?;
+    let paseo = paseo_session();
+    let resolved = if paseo.is_some() { Some(factory_home()?) } else { None };
+    let mirrors = opts.verdict.is_some()
+        || patch.contains_key("stage")
+        || patch.contains_key("rounds")
+        || patch.get("tracer").and_then(|t| t.get("follow")) == Some(&Value::Bool(true));
+    if mirrors && fs::symlink_metadata(home.join("tracer.json")).is_ok() {
+        return Err(not_ported("board with Tracer"));
+    }
+    let (job, held) = receipt_cas(home, |text, signed, sent| {
+        let mut data = load_board(text)?;
+        jobs_of(&data)?;
+        let before = data.clone();
+        let index = |data: &Value| data["jobs"].as_array().unwrap().iter().position(|j| get_str(j, "id") == Some(job_id));
+        let found = index(&data).map(|i| data["jobs"][i].clone());
+        let found = found.as_ref();
+        if let Some(Verdict { slug, n, reviewer, value }) = &opts.verdict {
+            if let Some(f) = found.filter(|f| get_str(f, "project") != Some(slug)) {
+                return Err(fail(format!("{job_id} belongs to {}, not {slug}", py_str(or_null(f.get("project")))), 2));
+            }
+            let rounds = found.and_then(|f| f.get("rounds")).and_then(Value::as_array);
+            let Some(rounds) = rounds.filter(|r| r.get(n.wrapping_sub(1)).is_some_and(Value::is_object)) else {
+                return Err(fail(format!("{job_id} has no rounds entry {n} on the board. Nothing was written."), 4));
+            };
+            if let Some(refusal) = verdict_file_refusal(home, slug, job_id, *n, reviewer, value)? {
+                return Err(fail(refusal, 4));
+            }
+            let mut rounds = rounds.clone();
+            rounds[n - 1][reviewer.as_str()] = Value::from(value.as_str());
+            patch.insert("rounds".into(), Value::Array(rounds));
+        }
+        if found.is_none() {
+            let floor = archive_floor(&data);
+            if let Some(m) = ID_DIGITS.match_start(job_id) {
+                if m[1].parse::<u128>().is_ok_and(|n| n <= floor) {
+                    return Err(fail(
+                        format!("ids up to {floor} belong to archived jobs, so {job_id} cannot go back on the board. Read it with factory.py job {job_id}. Claim new ids with claim. Nothing was written."),
+                        2,
+                    ));
+                }
+            }
+            if !NEW_JOB_ID.is_full(job_id) {
+                return Err(fail(
+                    format!("bad job id {}: a new job id is digits, a dash and a lowercase slug, like 003-rate-limiting. Nothing was written.", repr(job_id)),
+                    2,
+                ));
+            }
+            if !truthy(patch.get("stage")) {
+                return Err(fail(
+                    format!("{job_id} is not on the board, and a new row must set stage. Claim new ids with claim. Nothing was written."),
+                    2,
+                ));
+            }
+        }
+        if let Some(c) = blocking(found, &device, &session, minutes)? {
+            return Ok((None, (None, Some(Held::Claim(c)))));
+        }
+        if moved_away(found, &device, &session) {
+            return Err(fail(moved_message(job_id, &found.unwrap()["move"]), 6));
+        }
+        if let Some(f) = found.filter(|f| closing(f)) {
+            if !mine(or_null(f.get("claim")), &device, &session) {
+                return Err(fail(closing_message(job_id), 6));
+            }
+            let i = index(&data).unwrap();
+            data["jobs"][i].as_object_mut().unwrap().shift_remove("claim");
+            patch_job(&mut data, job_id, &json!({}));
+            return Ok((Some(dump_board(&data)), (None, Some(Held::Closing))));
+        }
+        let origin = found.and_then(|f| f.get("origin")).filter(|o| o.is_object());
+        if let Some(origin) = origin {
+            if get_str(origin, "gate") == Some("human")
+                && !truthy(origin.get("approved"))
+                && patch.contains_key("stage")
+                && !is_one_of(patch.get("stage"), &[IDEA, "closed"])
+            {
+                return Err(fail(format!("{job_id} waits on a human decision"), 2));
+            }
+        }
+        if patch.contains_key("stage") && !truthy(patch.get("stage")) {
+            return Err(fail(
+                format!(r#"a board write cannot clear {job_id}'s stage. Close the job with {{"stage": "closed"}} instead. Nothing was written."#),
+                2,
+            ));
+        }
+        let refusal = match patch.get("rounds") {
+            Some(rounds) if opts.verdict.is_none() => rounds_refusal(job_id, found, rounds, opts.rewrite_round),
+            _ => None,
+        };
+        if let Some(refusal) = refusal.or_else(|| move_refusal(home, job_id, found, &patch)) {
+            return Err(fail(refusal, 2));
+        }
+        if let Some(refs) = patch.get("refs") {
+            if batch_refs(refs) != batch_refs(or_null(found.and_then(|f| f.get("refs")))) {
+                return Err(fail(
+                    format!("only factory.py batch and the lead's mirror add or remove a batched-into ref. A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written."),
+                    2,
+                ));
+            }
+        }
+        if let Some(f) = found {
+            if is_one_of(patch.get("stage"), &["closed"])
+                && !is_one_of(f.get("stage"), TERMINAL)
+                && lead_of(f).is_none()
+                && !open_stacked(&data, job_id).is_empty()
+            {
+                return Err(not_ported("board closing stacked pull requests"));
+            }
+        }
+        let (babysit, priority) = (found.and_then(|f| f.get("babysit")), found.and_then(|f| f.get("priority")));
+        let pressed = patch.get("babysit").is_some_and(Value::is_null)
+            && babysit.is_some_and(Value::is_object)
+            && priority.is_some_and(Value::is_object)
+            && py_eq(or_null(priority.unwrap().get("at")), or_null(babysit.unwrap().get("at")));
+        patch_job(&mut data, job_id, &Value::Object(patch.clone()));
+        let i = index(&data).unwrap();
+        let job = data["jobs"][i].as_object_mut().unwrap();
+        if pressed {
+            job.shift_remove("priority");
+        }
+        let held_here = |job: &Map<String, Value>| mine(or_null(job.get("claim")), &device, &session);
+        if is_one_of(patch.get("stage"), RELEASE) {
+            job.shift_remove("claim");
+        } else if patch.get("not_before").is_some_and(Value::is_string) && !is_one_of(job.get("stage"), TERMINAL) && held_here(job) {
+            job.shift_remove("claim");
+        } else if held_here(job) {
+            let updated = job["updated"].clone();
+            job["claim"]["seen"] = updated;
+            if let Some(paseo) = &paseo {
+                job.insert("paseo".into(), paseo.clone());
+            }
+        }
+        if let Some(paseo) = &paseo {
+            if !job.get("paseo").is_some_and(Value::is_object) && !job.get("paseo_writer").is_some_and(|w| py_eq(w, paseo)) {
+                job.insert("paseo_writer".into(), paseo.clone());
+            }
+        }
+        if tracer_gate_passed(&Value::Object(job.clone()), &patch) {
+            if !signed {
+                job["tracer"].as_object_mut().unwrap().shift_remove("receipt");
+            }
+            let tracer = job["tracer"].clone();
+            if truthy(tracer.get("receipt")) {
+                job.insert("stage".into(), Value::from("build"));
+                job.insert("note".into(), Value::from(TRACER_APPROVED_NOTE));
+                job.shift_remove("needs");
+                sent.push(job_id.to_string());
+            } else {
+                let feature = match tracer.get("feature").filter(|f| truthy(Some(f))) {
+                    Some(f) => py_str(f),
+                    None => tracer_ids(&Value::Object(job.clone())).1,
+                };
+                job.insert("note".into(), Value::from("gate: spec-approval"));
+                let needs = format!("Tracer approved scope for {feature} without a signed receipt: run /factory approve-spec {job_id} or press Approve spec to build");
+                job.insert("needs".into(), Value::from(needs));
+            }
+        }
+        if same_board(&before, &data, &device, &session)? {
+            let row = before["jobs"].as_array().unwrap().iter().find(|j| get_str(j, "id") == Some(job_id)).cloned();
+            return Ok((None, (row, None)));
+        }
+        let job = data["jobs"][i].clone();
+        Ok((Some(dump_board(&data)), (Some(job), None)))
+    })?;
+    match held {
+        Some(Held::Closing) => return Err(fail(closing_message(job_id), 6)),
+        Some(Held::Claim(c)) => {
+            return Err(fail(
+                format!("{}. Nothing was written. Pass --session <tag> if this session holds it, or take it over with hold <project>/<id> take", held_by(job_id, &c)),
+                6,
+            ))
+        }
+        None => {}
+    }
+    let job = job.unwrap_or(Value::Null);
+    if let (Some(paseo), Some(resolved)) = (&paseo, &resolved) {
+        if truthy(Some(&job)) && job.get("paseo").is_some_and(|p| py_eq(p, paseo)) {
+            record_paseo_claim(resolved, job_id, paseo);
+        }
+    }
+    if opts.show {
+        println!("{}", dumps(&job, INDENT2));
+    }
+    Ok(job)
 }
 
 pub fn hold(_call: &Call) -> Res<()> {
