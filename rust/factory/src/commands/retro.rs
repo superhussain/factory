@@ -284,15 +284,19 @@ fn redact_after_group(p: &Pattern, text: &str, count: usize) -> String {
 
 /// Whether every secret word in name is token followed by s, as in max_tokens.
 fn count_name(name: &str) -> bool {
-    RETRO_SECRET_WORD.find_iter(name).all(|m| {
-        m.as_str().to_lowercase() == "token"
-            && matches!(name[m.end()..].chars().next(), Some('s' | 'S'))
-    })
+    RETRO_SECRET_WORD
+        .find_all_or_stop(name)
+        .into_iter()
+        .all(|m| {
+            m.as_str().to_lowercase() == "token"
+                && matches!(name[m.end()..].chars().next(), Some('s' | 'S'))
+        })
 }
 
 fn secret_pair(c: &Captures) -> String {
     let (name, sep, value) = (group(c, 1), group(c, 2), group(c, 3));
-    if RETRO_SECRET_WORD.search(name).is_none() || (RETRO_COUNT.is_full(value) && count_name(name))
+    if RETRO_SECRET_WORD.search_or_stop(name).is_none()
+        || (RETRO_COUNT.is_full_or_stop(value) && count_name(name))
     {
         return c.get(0).unwrap().as_str().to_string();
     }
@@ -301,7 +305,10 @@ fn secret_pair(c: &Captures) -> String {
 
 /// One command with every -k, -K and bare -pass, -passin or -passout value after its openssl as [redacted].
 fn openssl_part(part: &str) -> String {
-    let Some(end) = RETRO_OPENSSL.search(part).map(|c| c.get(0).unwrap().end()) else {
+    let Some(end) = RETRO_OPENSSL
+        .search_or_stop(part)
+        .map(|c| c.get(0).unwrap().end())
+    else {
         return part.to_string();
     };
     let rest = redact_after_group(
@@ -325,7 +332,7 @@ fn tool_pass(line: &str) -> String {
         (&RETRO_DOCKER_LOGIN, &RETRO_SSHPASS_PASS, 1),
         (&RETRO_OPENSSL, &RETRO_OPENSSL_PASS, 0),
     ] {
-        if let Some(end) = tool.search(&line).map(|c| c.get(0).unwrap().end()) {
+        if let Some(end) = tool.search_or_stop(&line).map(|c| c.get(0).unwrap().end()) {
             line = format!(
                 "{}{}",
                 &line[..end],
@@ -334,15 +341,19 @@ fn tool_pass(line: &str) -> String {
         }
     }
     let mut line: String = RETRO_COMMAND_SPLIT
-        .find_iter(&line)
+        .find_all_or_stop(&line)
+        .into_iter()
         .map(|m| openssl_part(m.as_str()))
         .collect();
     if let Some(hit) = RETRO_DOCKER_LOGIN
-        .search(&line)
+        .search_or_stop(&line)
         .map(|c| c.get(0).unwrap().range())
     {
         // The login's own last letter sits before hit.end, so searching from there sees no new left edge.
-        if RETRO_PASSWORD_STDIN.search(&line[hit.end..]).is_some() {
+        if RETRO_PASSWORD_STDIN
+            .search_or_stop(&line[hit.end..])
+            .is_some()
+        {
             let head = RETRO_ECHO_PASS.replace_all(&line[..hit.start], |c| {
                 format!("{}[redacted]{}", group(c, 1), group(c, 3))
             });

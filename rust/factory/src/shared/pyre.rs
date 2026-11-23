@@ -138,13 +138,44 @@ impl Pattern {
     pub fn replace_all(&self, s: &str, f: impl FnMut(&Captures) -> String) -> String {
         match self.compiled("search").try_replacen(s, 0, f) {
             Ok(out) => out.into_owned(),
-            Err(_) => {
-                eprintln!(
-                    "factory.py: pattern {} hit the regex backtrack limit; stopping so unredacted text is never written",
-                    repr(self.src)
-                );
-                std::process::exit(1)
-            }
+            Err(_) => self.stop(),
+        }
+    }
+
+    /// `re.search` for a redaction gate. Past the backtrack limit it exits rather than count it as no match.
+    pub fn search_or_stop<'t>(&self, s: &'t str) -> Option<Captures<'t>> {
+        self.compiled("search")
+            .captures(s)
+            .unwrap_or_else(|_| self.stop())
+    }
+
+    /// `re.fullmatch` for a redaction gate. Past the backtrack limit it exits.
+    pub fn is_full_or_stop(&self, s: &str) -> bool {
+        self.compiled("full")
+            .is_match(s)
+            .unwrap_or_else(|_| self.stop())
+    }
+
+    /// `re.finditer` for a redaction gate. Past the backtrack limit it exits.
+    pub fn find_all_or_stop<'t>(&self, s: &'t str) -> Vec<fancy_regex::Match<'t>> {
+        self.compiled("search")
+            .find_iter(s)
+            .map(|m| m.unwrap_or_else(|_| self.stop()))
+            .collect()
+    }
+
+    /// Exit 1 so a redaction never writes text a pattern could not finish reading.
+    fn stop(&self) -> ! {
+        let msg = format!(
+            "factory.py: pattern {} hit the regex backtrack limit; stopping so unredacted text is never written",
+            repr(self.src)
+        );
+        #[cfg(test)]
+        panic!("{msg}");
+        #[cfg(not(test))]
+        {
+            eprintln!("{msg}");
+            std::process::exit(1)
         }
     }
 }
@@ -422,6 +453,17 @@ mod tests {
         assert_eq!(W.replace_all("W/\"x\"", |_| String::new()), "\"x\"");
         let found: Vec<&str> = SLUG.find_iter("a b-c").map(|m| m.as_str()).collect();
         assert_eq!(found, ["a", "b-c"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn redaction_gate_stops_at_the_backtrack_limit() {
+        let p = Pattern::with_limit(
+            r"\bgit\b[^;&|\n]*\bpush\b[^;&|\n]*\s(?:--force(?:-with-lease)?|-f)(?=[\s=]|$)",
+            Flags::NONE,
+            1_000,
+        );
+        p.search_or_stop(&"git ".repeat(500));
     }
 
     #[test]
