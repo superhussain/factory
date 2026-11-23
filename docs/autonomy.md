@@ -152,8 +152,6 @@ flowchart LR
   explorer card to any stage but `idea` or `closed`.
 - `origin.approved` carries `decider: "person"`. An older approval without it was made
   by a person, since `suggest approve` is its only writer.
-- A job's `decision` carries `decider` too: `person` for `/factory approve` and a
-  person's close, `model` for the approver.
 - Honest limit: the Worker cannot yet tell a human from a service token, so a token
   holder could forge an approval with a raw PUT. The runtime guards stop automation,
   except an agent that runs `--chat-file`, which only the chat-decisions
