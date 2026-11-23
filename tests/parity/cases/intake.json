@@ -775,6 +775,3159 @@
       },
       "exit": 6,
       "from": "tests/cli/test_factory.py::IdeaImagesTest.test_import_preserves_a_differing_local_file_and_unresolved_remote"
+    },
+    {
+      "id": "intake/needs-writes-answers-then-clears-needs",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-writes-a.txt",
+        "--chat-file",
+        "{home}/needs-writes-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_writes_answers_then_clears_needs"
+    },
+    {
+      "id": "intake/needs-condition-header-matches-the-dashboard",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-header-a.txt",
+        "--chat-file",
+        "{home}/needs-header-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_condition_header_matches_the_dashboard"
+    },
+    {
+      "id": "intake/needs-second-run-replaces-answers-with-if-match",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-second-a.txt",
+        "--chat-file",
+        "{home}/needs-second-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Again: [needs.md](#042-sample-export/needs)\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "GET /api/jobs/sample/042-sample-export/answers.md": [200, "# Answers\n\nold\n"],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_second_run_replaces_answers_with_if_match"
+    },
+    {
+      "id": "intake/needs-needs-human-keeps-needs",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-human-a.txt",
+        "--chat-file",
+        "{home}/needs-human-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"needs-human\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_needs_human_keeps_needs"
+    },
+    {
+      "id": "intake/needs-job-missing-from-board",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "043-other",
+        "--answers",
+        "{home}/needs-missing-a.txt",
+        "--chat-file",
+        "{home}/needs-missing-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_job_missing_from_board"
+    },
+    {
+      "id": "intake/needs-job-not-waiting",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-waiting-a.txt",
+        "--chat-file",
+        "{home}/needs-waiting-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_job_not_waiting"
+    },
+    {
+      "id": "intake/needs-bad-project-on-the-board",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-project-a.txt",
+        "--chat-file",
+        "{home}/needs-project-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"../x\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_bad_project_on_the_board"
+    },
+    {
+      "id": "intake/needs-no-needs-file",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-nofile-a.txt",
+        "--chat-file",
+        "{home}/needs-nofile-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_no_needs_file"
+    },
+    {
+      "id": "intake/needs-needs-without-question-form",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-noform-a.txt",
+        "--chat-file",
+        "{home}/needs-noform-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nTell me which format to use.\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_needs_without_question_form"
+    },
+    {
+      "id": "intake/needs-label-not-an-option",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-label-a.txt",
+        "--chat-file",
+        "{home}/needs-label-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_label_not_an_option"
+    },
+    {
+      "id": "intake/needs-two-picks-on-pick-one",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-twopicks-a.txt",
+        "--chat-file",
+        "{home}/needs-twopicks-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_two_picks_on_pick_one"
+    },
+    {
+      "id": "intake/needs-unanswered-question",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-skip-a.txt",
+        "--chat-file",
+        "{home}/needs-skip-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_unanswered_question"
+    },
+    {
+      "id": "intake/needs-unanswered-question-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-blank-a.txt",
+        "--chat-file",
+        "{home}/needs-blank-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_unanswered_question"
+    },
+    {
+      "id": "intake/needs-chat-file-refusals",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-empty-a.txt",
+        "--chat-file",
+        "{home}/needs-empty-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_chat_file_refusals"
+    },
+    {
+      "id": "intake/needs-chat-file-refusals-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-long-a.txt",
+        "--chat-file",
+        "{home}/needs-long-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_chat_file_refusals"
+    },
+    {
+      "id": "intake/needs-chat-file-refusals-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-link-a.txt",
+        "--chat-file",
+        "/dev/stdin"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_chat_file_refusals"
+    },
+    {
+      "id": "intake/needs-chat-file-link-is-neutralized",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "answer",
+        "042-sample-export",
+        "--answers",
+        "{home}/needs-neutral-a.txt",
+        "--chat-file",
+        "{home}/needs-neutral-chat.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"project\":\"sample\",\"stage\":\"build\",\"needs\":\"Pick the export format in [needs.md](#042-sample-export/needs).\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/042-sample-export/needs.md": [
+          200,
+          "# Needs\n\nThe export needs a format before the build goes on.\n\n## Question: Export format\nWhich format should the export write?\nPick: one\n- CSV (recommended): Opens in any spreadsheet\n- JSON: Keeps nested fields\n"
+        ],
+        "PUT /api/jobs/sample/042-sample-export/answers.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_chat_file_link_is_neutralized"
+    },
+    {
+      "id": "intake/needs-bad-usage",
+      "argv": [
+        "--home",
+        "{home}",
+        "needs",
+        "submit",
+        "042-sample-export",
+        "--answers",
+        "a",
+        "--chat-file",
+        "c"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_needs_answer.py::NeedsAnswerTest.test_bad_usage"
+    },
+    {
+      "id": "intake/control-prioritize-writes-the-chat-record",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "prioritize",
+        "--chat-file",
+        "{home}/control-prioritize.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_prioritize_writes_the_chat_record"
+    },
+    {
+      "id": "intake/control-second-prioritize-is-unchanged",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "prioritize",
+        "--chat-file",
+        "{home}/control-second.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"priority\":{\"at\":\"2026-01-01T00:00:00Z\",\"via\":\"chat\",\"quote\":\"prioritize 042-sample-export\",\"by\":\"parity\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_second_prioritize_is_unchanged"
+    },
+    {
+      "id": "intake/control-unprioritize-removes-priority",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "unprioritize",
+        "--chat-file",
+        "{home}/control-unpri.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"priority\":{\"at\":\"2026-01-01T00:00:00Z\",\"via\":\"chat\",\"quote\":\"prioritize 042-sample-export\",\"by\":\"parity\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_unprioritize_removes_priority"
+    },
+    {
+      "id": "intake/control-unprioritize-removes-priority-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "unprioritize",
+        "--chat-file",
+        "{home}/control-unpri2.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_unprioritize_removes_priority"
+    },
+    {
+      "id": "intake/control-refuses-missing-rider-projectless-and-pr-open-jobs",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "099-missing",
+        "prioritize",
+        "--chat-file",
+        "{home}/control-refuse.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_control.py::ControlTest.test_refuses_missing_rider_projectless_and_pr_open_jobs"
+    },
+    {
+      "id": "intake/control-refuses-missing-rider-projectless-and-pr-open-jobs-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-rider",
+        "prioritize",
+        "--chat-file",
+        "{home}/control-refuse.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_refuses_missing_rider_projectless_and_pr_open_jobs"
+    },
+    {
+      "id": "intake/control-refuses-missing-rider-projectless-and-pr-open-jobs-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "044-no-project",
+        "prioritize",
+        "--chat-file",
+        "{home}/control-refuse.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_refuses_missing_rider_projectless_and_pr_open_jobs"
+    },
+    {
+      "id": "intake/control-refuses-missing-rider-projectless-and-pr-open-jobs-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "045-open",
+        "prioritize",
+        "--chat-file",
+        "{home}/control-refuse.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_refuses_missing_rider_projectless_and_pr_open_jobs"
+    },
+    {
+      "id": "intake/control-pause-and-resume",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "pause",
+        "--chat-file",
+        "{home}/control-pause.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_pause_and_resume"
+    },
+    {
+      "id": "intake/control-pause-and-resume-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "pause",
+        "--chat-file",
+        "{home}/control-pause.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"paused\":{\"at\":\"2026-01-01T00:00:00Z\",\"via\":\"chat\",\"quote\":\"pause 042-sample-export\",\"by\":\"parity\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_pause_and_resume"
+    },
+    {
+      "id": "intake/control-pause-and-resume-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "resume",
+        "--chat-file",
+        "{home}/control-resume.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"paused\":{\"at\":\"2026-01-01T00:00:00Z\",\"via\":\"chat\",\"quote\":\"pause 042-sample-export\",\"by\":\"parity\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_pause_and_resume"
+    },
+    {
+      "id": "intake/control-pause-and-resume-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "resume",
+        "--chat-file",
+        "{home}/control-resume.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_pause_and_resume"
+    },
+    {
+      "id": "intake/control-pause-refusals",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "099-missing",
+        "pause",
+        "--chat-file",
+        "{home}/control-refuse.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_control.py::ControlTest.test_pause_refusals"
+    },
+    {
+      "id": "intake/control-pause-refusals-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-rider",
+        "pause",
+        "--chat-file",
+        "{home}/control-refuse.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_pause_refusals"
+    },
+    {
+      "id": "intake/control-pause-refusals-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "044-no-project",
+        "pause",
+        "--chat-file",
+        "{home}/control-refuse.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_pause_refusals"
+    },
+    {
+      "id": "intake/control-pause-refusals-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "046-merged",
+        "pause",
+        "--chat-file",
+        "{home}/control-refuse.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_pause_refusals"
+    },
+    {
+      "id": "intake/control-pause-refusals-5",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "047-closed",
+        "pause",
+        "--chat-file",
+        "{home}/control-refuse.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_pause_refusals"
+    },
+    {
+      "id": "intake/control-pause-refusals-6",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "099-missing",
+        "resume",
+        "--chat-file",
+        "{home}/control-refuse.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_control.py::ControlTest.test_pause_refusals"
+    },
+    {
+      "id": "intake/control-pause-refusals-7",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "048-idea",
+        "pause",
+        "--chat-file",
+        "{home}/control-refuse.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_pause_refusals"
+    },
+    {
+      "id": "intake/control-close-queues-the-chat-record",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "close",
+        "--reason-file",
+        "{home}/control-close-reason.txt",
+        "--chat-file",
+        "{home}/control-close.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_queues_the_chat_record"
+    },
+    {
+      "id": "intake/control-close-queues-the-chat-record-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "close",
+        "--reason-file",
+        "{home}/control-close2-reason.txt",
+        "--chat-file",
+        "{home}/control-close2.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"close\":{\"reason\":\"Duplicate of 041-sample-export\",\"at\":\"2026-01-01T00:00:00Z\",\"via\":\"chat\",\"quote\":\"close 042-sample-export\",\"by\":\"parity\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_queues_the_chat_record"
+    },
+    {
+      "id": "intake/control-close-over-a-malformed-close-is-unchanged",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "close",
+        "--reason-file",
+        "{home}/control-close-reason.txt",
+        "--chat-file",
+        "{home}/control-close.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"close\":{\"at\":\"2026-01-02T12:00:00Z\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_over_a_malformed_close_is_unchanged"
+    },
+    {
+      "id": "intake/control-close-over-a-malformed-close-is-unchanged-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "close",
+        "--reason-file",
+        "{home}/control-close-reason.txt",
+        "--chat-file",
+        "{home}/control-close.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"close\":true}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_over_a_malformed_close_is_unchanged"
+    },
+    {
+      "id": "intake/control-close-refusals",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "099-missing",
+        "close",
+        "--reason-file",
+        "{home}/control-close-reason.txt",
+        "--chat-file",
+        "{home}/control-close.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_refusals"
+    },
+    {
+      "id": "intake/control-close-refusals-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-rider",
+        "close",
+        "--reason-file",
+        "{home}/control-close-reason.txt",
+        "--chat-file",
+        "{home}/control-close.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_refusals"
+    },
+    {
+      "id": "intake/control-close-refusals-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "044-no-project",
+        "close",
+        "--reason-file",
+        "{home}/control-close-reason.txt",
+        "--chat-file",
+        "{home}/control-close.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_refusals"
+    },
+    {
+      "id": "intake/control-close-refusals-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "048-idea",
+        "close",
+        "--reason-file",
+        "{home}/control-close-reason.txt",
+        "--chat-file",
+        "{home}/control-close.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_refusals"
+    },
+    {
+      "id": "intake/control-close-refusals-5",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "046-merged",
+        "close",
+        "--reason-file",
+        "{home}/control-close-reason.txt",
+        "--chat-file",
+        "{home}/control-close.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_refusals"
+    },
+    {
+      "id": "intake/control-close-refusals-6",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "047-closed",
+        "close",
+        "--reason-file",
+        "{home}/control-close-reason.txt",
+        "--chat-file",
+        "{home}/control-close.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"id\":\"044-no-project\",\"stage\":\"idea\"},{\"id\":\"045-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"046-merged\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"047-closed\",\"stage\":\"closed\",\"project\":\"sample\"},{\"id\":\"048-idea\",\"stage\":\"idea\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_refusals"
+    },
+    {
+      "id": "intake/control-close-refusals-7",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "close",
+        "--reason-file",
+        "{home}/control-badreason0-reason.txt",
+        "--chat-file",
+        "{home}/control-badreason0.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_refusals"
+    },
+    {
+      "id": "intake/control-close-refusals-8",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "close",
+        "--reason-file",
+        "{home}/control-badreason1-reason.txt",
+        "--chat-file",
+        "{home}/control-badreason1.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_refusals"
+    },
+    {
+      "id": "intake/control-close-refusals-9",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "close",
+        "--reason-file",
+        "{home}/control-badreason2-reason.txt",
+        "--chat-file",
+        "{home}/control-badreason2.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_close_refusals"
+    },
+    {
+      "id": "intake/control-babysit-writes-the-chat-record",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "babysit",
+        "--chat-file",
+        "{home}/control-babysit.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"needs\":\"Approve the PR?\",\"escalated\":true,\"note\":\"waiting\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_babysit_writes_the_chat_record"
+    },
+    {
+      "id": "intake/control-babysit-writes-the-chat-record-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "babysit",
+        "--chat-file",
+        "{home}/control-babysit.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"needs\":\"Approve the PR?\",\"escalated\":true,\"note\":\"waiting\",\"babysit\":{\"at\":\"2026-01-01T00:00:00Z\",\"via\":\"chat\",\"quote\":\"babysit 042-sample-export\",\"by\":\"parity\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_babysit_writes_the_chat_record"
+    },
+    {
+      "id": "intake/control-babysit-keeps-an-earlier-priority",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "babysit",
+        "--chat-file",
+        "{home}/control-babysit.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"priority\":{\"at\":\"2026-01-02T12:00:00Z\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_babysit_keeps_an_earlier_priority"
+    },
+    {
+      "id": "intake/control-babysit-refusals",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "099-missing",
+        "babysit",
+        "--chat-file",
+        "{home}/control-babysit.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-no-project\",\"stage\":\"pr-open\",\"pr\":\"https://github.com/example/sample/pull/44\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"044-rider\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://example.test/pull/44\",\"id\":\"045-no-pr\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"046-paused\",\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"047-closing\",\"close\":{\"reason\":\"Not needed\",\"at\":\"2026-01-02T12:00:00Z\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_control.py::ControlTest.test_babysit_refusals"
+    },
+    {
+      "id": "intake/control-babysit-refusals-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-no-project",
+        "babysit",
+        "--chat-file",
+        "{home}/control-babysit.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-no-project\",\"stage\":\"pr-open\",\"pr\":\"https://github.com/example/sample/pull/44\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"044-rider\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://example.test/pull/44\",\"id\":\"045-no-pr\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"046-paused\",\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"047-closing\",\"close\":{\"reason\":\"Not needed\",\"at\":\"2026-01-02T12:00:00Z\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_babysit_refusals"
+    },
+    {
+      "id": "intake/control-babysit-refusals-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "babysit",
+        "--chat-file",
+        "{home}/control-babysit.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-no-project\",\"stage\":\"pr-open\",\"pr\":\"https://github.com/example/sample/pull/44\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"044-rider\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://example.test/pull/44\",\"id\":\"045-no-pr\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"046-paused\",\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"047-closing\",\"close\":{\"reason\":\"Not needed\",\"at\":\"2026-01-02T12:00:00Z\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_babysit_refusals"
+    },
+    {
+      "id": "intake/control-babysit-refusals-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "044-rider",
+        "babysit",
+        "--chat-file",
+        "{home}/control-babysit.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-no-project\",\"stage\":\"pr-open\",\"pr\":\"https://github.com/example/sample/pull/44\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"044-rider\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://example.test/pull/44\",\"id\":\"045-no-pr\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"046-paused\",\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"047-closing\",\"close\":{\"reason\":\"Not needed\",\"at\":\"2026-01-02T12:00:00Z\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_babysit_refusals"
+    },
+    {
+      "id": "intake/control-babysit-refusals-5",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "045-no-pr",
+        "babysit",
+        "--chat-file",
+        "{home}/control-babysit.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-no-project\",\"stage\":\"pr-open\",\"pr\":\"https://github.com/example/sample/pull/44\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"044-rider\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://example.test/pull/44\",\"id\":\"045-no-pr\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"046-paused\",\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"047-closing\",\"close\":{\"reason\":\"Not needed\",\"at\":\"2026-01-02T12:00:00Z\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_babysit_refusals"
+    },
+    {
+      "id": "intake/control-babysit-refusals-6",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "046-paused",
+        "babysit",
+        "--chat-file",
+        "{home}/control-babysit.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-no-project\",\"stage\":\"pr-open\",\"pr\":\"https://github.com/example/sample/pull/44\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"044-rider\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://example.test/pull/44\",\"id\":\"045-no-pr\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"046-paused\",\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"047-closing\",\"close\":{\"reason\":\"Not needed\",\"at\":\"2026-01-02T12:00:00Z\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_babysit_refusals"
+    },
+    {
+      "id": "intake/control-babysit-refusals-7",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "047-closing",
+        "babysit",
+        "--chat-file",
+        "{home}/control-babysit.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-no-project\",\"stage\":\"pr-open\",\"pr\":\"https://github.com/example/sample/pull/44\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"044-rider\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"042-sample-export\"}]},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://example.test/pull/44\",\"id\":\"045-no-pr\"},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"046-paused\",\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"stage\":\"pr-open\",\"project\":\"sample\",\"pr\":\"https://github.com/example/sample/pull/44\",\"id\":\"047-closing\",\"close\":{\"reason\":\"Not needed\",\"at\":\"2026-01-02T12:00:00Z\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_babysit_refusals"
+    },
+    {
+      "id": "intake/control-move-writes-the-chat-record-and-drops-the-claim",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-sample-export",
+        "move",
+        "beta",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_writes_the_chat_record_and_drops_the_claim"
+    },
+    {
+      "id": "intake/control-move-writes-the-chat-record-and-drops-the-claim-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-sample-export",
+        "move",
+        "beta",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"move\":{\"from\":\"alpha\",\"session\":\"s-alpha\",\"agent\":\"agent-alpha\",\"server\":\"server-alpha\",\"to\":\"beta\",\"at\":\"2026-01-01T00:00:00Z\",\"via\":\"chat\",\"quote\":\"move 043-sample-export to beta\",\"by\":\"parity\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_writes_the_chat_record_and_drops_the_claim"
+    },
+    {
+      "id": "intake/control-move-refusals",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "099-missing",
+        "move",
+        "beta",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-stop-queued\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"move\":{\"from\":\"beta\",\"to\":\"alpha\",\"at\":\"2026-01-02T11:00:00Z\"}},{\"id\":\"045-no-project\",\"stage\":\"build\"},{\"id\":\"046-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"047-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_refusals"
+    },
+    {
+      "id": "intake/control-move-refusals-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "045-no-project",
+        "move",
+        "beta",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-stop-queued\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"move\":{\"from\":\"beta\",\"to\":\"alpha\",\"at\":\"2026-01-02T11:00:00Z\"}},{\"id\":\"045-no-project\",\"stage\":\"build\"},{\"id\":\"046-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"047-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_refusals"
+    },
+    {
+      "id": "intake/control-move-refusals-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "046-open",
+        "move",
+        "beta",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-stop-queued\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"move\":{\"from\":\"beta\",\"to\":\"alpha\",\"at\":\"2026-01-02T11:00:00Z\"}},{\"id\":\"045-no-project\",\"stage\":\"build\"},{\"id\":\"046-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"047-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_refusals"
+    },
+    {
+      "id": "intake/control-move-refusals-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "047-rider",
+        "move",
+        "beta",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-stop-queued\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"move\":{\"from\":\"beta\",\"to\":\"alpha\",\"at\":\"2026-01-02T11:00:00Z\"}},{\"id\":\"045-no-project\",\"stage\":\"build\"},{\"id\":\"046-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"047-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_refusals"
+    },
+    {
+      "id": "intake/control-move-refusals-5",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-sample-export",
+        "move",
+        "alpha",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-stop-queued\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"move\":{\"from\":\"beta\",\"to\":\"alpha\",\"at\":\"2026-01-02T11:00:00Z\"}},{\"id\":\"045-no-project\",\"stage\":\"build\"},{\"id\":\"046-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"047-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_refusals"
+    },
+    {
+      "id": "intake/control-move-refusals-6",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "044-stop-queued",
+        "move",
+        "beta",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-stop-queued\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"move\":{\"from\":\"beta\",\"to\":\"alpha\",\"at\":\"2026-01-02T11:00:00Z\"}},{\"id\":\"045-no-project\",\"stage\":\"build\"},{\"id\":\"046-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"047-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_refusals"
+    },
+    {
+      "id": "intake/control-move-refusals-7",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-sample-export",
+        "move",
+        "gamma",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-stop-queued\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"move\":{\"from\":\"beta\",\"to\":\"alpha\",\"at\":\"2026-01-02T11:00:00Z\"}},{\"id\":\"045-no-project\",\"stage\":\"build\"},{\"id\":\"046-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"047-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_refusals"
+    },
+    {
+      "id": "intake/control-move-refusals-8",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-sample-export",
+        "move",
+        "delta",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-stop-queued\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"move\":{\"from\":\"beta\",\"to\":\"alpha\",\"at\":\"2026-01-02T11:00:00Z\"}},{\"id\":\"045-no-project\",\"stage\":\"build\"},{\"id\":\"046-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"047-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_refusals"
+    },
+    {
+      "id": "intake/control-move-refusals-9",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-sample-export",
+        "move",
+        "beta",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-stop-queued\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"move\":{\"from\":\"beta\",\"to\":\"alpha\",\"at\":\"2026-01-02T11:00:00Z\"}},{\"id\":\"045-no-project\",\"stage\":\"build\"},{\"id\":\"046-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"047-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_refusals"
+    },
+    {
+      "id": "intake/control-move-refusals-10",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-sample-export",
+        "move",
+        "beta",
+        "--chat-file",
+        "{home}/control-move.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-stop-queued\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"move\":{\"from\":\"beta\",\"to\":\"alpha\",\"at\":\"2026-01-02T11:00:00Z\"}},{\"id\":\"045-no-project\",\"stage\":\"build\"},{\"id\":\"046-open\",\"stage\":\"pr-open\",\"project\":\"sample\"},{\"id\":\"047-rider\",\"stage\":\"build\",\"project\":\"sample\",\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [200, "{\"pickup\": \"on\"}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_move_refusals"
+    },
+    {
+      "id": "intake/control-rerun-writes-a-self-move",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-sample-export",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_writes_a_self_move"
+    },
+    {
+      "id": "intake/control-rerun-writes-a-self-move-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-sample-export",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"move\":{\"from\":\"alpha\",\"session\":\"s-alpha\",\"agent\":\"agent-alpha\",\"server\":\"server-alpha\",\"to\":\"alpha\",\"at\":\"2026-01-01T00:00:00Z\",\"via\":\"chat\",\"quote\":\"rerun 043-sample-export\",\"by\":\"parity\"}}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_writes_a_self_move"
+    },
+    {
+      "id": "intake/control-rerun-refusals",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "099-missing",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-no-claim\",\"stage\":\"build\",\"project\":\"sample\",\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"045-paused\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"id\":\"046-needs\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"needs\":\"Pick A or B\"},{\"id\":\"047-retired\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"gamma\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"048-unlisted\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"beta\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"049-no-project\",\"stage\":\"build\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"050-open\",\"stage\":\"pr-open\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"051-rider\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"},\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\"]}}"
+        ]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_refusals"
+    },
+    {
+      "id": "intake/control-rerun-refusals-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "049-no-project",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-no-claim\",\"stage\":\"build\",\"project\":\"sample\",\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"045-paused\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"id\":\"046-needs\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"needs\":\"Pick A or B\"},{\"id\":\"047-retired\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"gamma\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"048-unlisted\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"beta\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"049-no-project\",\"stage\":\"build\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"050-open\",\"stage\":\"pr-open\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"051-rider\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"},\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_refusals"
+    },
+    {
+      "id": "intake/control-rerun-refusals-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "050-open",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-no-claim\",\"stage\":\"build\",\"project\":\"sample\",\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"045-paused\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"id\":\"046-needs\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"needs\":\"Pick A or B\"},{\"id\":\"047-retired\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"gamma\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"048-unlisted\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"beta\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"049-no-project\",\"stage\":\"build\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"050-open\",\"stage\":\"pr-open\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"051-rider\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"},\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_refusals"
+    },
+    {
+      "id": "intake/control-rerun-refusals-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "051-rider",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-no-claim\",\"stage\":\"build\",\"project\":\"sample\",\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"045-paused\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"id\":\"046-needs\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"needs\":\"Pick A or B\"},{\"id\":\"047-retired\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"gamma\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"048-unlisted\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"beta\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"049-no-project\",\"stage\":\"build\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"050-open\",\"stage\":\"pr-open\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"051-rider\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"},\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_refusals"
+    },
+    {
+      "id": "intake/control-rerun-refusals-5",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "044-no-claim",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-no-claim\",\"stage\":\"build\",\"project\":\"sample\",\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"045-paused\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"id\":\"046-needs\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"needs\":\"Pick A or B\"},{\"id\":\"047-retired\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"gamma\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"048-unlisted\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"beta\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"049-no-project\",\"stage\":\"build\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"050-open\",\"stage\":\"pr-open\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"051-rider\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"},\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_refusals"
+    },
+    {
+      "id": "intake/control-rerun-refusals-6",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "045-paused",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-no-claim\",\"stage\":\"build\",\"project\":\"sample\",\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"045-paused\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"id\":\"046-needs\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"needs\":\"Pick A or B\"},{\"id\":\"047-retired\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"gamma\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"048-unlisted\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"beta\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"049-no-project\",\"stage\":\"build\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"050-open\",\"stage\":\"pr-open\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"051-rider\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"},\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_refusals"
+    },
+    {
+      "id": "intake/control-rerun-refusals-7",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "046-needs",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-no-claim\",\"stage\":\"build\",\"project\":\"sample\",\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"045-paused\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"id\":\"046-needs\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"needs\":\"Pick A or B\"},{\"id\":\"047-retired\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"gamma\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"048-unlisted\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"beta\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"049-no-project\",\"stage\":\"build\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"050-open\",\"stage\":\"pr-open\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"051-rider\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"},\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_refusals"
+    },
+    {
+      "id": "intake/control-rerun-refusals-8",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "047-retired",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-no-claim\",\"stage\":\"build\",\"project\":\"sample\",\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"045-paused\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"id\":\"046-needs\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"needs\":\"Pick A or B\"},{\"id\":\"047-retired\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"gamma\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"048-unlisted\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"beta\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"049-no-project\",\"stage\":\"build\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"050-open\",\"stage\":\"pr-open\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"051-rider\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"},\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_refusals"
+    },
+    {
+      "id": "intake/control-rerun-refusals-9",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "048-unlisted",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-no-claim\",\"stage\":\"build\",\"project\":\"sample\",\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"045-paused\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"id\":\"046-needs\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"needs\":\"Pick A or B\"},{\"id\":\"047-retired\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"gamma\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"048-unlisted\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"beta\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"049-no-project\",\"stage\":\"build\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"050-open\",\"stage\":\"pr-open\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"051-rider\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"},\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_refusals"
+    },
+    {
+      "id": "intake/control-rerun-refusals-10",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "043-sample-export",
+        "rerun",
+        "--chat-file",
+        "{home}/control-rerun.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"},{\"id\":\"043-sample-export\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"044-no-claim\",\"stage\":\"build\",\"project\":\"sample\",\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"045-paused\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"paused\":{\"at\":\"2026-01-02T12:00:00Z\"}},{\"id\":\"046-needs\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\",\"session\":\"s-alpha\",\"seen\":\"2026-01-02T12:00:00Z\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"},\"needs\":\"Pick A or B\"},{\"id\":\"047-retired\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"gamma\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"048-unlisted\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"beta\"},\"paseo\":{\"agent\":\"agent-alpha\",\"server\":\"server-alpha\"}},{\"id\":\"049-no-project\",\"stage\":\"build\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"050-open\",\"stage\":\"pr-open\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"}},{\"id\":\"051-rider\",\"stage\":\"build\",\"project\":\"sample\",\"claim\":{\"device\":\"alpha\"},\"refs\":[{\"kind\":\"batched-into\",\"id\":\"043-sample-export\"}]}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": \"yes\", \"hosts\": [\"alpha\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_rerun_refusals"
+    },
+    {
+      "id": "intake/control-usage",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "prioritize",
+        "--chat",
+        "prioritize 042-sample-export"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-2",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "pause",
+        "--chat",
+        "prioritize 042-sample-export"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-3",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "archive",
+        "--chat-file",
+        "{home}/control-usage.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-4",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "prioritize",
+        "--note",
+        "{home}/control-usage.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-5",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "pause",
+        "--chat-file",
+        "{home}/control-usage.txt",
+        "--reason-file",
+        "{home}/control-usage-reason.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-6",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "close",
+        "--chat-file",
+        "{home}/control-usage.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-7",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "close",
+        "--reason",
+        "Duplicate",
+        "--chat-file",
+        "{home}/control-usage.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-8",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "close",
+        "--chat-file",
+        "{home}/control-usage.txt",
+        "--chat-file",
+        "{home}/control-usage.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-9",
+      "argv": ["--home", "{home}", "control", "042-sample-export", "move"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-10",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "move",
+        "--chat-file",
+        "{home}/control-usage.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-11",
+      "argv": ["--home", "{home}", "control", "042-sample-export", "move", "beta"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-12",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "move",
+        "be/ta",
+        "--chat-file",
+        "{home}/control-usage.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-13",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "move",
+        "beta",
+        "--chat-file",
+        "{home}/control-usage.txt",
+        "--reason-file",
+        "{home}/control-usage-reason.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-14",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "rerun",
+        "beta",
+        "--chat-file",
+        "{home}/control-usage.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-15",
+      "argv": ["--home", "{home}", "control", "042-sample-export", "rerun"],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-16",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "babysit",
+        "--chat-file",
+        "{home}/control-usage.txt",
+        "--chat-file",
+        "{home}/control-usage.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-usage-17",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "prioritize",
+        "--chat-file",
+        "{home}/control-crlf.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_usage"
+    },
+    {
+      "id": "intake/control-prioritized-reads-the-chat-record",
+      "argv": [
+        "--home",
+        "{home}",
+        "control",
+        "042-sample-export",
+        "prioritize",
+        "--chat-file",
+        "{home}/control-prioritized.txt"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"007-old\",\"stage\":\"merged\",\"project\":\"sample\"},{\"id\":\"042-sample-export\",\"stage\":\"build\",\"project\":\"sample\"}],\"autonomy\":{\"paused\":false,\"projects\":[\"sample\"],\"self\":[]}}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/hosts": [
+          200,
+          "[{\"id\": \"alpha\", \"state\": \"active\"}, {\"id\": \"beta\", \"state\": \"active\"}, {\"id\": \"gamma\", \"state\": \"retired\"}]"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          "{\"pickup\": {\"enabled\": true, \"hosts\": [\"alpha\", \"beta\"]}}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_control.py::ControlTest.test_prioritized_reads_the_chat_record"
     }
   ]
 }

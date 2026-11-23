@@ -8,17 +8,17 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::board::{dump_board, escalated, load_board, patch_job, read_board};
+use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, read_board};
 use crate::shared::consts::{
-    tag_lookalike, BACKLOG_LINE, BACKLOG_NOTES_TAG, IDEA, JOB_ID, NOTES_SENTENCE, NOTE_INVISIBLE,
-    NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, TERMINAL,
+    tag_lookalike, BACKLOG_LINE, BACKLOG_NOTES_TAG, IDEA, IN_FLIGHT, JOB_ID, NOTES_SENTENCE,
+    NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG, TERMINAL,
 };
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::{is_link, write_atomic};
 use crate::shared::home::{factory_home, holder};
 use crate::shared::http::{api, cas};
 use crate::shared::project::{local_bytes, r2_target, safe_job_folder, sha};
-use crate::shared::py::{os_error, repr, strip};
+use crate::shared::py::{is_space, os_error, repr, rstrip, strip};
 use crate::shared::pyjson::{dumps, float_repr, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::time::{now, parse_stamp, unix_now};
@@ -1023,12 +1023,885 @@ pub fn suggest_cmd(_call: &Call) -> Res<()> {
     Err(not_ported("suggest"))
 }
 
-pub fn control_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("control"))
+// ---- answers to needs.md and backlog questions ----
+
+struct Opt {
+    label: String,
+    desc: String,
+    recommended: bool,
 }
 
-pub fn needs_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("needs"))
+/// A question as the dashboard's parseNeeds or parseBacklogContext reads it.
+struct Question {
+    header: String,
+    prompt: String,
+    pick: String,
+    options: Vec<Opt>,
+    labels: Vec<String>,
+}
+
+/// One answered question: the picked labels and the other text. None is a "no answer" line.
+type Answer = Option<(Vec<String>, String)>;
+
+static ANSWER_ROW: Pattern = Pattern::new(r"- (.+?)(?::\s+(.+))?", Flags::NONE);
+static RECOMMENDED: Pattern = Pattern::new(r"(.*) \(recommended\)", Flags::I);
+
+/// `" ".join(s.split())`.
+fn collapse(s: &str) -> String {
+    s.split(is_space)
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `text.replace("\r\n", "\n").replace("\r", "\n")`.
+fn newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// The questions of a needs.md, as the dashboard's parseNeeds reads them, or [] when it has no
+/// question form.
+fn needs_questions(text: &str) -> Vec<Question> {
+    let text = newlines(text);
+    let mut sections: Vec<(Option<&str>, Vec<&str>)> = vec![(None, Vec::new())];
+    for line in text.split('\n') {
+        if line.starts_with("## ") {
+            sections.push((Some(line), Vec::new()));
+        } else {
+            sections.last_mut().unwrap().1.push(line);
+        }
+    }
+    let mut questions = Vec::new();
+    for (head, lines) in sections {
+        let Some(head) = head.filter(|h| h.starts_with("## Question:")) else {
+            continue;
+        };
+        let header = strip(&head["## Question:".len()..]);
+        let picks: Vec<&str> = lines
+            .iter()
+            .copied()
+            .filter(|l| l.starts_with("Pick:"))
+            .collect();
+        if questions.len() == 4
+            || header.is_empty()
+            || utf16_len(header) > 60
+            || picks.len() != 1
+            || !["Pick: one", "Pick: many"].contains(&picks[0])
+        {
+            return Vec::new();
+        }
+        let at = lines.iter().position(|l| *l == picks[0]).unwrap();
+        let prompt = lines[..at]
+            .iter()
+            .copied()
+            .filter(|l| !strip(l).is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let prompt = strip(&prompt).to_string();
+        let mut options = Vec::new();
+        for row in lines[at + 1..].iter().filter(|l| !strip(l).is_empty()) {
+            let Some(m) = ANSWER_ROW.fullmatch(row) else {
+                return Vec::new();
+            };
+            let first = m.get(1).unwrap().as_str();
+            let rec = RECOMMENDED.fullmatch(first);
+            options.push(Opt {
+                label: rec
+                    .as_ref()
+                    .map_or(first, |r| r.get(1).unwrap().as_str())
+                    .to_string(),
+                desc: m.get(2).map_or("", |d| d.as_str()).to_string(),
+                recommended: rec.is_some(),
+            });
+        }
+        let pick = &picks[0]["Pick: ".len()..];
+        if prompt.is_empty()
+            || !(2..=4).contains(&options.len())
+            || pick == "one" && options.iter().filter(|o| o.recommended).count() > 1
+        {
+            return Vec::new();
+        }
+        let labels = options.iter().map(|o| o.label.clone()).collect();
+        questions.push(Question {
+            header: header.to_string(),
+            prompt,
+            pick: pick.to_string(),
+            options,
+            labels,
+        });
+    }
+    questions
+}
+
+/// The picks of a ", " separated answer. A whole label wins over the split, so a label that holds
+/// ", " stays one pick; the longest label that ends the text or is followed by ", " is taken first.
+fn split_picks(text: &str, labels: &[String]) -> Vec<String> {
+    let mut picks = Vec::new();
+    let mut i = 0;
+    while i < text.len() {
+        let rest = &text[i..];
+        let mut label: Option<&str> = None;
+        for x in labels {
+            if (rest == x || rest.starts_with(&format!("{x}, ")))
+                && label.is_none_or(|l| x.chars().count() > l.chars().count())
+            {
+                label = Some(x);
+            }
+        }
+        let piece = label.unwrap_or_else(|| rest.split(", ").next().unwrap());
+        if !piece.is_empty() {
+            picks.push(piece.to_string());
+        }
+        i += piece.len() + 2;
+    }
+    picks
+}
+
+/// One answer per question from an answers file of "- <header>: <answer>" lines. Exits 2 when the
+/// file does not fit the questions, and with skip_error on a "no answer" line when it is given.
+fn parse_answers(path: &str, questions: &[Question], skip_error: Option<&str>) -> Res<Vec<Answer>> {
+    let bad = |why: &str| fail(format!("--answers {path}: {why}"), 2);
+    let text = std::fs::read(path)
+        .ok()
+        .and_then(|b| String::from_utf8(b).ok())
+        .ok_or_else(|| bad("cannot read it as UTF-8 text"))?
+        .replace("\r\n", "\n");
+    if text.chars().count() > 2000 {
+        return Err(bad("longer than 2000 characters"));
+    }
+    if let Some(why) = check_untrusted(&text) {
+        return Err(bad(&why));
+    }
+    let lines: Vec<&str> = text
+        .split('\n')
+        .filter(|l| !strip(l).is_empty())
+        .map(rstrip)
+        .collect();
+    let headers: Vec<&str> = questions.iter().map(|q| q.header.as_str()).collect();
+    let shape = format!(
+        "write one line per question, as - <header>: <answer>, for: {}",
+        if headers.is_empty() {
+            "no questions".to_string()
+        } else {
+            headers.join(", ")
+        }
+    );
+    if lines.len() != questions.len() {
+        return Err(bad(&shape));
+    }
+    let mut out = Vec::new();
+    for (q, line) in questions.iter().zip(lines) {
+        let prefix = format!("- {}: ", q.header);
+        let answer = line.strip_prefix(&prefix).map_or("", strip);
+        if answer.is_empty() {
+            return Err(bad(&shape));
+        }
+        if answer == "no answer" {
+            if let Some(skip) = skip_error {
+                return Err(fail(skip, 2));
+            }
+            out.push(None);
+            continue;
+        }
+        let sep = if answer.starts_with("Other: ") {
+            "Other: "
+        } else {
+            ". Other: "
+        };
+        let (picked, other) = answer.split_once(sep).unwrap_or((answer, ""));
+        let picked = split_picks(picked, &q.labels);
+        let other = collapse(other);
+        for label in &picked {
+            if !q.labels.contains(label) {
+                return Err(bad(&format!(
+                    "{label} is not an option of {}; pick from {}",
+                    q.header,
+                    q.labels.join(", ")
+                )));
+            }
+        }
+        let distinct: BTreeSet<&String> = picked.iter().collect();
+        if distinct.len() != picked.len() || q.pick == "one" && picked.len() > 1 {
+            return Err(bad(&if q.pick == "one" {
+                format!("{} takes one pick", q.header)
+            } else {
+                format!("{} repeats a pick", q.header)
+            }));
+        }
+        if picked.is_empty() && other.is_empty() {
+            return Err(bad(&shape));
+        }
+        out.push(Some((picked, other)));
+    }
+    Ok(out)
+}
+
+/// A quote for a record line; a blank chat message reaches here only as Python's None.
+fn quoted(quote: Option<&str>) -> Res<String> {
+    quote
+        .map(collapse)
+        .ok_or_else(|| fail("'NoneType' object has no attribute 'split'", 1))
+}
+
+/// answers.md as the dashboard's answersMarkdown writes it, naming the chat message as its source.
+fn needs_answers_markdown(
+    questions: &[Question],
+    picks: &[Answer],
+    sha12: &str,
+    stamp: &str,
+    device: &str,
+    quote: Option<&str>,
+) -> Res<String> {
+    let mut blocks = vec![
+        "# Answers".to_string(),
+        format!("For needs.md sha256 {sha12}, submitted {stamp} from chat by {device}."),
+        format!("Chat message: \"{}\"", quoted(quote)?),
+    ];
+    for (i, (q, answer)) in questions.iter().zip(picks).enumerate() {
+        let (picked, other) = answer.as_ref().unwrap();
+        let rows: Vec<String> = q
+            .options
+            .iter()
+            .map(|o| {
+                format!(
+                    "- [{}] {}{}{}",
+                    if picked.contains(&o.label) { "x" } else { " " },
+                    o.label,
+                    if o.recommended { " (recommended)" } else { "" },
+                    if o.desc.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {}", o.desc)
+                    }
+                )
+            })
+            .collect();
+        blocks.extend([
+            format!("## Question {}: {}", i + 1, q.header),
+            q.prompt.clone(),
+            format!("Pick: {}", q.pick),
+            rows.join("\n"),
+            if other.is_empty() {
+                "Other: none".to_string()
+            } else {
+                format!("Other:\n> {other}")
+            },
+        ]);
+    }
+    Ok(blocks.join("\n\n") + "\n")
+}
+
+static ASCII_SLUG: Pattern = Pattern::new(r"[\w-]+", Flags::ASCII);
+
+/// Submit a person's chat answers to a job's needs.md form with the dashboard's writes: answers.md
+/// first, then the board's needs cleared unless the job is at needs-human.
+fn needs_answer(home: &Path, job_id: &str, answers: &str, chat_file: &str) -> Res<()> {
+    if !JOB_ID.is_full(job_id) || job_id.contains("..") {
+        return Err(fail(NEEDS_ANSWER_USAGE, 2));
+    }
+    let quote = chat_quote(
+        Some(&read_chat_file(chat_file, "--chat-file")?),
+        "--chat-file",
+    )?;
+    let board = load_board(Some(
+        &api(home, "GET", "/api/board", None, &[200], &[])?.text()?,
+    ))?;
+    let Some(job) = board["jobs"]
+        .as_array()
+        .and_then(|jobs| jobs.iter().find(|j| get_str(j, "id") == Some(job_id)))
+    else {
+        return Err(fail(
+            format!("no job {job_id} on the board. Nothing was written."),
+            4,
+        ));
+    };
+    if !waits_on_you(job) {
+        return Err(fail(
+            format!("{job_id} is not waiting on you. Nothing was written."),
+            2,
+        ));
+    }
+    let project = truthy(job.get("project")).then(|| py_str(&job["project"]));
+    if project.as_ref().is_some_and(|p| !ASCII_SLUG.is_full(p)) {
+        return Err(fail(
+            format!("{job_id} has a bad project on the board. Nothing was written."),
+            2,
+        ));
+    }
+    let base = format!(
+        "/api/jobs/{}{job_id}/",
+        project.map_or(String::new(), |p| format!("{p}/"))
+    );
+    let r = api(
+        home,
+        "GET",
+        &format!("{base}needs.md"),
+        None,
+        &[200, 404],
+        &[],
+    )?;
+    if r.status == 404 {
+        return Err(fail(
+            format!("{job_id} has no needs.md. Nothing was written."),
+            4,
+        ));
+    }
+    let text = r.text()?;
+    let questions = needs_questions(&text);
+    if questions.is_empty() {
+        return Err(fail(
+            format!("{job_id}'s needs.md has no question form. Nothing was written."),
+            2,
+        ));
+    }
+    let picks = parse_answers(answers, &questions, Some(NEEDS_SKIPPED))?;
+    let sha12 = &sha(text.as_bytes())[..12];
+    let body = needs_answers_markdown(
+        &questions,
+        &picks,
+        sha12,
+        &now(),
+        &holder(home)?.0,
+        quote.as_deref(),
+    )?;
+    cas(home, &format!("{base}answers.md"), |_| {
+        Ok((Some(body.clone()), ()))
+    })?;
+    let needs = cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(j) = find_job(&mut data, job_id) else {
+            return Ok((None, "kept"));
+        };
+        let needs = if truthy(j.get("needs")) {
+            py_str(&j["needs"])
+        } else {
+            String::new()
+        };
+        if get_str(j, "stage") == Some("needs-human")
+            || !needs.contains(&format!("#{job_id}/needs"))
+        {
+            return Ok((None, "kept"));
+        }
+        let stamp = now();
+        j.as_object_mut().unwrap().shift_remove("needs");
+        j["updated"] = Value::from(stamp.clone());
+        data["updated"] = Value::from(stamp);
+        Ok((Some(dump_board(&data)), "cleared"))
+    })?;
+    println!(
+        "{}",
+        dumps(
+            &json!({"id": job_id, "answers": "saved", "needs": needs}),
+            DEFAULT
+        )
+    );
+    Ok(())
+}
+
+/// `dict(zip(keys, values))` for flag pairs: a repeated flag keeps its last value.
+fn flag_pairs<'a>(keys: &'a [String], values: &'a [String]) -> Vec<(&'a str, &'a str)> {
+    let mut pairs: Vec<(&str, &str)> = Vec::new();
+    for (k, v) in keys.iter().zip(values) {
+        match pairs.iter_mut().find(|(key, _)| key == k) {
+            Some(slot) => slot.1 = v,
+            None => pairs.push((k, v)),
+        }
+    }
+    pairs
+}
+
+/// Every other item of a list, from start.
+fn every_other(list: &[String], start: usize) -> Vec<String> {
+    list.iter().skip(start).step_by(2).cloned().collect()
+}
+
+/// The flags given as `dict(zip(list[start::2], list[start + 1::2]))`.
+fn flags_of(list: &[String], start: usize) -> Vec<(String, String)> {
+    let keys = every_other(list, start);
+    let values = every_other(list, start + 1);
+    flag_pairs(&keys, &values)
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+fn flag<'a>(pairs: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    pairs
+        .iter()
+        .find(|(k, _)| k == name)
+        .map(|(_, v)| v.as_str())
+}
+
+/// The flag names, sorted, to compare with Python's `set(flags)`.
+fn flag_names(pairs: &[(String, String)]) -> BTreeSet<&str> {
+    pairs.iter().map(|(k, _)| k.as_str()).collect()
+}
+
+pub fn needs_cmd(call: &Call) -> Res<()> {
+    home_and(|home| needs_cmd_in(home, &call.args))
+}
+
+fn needs_cmd_in(home: &Path, args: &[String]) -> Res<()> {
+    let (sub, rest) = (&args[0], &args[1..]);
+    let flags = flags_of(rest, 1);
+    if sub != "answer" || flag_names(&flags) != BTreeSet::from(["--answers", "--chat-file"]) {
+        return Err(fail(NEEDS_ANSWER_USAGE, 2));
+    }
+    needs_answer(
+        home,
+        &rest[0],
+        flag(&flags, "--answers").unwrap(),
+        flag(&flags, "--chat-file").unwrap(),
+    )
+}
+
+// ---- control ----
+
+/// base with extra's keys added in order, as `{**base, **extra}`.
+fn with(mut base: Value, extra: &Value) -> Value {
+    for (k, v) in extra.as_object().unwrap() {
+        base[k] = v.clone();
+    }
+    base
+}
+
+fn earlier_moves(m: &Value) -> Vec<Value> {
+    m.get("earlier")
+        .and_then(Value::as_array)
+        .map(|e| e.iter().filter(|x| x.is_object()).cloned().collect())
+        .unwrap_or_default()
+}
+
+/// True when pickup recorded this holder's stop. Only a string counts, as in the dashboard.
+fn move_stopped(x: &Value) -> bool {
+    x.get("stopped").is_some_and(Value::is_string)
+}
+
+/// The move's holders whose host has not stopped them yet, earlier ones first.
+fn queued_stops(m: &Value) -> Vec<Value> {
+    if !m.is_object() {
+        return Vec::new();
+    }
+    earlier_moves(m)
+        .into_iter()
+        .chain([m.clone()])
+        .filter(|x| truthy(x.get("from")) && !move_stopped(x))
+        .collect()
+}
+
+/// (enabled, hosts) from the project's effective pipeline, or the reason it cannot be read.
+fn pickup_config(home: &Path, slug: &str) -> Res<Result<(bool, Vec<Value>), String>> {
+    let r = api(
+        home,
+        "GET",
+        &format!("/api/pipeline/effective/{slug}"),
+        None,
+        &[200, 404, 409],
+        &[],
+    )?;
+    if r.status == 404 {
+        return Ok(Err(
+            "no pipeline view; register the project or deploy the current Worker".into(),
+        ));
+    }
+    if r.status == 409 {
+        return Ok(Err(
+            "stored pipeline configuration no longer validates".into()
+        ));
+    }
+    let view = loads(&r.text()?).ok();
+    if view
+        .as_ref()
+        .is_some_and(|v| v.is_object() && v.get("pickup").is_none())
+    {
+        return Ok(Ok((false, Vec::new())));
+    }
+    let p = view.as_ref().and_then(|v| v.get("pickup"));
+    if let Some(p) = p.filter(|p| p.is_object()) {
+        let hosts = p.get("hosts").and_then(Value::as_array);
+        if let (Some(Value::Bool(enabled)), Some(hosts)) = (p.get("enabled"), hosts) {
+            if hosts
+                .iter()
+                .all(|h| h.as_str().is_some_and(|h| HOST_NAME.is_full(h)))
+            {
+                return Ok(Ok((*enabled, hosts.clone())));
+            }
+        }
+    }
+    Ok(Err("malformed pickup in the pipeline view".into()))
+}
+
+/// (reason, on_host): why host would never pick up a job of slug, and whether the reason is the
+/// host itself rather than the pickup view. None when it is active and pickup lists it.
+fn pickup_host_problem(home: &Path, slug: &Value, host: &Value) -> Res<Option<(String, bool)>> {
+    let hosts = parse(&api(home, "GET", "/api/hosts", None, &[200], &[])?.text()?)?;
+    let active = hosts.as_array().into_iter().flatten().any(|h| {
+        h.is_object() && h.get("id") == Some(host) && get_str(h, "state") == Some("active")
+    });
+    if !active {
+        return Ok(Some((
+            format!("{} is not an active host", py_str(host)),
+            true,
+        )));
+    }
+    match pickup_config(home, &py_str(slug))? {
+        Err(why) => Ok(Some((why, false))),
+        Ok((enabled, listed)) if !enabled || !listed.contains(host) => Ok(Some((
+            format!("{} does not run pickup for {}", py_str(host), py_str(slug)),
+            true,
+        ))),
+        Ok(_) => Ok(None),
+    }
+}
+
+/// Move job to host to, as the dashboard's writeMove does, and drop its claim and Paseo link.
+fn write_move(job: &mut Value, to: &Value, stamp: &str, record: &Value) {
+    let empty = json!({});
+    let claim = job
+        .get("claim")
+        .filter(|c| c.is_object())
+        .cloned()
+        .unwrap_or(json!({}));
+    let m = job.get("move").filter(|m| m.is_object()).cloned();
+    let prior = match &m {
+        Some(m) if !truthy(Some(&claim)) && truthy(Some(m)) && !move_stopped(m) => m.clone(),
+        _ => json!({}),
+    };
+    let or = |a: Option<&Value>, b: Option<&Value>| {
+        if truthy(a) {
+            a.cloned()
+        } else {
+            b.cloned()
+        }
+    };
+    let origin = or(claim.get("device"), prior.get("from"));
+    let session = or(claim.get("session"), prior.get("session"));
+    let mut earlier = m.as_ref().map(earlier_moves).unwrap_or_default();
+    if let Some(m) = m
+        .as_ref()
+        .filter(|m| truthy(Some(m)) && truthy(m.get("from")) && !truthy(Some(&prior)))
+    {
+        let mut entry = json!({});
+        for k in ["from", "session", "agent", "server", "at"] {
+            if truthy(m.get(k)) {
+                entry[k] = m[k].clone();
+            }
+        }
+        if move_stopped(m) {
+            entry["stopped"] = m["stopped"].clone();
+        }
+        earlier.push(entry);
+    }
+    let paseo = job
+        .get("paseo")
+        .filter(|p| p.is_object())
+        .unwrap_or(&empty)
+        .clone();
+    let link = if truthy(paseo.get("agent")) {
+        &paseo
+    } else {
+        &prior
+    };
+    let mut moved = json!({});
+    for (k, v) in [
+        ("from", origin),
+        ("session", session),
+        ("agent", link.get("agent").cloned()),
+        ("server", link.get("server").cloned()),
+    ] {
+        if truthy(v.as_ref()) {
+            moved[k] = v.unwrap();
+        }
+    }
+    moved["to"] = to.clone();
+    moved["at"] = Value::from(stamp);
+    let mut moved = with(moved, record);
+    if !earlier.is_empty() {
+        moved["earlier"] = Value::Array(earlier);
+    }
+    job["move"] = moved;
+    let map = job.as_object_mut().unwrap();
+    map.shift_remove("claim");
+    map.shift_remove("paseo");
+}
+
+/// Make the dashboard's Babysit PR, Move or Rerun after the dashboard's checks, and print the result.
+fn control_launch(
+    home: &Path,
+    job_id: &str,
+    action: &str,
+    host: Option<&str>,
+    record: &Value,
+) -> Res<()> {
+    let mut problems: Vec<((Value, Value), Option<(String, bool)>)> = Vec::new();
+    let word = match action {
+        "babysit" => "babysat".to_string(),
+        "move" => format!("moved to {}", host.unwrap()),
+        _ => "rerun".to_string(),
+    };
+    let refuse = |why: &str| {
+        fail(
+            format!("{job_id} cannot be {word}: {why}. Nothing was written."),
+            2,
+        )
+    };
+    let (result, to) = cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(job) = find_job(&mut data, job_id) else {
+            return Err(fail(
+                format!("no job {job_id} on the board. Nothing was written."),
+                4,
+            ));
+        };
+        if action == "babysit" && truthy(job.get("babysit")) {
+            return Ok((None, ("unchanged", Value::Null)));
+        }
+        let (stage, lead, slug) = (job.get("stage"), lead_of(job), job.get("project"));
+        let empty = json!({});
+        let claim = job.get("claim").filter(|c| c.is_object()).unwrap_or(&empty);
+        let m = job.get("move").filter(|m| m.is_object()).unwrap_or(&empty);
+        let pr = get_str(job, "pr").unwrap_or("");
+        if !truthy(slug) {
+            return Err(refuse("it has no project"));
+        }
+        let allowed: &[&str] = if action == "babysit" {
+            &["pr-open"]
+        } else {
+            IN_FLIGHT
+        };
+        if !has_str(allowed, stage) {
+            return Err(refuse(&format!("it is at {}", py_opt(stage))));
+        }
+        if let Some(lead) = &lead {
+            return Err(refuse(&format!("it is a rider of {lead}")));
+        }
+        let slug = slug.unwrap().clone();
+        let mut problem = |to: &Value| -> Res<Option<(String, bool)>> {
+            let key = (slug.clone(), to.clone());
+            if let Some((_, found)) = problems.iter().find(|(k, _)| *k == key) {
+                return Ok(found.clone());
+            }
+            let found = pickup_host_problem(home, &slug, to)?;
+            problems.push((key, found.clone()));
+            Ok(found)
+        };
+        let to: Value;
+        if action == "babysit" {
+            if !GH_PR.is_full(pr) {
+                return Err(refuse("it has no GitHub pull request URL"));
+            }
+            if truthy(job.get("paused")) {
+                return Err(refuse("it is paused"));
+            }
+            if truthy(job.get("close")) {
+                return Err(refuse("it has a close queued"));
+            }
+            to = Value::Null;
+        } else if action == "move" {
+            to = Value::from(host.unwrap());
+            if !truthy(Some(claim)) && m.get("to") == Some(&to) && m.get("claimed").is_none() {
+                return Ok((None, ("unchanged", to)));
+            }
+            let runs_on = if truthy(claim.get("device")) {
+                claim.get("device")
+            } else if move_stopped(m) {
+                None
+            } else {
+                m.get("from")
+            };
+            if runs_on == Some(&to) {
+                return Err(refuse(&format!("it already runs on {}", py_str(&to))));
+            }
+            if queued_stops(m).iter().any(|x| x.get("from") == Some(&to)) {
+                return Err(refuse(&format!(
+                    "a stop is still queued on {}; pick another host",
+                    py_str(&to)
+                )));
+            }
+            if let Some((why, _)) = problem(&to)? {
+                return Err(refuse(&why));
+            }
+        } else {
+            if !truthy(Some(claim))
+                && truthy(m.get("from"))
+                && m.get("to") == m.get("from")
+                && m.get("claimed").is_none()
+            {
+                return Ok((None, ("unchanged", m["to"].clone())));
+            }
+            to = claim.get("device").cloned().unwrap_or(Value::Null);
+            if !truthy(Some(&to)) {
+                return Err(refuse("it has no claim, so no host runs it"));
+            }
+            if truthy(job.get("paused")) {
+                return Err(refuse("it is paused"));
+            }
+            if get_str(job, "needs").is_some_and(|n| !strip(n).is_empty()) {
+                return Err(refuse("it is waiting on a person"));
+            }
+            if let Some((why, on_host)) = problem(&to)? {
+                let tail = if on_host {
+                    ", so nothing would restart it; move it to another host instead"
+                } else {
+                    ""
+                };
+                return Err(refuse(&format!("{why}{tail}")));
+            }
+        }
+        let stamp = now();
+        let job = find_job(&mut data, job_id).unwrap();
+        if action == "babysit" {
+            let pr = get_str(job, "pr").unwrap_or("").to_string();
+            job["babysit"] = with(json!({"at": stamp}), record);
+            if job.get("priority").is_none_or(Value::is_null) {
+                job["priority"] = with(json!({"at": stamp}), record);
+            }
+            let map = job.as_object_mut().unwrap();
+            map.shift_remove("needs");
+            map.shift_remove("escalated");
+            job["note"] = Value::from(format!(
+                "babysitting PR #{}",
+                pr.rsplit('/').next().unwrap()
+            ));
+        } else {
+            write_move(job, &to, &stamp, record);
+        }
+        job["updated"] = Value::from(stamp.clone());
+        data["updated"] = Value::from(stamp);
+        Ok((Some(dump_board(&data)), ("queued", to)))
+    })?;
+    let mut out = json!({"id": job_id, "action": action, "result": result});
+    if action != "babysit" {
+        out["to"] = to;
+    }
+    println!("{}", dumps(&out, DEFAULT));
+    Ok(())
+}
+
+pub fn control_cmd(call: &Call) -> Res<()> {
+    home_and(|home| control_cmd_in(home, &call.args))
+}
+
+fn control_cmd_in(home: &Path, args: &[String]) -> Res<()> {
+    let (job_id, action) = (&args[0], args[1].as_str());
+    let mut flags = &args[2..];
+    let mut host = None;
+    if action == "move" {
+        if flags.is_empty() || !HOST_NAME.is_full(&flags[0]) {
+            return Err(fail(CONTROL_USAGE, 2));
+        }
+        host = Some(flags[0].as_str());
+        flags = &flags[1..];
+    }
+    let pairs = flags_of(flags, 0);
+    let want: BTreeSet<&str> = if action == "close" {
+        BTreeSet::from(["--reason-file", "--chat-file"])
+    } else {
+        BTreeSet::from(["--chat-file"])
+    };
+    if !JOB_ID.is_full(job_id)
+        || job_id.contains("..")
+        || !CONTROL_ACTIONS.contains(&action)
+        || flags.len() != 2 * want.len()
+        || flag_names(&pairs) != want
+    {
+        return Err(fail(CONTROL_USAGE, 2));
+    }
+    let quote = chat_quote(
+        Some(&read_chat_file(
+            flag(&pairs, "--chat-file").unwrap(),
+            "--chat-file",
+        )?),
+        "--chat-file",
+    )?;
+    let mut reason = String::new();
+    if action == "close" {
+        let text = read_chat_file(flag(&pairs, "--reason-file").unwrap(), "--reason-file")?;
+        reason = strip(&text).to_string();
+        if !CLOSE_REASON.is_full(&reason) {
+            return Err(fail(
+                "--reason-file must be one line of 1 to 200 characters; nothing was changed",
+                2,
+            ));
+        }
+    }
+    let device = holder(home)?.0;
+    let record = json!({"via": "chat", "quote": quote, "by": device});
+    if matches!(action, "babysit" | "move" | "rerun") {
+        return control_launch(home, job_id, action, host, &record);
+    }
+    let (result, stored) = cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(job) = find_job(&mut data, job_id) else {
+            return Err(fail(
+                format!("no job {job_id} on the board. Nothing was written."),
+                4,
+            ));
+        };
+        let (stage, lead) = (job.get("stage"), lead_of(job));
+        if matches!(action, "prioritize" | "pause" | "close") {
+            let barred = if action == "prioritize" {
+                !has_str(PRIORITY_STAGES, stage)
+            } else {
+                has_str(TERMINAL, stage) || action == "close" && get_str(job, "stage") == Some(IDEA)
+            };
+            let why = if !truthy(job.get("project")) {
+                Some("it has no project".to_string())
+            } else if barred {
+                Some(format!("it is at {}", py_opt(stage)))
+            } else {
+                lead.map(|lead| format!("it is a rider of {lead}"))
+            };
+            if let Some(why) = why {
+                let word = match action {
+                    "prioritize" => "prioritized",
+                    "pause" => "paused",
+                    _ => "closed",
+                };
+                return Err(fail(
+                    format!("{job_id} cannot be {word}: {why}. Nothing was written."),
+                    2,
+                ));
+            }
+        }
+        let key = match action {
+            "prioritize" | "unprioritize" => "priority",
+            "pause" | "resume" => "paused",
+            _ => "close",
+        };
+        let adding = matches!(action, "prioritize" | "pause" | "close");
+        if truthy(job.get(key)) == adding {
+            return Ok((None, ("unchanged".to_string(), job.get(key).cloned())));
+        }
+        let stamp = now();
+        if action == "close" {
+            job[key] = with(json!({"reason": reason, "at": stamp}), &record);
+        } else if adding {
+            job[key] = with(json!({"at": stamp}), &record);
+        } else {
+            job.as_object_mut().unwrap().shift_remove(key);
+        }
+        job["updated"] = Value::from(stamp.clone());
+        let stored = job.get(key).cloned();
+        data["updated"] = Value::from(stamp);
+        let result = if action == "close" {
+            "queued".to_string()
+        } else {
+            format!("{action}d")
+        };
+        Ok((Some(dump_board(&data)), (result, stored)))
+    })?;
+    let mut out = json!({"id": job_id, "action": action, "result": result});
+    if action == "close" {
+        out["reason"] = stored
+            .as_ref()
+            .and_then(Value::as_object)
+            .map_or(Value::Null, |s| {
+                s.get("reason").cloned().unwrap_or(Value::Null)
+            });
+    }
+    println!("{}", dumps(&out, DEFAULT));
+    Ok(())
 }
 
 pub fn triage_cmd(_call: &Call) -> Res<()> {
