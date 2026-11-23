@@ -385,12 +385,17 @@ Where `factory daemon setup --install` has installed the daemon service, the
 daemon is the host's only pickup scheduler and no pickup timer exists.
 
 - `daemon setup --install` installs the service, then removes the pickup timer.
-  `daemon setup --uninstall` removes the service, then puts the timer back, so the
-  host always has exactly one scheduler.
+  `daemon setup --uninstall` puts the timer back, then removes the service, so the
+  host never goes without a scheduler. When either rewrites the crontab, it first
+  saves it to `<home>/backups/daemon-setup-<stamp>/crontab.txt`.
 - The daemon starts a pass about 2 s after a board or backlog change, when a
-  local Paseo agent titled `factory <id>` stops running (it reads `paseo ls`
-  every 15 s), right after a pass that launched a job, and after 5 minutes with
-  no pass. Passes begin at least 30 s apart. The 5-minute pass covers stale
+  local Paseo agent titled `factory <id>` or `babysit <id>` stops running, right
+  after a pass that launched a job, and after 5 minutes with no pass. Passes
+  begin at least 30 s apart. It reads `paseo ls` at start and after a pass that
+  launched, then every 15 s while a factory agent runs, backing off to every 60 s
+  while nothing changes, and not at all once none runs.
+- While the daemon cannot reach `/events/host`, it still runs a pass at start
+  and then every 5 minutes. The 5-minute pass covers stale
   claims, takeover, `not before` schedules, retro and outcomes stamps, orphan
   scans and the host status heartbeat.
 - `pickup setup` reports check 7 as `scheduler: daemon` and passes it, and
