@@ -27,6 +27,11 @@ Set up automatic factory pickup on this host. You are a coding agent on the mach
 A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.
 ```
 
+When the installed skill is older than this setup, run
+`python3 <installed-skill>/runtime/factory.py catch-up`, or install with
+`tools/install.py` if no skill exists yet. Catch-up backs up the skill, timer and
+home config, installs origin's skill and rewrites the pickup timer through it.
+
 ## Set up and check
 
 Run this on each host. It checks every piece pickup needs, in order, and prints
