@@ -5,7 +5,7 @@ intake/inbox-missing-backlog-counts-as-empty
 intake/inbox-api-failure-exits-5
 intake/inbox-jobs-need-a-string-id-and-default-to-empty-text
 intake/inbox-rows-are-cut-*
-# intake/inbox-a-lone-surrogate-in-a-title-is-dropped stays out: serde_json refuses lone surrogates (README, Known divergences).
+intake/inbox-a-lone-surrogate-in-a-title-is-dropped
 intake/unclaim-*
 intake/deny-notes-*
 intake/idea-files-*
