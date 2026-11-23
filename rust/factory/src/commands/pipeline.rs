@@ -4231,7 +4231,7 @@ fn batch_problem(
     session: &str,
     minutes: u32,
 ) -> Res<Option<String>> {
-    let jobs = data["jobs"].as_array().cloned().unwrap_or_default();
+    let jobs = data["jobs"].as_array().map_or(&[][..], Vec::as_slice);
     if str_of(j, "project") != Some(slug) {
         return Ok(Some("another project".into()));
     }
@@ -4250,7 +4250,7 @@ fn batch_problem(
     if let Some(t) = waiting_until(j) {
         return Ok(Some(format!("not before {t}")));
     }
-    if let Some(id) = waiting_on(j, &jobs) {
+    if let Some(id) = waiting_on(j, jobs) {
         return Ok(Some(format!("waits on {}", py_str(Some(&id)))));
     }
     if truthy(j.get("idea_images")) {

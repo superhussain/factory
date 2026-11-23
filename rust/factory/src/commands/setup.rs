@@ -603,7 +603,7 @@ fn adopt_home(existing: &Path, pointer: &Path) -> Res<()> {
         )
     };
     let home = resolve(existing).map_err(|_| atomic())?;
-    validate_home(&home)?;
+    validate_home(&home, true)?;
     let folder = pointer.parent().unwrap_or(Path::new("/"));
     let default = folder.join("factory");
     if fs::symlink_metadata(default.join("config.md")).is_ok() && !same_path(&default, &home) {
@@ -692,7 +692,7 @@ fn doctor(home: &Path) -> Value {
     };
     check("location", true, "Location resolved.");
     let mut origin = String::new();
-    let mut config_error = match validate_home(&home) {
+    let mut config_error = match validate_home(&home, true) {
         Ok(()) => String::new(),
         Err(e) => strip(e.stderr.get("factory.py: ".len()..).unwrap_or("")).to_string(),
     };

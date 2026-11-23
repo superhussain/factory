@@ -4712,6 +4712,7 @@ class PickupSetupTest(PickupFixture):
         self.system_python = (1, "")
         self.crontab = ""
         self.crontab_error = None
+        self.bootstrap_error = None
         self.loaded = False
         self.runs = []
 
@@ -4727,6 +4728,8 @@ class PickupSetupTest(PickupFixture):
             self.crontab = stdin
         if argv[:2] == ["launchctl", "print"]:
             return (0 if self.loaded else 113), ""
+        if argv[:2] == ["launchctl", "bootstrap"] and self.bootstrap_error:
+            return 5, self.bootstrap_error
         return 0, ""
 
     def setup(self, *args):
@@ -4956,7 +4959,9 @@ class PickupSetupTest(PickupFixture):
         doc = plistlib.loads(plist.read_bytes())
         self.assertEqual(doc["StartInterval"], 300)
         self.assertEqual(doc["ProgramArguments"][-3:], ["--home", str(self.home), "pickup"])
-        self.assertIn(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)], self.runs)
+        enable = ["launchctl", "enable", f"gui/{os.getuid()}/factory.pickup"]
+        bootstrap = ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)]
+        self.assertLess(self.runs.index(enable), self.runs.index(bootstrap))
         self.loaded = True
         stamp = plist.stat().st_mtime_ns
         self.runs.clear()
@@ -4964,6 +4969,15 @@ class PickupSetupTest(PickupFixture):
         self.assertTrue(out.startswith(f"timer already installed: {plist}\n"))
         self.assertEqual(plist.stat().st_mtime_ns, stamp)
         self.assertFalse(any(argv[:2] == ["launchctl", "bootstrap"] for argv in self.runs))
+
+    @unittest.skipIf(sys.platform == "win32", "launchd needs os.getuid")
+    def test_install_launchd_bootstrap_failure_fails(self):
+        patch.object(factory, "PICKUP_SCHEDULER", "launchd").start()
+        self.bootstrap_error = "Bootstrap failed: 5: Input/output error\n"
+        code, out, err = self.setup("--install")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("could not install the launchd timer factory.pickup: Bootstrap failed: 5: Input/output error\n",
+                      err)
 
     def test_install_schtasks(self):
         patch.object(factory, "PICKUP_SCHEDULER", "schtasks").start()

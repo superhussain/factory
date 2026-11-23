@@ -43,6 +43,11 @@ def rust_binary(checkout):
         return None
     cargo = shutil.which("cargo")
     if cargo is None:
+        # rustup installs into ~/.cargo/bin, which launchd and non-login shells leave off PATH.
+        home_cargo = Path.home() / ".cargo" / "bin" / ("cargo.exe" if os.name == "nt" else "cargo")
+        if home_cargo.is_file() and os.access(home_cargo, os.X_OK):
+            cargo = str(home_cargo)
+    if cargo is None:
         print("install: cargo not found, keeping the Python runtime", file=sys.stderr)
         return None
     # A per-user target folder keeps dependencies compiled across catch-up's fresh source worktrees.
