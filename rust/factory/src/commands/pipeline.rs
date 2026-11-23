@@ -5403,6 +5403,9 @@ mod tests {
         #[cfg(unix)]
         #[test]
         fn pick_runtime() {
+            let _lock = crate::shared::TEST_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             let home = home("routes-runtime", ROUTES);
             let paseo = home.join("paseo");
             fs::create_dir(&paseo).unwrap();

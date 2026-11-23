@@ -17,3 +17,8 @@ pub mod redact;
 pub mod time;
 pub mod unicode;
 mod unicode_printable;
+
+/// Held by every test that sets PASEO_HOME, PASEO_AGENT_ID, FACTORY_HOME or FACTORY_SESSION, since tests share
+/// one process environment.
+#[cfg(test)]
+pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

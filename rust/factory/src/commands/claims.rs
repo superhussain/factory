@@ -1702,14 +1702,12 @@ mod tests {
     }
     use crate::shared::fs::temp_dir;
     use crate::shared::http::tests::{home_for, serve};
-    use std::sync::Mutex;
-
-    static ENV: Mutex<()> = Mutex::new(());
+    use crate::shared::TEST_ENV_LOCK;
 
     /// Run f with these environment variables set, restoring them after. Tests that read the Paseo or session
     /// variables hold the same lock.
     fn with_env<T>(vars: &[(&str, &str)], f: impl FnOnce() -> T) -> T {
-        let _lock = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let saved: Vec<_> = vars
             .iter()
             .map(|(k, _)| (*k, std::env::var_os(k)))

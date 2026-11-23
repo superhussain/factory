@@ -7942,7 +7942,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Mutex, MutexGuard};
 
-    pub(super) static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use crate::shared::TEST_ENV_LOCK as ENV_LOCK;
     const DEVICE: &str = "host-a";
     const IDEA_TEXT: &str = "$(touch pwned)";
     const PLACEHOLDERS: [&str; 10] = [
