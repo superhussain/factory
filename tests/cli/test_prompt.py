@@ -324,7 +324,7 @@ class PromptTest(IsolatedTestCase):
         skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
         self.assertNotIn("end that stage's", skill)
         self.assertNotIn("Prompts carry only", skill)
-        self.assertIn('`python3 "$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] '
+        self.assertIn('`"$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] '
                       '--out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`', skill)
         self.assertIn("`Your full prompt is in <printed path>. Read it first and follow it exactly.`", skill)
         self.assertIn("Roles are `spec`, `build`, `review-security`, `review-ux`, `review-ui`, `review-code` and "

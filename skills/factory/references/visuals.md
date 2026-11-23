@@ -84,7 +84,7 @@ What calls what. Boxes step 225 apart on x. A `cut` arrow marks the broken hop.
 <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto"><path class="tip" d="M0,0L8,4L0,8z"/></marker></defs>
 <rect class="box" x="10" y="35" width="170" height="50" rx="8"/>
 <text x="95" y="58" text-anchor="middle">device push</text>
-<text class="sub mono" x="95" y="75" text-anchor="middle">factory.py JOB_REL</text>
+<text class="sub mono" x="95" y="75" text-anchor="middle">factory JOB_REL</text>
 <line class="line" x1="180" y1="60" x2="233" y2="60" marker-end="url(#ah)"/>
 <rect class="ok" x="235" y="35" width="170" height="50" rx="8"/>
 <text x="320" y="58" text-anchor="middle">Worker</text>

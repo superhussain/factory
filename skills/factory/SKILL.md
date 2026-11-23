@@ -1,7 +1,7 @@
 ---
 name: factory
 description: Use for /factory commands, factory dashboard tasks, and continuing or handing a factory job between Claude, OpenCode, and other coding agents. Captures ideas before project registration, then runs spec, build, four reviews, approval, PR and merge. Registers projects with init; handoff and resume preserve an existing job.
-compatibility: Requires Python 3.8+, git and gh; network access to the configured factory HTTPS API and project Git/gh remotes.
+compatibility: Requires git and gh, plus a Rust toolchain (rustup) to build the binary, and Python 3.8+ for tools/install.py and the other tools/*.py scripts; network access to the configured factory HTTPS API and project Git/gh remotes.
 ---
 
 # Software factory
@@ -96,11 +96,11 @@ Read [feature](references/commands/feature.md) before step 1 of any loop run. It
 
 Setup and diagnostics (home precedence, `adopt-home`, `doctor`) are in [init](references/commands/init.md).
 
-Resolve the paths once per command, from the installed skill (`py -3` instead of
-`python3` on Windows):
+Resolve the paths once per command, from the installed skill (`factory.exe` on
+Windows):
 
 ```bash
-python3 <this skill's dir>/runtime/factory.py where [<slug>]
+<this skill's dir>/runtime/factory where [<slug>]
 ```
 
 Pass `<slug>` when the command names a project (`/factory <slug>: <feature>`).
@@ -111,7 +111,7 @@ variables for the rest of the command:
 | Variable | Key | Value |
 | --- | --- | --- |
 | `$FACTORY` | `factory` | resolved device home, selected explicitly or through location configuration |
-| `$RUNTIME` | `runtime` | the skill's `runtime/factory.py` |
+| `$RUNTIME` | `runtime` | the skill's `runtime/factory` |
 | `$PROJECT` | `project_file` | `$FACTORY/projects/<slug>.md`, the cached project file |
 | `$REPO_PATH` | `repo_path` | this device's checkout, from `$FACTORY/paths.md` |
 | `$REPO` | `repo` | the project file's `repo` |
@@ -126,22 +126,22 @@ A job's worktree is `WT="$WORKTREES/<id>"`, on branch `factory/<id>` cut from `$
 | Path | What |
 | --- | --- |
 | `$PROJECT` | project context for every agent |
-| `$JOBS/<id>/` | `spec.md`, `build.md`, `pre-review.md` (written by `factory.py pre-review`), `round-N/review-{security,ux,ui,code}.md`, `round-N/grounding.md` (written by `factory.py grounding`), `review-floor.json` (written by `factory.py review-floor` and `review-plan`), `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, `<file>-evidence.md`, `scratchpad.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
+| `$JOBS/<id>/` | `spec.md`, `build.md`, `pre-review.md` (written by `factory pre-review`), `round-N/review-{security,ux,ui,code}.md`, `round-N/grounding.md` (written by `factory grounding`), `review-floor.json` (written by `factory review-floor` and `review-plan`), `decision.md`, `needs.md` (agent-written ask), `answers.md` (dashboard-written reply), optional `rework-N.md`, `handoff.md`, `<file>-evidence.md`, `scratchpad.md`, and images and an optional `<page>.walkthrough.html` next to any of them (`walkthrough.html` for the spec) |
 | `$WT` | the builder's worktree |
 | `$FACTORY/config.md`, `$FACTORY/.env` | device settings and the private Access service token |
 
-A command that needs Cloudflare credentials runs as `python3 <skill>/runtime/factory.py with-cloudflare -- <command>`. Never read `$FACTORY/.env` in a command or print its values.
+A command that needs Cloudflare credentials runs as `<skill>/runtime/factory with-cloudflare -- <command>`. Never read `$FACTORY/.env` in a command or print its values.
 
 R2 holds the board (one for every project, each job carrying `project`), the
-backlog, the project files, and a copy of every job folder's markdown and images. `factory.py`
+backlog, the project files, and a copy of every job folder's markdown and images. `factory`
 reads and writes them, and job folders go up by hand:
 
-- After writing any job file, run `python3 "$RUNTIME" push "$SLUG/<id>"`. It uploads
+- After writing any job file, run `"$RUNTIME" push "$SLUG/<id>"`. It uploads
   the job's changed markdown, images (PNG, JPEG, GIF, WebP, up to 5 MiB each) and
   walkthroughs named as in the table (up to 1 MiB each), and refuses to overwrite a
   file another device changed. `pull`, `sync`, and `hold` restore them. View a
   walkthrough through the dashboard, never from disk, which skips the CSP sandbox.
-- After filling a new project file, run `python3 "$RUNTIME" push "$SLUG"`.
+- After filling a new project file, run `"$RUNTIME" push "$SLUG"`.
 - Read [project settings](references/project-settings.md) before you pull, push or edit a project file.
 - `pull "$SLUG/<id>"` downloads what changed in R2 and keeps local edits, and
   `sync "$SLUG"` does that for every job of the project that is not `merged` or
@@ -160,7 +160,7 @@ reads and writes them, and job folders go up by hand:
 - Never put code in job files, because the dashboard serves them.
 - Job ids are `NNN-slug`, unique across the whole factory. The slug is a few
   kebab-case words from the feature. Claim one with
-  `python3 "$RUNTIME" claim "$FACTORY" <feature-slug> "$SLUG"`. It reserves the id
+  `"$RUNTIME" claim "$FACTORY" <feature-slug> "$SLUG"`. It reserves the id
   on the board, creates `$JOBS/<id>`, and prints the id.
   The reservation is a stub with no stage. `board` refuses to create or leave
   any other row without one.
@@ -189,7 +189,7 @@ Setup and diagnostics are exceptions; [init](references/commands/init.md) says h
    `link: <url>`. After the line is decided, the link opens the job it became.
 
 For a command that acts on an existing job (`rework`, `approve`, resuming a round,
-shipping), steps 1 and 2 are: `python3 <this skill's dir>/runtime/factory.py job <id>`
+shipping), steps 1 and 2 are: `<this skill's dir>/runtime/factory job <id>`
 for its `project`, then `where <project>`, `hold <project>/<id>`, and
 `worktree <project>/<id>`. `hold` claims the job for this session and pulls its
 files. `worktree` creates `$WT` from `origin/factory/<id>`, or fast-forwards it, and
@@ -238,7 +238,7 @@ says to.
 
 ## Board
 
-Several sessions can run at once, so every session edits the board through `factory.py`,
+Several sessions can run at once, so every session edits the board through `factory`,
 which retries on a conflicting write, creates a missing board, and stamps both
 `updated` fields. Pipe a JSON merge patch for one job on stdin. It prints the job,
 and a new id adds it. A new id must be digits, a dash and a lowercase slug, or the
@@ -248,11 +248,11 @@ verdict lands.
 
 ```bash
 echo '{"stage":"review","round":1,"rounds":[{"security":"pending","ux":"pending","ui":"pending","code":"pending"}]}' \
-  | python3 "$RUNTIME" board "$FACTORY" 003-rate-limiting --session <tag>
+  | "$RUNTIME" board "$FACTORY" 003-rate-limiting --session <tag>
 ```
 
 `null` clears a key (`{"port": null}`), and `rounds` is always sent whole. To record one
-reviewer's verdict, run `python3 "$RUNTIME" verdict "$SLUG/<id>" <N> <reviewer> <verdict>`
+reviewer's verdict, run `"$RUNTIME" verdict "$SLUG/<id>" <N> <reviewer> <verdict>`
 instead of resending `rounds`. A `board` patch cannot rewrite a recorded round: it may only keep the
 stored rounds and append all-pending ones. The job's first patch also sets `"project": "<slug>"`.
 
@@ -262,10 +262,10 @@ Every job field, with an example row and who writes it, is in [board fields](ref
 
 ## Rules
 
-- Before each role dispatch, run `python3 "$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`. For via paseo, record after the worker exists, with `--paseo-agent <agent-id>`.
+- Before each role dispatch, run `"$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`. For via paseo, record after the worker exists, with `--paseo-agent <agent-id>`.
   After hold, record the orchestrator once when no orchestrator row carries this session.
 - Agents get context from files, not the conversation. Build every agent prompt with
-  `python3 "$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] --out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`
+  `"$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] --out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`
   (`<role>-round-<N>.txt` when you pass `--round`), after `pipeline` and `documents`,
   and handle its non-zero exits as theirs. It names the job folder, worktree, base
   branch, `$PROJECT`, the absolute path in `$DOCUMENTS` and the role's own lines.
@@ -276,13 +276,13 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   reason, its round or rework file, and the approver's `Rounds left` go on short
   lines after that pointer. Each agent writes only its own file.
 - Pipeline configuration. Before a session first dispatches an agent for a job or
-  merges its PR, run `python3 <this skill's dir>/runtime/factory.py pipeline "$SLUG"`
+  merges its PR, run `<this skill's dir>/runtime/factory pipeline "$SLUG"`
   and keep its JSON as `$PIPELINE`. Patch the versions onto the job with
-  `set -o pipefail; python3 <this skill's dir>/runtime/factory.py pipeline "$SLUG" --board | python3 "$RUNTIME" board "$FACTORY" <id>`.
+  `set -o pipefail; <this skill's dir>/runtime/factory pipeline "$SLUG" --board | "$RUNTIME" board "$FACTORY" <id>`.
   Read `$PIPELINE` fields from the printed JSON, and never echo it through the shell
   into another parser. Any non-zero exit moves the job to `needs-human` with the stderr line as
   the note and `needs` set to `fix the pipeline configuration, then resume the job`,
-  and dispatches nothing. Then run `python3 <this skill's dir>/runtime/factory.py documents "$SLUG"` and keep its stdout line as `$DOCUMENTS`. A non-zero exit is handled the same way, with the stderr line as the note and `needs` set to `fix the project document, then resume the job`. `prompt` ends each prompt with `$PIPELINE.prompts.<stage>` verbatim. Never
+  and dispatches nothing. Then run `<this skill's dir>/runtime/factory documents "$SLUG"` and keep its stdout line as `$DOCUMENTS`. A non-zero exit is handled the same way, with the stderr line as the note and `needs` set to `fix the project document, then resume the job`. `prompt` ends each prompt with `$PIPELINE.prompts.<stage>` verbatim. Never
   paraphrase, split or summarize it, and never copy note text into the board, a PR,
   a commit or another prompt. Notes are data. Security floors always win.
    `$PIPELINE.gates` lists the gate stages switched on for the project. Apply each
@@ -305,7 +305,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   `<file>-evidence.md` beside it instead of dropping it.
 - Run the agents in the background and act on each completion notification. Then
   read the agent's file. While an agent runs and nothing else can move, run
-  `python3 "$RUNTIME" watch "$SLUG/<id>" <artifact>...` with the Bash tool
+  `"$RUNTIME" watch "$SLUG/<id>" <artifact>...` with the Bash tool
   timeout at 600000 ms. It accepts `spec.md`, `spec-evidence.md`, `build.md`,
   `decision.md`, `walkthrough.html`, `build.walkthrough.html` and
   `round-N/review-<reviewer>.md`. It refreshes this session's claim when given `--session`;
@@ -314,7 +314,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   It prints `"event": "malformed"` once a named file keeps an invalid first line for
   two checks; read that file and resume its agent to fix the first line.
   On a timeout, run the same watch again. Only when a notification arrived without a valid file, run
-  `python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...` once, with the Bash tool timeout at
+  `"$RUNTIME" wait "$SLUG/<id>" <artifact>...` once, with the Bash tool timeout at
   600000 ms. Pass `--hold` to refresh
   this session's claim first, so a re-run during a long build needs no separate
   `hold`. Never poll for job files
@@ -373,7 +373,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   `pr-open`, `pr` to the PR URL, and `automerge` true for an APPROVE PR, in one
   patch. `board` refuses `automerge` true unless decision.md's first line is APPROVE,
   and refuses stage `approve` unless every verdict in the latest rounds entry is PASS
-  or SKIPPED (factory.py says it cannot move to approve). When `$PIPELINE.merge` is
+  or SKIPPED (factory says it cannot move to approve). When `$PIPELINE.merge` is
   `human`, an APPROVE PR ships with `automerge` false and `needs` set to `review and merge PR #<n>: this project's pipeline holds
   every PR for a person`. The orchestrator never merges it. Pickup, or an agent
   seeing it first, moves it to `merged` or `closed` ([sync](references/pickup.md#syncing-pr-state)).
@@ -389,7 +389,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   and ends with `Stacked: #<rider PR number>`.
 - Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
   at `pr-open` until its parent merges and it is retargeted to `$BASE`. Wait for
-  checks with `python3 "$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0: they
+  checks with `"$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0: they
   passed, or the repo has none. On a PR behind `$BASE`, it runs
   `gh pr update-branch` and rechecks the new head. Exit 3: still pending; run it
   again. Exit 1 names failing checks. Exit 4: no open PR. Exit 5: no usable gh
@@ -401,7 +401,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   Exit 8: earned autonomy holds the class after a revert; checks already set
   automerge false and needs. Stop.
   Never poll `gh pr checks` in a loop or with `--watch`.
-  Immediately before every `gh pr merge`, run `factory.py pipeline "$SLUG"` again
+  Immediately before every `gh pr merge`, run `factory pipeline "$SLUG"` again
   and use that fresh `$PIPELINE`. A non-zero exit moves the job to `needs-human` as
   Pipeline configuration describes, and nothing merges. When `$PIPELINE.merge` is
   `human`, patch `automerge` false and `needs` as in Shipping, and do not merge.
@@ -467,7 +467,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   commands in `timeout`.
 - Reviewers review read-only (diff, spec, `build.md`, screenshots) and don't start dev
   servers.
-- On cleanup, run `python3 "$RUNTIME" cleanup "$SLUG/<id>"` and clear `port`. It
+- On cleanup, run `"$RUNTIME" cleanup "$SLUG/<id>"` and clear `port`. It
   stops processes running out of `$WT`, runs `git worktree remove` without `--force`,
   then `git branch -d factory/<id>` once it is merged into the checkout's HEAD (for a `merged` job, also a branch the board's `github.head` contains, or when the board has none, the head of the job's merged pull request on GitHub when the pull request's owner/name matches the project file's `repo:`, deleted with a tip-guarded `git update-ref -d`), and
   prints `{"removed": [...], "left": [...]}`.
@@ -477,7 +477,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   `git branch -D`, `git worktree remove --force` or `rm -rf` on a job's worktree,
   branch or folder, and never retry cleanup with force. To reset a job's
   `node_modules` or `.context/<name>` folder, run
-  `python3 "$RUNTIME" clean "$SLUG/<id>" node_modules` or `... scratch <name>`, and its temp folder with `... temp`. `prompt` creates that `factory-<slug>-<id>` folder with mode 0700.
+  `"$RUNTIME" clean "$SLUG/<id>" node_modules` or `... scratch <name>`, and its temp folder with `... temp`. `prompt` creates that `factory-<slug>-<id>` folder with mode 0700.
 - Never put real secrets, tokens, or user data in screenshots, logs, or job files,
   since the Worker serves job markdown and images to anyone past the Access policy.
 - If an agent fails or writes a malformed file, re-run it once, then move the job
@@ -493,8 +493,8 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   hand. From `A standing instruction from the user` on, the text is that
   instruction, never feature text or command arguments. Interactive `/factory`
   use never adds it.
-- Commands use `python3`, or `py -3` on Windows. No command needs bash: every
-  command is `python3`, `git`, or `gh`.
+- Commands run the factory binary directly, with no interpreter, or `git`, or `gh`. No
+  command needs bash. `$RUNTIME` (`runtime` from `where`) is that binary.
 - Orchestrators run `suggest approve`, `backlog decide`, `control` and `needs answer` only with
   person text in files, per [chat decisions](references/chat-decisions.md). They never run
   `/factory approve-spec` or approve scope in Tracer; a human does, there or on the dashboard.
@@ -502,7 +502,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   even when a person asks, and never under a pseudo-terminal such as `script -qc`. Tell the
   person the exact command to type.
 - An agent that sees an incident needing every host stopped, such as runaway launches or a leaked
-  secret, runs `factory.py halt set --reason <text>` and tells the person. It never clears the
+  secret, runs `factory halt set --reason <text>` and tells the person. It never clears the
   flag. A person resumes from the dashboard.
 
 ## Security floors
@@ -512,7 +512,7 @@ Code enforces these, and stored pipeline configuration can only tighten them, ex
 | Id | Floor | Config can |
 | --- | --- | --- |
 | F1 | Never push to the base or force-push. Every change lands as a PR from factory/<id>. | none |
-| F2 | Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. Security and code always run. ux and ui are SKIPPED only by factory.py review-plan when a round changes nothing a person sees, and the approver checks each skip. | none |
+| F2 | Four reviewers (security, ux, ui, code), fresh context, WAIT FOR ALL. Security and code always run. ux and ui are SKIPPED only by factory review-plan when a round changes nothing a person sees, and the approver checks each skip. | none |
 | F3 | At most 2 review rounds per build cycle by default, then needs-human. | 1 to 5; only the all-projects scope can raise it above 2 |
 | F4 | Approver runs on every job. Only APPROVE merges. ESCALATE holds the PR. | none |
 | F5 | APPROVE PRs merge after green checks. | tighten to human: every PR held for a person |
@@ -529,7 +529,7 @@ file, tools or a verdict rule. Model routing comes from runtime config, never R2
 ## Gate stages
 
 The gate catalog is code: `GATES` in `worker/admission.js` and `PIPELINE_GATES` in
-`factory.py`. Pipeline configuration can switch a catalog gate on for every project
+`factory`. Pipeline configuration can switch a catalog gate on for every project
 or for one project, and a gate switched on globally applies to every project. Config
 cannot add a gate outside the catalog or remove a loop stage: the spec, the build,
 the reviews F2 requires, the approver and the PR always run.
@@ -539,17 +539,17 @@ the reviews F2 requires, the approver and the PR always run.
 | `spec-approval` | A person approves spec.md before the build starts. | between loop steps 2 and 3 |
 
 **spec-approval.** Right before a job would move from `spec` to `build`, run
-`factory.py pipeline "$SLUG"` again and use that fresh `$PIPELINE`. A non-zero exit
+`factory pipeline "$SLUG"` again and use that fresh `$PIPELINE`. A non-zero exit
 moves the job to `needs-human` as Pipeline configuration describes. When
 `spec-approval` is in `$PIPELINE.gates`, run `push "$SLUG/<id>"`, patch
 `{"stage": "needs-human", "note": "gate: spec-approval", "needs": "approve spec.md, then run /factory approve-spec <id> to start the build"}`
 with `<id>` expanded, and dispatch nothing. When the job's board `tracer.scope` is
 `gathering`, patch
 `{"stage": "needs-human", "note": "gate: tracer-scope", "needs": "approve or decline scope for <feature> in Tracer; the factory build waits for that decision"}`
-instead, with `<feature>` set to `tracer.feature`. When Tracer approves, factory.py
+instead, with `<feature>` set to `tracer.feature`. When Tracer approves, factory
 moves the job to `build` with note `spec approved in Tracer`, and pickup launches
-`/factory recover <id>`. When Tracer declines, factory.py moves it to
-`gate: spec-approval`. When Tracer already approved the scope, factory.py turns
+`/factory recover <id>`. When Tracer declines, factory moves it to
+`gate: spec-approval`. When Tracer already approved the scope, factory turns
 either hold patch into `build` with note `spec approved in Tracer`. The printed job
 shows it. Dispatch nothing, and pickup launches `/factory recover <id>`. With the
 gate off, Tracer never holds the build. Only a person passes this gate: by
@@ -565,7 +565,7 @@ Read [build](references/commands/build.md) before you check the queue: after eve
 
 ## Schedules
 
-Schedules are optional prompt templates. Read [schedules](references/schedules.md) before you create, refresh or debug one, or `factory.py pickup`.
+Schedules are optional prompt templates. Read [schedules](references/schedules.md) before you create, refresh or debug one, or `factory pickup`.
 
 ## Commands
 

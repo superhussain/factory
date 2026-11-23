@@ -5,7 +5,7 @@ it is due. With `force`, triggers it even while jobs are in flight.
 
 ## Builds
 
-1. Run `python3 "$RUNTIME" builds "$SLUG"`. It prints the queued job ids, the jobs
+1. Run `"$RUNTIME" builds "$SLUG"`. It prints the queued job ids, the jobs
    still in flight (at spec, build, review, or approve, or an unescalated PR not yet
    merged; ideas don't count), the jobs whose build is running, and `due`. A job not
    updated within `claim_stale_minutes` doesn't count as in flight, so a dead session

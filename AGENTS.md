@@ -14,8 +14,8 @@ python3 tools/verify.py device
 PYTHONPATH=tests/cli python3 -B -m unittest tests.cli.test_pickup.CloseTest
 ```
 
-The device checks and installed Python bundle use only Python's standard library;
-they need no Node, pnpm or mise. The affected targets cache under the ignored
+The device checks use only Python's standard library, and the installed bundle is the factory binary;
+neither needs Node, pnpm or mise. The affected targets cache under the ignored
 `.nx/cache`; job 108 owns the lint and format targets. `local` binds
 `127.0.0.1:8220`/`8221`; `browser` binds owned ephemeral ports, so parallel
 jobs can run it at once. `browser` has no Nx dependency on `local`, so the two run side by side.
@@ -28,6 +28,6 @@ then lints and format-checks only the staged `.js`/`.mjs`/`.cjs`/`.ts` files
 `pnpm run format:check` is a CI gate. Run `mise exec -- pnpm run format` to
 apply oxfmt over `worker tools tests paseo-plugin`; `.oxfmtrc.json` excludes `tests/fixtures/`.
 
-Repair a broken install with `mise exec -- pnpm install --frozen-lockfile`. Never delete `node_modules` recursively; `python3 skills/factory/runtime/factory.py clean <slug>/<job-id> node_modules` resets it in a factory worktree. Host hooks deny `rm -rf`, and `factory.py audit` flags it as `recursive-delete`.
+Repair a broken install with `mise exec -- pnpm install --frozen-lockfile`. Never delete `node_modules` recursively; `<installed-skill>/runtime/factory clean <slug>/<job-id> node_modules` resets it in a factory worktree. Host hooks deny `rm -rf`, and `factory audit` flags it as `recursive-delete`.
 
 To set up a factory for a person, read `.claude/skills/factory-setup/SKILL.md` and follow it.

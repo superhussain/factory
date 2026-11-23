@@ -261,6 +261,18 @@ class CatchUpTest(IsolatedTestCase):
             (folder / "bundle.json").write_text(json.dumps({"commit": self.b, "entry": entry}))
             self.assertEqual(self.runtime.catch_up_entry(folder), fallback, entry)
 
+    def test_runtime_path_names_the_bundle_binary(self):
+        skill = self.root / "named"
+        (skill / "runtime").mkdir(parents=True)
+        with patch.object(self.runtime, "HERE", str(skill / "runtime")):
+            self.assertEqual(self.runtime.runtime_path(), str(skill / "runtime" / "factory.py"))
+            for entry in (["../factory"], ["/usr/bin/factory"], [], None):
+                (skill / "bundle.json").write_text(json.dumps({"commit": self.b, "entry": entry}))
+                self.assertEqual(self.runtime.runtime_path(), str(skill / "runtime" / "factory.py"), entry)
+            (skill / "bundle.json").write_text(json.dumps({"commit": self.b, "entry": ["runtime/factory"]}))
+            self.assertEqual(self.runtime.runtime_path(), str(skill / "runtime" / "factory"))
+            self.assertEqual(self.runtime.bundle_entry(skill), [str(skill / "runtime" / "factory")])
+
     def test_timer_skipped_without_timer(self):
         calls = self.timer_calls()
         code, out, _ = self.call()

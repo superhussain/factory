@@ -5,15 +5,15 @@ round cap or a failed agent. The job must be at `needs-human`. Otherwise report 
 stage and stop. A human has decided, so ship and merge the PR as an APPROVE without
 re-running reviews. Before shipping, write the job's `decision.md` with `APPROVE` on
 line 1 and `A person approved this job with /factory approve.` on line 2. Keep line 2
-exact: factory.py reads it to record `decider` `person`. Then run
+exact: factory reads it to record `decider` `person`. Then run
 `push "$SLUG/<id>"`, since `board` refuses `automerge` true without an APPROVE
 decision.md. If the PR can't be opened, leave the job at `needs-human` with the
 reason. A job held at the spec-approval gate (note `gate: spec-approval`, no
 `build.md`) has nothing to ship. Report that and point to
 `/factory approve-spec <job-id>`.
 
-With `--session <tag>`, `factory.py pickup` started this session for the dashboard's
-Approve as is press. Run `hold` with the tag, then read `resolve` from `factory.py job
+With `--session <tag>`, `factory pickup` started this session for the dashboard's
+Approve as is press. Run `hold` with the tag, then read `resolve` from `factory job
 <id>`. If `resolve.action` is not `approve`, report that and stop. Patch
 `{"resolve": null}` before any other step, then approve the job as above. When there is
 nothing to ship, keep the job at `needs-human` and patch the reason as its `note`.

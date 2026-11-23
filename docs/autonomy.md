@@ -7,7 +7,7 @@ project, run by a schedule a human enables. The kill switch defaults to paused.
 
 ## Commands
 
-All of these run through `factory.py` on a device.
+All of these run through `factory` on a device.
 
 | Command | Who | What it does |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ All of these run through `factory.py` on a device.
 | `autonomy promote <slug> <class>` | human at a terminal | Lifts a hold once the class earns it, then starts a 14-day cooldown. |
 | `autonomy self <slug>` | anyone | Marks a project as part of the factory itself, so the classifier flags its cards. |
 | `suggest admit <file>` | trusted launcher | Checks a `factory.suggestions/1` file and adds one gated idea card per new suggestion. |
-| `suggest approve <job-id> <A\|B\|C>` | human at a terminal, or an orchestrator relaying the person's chat message (`--chat-file`) | Approves one option after you type the job id, or records the chat quote with `--chat-file`, which lets `factory.py pickup` promote the card. |
+| `suggest approve <job-id> <A\|B\|C>` | human at a terminal, or an orchestrator relaying the person's chat message (`--chat-file`) | Approves one option after you type the job id, or records the chat quote with `--chat-file`, which lets `factory pickup` promote the card. |
 | `explore <slug>` | explorer schedule | Snapshots an allowlisted project's base for the explorer and prints the run's paths. Exits 3 when paused or not allowlisted. |
 | `explore <slug> done <run>` | explorer schedule | Removes that run's snapshot and keeps its suggestions file. |
 
@@ -58,7 +58,7 @@ answer. To reject a card, discard it in the idea drawer.
 These harden admission so it can take real explorer output.
 
 - **Fail closed.** A malformed `autonomy` record counts as paused with an empty
-  allowlist, and `factory.py` warns on stderr. Malformed means not an object, a
+  allowlist, and `factory` warns on stderr. Malformed means not an object, a
   `paused` that is not true or false, a `projects` or `self` that is not a list of
   strings, or more than one allowlisted project. `autonomy pause` rewrites it clean.
 - **One project.** The allowlist holds at most one project. `autonomy allow <slug>`
@@ -83,7 +83,7 @@ materializes and enables it; nothing enables it by default.
 
 ```mermaid
 flowchart LR
-  S[schedule session] -->|explore slug| E[factory.py]
+  S[schedule session] -->|explore slug| E[factory]
   E -->|snapshot, JSON| S
   S -->|checkout path| X[factory-explorer: Read Grep Glob]
   X -->|one JSON reply| S
@@ -135,7 +135,7 @@ flowchart LR
     R[repo contents, project files, prompts] --> X[explorer agent]
     X --> F[suggestions JSON file]
   end
-  F -->|schema, caps, allowlist, dedupe, classifier| A[factory.py suggest admit]
+  F -->|schema, caps, allowlist, dedupe, classifier| A[factory suggest admit]
   A -->|CAS PUT, idea + needs, no project| B[(board.json)]
   H[human at terminal] -->|typed confirm| P[suggest approve]
   O[orchestrator] -.->|chat quote| P
@@ -143,7 +143,7 @@ flowchart LR
   B --> L[existing loop: spec, build, 4 reviews, approver, PR]
 ```
 
-- `factory.py`, the Worker and the human are trusted. Everything an explorer reads
+- `factory`, the Worker and the human are trusted. Everything an explorer reads
   or writes is untrusted data.
 - Admission sends only GET and PUT to `/api/board` and GET to `/projects.json`. It
   never runs git, gh or any other process.
@@ -158,7 +158,7 @@ flowchart LR
   holder could forge an approval with a raw PUT. The runtime guards stop automation,
   except an agent that runs `--chat-file`, which only the chat-decisions
   rule holds back. They do not stop abuse. A Worker-side human-only approval gate must land before stage 2.
-- Upgrade every host that runs `factory.py pickup` before the first `autonomy resume`.
+- Upgrade every host that runs `factory pickup` before the first `autonomy resume`.
   Older runtimes skip cards without a `project`, so unapproved cards stay put there too.
 
 ## Retro cards
@@ -214,7 +214,7 @@ project and a human typing at a terminal, or a relayed chat message.
 
 ## Lesson cards
 
-`factory.py backlog lesson <slug>/<job-id> --fact-file <file> --why-file <file>`
+`factory backlog lesson <slug>/<job-id> --fact-file <file> --why-file <file>`
 queues a lesson an agent will not save alone as one held backlog line. The fact is 1
 to 200 characters and the why 1 to 300. Both pass the untrusted-text checks and the
 `.env` value check, or the command exits 2 with nothing queued.
@@ -258,7 +258,7 @@ idea job.
 
 ## Agent lessons
 
-`factory.py lesson <slug>/<job-id> --fact-file <file> [--why-file <file>]` lets the
+`factory lesson <slug>/<job-id> --fact-file <file> [--why-file <file>]` lets the
 orchestrator save what a close or deny taught. Without a why it appends
 `- <fact> (<job-id>, <date>)` to `<slug>/notes.md` through `PUT /api/project-retro`, so it
 counts toward the 2 retro edits per file per day.
@@ -297,7 +297,7 @@ Retro edits never change the Babysit note.
 - **Output.** Each edit prints `edited <scope> stage_notes.<stage> to version N: <summary>`
   or `skipped edits[i]...`, and `findings.md` lists it under Pipeline edits. Edits never
   change the exit code. An older Worker answers 404.
-- **Kill switch.** `factory.py autonomy pause` stops every retro edit, on the device and
+- **Kill switch.** `factory autonomy pause` stops every retro edit, on the device and
   in the Worker.
 - **Restore.** Settings, Pipeline lists each retro version as
   `Version 8 · retro · <time> · <summary> · run <run>`. Click Restore to draft on the
@@ -336,7 +336,7 @@ Only `retro admit`, `trial settle` and the Worker's resume route write `trials`.
 - **Admit.** `retro admit` skips a stage-note edit while its stage has an open trial
   (`skipped edits[i]: a trial is open for <scope> stage_notes.<stage>`) or while the
   project is paused. Both checks run before the daily cap.
-- **Settle.** `factory.py trial settle` runs first in each retro. It stops with
+- **Settle.** `factory trial settle` runs first in each retro. It stops with
   `autonomy is paused; no trial settled` (exit 3) while autonomy is paused. For each open trial:
 
 | Outcome | When | Prints |
@@ -361,7 +361,7 @@ when it writes the board.
   `stage-note trials paused for <slug> after 2 reverts; a person runs trial resume <slug>`,
   and admit skips with
   `skipped edits[i]: stage-note trials are paused after 2 reverts; a person runs trial resume <slug>`.
-  `factory.py trial resume <slug> "<reason>"` clears the pause. A person runs it, or asks
+  `factory trial resume <slug> "<reason>"` clears the pause. A person runs it, or asks
   an agent to run it and pass their instruction as the reason. It posts
   `{"instruction": "<reason>"}` to `POST /api/trials/resume/<slug>`, which sets `resumed`
   and `resumed_by` on that project's unresumed reverts. It prints
@@ -398,7 +398,7 @@ creates a missing file and never touches `global`.
 | `project.md` frontmatter is unchanged | 403 `retro edits never change project frontmatter` |
 | at most 2 retro versions per file in 24 hours | 429 `retro edit cap: 2 per file per day` |
 | the saved text and summary pass the project document checks | 400 `<field>: <reason>` |
-| `replace` sent to `notes.md` passes the note checks, so no link or override phrase | 400 `replace: <reason>` |
+| the touched lines of the saved `notes.md` text, plus the nearest non-blank line on each side, pass the note checks, so `replace` cannot join stored text into a link or override phrase | 400 `replace: <reason>` |
 
 - **Device first.** Before any PUT, `retro admit` repeats the text checks, the
   exactly-once match, the 600-character cap, the file rule, the daily cap and the pause.
@@ -419,7 +419,7 @@ flowchart LR
 
 | Stage | Entry | Exit |
 | --- | --- | --- |
-| 0 | coordinator gate on the spec | merged after 4 reviews and the approver; `autonomy status` on production shows `paused: true`; every host running `factory.py pickup` upgraded |
+| 0 | coordinator gate on the spec | merged after 4 reviews and the approver; `autonomy status` on production shows `paused: true`; every host running `factory pickup` upgraded |
 | 1 | stage 0 exit; a human runs `autonomy allow <one slug>` and `resume` | at least 20 explorer cards decided by a human; zero cards promoted without approve; approve and discard counts by `origin.eligible` recorded |
 | 2 | stage 1 exit; Worker human-only approval gate merged; eligible-card approval rate at least 80 percent over at least 20 eligible cards | two weeks with zero reverted auto-card PRs |
 | 3 | stage 2 exit; a signed-off decision recorded by a terminal-gated command in the board and in the factory project's `decisions.md` | ongoing |
@@ -432,7 +432,7 @@ Each later stage is its own gated job.
 | --- | --- | --- |
 | `depends-on` ref | approving a backlog line, `next`, `batch`, or a board patch | pickup, `ideas` and `batch` skip the idea until the named job is merged, closed or off the board. The card shows "depends on <id>". |
 | `not_before` | a board patch such as `{"not_before": "2026-11-17T09:00:00Z"}`, cleared with `null` | pickup, `ideas` and `stuck` skip the job until that UTC time. It does not count toward `max_inflight`. The card shows "Not before <time>". |
-| `launch_failure` | `factory.py pickup`, after a launch fails for a reason other than a usage limit | pickup sets `not_before` 5 minutes out, doubling with each failure in a row up to 4 hours, and records `count`, `reason` and `at`. The next successful launch removes the record. The fifth failure in a row moves the job to `needs-human` with a `needs` ask instead and keeps the record. `board` refuses the field. |
+| `launch_failure` | `factory pickup`, after a launch fails for a reason other than a usage limit | pickup sets `not_before` 5 minutes out, doubling with each failure in a row up to 4 hours, and records `count`, `reason` and `at`. The next successful launch removes the record. The fifth failure in a row moves the job to `needs-human` with a `needs` ask instead and keeps the record. `board` refuses the field. |
 | `Depends on: <slug>: <feature>` backlog line | context under a backlog line | Approve is refused while that prerequisite line is unchecked. The dashboard shows "Waits on" and Open the prerequisite. Approve turns the line into a `depends-on` ref. |
 | Spec sub-jobs | a spec's Sub-jobs list with `Depends on: <n>` bullets | after merge, each sub-job is queued as a backlog line ending `(sub-job-of <id>)`, with `Depends on:` lines for its prerequisites, so approval follows list order. |
 
@@ -445,17 +445,17 @@ rules clearly allow. It is off unless a person turns it on.
 
 ```mermaid
 flowchart LR
-  A[factory.py backlog add] --> B[(backlog.md)]
+  A[factory backlog add] --> B[(backlog.md)]
   A --> W[POST /api/backlog/triage]
   W --> M[clef-flash on Workers AI]
   W -->|queue| I[(board.json idea)]
   W -->|hold or off| B
-  I --> P[factory.py pickup]
-  P[factory.py pickup] --> S[backlog_triage_pass]
+  I --> P[factory pickup]
+  P[factory pickup] --> S[backlog_triage_pass]
   S --> W
   S --> X[POST /api/backlog/triage/batch]
   S --> V[POST /api/backlog/triage/verdicts]
-  RP[factory.py triage replay --rules-file] --> RT[POST /api/backlog/triage/rate]
+  RP[factory triage replay --rules-file] --> RT[POST /api/backlog/triage/rate]
 ```
 
 Settings, Pipeline holds a `triage` block per scope. A project value replaces the global
@@ -467,7 +467,7 @@ one whole. With neither set, triage is off.
 | `threshold` | an integer from 1 to 100. The dashboard fills in 90 |
 | `rules` | text, may be empty. It passes the same admission rules as stage notes, so no links, secrets or instructions to skip review |
 
-After `factory.py backlog add` appends a line, it posts the line and its `--context`
+After `factory backlog add` appends a line, it posts the line and its `--context`
 text to the Worker. The Worker reads the effective `triage` block and answers:
 
 | Case | Model called | Decision |
@@ -478,7 +478,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 | confidence at or above the threshold | yes | `queue` |
 | confidence below the threshold | yes | `hold` |
 
-- **Queue.** `factory.py` adds an `idea` row with `backlog.by: "triage"` and the verdict,
+- **Queue.** `factory` adds an `idea` row with `backlog.by: "triage"` and the verdict,
   then checks the line off with the new id, as a dashboard Approve does. If the line
   changed meanwhile, it drops the row while the row is still an unclaimed idea. The idea
   carries the line's context under `Context from the backlog:`, cut so the idea stays within
@@ -491,7 +491,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
 - **Hold.** The line waits in the backlog for a person, as before.
   The Worker keeps the latest hold verdict for each line, keyed by `<slug>: <feature>` without trailing whitespace, and the backlog drawer shows it under Held by triage. The board reads the stored verdicts of the lines it lists in one `POST /api/backlog/triage/verdicts` call per 50 lines. It reads again only when the listed lines change, and only for lines with no verdict yet. Opening a line with no verdict reads that line again. A line the Worker would refuse, such as one over 2000 characters, reads as no verdict and leaves the other lines' verdicts intact.
 - **Sweep.** Lines that `backlog rework` appends, or that a person types, get the same
-  verdict from `backlog_triage_pass`. `factory.py pickup` runs it before it claims ideas, never with `--dry-run`, and at most once every 30 minutes per host. The host's `backlog-triage-sweep.json` holds the start of the last sweep, and `factory.py pickup --triage-now` runs a sweep at once. Each sweep takes up to 20 unchecked lines in projects whose effective `triage.enabled` is true and reads their stored verdicts in one `POST /api/backlog/triage/verdicts`. A line another host already held is recorded without a post. The rest go with the indented block under each as context. Plain lines go up to 8 per `POST /api/backlog/triage/batch` call, one project per call, in file order. In a live run, one batch of 8 plain lines sent 1724 input tokens against 2329 for 8 single calls, a saving of 26%. Lines whose context has a `## Question:` line then post alone to `POST /api/backlog/triage`. An older Worker answers the batch route with 404, and a batch it refuses whole gets a 400, so those lines post one at a time. In a batch reply, an entry the model answered unusably (502) warns and waits for the next sweep without ending it, and an entry refused with a 400 is recorded like a single 400. Held lines, and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this host never sends them again. `backlog add` records its held line there too. A 404, 409, 502 or 503 reply, or a network failure, warns and ends the sweep. That line and the rest are retried on the next sweep. Deleting the file
+  verdict from `backlog_triage_pass`. `factory pickup` runs it before it claims ideas, never with `--dry-run`, and at most once every 30 minutes per host. The host's `backlog-triage-sweep.json` holds the start of the last sweep, and `factory pickup --triage-now` runs a sweep at once. Each sweep takes up to 20 unchecked lines in projects whose effective `triage.enabled` is true and reads their stored verdicts in one `POST /api/backlog/triage/verdicts`. A line another host already held is recorded without a post. The rest go with the indented block under each as context. Plain lines go up to 8 per `POST /api/backlog/triage/batch` call, one project per call, in file order. In a live run, one batch of 8 plain lines sent 1724 input tokens against 2329 for 8 single calls, a saving of 26%. Lines whose context has a `## Question:` line then post alone to `POST /api/backlog/triage`. An older Worker answers the batch route with 404, and a batch it refuses whole gets a 400, so those lines post one at a time. In a batch reply, an entry the model answered unusably (502) warns and waits for the next sweep without ending it, and an entry refused with a 400 is recorded like a single 400. Held lines, and lines the Worker refuses with a 400, go into the host's `backlog-triage.json`, so this host never sends them again. `backlog add` records its held line there too. A 404, 409, 502 or 503 reply, or a network failure, warns and ends the sweep. That line and the rest are retried on the next sweep. Deleting the file
   only causes rescoring. A line whose new idea row could not be checked off or removed goes
   there too, so it is never queued twice.
 - **Failure.** A 404 from an older Worker means off. Any other error prints a warning,
@@ -531,12 +531,12 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   same project on `board.json`: not `merged` or `closed`, newest `updated` first, at most 20,
   titles cut to 80 characters. It asks one `dup.<n>` `choice` question per queued item over
   `none` and `j1` to `j20`, and the Worker maps the pick back to an id from its own list. The
-  verdict then carries `duplicate`, which `factory.py` stores as `backlog.triage.duplicate` and
+  verdict then carries `duplicate`, which `factory` stores as `backlog.triage.duplicate` and
   prints as `; possible duplicate of <id>`. While the job is an idea, its card shows
   `possible duplicate of <id>`. The note is advisory: it never holds, closes or changes the
   queue decision, and no candidates, a missing binding, a failed call or a pick of `none` just
   leave it out. Holds and question items get no check.
-- **Replay.** `factory.py triage replay <slug> [--threshold N] [--rules-file PATH]` scores a
+- **Replay.** `factory triage replay <slug> [--threshold N] [--rules-file PATH]` scores a
   threshold against what people decided. Its labels are the project's board and archive `backlog` records whose decider
   is `person` and decision is `approved` or `denied`, latest `at` per line. Each label is paired with
   the line's stored model hold: a confidence at or above the threshold queues. `agreement` is
@@ -578,7 +578,7 @@ threshold is a code constant of 80, a guess that has not been measured.
 ```mermaid
 sequenceDiagram
   participant O as orchestrator
-  participant F as factory.py escalation
+  participant F as factory escalation
   participant W as Worker
   participant M as clef-flash
   O->>F: sample/042-csv-export 1
@@ -589,7 +589,7 @@ sequenceDiagram
   F-->>O: one JSON line
 ```
 
-- `factory.py escalation <slug>/<job-id> <round>` reads `round-<N>/review-*.md` and sends
+- `factory escalation <slug>/<job-id> <round>` reads `round-<N>/review-*.md` and sends
   only the reviews whose first line is `VERDICT: CHANGES`, each cut to 8000 characters.
 - The Worker wraps each review in a `<review-findings reviewer="..." trust="data">`
   envelope and asks one `escalate` question of type `noul`. Confidence 80 or more is
@@ -624,11 +624,11 @@ Reply 200: `{"decision": "escalate"|"continue", "confidence": int, "threshold": 
 
 A failed check never blocks a job. It only skips the extra stop. The round cap, the
 approver and the merge rules still apply. The Worker must deploy before hosts upgrade, or
-`factory.py` sees 404 and continues.
+`factory` sees 404 and continues.
 
 ## Repeated findings
 
-Loop step 5 runs `factory.py repeats <slug>/<job-id> <round>` below the round cap and before the escalation check, and loop step 4 reads `repeats` from `factory.py pre-review`. `factory.py repeats` saves each repeat in the board job's `repeated`.
+Loop step 5 runs `factory repeats <slug>/<job-id> <round>` below the round cap and before the escalation check, and loop step 4 reads `repeats` from `factory pre-review`. `factory repeats` saves each repeat in the board job's `repeated`.
 
 | Case | Result |
 | --- | --- |
@@ -653,7 +653,7 @@ Loop step 5 runs `factory.py repeats <slug>/<job-id> <round>` below the round ca
 
 ## Diff budget
 
-`factory.py pre-review` compares the size the spec's Tasks `- Files:` lines imply with the branch's diff against `origin/<base>`. It writes a `Budget:` line after `Head:` and a `budget` object in its JSON line. When the branch is over, `pre-review.md` gets a `## Diff budget` section the code reviewer must judge. The budget only warns: it never changes the exit code or the stage.
+`factory pre-review` compares the size the spec's Tasks `- Files:` lines imply with the branch's diff against `origin/<base>`. It writes a `Budget:` line after `Head:` and a `budget` object in its JSON line. When the branch is over, `pre-review.md` gets a `## Diff budget` section the code reviewer must judge. The budget only warns: it never changes the exit code or the stage.
 
 | Measure | Rule |
 | --- | --- |
@@ -687,7 +687,7 @@ Loop step 5 runs `factory.py repeats <slug>/<job-id> <round>` below the round ca
 
 ## Earned autonomy report
 
-`factory.py autonomy report [<slug>]` reads the board and prints, for each project and job class, the outcomes `outcomes record` stored on jobs merged in the last 90 days. It recommends `automerge`, `hold` or `collect` and writes nothing. A person changes Merge under Settings, Pipeline.
+`factory autonomy report [<slug>]` reads the board and prints, for each project and job class, the outcomes `outcomes record` stored on jobs merged in the last 90 days. It recommends `automerge`, `hold` or `collect` and writes nothing. A person changes Merge under Settings, Pipeline.
 
 The class comes from the job's first review round:
 
@@ -767,7 +767,7 @@ The hold on synthetic job `1031-add-w`, PR #631, after `1019-add-z` was reverted
 | Field | Value |
 | --- | --- |
 | `automerge` | `false` |
-| `needs` | `review and merge PR #631: earned autonomy holds alpha visible PRs after reverted 1019-add-z; a person lifts it with factory.py autonomy restore alpha visible` |
+| `needs` | `review and merge PR #631: earned autonomy holds alpha visible PRs after reverted 1019-add-z; a person lifts it with factory autonomy restore alpha visible` |
 | `note` | `earned autonomy hold: a person reviews and merges` |
 | pickup prints | `held 1031-add-w alpha PR #631 for a person` |
 

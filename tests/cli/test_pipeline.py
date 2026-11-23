@@ -167,17 +167,17 @@ class PipelineTest(IsolatedTestCase):
     def test_skill_rechecks_the_pipeline_before_every_merge(self):
         text = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
         merge = text.split("- Merging an APPROVE PR:")[1].split(" - Jobs at `pr-open`")[0]
-        self.assertIn('Immediately before every `gh pr merge`, run `factory.py pipeline "$SLUG"` again', merge)
+        self.assertIn('Immediately before every `gh pr merge`, run `factory pipeline "$SLUG"` again', merge)
         self.assertIn("When `$PIPELINE.merge` is `human`, patch `automerge` false", merge)
-        self.assertLess(merge.index("factory.py pipeline"), merge.index('`gh pr merge <n>'))
+        self.assertLess(merge.index("factory pipeline"), merge.index('`gh pr merge <n>'))
         recover = " ".join((SKILL / "references/commands/recover.md").read_text(encoding="utf-8").split())
         row = recover.split("| pr-open, `automerge` true |")[1].split(" |")[0]
-        self.assertIn('re-running `factory.py pipeline "$SLUG"` right before `gh pr merge`', row)
+        self.assertIn('re-running `factory pipeline "$SLUG"` right before `gh pr merge`', row)
         self.assertIn("`merge` `human` holds the PR for a person with `automerge` false", row)
 
     def test_skill_pipes_the_board_patch(self):
         text = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn("Patch the versions onto the job with `set -o pipefail; python3 <this skill's dir>/runtime/factory.py "
-                      'pipeline "$SLUG" --board | python3 "$RUNTIME" board "$FACTORY" <id>`.', text)
+        self.assertIn("Patch the versions onto the job with `set -o pipefail; <this skill's dir>/runtime/factory "
+                      'pipeline "$SLUG" --board | "$RUNTIME" board "$FACTORY" <id>`.', text)
         self.assertIn("Read `$PIPELINE` fields from the printed JSON, and never echo it through the shell "
                       "into another parser.", text)

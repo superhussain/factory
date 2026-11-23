@@ -21,12 +21,12 @@ feature.
    Respawn the spec writer with a fresh `prompt` file.
    Apply the spec-approval gate as Gate stages describes.
    When `spec.md` has a `## Stacked PR` section, run
-   `python3 "$RUNTIME" stack "$SLUG/<id>" <rider-id> --session <tag>` with the id on its
+   `"$RUNTIME" stack "$SLUG/<id>" <rider-id> --session <tag>` with the id on its
    line, then `git -C "$REPO_PATH" worktree add "$WORKTREES/<rider-id>" -b factory/<rider-id> factory/<id>`.
    Every builder dispatch for this job, fix rounds and recovery included, also gets that
    rider worktree. Exit 2, 4 or 6 writes nothing: report the line, create no rider
    worktree, and tell the builder to build every task on `factory/<id>`.
-   Run `python3 "$RUNTIME" review-floor "$SLUG/<id>"`. A non-zero exit puts its stderr
+   Run `"$RUNTIME" review-floor "$SLUG/<id>"`. A non-zero exit puts its stderr
    line in the board `note`, and the build goes ahead.
    Set stage `build`, then
    spawn `factory-builder` as `builder-<id>` at the
@@ -48,8 +48,8 @@ feature.
    `push "$SLUG/<id>"` and patch
    `{"stage": "needs-human", "note": "env block: <kind>: <what is missing> (builder blocked twice)", "needs": "provide the missing <kind>: <what is missing>, then run /factory rework <id> <note>"}`
    from the latest line.
-4. Pre-review: run `python3 "$RUNTIME" hold "$SLUG/<id>"`, then
-   `python3 "$RUNTIME" pre-review "$SLUG/<id>"` as a background command, and act on its
+4. Pre-review: run `"$RUNTIME" hold "$SLUG/<id>"`, then
+   `"$RUNTIME" pre-review "$SLUG/<id>"` as a background command, and act on its
    completion notification. Exit 1 means a check failed: patch
    `{"stage": "build", "note": "pre-review: <failed check names> failed"}`, resume the
    builder with `<job folder>/pre-review.md` on a short line, and create no round
@@ -65,8 +65,8 @@ feature.
    reads it from `pre-review.md`.
    Review round N: create `round-N/`, set stage `review`, `round` N, and append an
    all-`pending` entry to `rounds`. Before spawning anyone, run
-   `python3 "$RUNTIME" review-plan "$SLUG/<id>" <N>` and run
-   `python3 "$RUNTIME" verdict "$SLUG/<id>" <N> <r> SKIPPED` for each reviewer `<r>` in its
+   `"$RUNTIME" review-plan "$SLUG/<id>" <N>` and run
+   `"$RUNTIME" verdict "$SLUG/<id>" <N> <r> SKIPPED` for each reviewer `<r>` in its
    `skipped` list. Its `protected` list stays in `round-N/review-plan.json` for the
    approver. Spawn only the reviewers in its
    `run` list, from `factory-review-security`, `factory-review-ux`,
@@ -81,17 +81,17 @@ feature.
    With a stacked rider, every reviewer and the approver get `$WORKTREES/<rider-id>`
    and `factory/<rider-id>` in place of the job's worktree and branch, since that
    branch holds the whole stack.
-   Then run `python3 "$RUNTIME" round-wait "$SLUG/<id>" <N>` with the Bash tool timeout
+   Then run `"$RUNTIME" round-wait "$SLUG/<id>" <N>` with the Bash tool timeout
    at 600000 ms. It records each verdict on the board. On `timeout`, run it again. On
    `malformed`, read the review file whose `files` entry is not a valid `VERDICT:`
    line, resume its agent, then run `round-wait` again.
-5. Once `round-wait` prints `round`, run `python3 "$RUNTIME" grounding "$SLUG/<id>" <N>`.
+5. Once `round-wait` prints `round`, run `"$RUNTIME" grounding "$SLUG/<id>" <N>`.
    It flags citations and never changes a verdict. A non-zero exit puts its stderr line in
    the board `note`, and the loop goes on. When it prints `"result": "unverified"`, the
    builder dispatch below and the approver in step 6 get `round-<N>/grounding.md` on a
    short line. Then any CHANGES first checks the round cap. At the cap, the job
    goes to `needs-human`. Below the cap, first run
-   `python3 "$RUNTIME" repeats "$SLUG/<id>" <N>`. When its decision is `repeat`, run
+   `"$RUNTIME" repeats "$SLUG/<id>" <N>`. When its decision is `repeat`, run
    `push "$SLUG/<id>"`, patch
    `{"stage": "needs-human", "note": "repeat: round <first> and round <N> both flag <signature> (<reviewer>)", "needs": "decide on the repeated finding at $DASHBOARD#<id>/round-<first>/review-<r> and $DASHBOARD#<id>/round-<N>/review-<r>, then run /factory rework <id> <note> or /factory approve <id>"}`
    from its first `repeats` entry, with ` and <k> more` after the reviewer when it lists
@@ -101,7 +101,7 @@ feature.
    from its first `churn` entry, with ` and <k> more files` after `<c>` when it lists
    k more, and dispatch nothing. A non-zero exit puts its stderr line in the board
    `note` and the step goes on. Otherwise, run
-   `python3 "$RUNTIME" escalation "$SLUG/<id>" <N>`. When its decision is `escalate`,
+   `"$RUNTIME" escalation "$SLUG/<id>" <N>`. When its decision is `escalate`,
    run `push "$SLUG/<id>"`, patch
    `{"stage": "needs-human", "note": "review panel: round <N> findings need a person (clef-flash <confidence>%)", "needs": "decide on the round-<N> findings at $DASHBOARD#<id>/round-<N>/review-<r>, then run /factory rework <id> <note> or /factory approve <id>"}`,
    with `<r>` the first CHANGES reviewer in the order security, ux, ui, code, and
@@ -121,7 +121,7 @@ feature.
    APPROVE ships the PR and merges it as Rules describes. ESCALATE ships a held PR
    at `pr-open` with `escalated` true and the board note "escalated:" plus the
    decision's reason. The PR URL goes in `pr`, not the note. CHANGES is a normal fix
-   round: run `python3 "$RUNTIME" review-floor "$SLUG/<id>"` before sending the
+   round: run `"$RUNTIME" review-floor "$SLUG/<id>"` before sending the
    builder `decision.md`. Send `decision.md` as in step 5 and run the next review
    round, still under the round cap. One approver CHANGES per build cycle. A second
    one moves the job to `needs-human`.
@@ -129,7 +129,7 @@ feature.
    builds section says its diff needs one: patch `{"build": {"state": "queued"}}`.
    Then check the build queue as Builds describes.
 8. If `spec.md` lists sub-jobs, queue each one in list order with
-   `factory.py backlog add "<slug>: <feature> (sub-job-of <id>)" --context <file>`.
+   `factory backlog add "<slug>: <feature> (sub-job-of <id>)" --context <file>`.
    Write the file first, in a temporary location outside the job folder. Its first
    line is `Recommend: approve` or `Recommend: deny`. Right after `Recommend: approve`,
    write one `Depends on: <slug>: <feature> (sub-job-of <id>)` line per prerequisite
@@ -147,25 +147,25 @@ feature.
    them), `## Device check` items, and anything already on `$BASE`. Drop cosmetic
    nits (line wrapping, comment placement, punctuation, wording) instead of
    queueing them. Queue each agent-doable item with
-   `factory.py backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
+   `factory backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
    writing the file first as in step 8: first line `Recommend: approve`, then
    `Left open by <id> (PR #<n>): <source file>`. List person-only items but never
    queue them and never set `needs` for them. Then append `## Follow-ups` to
    `decision.md` as a table with Item, Source and Outcome (`queued`,
    `already queued` or `for a person`) columns, or `None.` when there are none, and run
    `push "$SLUG/<id>"`.
-10. Run `python3 "$RUNTIME" usage record "$SLUG/<id>"`, then `python3 "$RUNTIME" audit push <id>`.
+10. Run `"$RUNTIME" usage record "$SLUG/<id>"`, then `"$RUNTIME" audit push <id>`.
     A non-zero exit from either never stops close-out.
     After the `merged:` line and the final summary are sent, run
-    `python3 "$RUNTIME" archive-workspace "$SLUG/<id>" --check`. If the output has a
+    `"$RUNTIME" archive-workspace "$SLUG/<id>" --check`. If the output has a
     `reason`, stop. If `leftovers` is not empty, write a file that starts with
     `Recommend: approve`, then `Left in Paseo workspace <would_archive> when <id> merged:`,
     then one leftover per line, and run
-    `python3 "$RUNTIME" backlog add "<slug>: Recover or drop what <id> left in Paseo workspace <would_archive> (follow-up-of <id>)" --context <file>`.
+    `"$RUNTIME" backlog add "<slug>: Recover or drop what <id> left in Paseo workspace <would_archive> (follow-up-of <id>)" --context <file>`.
     If that exits non-zero, skip the archive: patch
     `{"note": "workspace kept: leftovers follow-up not queued: <stderr line>"}` and stop.
     An `already in backlog:` line exits 0 and counts as queued.
-    As the session's last command, run `python3 "$RUNTIME" archive-workspace "$SLUG/<id>"`.
+    As the session's last command, run `"$RUNTIME" archive-workspace "$SLUG/<id>"`.
     It archives this session's Paseo workspace when it is the job's own worktree workspace,
     whatever its git state, and can end the session. When the workspace archive leaves
     this session's agent running, it archives the agent too. On exit 1, a stderr line holding
@@ -189,7 +189,7 @@ Then `## Evidence`, with commits, commands and results a reader can check, and
 `## Left out`, with anything not done and whether a job was queued for it. If
 `decision.md` already holds an approver verdict, keep its full text under a
 final `## Earlier decision` heading. Then queue its left-out items as
-**Closing without shipping** step 1 describes. Run `python3 "$RUNTIME" push "$SLUG/<id>"`.
+**Closing without shipping** step 1 describes. Run `"$RUNTIME" push "$SLUG/<id>"`.
 Only when it exits 0, patch `{"stage": "closed", "note": "<reason>", "needs": null}`,
 run `cleanup` on it, and send `closed: <reason> · $DASHBOARD#<id>/decision`.
 Then give the final summary and finish with **Closing without shipping** step 3.
@@ -205,14 +205,14 @@ first line `CLOSED: <reason>`, pushed before the stage moves to `closed`.
    are each `## Left out` bullet and, when `build.md` exists, what its last run lists
    under `### Left open` or as unresolved. Leave out anything already on `$BASE` and
    any item whose bullet names an existing job. Queue each agent-doable item with
-   `factory.py backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
+   `factory backlog add "<slug>: <feature> (follow-up-of <id>)" --context <file>`,
    writing the file first as in step 8: first line `Recommend: approve`, then
    `Left out by <id> (closed at <stage>): <source file>`. An `already in backlog:` line
    means it is queued. List person-only items but never queue them or set `needs`.
    Append `## Follow-ups` as step 9 describes.
 2. If the close reason states a durable project fact, such as a command, a path, a naming
    rule, or why a kind of change was rejected, write it as one sentence of at most 200
-   characters to a file and run `python3 "$RUNTIME" lesson "$SLUG/<id>" --fact-file <file>`.
+   characters to a file and run `"$RUNTIME" lesson "$SLUG/<id>" --fact-file <file>`.
    Add `--why-file <file>` when a person should judge the fact first. Skip it when the
    reason only names an outcome, such as duplicate, already fixed, superseded or out of
    scope. Never infer a fact the reason does not state. Record at most one lesson per job.

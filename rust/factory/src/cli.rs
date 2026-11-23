@@ -98,7 +98,7 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
 
 /// Commands only the binary has. `factory.py` and `USAGE` do not list them.
 const EXTRA: &[(&str, Handler, usize, usize)] = &[
-    ("daemon", daemon::daemon, 0, 0),
+    ("daemon", daemon::daemon, 0, 2),
     ("install", install::install, 4, 5),
 ];
 
@@ -283,7 +283,8 @@ mod tests {
     #[test]
     fn daemon_is_binary_only() {
         assert!(handler_for("daemon", 0).is_some());
-        assert!(handler_for("daemon", 1).is_none());
+        assert!(handler_for("daemon", 2).is_some());
+        assert!(handler_for("daemon", 3).is_none());
         assert!(!USAGE.contains("daemon"));
     }
 
