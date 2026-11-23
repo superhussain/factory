@@ -133,7 +133,7 @@ jobs:
   # Builds linux-x64 natively and type-checks the darwin-arm64 and windows-x64 targets.
   rust:
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: rust
