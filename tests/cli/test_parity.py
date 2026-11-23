@@ -60,7 +60,7 @@ class RunnerTest(unittest.TestCase):
         with patch.object(run, "factory_command", return_value=run.PYTHON):
             code, out, err = run_main([])
         self.assertEqual((code, err), (0, ""), out)
-        self.assertEqual(out.splitlines()[-1], "parity: 49 passed, 0 failed")
+        self.assertEqual(out.splitlines()[-1], "parity: 72 passed, 0 failed")
 
     def test_a_wrong_binary_fails(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -83,11 +83,71 @@ class RunnerTest(unittest.TestCase):
 
     def test_cases_cover_cli_v1(self):
         ids = [case["id"] for case in run.load_cases()]
-        self.assertEqual(len(ids), 49)
-        self.assertEqual(len(set(ids)), 49)
+        self.assertEqual(len(ids), 72)
+        self.assertEqual(len(set(ids)), 72)
         self.assertIn("arity/claim/2", ids)
         self.assertIn("arity/claim/4", ids)
         self.assertFalse([i for i in ids if i.startswith("arity/ideas/")])
+
+    def case(self, case_id):
+        return next(case for case in run.load_cases() if case["id"] == case_id)
+
+    def test_http_case_records_requests(self):
+        fields = dict(run.run_side(self.case("pipeline/view"), run.PYTHON))
+        self.assertEqual(fields["exit code"], "0")
+        self.assertEqual([json.loads(line) for line in fields["requests"].splitlines()], [{
+            "method": "GET", "path": "/api/pipeline/effective/sample", "body": "",
+            "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret",
+                        "user-agent": "factory"}}])
+        self.assertIn("b'---\\napi_url: {api}\\ndevice: parity\\n---\\n'", fields["home tree"])
+
+    def test_request_drift_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            drift = Path(temp, "drift")
+            drift.write_text(f"#!{sys.executable}\n" + (
+                "import re, runpy, sys, urllib.error, urllib.request\n"
+                "home = sys.argv[sys.argv.index('--home') + 1]\n"
+                "origin = re.search(r'api_url: (\\S+)', open(home + '/config.md').read()).group(1)\n"
+                "try:\n"
+                "    urllib.request.urlopen(origin + '/extra')\n"
+                "except urllib.error.HTTPError:\n"
+                "    pass\n"
+                f"sys.argv[0] = {str(SKILL / 'runtime/factory.py')!r}\n"
+                "runpy.run_path(sys.argv[0], run_name='__main__')\n"))
+            drift.chmod(0o755)
+            code, out, err = run_main(["--bin", str(drift), "--case", "pipeline/view"])
+        self.assertEqual((code, err), (1, ""))
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "FAIL pipeline/view: requests differs")
+        self.assertIn('+{"body": "", "headers": {"user-agent": "Python-urllib/%d.%d"}, "method": "GET", '
+                      '"path": "/extra"}' % sys.version_info[:2], lines)
+
+    def test_python_exit_must_match_case(self):
+        case = dict(self.case("pipeline/view"), exit=3)
+        self.assertEqual(run.run_case(case, ["false"]), ["FAIL pipeline/view: python exit 0, case expects 3"])
+
+    def test_cases_live_in_their_subsystem_file(self):
+        row = {"id": "pipeline/x", "argv": [], "home": None, "stubs": {}}
+        with tempfile.TemporaryDirectory() as temp:
+            Path(temp, "board.json").write_text(json.dumps({"version": 1, "cases": [row]}))
+            with patch.object(run.load_cases, "__defaults__", (Path(temp),)):
+                self.assertEqual(run_main([]), (2, "", "parity: board.json: case pipeline/x belongs in pipeline.json\n"))
+            Path(temp, "board.json").unlink()
+            Path(temp, "pipeline.json").write_text(json.dumps({"version": 1, "cases": [row, row]}))
+            with patch.object(run.load_cases, "__defaults__", (Path(temp),)):
+                self.assertEqual(run_main([]), (2, "", "parity: duplicate case id pipeline/x\n"))
+
+    def test_ids_directory_reads_every_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            Path(temp, "main.txt").write_text("# comment\nmain/no-args\n")
+            Path(temp, "doctor.txt").write_text("doctor/extra\n")
+            self.assertEqual(run.read_ids(temp), ["doctor/extra", "main/no-args"])
+            with patch.object(run, "factory_command", return_value=run.PYTHON):
+                code, out, err = run_main(["--ids", temp])
+            self.assertEqual((code, out.splitlines()[-1], err), (0, "parity: 2 passed, 0 failed", ""))
+            Path(temp, "board.txt").write_text("main/no-args\n")
+            self.assertEqual(run_main(["--ids", temp]),
+                             (2, "", "parity: board.txt: pattern main/no-args must start with board/\n"))
 
 
 class UsageTextTest(unittest.TestCase):
