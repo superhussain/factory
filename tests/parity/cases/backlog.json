@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "backlog/unknown-sub",
+      "argv": ["backlog", "list", "x"],
+      "home": null,
+      "stubs": {}
+    }
+  ]
+}

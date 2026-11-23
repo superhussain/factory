@@ -1,0 +1,2 @@
+# Case ids the factory binary must pass. Port slices add their own file.
+arity/*

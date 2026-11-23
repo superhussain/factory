@@ -1,6 +1,6 @@
 """Differential runner: run each parity case on Python and on a factory binary, then compare.
 
-python3 tests/parity/run.py [--bin PATH] [--ids FILE] [--case ID]...
+python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]...
 """
 import argparse
 import difflib
@@ -20,10 +20,17 @@ import stub
 
 PYTHON = [sys.executable, "-B", str(SKILL / "runtime/factory.py")]
 TOOLS = ("gh", "paseo", "git")
+CASES = HERE / "cases"
 
 
-def load_cases():
-    cases = json.loads((HERE / "cases.json").read_text(encoding="utf-8"))["cases"]
+def load_cases(folder=CASES):
+    cases = []
+    for path in sorted(Path(folder).glob("*.json")):
+        for case in json.loads(path.read_text(encoding="utf-8"))["cases"]:
+            prefix = case["id"].split("/", 1)[0]
+            if prefix != path.stem:
+                raise ValueError(f"parity: {path.name}: case {case['id']} belongs in {prefix}.json")
+            cases.append(case)
     for row in json.loads((ROOT / "tests/fixtures/cli-v1.json").read_text(encoding="utf-8"))["commands"]:
         if row["name"] == "ideas":
             continue
@@ -31,7 +38,26 @@ def load_cases():
             if count >= 0:
                 cases.append({"id": f"arity/{row['name']}/{count}", "argv": [row["name"]] + ["operand"] * count,
                               "home": None, "stubs": {}})
+    seen = set()
+    for case in cases:
+        if case["id"] in seen:
+            raise ValueError(f"parity: duplicate case id {case['id']}")
+        seen.add(case["id"])
     return cases
+
+
+def read_ids(path):
+    path = Path(path)
+    files = sorted(path.glob("*.txt")) if path.is_dir() else [path]
+    patterns = []
+    for file in files:
+        for line in file.read_text(encoding="utf-8").splitlines():
+            pattern = line.split("#", 1)[0].strip()
+            if pattern and path.is_dir() and not pattern.startswith(file.stem + "/"):
+                raise ValueError(f"parity: {file.name}: pattern {pattern} must start with {file.stem}/")
+            if pattern:
+                patterns.append(pattern)
+    return patterns
 
 
 def run_side(case, command):
@@ -88,11 +114,12 @@ def main(argv):
     if os.name == "nt":
         print("parity: POSIX hosts only in phase 0", file=sys.stderr)
         return 2
-    cases = load_cases()
-    patterns = list(args.case)
-    if args.ids:
-        lines = Path(args.ids).read_text(encoding="utf-8").splitlines()
-        patterns += [line.split("#", 1)[0].strip() for line in lines if line.split("#", 1)[0].strip()]
+    try:
+        cases = load_cases()
+        patterns = list(args.case) + (read_ids(args.ids) if args.ids else [])
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
     for pattern in patterns:
         if not any(fnmatch.fnmatchcase(case["id"], pattern) for case in cases):
             print(f"parity: no case matches {pattern}", file=sys.stderr)

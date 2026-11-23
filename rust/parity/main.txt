@@ -1,0 +1,2 @@
+main/no-args
+main/unknown-command
