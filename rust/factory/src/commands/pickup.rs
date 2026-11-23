@@ -2022,6 +2022,16 @@ fn crontab_lines() -> Res<Vec<String>> {
 }
 
 /// Write and load a unit; one line saying what changed. A unit that already matches is left alone.
+/// How many times install polls `launchctl print` after a bootout, 250 ms apart: about 10 s.
+const BOOTOUT_POLLS: u32 = 40;
+
+/// A wait between launchctl steps; tests run their stubs without it.
+fn pause(d: Duration) {
+    if !cfg!(test) {
+        std::thread::sleep(d);
+    }
+}
+
 fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -> Res<String> {
     let values = timer_values(home, unit);
     check_unit_paths(scheduler, &values)?;
@@ -2040,13 +2050,24 @@ fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -> Res<Strin
         mkdirs(plist.parent().unwrap())?;
         write_file(&plist, &text)?;
         setup_run(&["launchctl", "bootout", &target], None);
-        // A disabled label makes bootstrap fail with "5: Input/output error".
+        // bootout returns before launchd lets go of the job; bootstrapping a label that is still
+        // loaded fails with "5: Input/output error", so wait for print to stop finding it.
+        for _ in 0..BOOTOUT_POLLS {
+            if setup_run(&["launchctl", "print", &target], None).0 != 0 {
+                break;
+            }
+            pause(Duration::from_millis(250));
+        }
+        // A disabled label makes bootstrap fail with "5: Input/output error" too.
         setup_run(&["launchctl", "enable", &target], None);
         let shown = plist.to_string_lossy();
-        (code, out) = setup_run(
-            &["launchctl", "bootstrap", &format!("gui/{uid}"), &shown],
-            None,
-        );
+        let bootstrap = ["launchctl", "bootstrap", &format!("gui/{uid}"), &shown];
+        let mut result = setup_run(&bootstrap, None);
+        if result.0 != 0 && result.1.contains("Input/output error") {
+            pause(Duration::from_secs(2));
+            result = setup_run(&bootstrap, None);
+        }
+        (code, out) = result;
         done = format!("installed launchd {noun}: {}", plist.display());
     } else if scheduler == "systemd" {
         let file = timer_path(scheduler, unit);
@@ -18649,25 +18670,109 @@ exit "$archive_code"
                 .any(|a| a[..2] == ["launchctl", "bootstrap"]));
         }
 
+        /// Puts `f` in front of the fixture's setup_run, which still records every call.
+        fn front(st: &St, f: impl Fn(&[&str]) -> Option<(i32, String)> + 'static) {
+            st.fx.set_fakes(move |fakes| {
+                let prev = fakes.setup_run.clone().unwrap();
+                fakes.setup_run = Some(Rc::new(move |argv, stdin| {
+                    let answer = prev(argv, stdin);
+                    f(argv).unwrap_or(answer)
+                }));
+            });
+        }
+
+        fn launchctl_verbs(st: &St) -> Vec<String> {
+            st.runs
+                .borrow()
+                .iter()
+                .filter(|a| a[0] == "launchctl")
+                .map(|a| a[1].clone())
+                .collect()
+        }
+
         #[cfg(unix)]
         #[test]
         fn test_install_launchd_bootstrap_failure_fails() {
             let st = St::new();
             st.launchd();
-            st.fx.set_fakes(|f| {
-                f.setup_run = Some(Rc::new(|argv, _| match argv[..2] {
-                    ["launchctl", "bootstrap"] => {
-                        (5, "Bootstrap failed: 5: Input/output error\n".into())
-                    }
-                    ["launchctl", "print"] => (113, String::new()),
-                    _ => (0, String::new()),
-                }))
+            front(&st, |argv| match argv[..2] {
+                ["launchctl", "bootstrap"] => {
+                    Some((5, "Bootstrap failed: 5: Input/output error\n".into()))
+                }
+                _ => None,
             });
             let (code, out, err) = st.setup(&["--install"]);
             assert_eq!((code, out.as_str()), (1, ""));
             assert!(err.contains(
                 "could not install the launchd timer factory.pickup: Bootstrap failed: 5: Input/output error\n"
             ));
+            // One retry after error 5, then the failure stands.
+            let verbs = launchctl_verbs(&st);
+            assert_eq!(
+                verbs.iter().filter(|v| *v == "bootstrap").count(),
+                2,
+                "{verbs:?}"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_install_launchd_waits_for_bootout() {
+            let st = St::new();
+            let plist = st.launchd();
+            *st.loaded.borrow_mut() = true;
+            // launchd still lists the job for three prints after bootout, then lets it go.
+            let (left, loaded) = (Rc::new(RefCell::new(None::<u32>)), st.loaded.clone());
+            front(&st, move |argv| {
+                match argv[..2] {
+                    ["launchctl", "bootout"] => *left.borrow_mut() = Some(3),
+                    ["launchctl", "print"] => {
+                        let mut l = left.borrow_mut();
+                        match *l {
+                            Some(0) => *loaded.borrow_mut() = false,
+                            Some(n) => *l = Some(n - 1),
+                            None => {}
+                        }
+                    }
+                    ["launchctl", "bootstrap"] => *loaded.borrow_mut() = true,
+                    _ => {}
+                }
+                None
+            });
+            // The plist differs from what install writes, so install reloads the loaded job.
+            fs::write(&plist, "old").unwrap();
+            let (code, out, err) = st.setup(&["--install"]);
+            assert_ne!(code, 1, "{err}");
+            assert!(out.contains("installed launchd timer"), "{out}");
+            let verbs = launchctl_verbs(&st);
+            let bootout = verbs.iter().position(|v| v == "bootout").unwrap();
+            let bootstrap = verbs.iter().position(|v| v == "bootstrap").unwrap();
+            let prints = verbs[bootout..bootstrap]
+                .iter()
+                .filter(|v| *v == "print")
+                .count();
+            assert!(prints >= 4, "{verbs:?}");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_install_launchd_retries_bootstrap_once() {
+            let st = St::new();
+            st.launchd();
+            let tries = Rc::new(RefCell::new(0));
+            let t = tries.clone();
+            front(&st, move |argv| match argv[..2] {
+                ["launchctl", "bootstrap"] => {
+                    *t.borrow_mut() += 1;
+                    (*t.borrow() == 1)
+                        .then(|| (5, "Bootstrap failed: 5: Input/output error\n".into()))
+                }
+                _ => None,
+            });
+            let (code, out, err) = st.setup(&["--install"]);
+            assert_ne!(code, 1, "{err}");
+            assert!(out.contains("installed launchd timer"), "{out}");
+            assert_eq!(*tries.borrow(), 2);
         }
 
         #[test]
