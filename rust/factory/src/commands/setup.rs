@@ -1,23 +1,45 @@
 //! Setup commands: init, adopt-home, doctor, host, with-cloudflare and explore.
 
+use std::collections::hash_map::RandomState;
 use std::fs;
-use std::io;
+use std::hash::{BuildHasher, Hasher};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::cli::{not_ported, Call};
 use crate::commands::lookup::{main_checkout, remotes};
 use crate::shared::conf::{closed_frontmatter, fm_get, frontmatter, read_conf, unquote};
-use crate::shared::exit::{fail, Exit, Res};
-use crate::shared::fs::{is_link, regular_metadata, resolve, seed, write_atomic};
-use crate::shared::home::{config_root, factory_home, skill_root};
-use crate::shared::http::{api, endpoint_message, normalized_origin, token_message};
+use crate::shared::consts::{REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL, SLUG};
+use crate::shared::exit::{exit, fail, Exit, Res};
+use crate::shared::fs::{
+    is_link, read_text, regular_metadata, resolve, same_path, seed, write_atomic,
+};
+use crate::shared::home::{
+    config_root, factory_home, holder, read_location, skill_root, validate_home,
+};
+use crate::shared::http::{
+    access_message, api, endpoint_message, normalized_origin, token_message,
+};
+use crate::shared::proc::git;
 use crate::shared::project::{
     local_bytes, project_files, pull_project, read_paths, read_project_state, save_project_state,
 };
-use crate::shared::py::{os_error, splitlines, strip};
+use crate::shared::py::{is_space, os_error, repr, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, DEFAULT};
+use crate::shared::pyre::{Flags, Pattern};
+use crate::shared::time::{format_stamp, now, parse_stamp};
+
+static REPO_PATH: Pattern = Pattern::new(r"[A-Za-z0-9_./-]{1,200}", Flags::ASCII);
+static RUN_TAG: Pattern = Pattern::new(r"[A-Za-z0-9_-]{1,64}", Flags::ASCII);
+static HOST_NAME: Pattern = Pattern::new(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", Flags::ASCII);
+static WORKER_MODEL: Pattern = Pattern::new(r"[A-Za-z0-9._:@/\[\]-]{1,128}", Flags::ASCII);
+static PAIRING_CODE: Pattern = Pattern::new(r"[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}", Flags::ASCII);
+
+const PAIRING_FAILED: &str = "pairing code is wrong, used or expired";
+const SCHEDULERS: &[&str] = &["launchd", "cron", "schtasks", "none"];
+const MAX_EXPLORER_PROJECTS: usize = 1;
 
 const ROLE_NAMES: [&str; 9] = [
     "factory-approver.md",
@@ -301,6 +323,11 @@ fn install_roles(dirs: &[(String, PathBuf)]) -> Res<usize> {
     Ok(plans.len())
 }
 
+/// True when v is not a relative repo path of `[A-Za-z0-9_./-]` with no `..` segment.
+fn check_path(v: &str) -> bool {
+    !REPO_PATH.is_full(v) || v.starts_with('/') || v.split('/').any(|s| s == "..")
+}
+
 /// A project file minus its frontmatter `path:` lines, since each device keeps its own.
 fn without_path(text: &str) -> String {
     let lines = splitlines(text, true);
@@ -544,20 +571,605 @@ pub fn init(call: &Call) -> Res<()> {
     register_project(&home, repo_path)
 }
 
-pub fn adopt_home_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("adopt-home"))
+/// Point the location file at an existing, valid home. A second run with the same home changes nothing.
+fn adopt_home(existing: &Path, pointer: &Path) -> Res<()> {
+    if !existing.is_absolute() {
+        return Err(fail(
+            format!(
+                "{}: adoption requires an absolute directory",
+                existing.display()
+            ),
+            2,
+        ));
+    }
+    let atomic = || {
+        fail(
+            format!(
+                "{}: cannot publish factory location atomically",
+                pointer.display()
+            ),
+            2,
+        )
+    };
+    let home = resolve(existing).map_err(|_| atomic())?;
+    validate_home(&home)?;
+    let folder = pointer.parent().unwrap_or(Path::new("/"));
+    let default = folder.join("factory");
+    if fs::symlink_metadata(default.join("config.md")).is_ok() && !same_path(&default, &home) {
+        return Err(fail(
+            format!(
+                "{}: a different initialized factory home exists",
+                default.display()
+            ),
+            2,
+        ));
+    }
+    if fs::symlink_metadata(pointer).is_ok() {
+        if read_location(pointer)? != home {
+            return Err(fail(
+                format!(
+                    "{}: a different factory home is selected",
+                    pointer.display()
+                ),
+                2,
+            ));
+        }
+        return Ok(());
+    }
+    fs::create_dir_all(folder).map_err(|_| atomic())?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let (temporary, mut file) = loop {
+        let token = RandomState::new().build_hasher().finish() as u32;
+        let temporary = folder.join(format!(".factory-location-{token:08x}"));
+        match options.open(&temporary) {
+            Ok(file) => break (temporary, file),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return Err(atomic()),
+        }
+    };
+    let text = dumps(
+        &json!({"version": 1, "home": home.display().to_string()}),
+        DEFAULT,
+    ) + "\n";
+    let mut published = file
+        .write_all(text.as_bytes())
+        .and_then(|()| file.sync_all());
+    drop(file);
+    if published.is_ok() {
+        published = fs::hard_link(&temporary, pointer);
+    }
+    let removed = fs::remove_file(&temporary);
+    match published {
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            if read_location(pointer)? != home {
+                return Err(fail(
+                    format!(
+                        "{}: a different factory home won publication",
+                        pointer.display()
+                    ),
+                    2,
+                ));
+            }
+        }
+        Err(_) => return Err(atomic()),
+        Ok(()) => {}
+    }
+    removed.map_err(|_| atomic())
+}
+
+pub fn adopt_home_cmd(call: &Call) -> Res<()> {
+    let existing = Path::new(&call.args[0]);
+    adopt_home(existing, &config_root()?.join("factory-location.json"))?;
+    let home = resolve(existing).map_err(|e| fail(os_error(&e, None), 1))?;
+    println!("{}", home.display());
+    Ok(())
+}
+
+/// The five-check report: location, config, credentials, then one GET each of projects and board.
+fn doctor(home: &Path) -> Value {
+    let home = resolve(home).unwrap_or_else(|_| home.to_path_buf());
+    let mut checks: Vec<Value> = Vec::new();
+    let mut check = |name: &str, valid: bool, message: &str| {
+        checks.push(json!({
+            "name": name,
+            "status": if valid { "pass" } else { "fail" },
+            "message": message,
+        }));
+    };
+    check("location", true, "Location resolved.");
+    let mut origin = String::new();
+    let mut config_error = match validate_home(&home) {
+        Ok(()) => String::new(),
+        Err(e) => strip(e.stderr.get("factory.py: ".len()..).unwrap_or("")).to_string(),
+    };
+    if config_error.is_empty() {
+        let config = home.join("config.md");
+        let meta = frontmatter(&config).map(|(m, _)| m).unwrap_or_default();
+        let endpoint = fm_get(&meta, "api_url").unwrap_or("");
+        if endpoint.is_empty() {
+            config_error = format!(
+                "Set api_url in {}, then run /factory init again.",
+                config.display()
+            );
+        } else {
+            match normalized_origin(endpoint, false) {
+                Ok(url) => origin = url,
+                Err(()) => config_error = endpoint_message(&config),
+            }
+        }
+    }
+    let valid = if config_error.is_empty() {
+        "Local configuration is valid."
+    } else {
+        &config_error
+    };
+    check("config", config_error.is_empty(), valid);
+    let env_file = home.join(".env");
+    let configured = regular_metadata(&env_file).is_ok()
+        && read_conf(&env_file).is_ok_and(|env| {
+            ["FACTORY_ACCESS_CLIENT_ID", "FACTORY_ACCESS_CLIENT_SECRET"]
+                .iter()
+                .all(|k| env.get(*k).is_some_and(|v| !v.is_empty()))
+        });
+    let message = if configured {
+        "Service token is configured.".to_string()
+    } else {
+        token_message(&env_file)
+    };
+    check("credentials", configured, &message);
+    for (name, route) in [("projects", "/projects.json"), ("board", "/api/board")] {
+        if !config_error.is_empty() || !configured {
+            check(
+                name,
+                false,
+                "Not attempted because local configuration is invalid.",
+            );
+            continue;
+        }
+        let ok: &[u16] = if name == "board" { &[200, 404] } else { &[200] };
+        let read = api(&home, "GET", route, None, ok, &[]).ok().and_then(|r| {
+            if name == "board" && r.status == 404 {
+                return Some("Board is absent; no board was created.");
+            }
+            let value = loads(&r.text().ok()?).ok()?;
+            let valid = if name == "projects" {
+                value.is_array()
+            } else {
+                value.get("jobs").is_some_and(Value::is_array)
+            };
+            valid.then_some(if name == "projects" {
+                "Projects are reachable."
+            } else {
+                "Board is reachable."
+            })
+        });
+        match read {
+            Some(message) => check(name, true, message),
+            None => check(
+                name,
+                false,
+                &format!("Cannot read {route}; check connectivity, Access policy and service-token configuration."),
+            ),
+        }
+    }
+    json!({
+        "version": 1,
+        "home": home.display().to_string(),
+        "api_url": origin,
+        "checks": checks,
+    })
 }
 
 pub fn doctor_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("doctor"))
+    let Ok(home) = factory_home() else {
+        let report = json!({"version": 1, "home": "", "api_url": "", "checks": [
+            {"name": "location", "status": "fail", "message": "Invalid factory location."}]});
+        println!("{}", dumps(&report, DEFAULT));
+        return Err(exit(2));
+    };
+    let report = doctor(&home);
+    let checks = report["checks"].as_array().cloned().unwrap_or_default();
+    let failed = |checks: &[Value]| checks.iter().any(|c| c["status"] == "fail");
+    if !failed(&checks[..3]) {
+        report_status(&home, cached_status(&home), Some(&report));
+    }
+    println!("{}", dumps(&report, DEFAULT));
+    if failed(&checks[..3]) {
+        return Err(exit(2));
+    }
+    if failed(&checks) {
+        return Err(exit(5));
+    }
+    Ok(())
+}
+
+/// True when s is a UTC stamp `strptime` reads and `strftime` writes back unchanged.
+fn utc(s: &str) -> bool {
+    parse_stamp(s).map(format_stamp).as_deref() == Some(s)
+}
+
+/// (scheduler, last_pickup, triage_failed_since) from the last status pickup sent, else ("none", None, None).
+fn cached_status(home: &Path) -> (String, Option<String>, Option<String>) {
+    let cache = read_text(&home.join("host-status.json"))
+        .ok()
+        .and_then(|text| loads(&text).ok());
+    if let Some(cache) = cache.as_ref().and_then(Value::as_object) {
+        if let (Some(scheduler), Some(last)) = (cache.get("scheduler"), cache.get("last_pickup")) {
+            let scheduler = scheduler.as_str().filter(|s| SCHEDULERS.contains(s));
+            if let Some(scheduler) =
+                scheduler.filter(|_| last.is_null() || last.as_str().is_some_and(utc))
+            {
+                let failing = cache
+                    .get("triage_failed_since")
+                    .and_then(Value::as_str)
+                    .filter(|f| utc(f));
+                return (
+                    scheduler.to_string(),
+                    last.as_str().map(String::from),
+                    failing.map(String::from),
+                );
+            }
+        }
+    }
+    ("none".to_string(), None, None)
+}
+
+/// (provider, model, effort) from `<provider> <model> [<effort>]`, or None when it is malformed.
+fn parse_route(value: &str) -> Option<(String, String, Option<String>)> {
+    let parts: Vec<&str> = value.split(is_space).filter(|p| !p.is_empty()).collect();
+    if !(2..=3).contains(&parts.len())
+        || !SLUG.is_full(parts[0])
+        || !ROUTE_MODEL.is_full(parts[1])
+        || parts.len() == 3 && !ROUTE_EFFORTS.contains(&parts[2])
+    {
+        return None;
+    }
+    Some((
+        parts[0].to_string(),
+        parts[1].to_string(),
+        parts.get(2).map(|e| e.to_string()),
+    ))
+}
+
+/// [(name, provider, model, effort)] from this host's routes.md, in preference order.
+fn read_routes(home: &Path) -> Res<Vec<(String, String, String, Option<String>)>> {
+    let path = home.join("routes.md");
+    let meta = if path.exists() {
+        dict(frontmatter(&path).map_err(|e| os_fail(e, &path))?.0)
+    } else {
+        Vec::new()
+    };
+    if meta.is_empty() {
+        return Err(fail(format!("no routes in {}: list this host's dispatch routes, primary first, as <name>: <provider> <model> [<effort>]", path.display()), 2));
+    }
+    let mut routes = Vec::new();
+    for (name, value) in meta {
+        // The optional experiment and review lines are config, not routes.
+        if name == "experiment" || REVIEW_ROUTE_KEYS.contains(&name.as_str()) {
+            continue;
+        }
+        match parse_route(&value).filter(|_| SLUG.is_full(&name)) {
+            Some((provider, model, effort)) => routes.push((name, provider, model, effort)),
+            None => {
+                return Err(fail(
+                    format!(
+                        "bad route {} in {}: use <name>: <provider> <model> [<effort>]",
+                        repr(&name),
+                        path.display()
+                    ),
+                    2,
+                ))
+            }
+        }
+    }
+    Ok(routes)
+}
+
+/// {route name: limited until} from this host's route-limits.json.
+fn read_limits(home: &Path) -> Res<Vec<(String, String)>> {
+    let path = home.join("route-limits.json");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let limits = read_text(&path).ok().and_then(|text| {
+        let value = loads(&text).ok()?;
+        value
+            .as_object()?
+            .iter()
+            .map(|(k, v)| {
+                let until = v.as_str()?;
+                parse_stamp(until)?;
+                Some((k.clone(), until.to_string()))
+            })
+            .collect::<Option<Vec<_>>>()
+    });
+    limits.ok_or_else(|| {
+        fail(
+            format!(
+                "cannot read {}: delete it to clear every route limit",
+                path.display()
+            ),
+            2,
+        )
+    })
+}
+
+fn host_os() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macOS"
+    } else if cfg!(windows) {
+        "Windows"
+    } else if cfg!(target_os = "linux") {
+        let release = fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
+        if release.to_lowercase().contains("microsoft") {
+            "Linux (WSL)"
+        } else {
+            "Linux"
+        }
+    } else {
+        "Other"
+    }
+}
+
+/// bundle.json's text as {commit, tree}, or None when it has any other shape.
+fn stamp_shape(text: &str) -> Option<Value> {
+    let stamp = loads(text).ok()?;
+    let map = stamp.as_object()?;
+    let hex = |v: &Value| {
+        v.as_str().is_some_and(|s| {
+            (7..=64).contains(&s.len()) && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        })
+    };
+    (map.len() == 2
+        && map.contains_key("commit")
+        && map.contains_key("tree")
+        && map.values().all(hex))
+    .then_some(stamp)
+}
+
+/// {commit, tree} from the bundle.json install.py writes beside the skill, or None.
+fn bundle_stamp() -> Option<Value> {
+    stamp_shape(&read_text(&skill_root().ok()?.join("bundle.json")).ok()?)
+}
+
+fn checkout_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// When the first merge on origin's base that commit lacks landed, from the first checkout
+/// holding commit. None when commit is current or no checkout holds it.
+fn bundle_behind_since(home: &Path, commit: &str) -> Option<String> {
+    let mut paths = dict(read_paths(home));
+    paths.sort();
+    for (slug, repo) in paths {
+        let repo = Path::new(&repo);
+        if !checkout_slug(&slug) || !repo.is_dir() {
+            continue;
+        }
+        let Ok((project, _, _)) = project_files(home, &slug) else {
+            continue;
+        };
+        let meta = if project.exists() {
+            frontmatter(&project).map(|(m, _)| m).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let base = fm_get(&meta, "base").unwrap_or("main");
+        if check_path(base) || base.starts_with('-') {
+            continue;
+        }
+        let origin = format!("refs/remotes/origin/{base}");
+        if git(repo, &["merge-base", commit, &origin]) != commit {
+            continue;
+        }
+        let times = git(
+            repo,
+            &[
+                "log",
+                "--first-parent",
+                "--format=%ct",
+                &format!("{commit}..{origin}"),
+            ],
+        );
+        return times
+            .split_whitespace()
+            .last()
+            .and_then(|t| t.parse().ok())
+            .map(format_stamp);
+    }
+    None
+}
+
+/// The status body the Worker's PUT /api/hosts/<id>/status accepts. Holds no path or secret.
+fn host_status(
+    home: &Path,
+    report: &Value,
+    scheduler: &str,
+    last: Option<&str>,
+    triage: Option<&str>,
+) -> Value {
+    let failed: Vec<Value> = report["checks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| c["status"] != "pass")
+        .map(|c| c["name"].clone())
+        .collect();
+    let (routes, limits) = match (read_routes(home), read_limits(home)) {
+        (Ok(routes), Ok(limits)) => (routes, limits),
+        _ => (Vec::new(), Vec::new()),
+    };
+    let stamp = now();
+    let routes: Vec<Value> = routes
+        .iter()
+        .filter(|(name, provider, model, _)| {
+            HOST_NAME.is_full(name) && HOST_NAME.is_full(provider) && WORKER_MODEL.is_full(model)
+        })
+        .take(16)
+        .map(|(name, provider, model, effort)| {
+            let until = fm_get(&limits, name).filter(|u| *u > stamp.as_str());
+            json!({"name": name, "provider": provider, "model": model, "effort": effort,
+                   "limited_until": until})
+        })
+        .collect();
+    let mut checkouts: Vec<String> = dict(read_paths(home))
+        .into_iter()
+        .filter(|(slug, path)| checkout_slug(slug) && Path::new(path).is_dir())
+        .map(|(slug, _)| slug)
+        .collect();
+    checkouts.sort();
+    checkouts.truncate(64);
+    let doctor = if failed.is_empty() {
+        json!("ok")
+    } else {
+        json!(failed)
+    };
+    let mut body = json!({
+        "os": host_os(), "scheduler": scheduler, "last_pickup": last, "bundle": bundle_stamp(),
+        "doctor": doctor, "routes": routes, "checkouts": checkouts,
+    });
+    let commit = body["bundle"]["commit"].as_str().map(String::from);
+    if let Some(behind) = commit.and_then(|c| bundle_behind_since(home, &c)) {
+        body["bundle_behind_since"] = json!(behind);
+    }
+    if let Some(triage) = triage {
+        body["triage_failed_since"] = json!(triage);
+    }
+    body
+}
+
+/// PUT this host's status when config.md sets device:. Silent in every outcome, so a caller's
+/// output and exit code stay as they were.
+fn report_status(
+    home: &Path,
+    cached: (String, Option<String>, Option<String>),
+    report: Option<&Value>,
+) -> bool {
+    let config = home.join("config.md");
+    let device = if config.exists() {
+        match frontmatter(&config) {
+            Ok((meta, _)) => fm_get(&meta, "device").unwrap_or("").to_string(),
+            Err(_) => return false,
+        }
+    } else {
+        String::new()
+    };
+    if !HOST_NAME.is_full(&device) {
+        return false;
+    }
+    let fresh;
+    let report = match report {
+        Some(report) => report,
+        None => {
+            fresh = doctor(home);
+            &fresh
+        }
+    };
+    let (scheduler, last, triage) = cached;
+    let body = host_status(home, report, &scheduler, last.as_deref(), triage.as_deref());
+    api(
+        home,
+        "PUT",
+        &format!("/api/hosts/{device}/status"),
+        Some(dumps(&body, DEFAULT).as_bytes()),
+        &[200],
+        &[("Content-Type", "application/json")],
+    )
+    .is_ok()
+}
+
+/// config.md text with `device: id` set in its frontmatter, every other byte kept, or None when
+/// there is no frontmatter.
+fn device_line(text: &str, id: &str) -> Option<String> {
+    let mut lines: Vec<String> = splitlines(text, true)
+        .into_iter()
+        .map(String::from)
+        .collect();
+    let end = (1..lines.len()).find(|&i| strip(&lines[i]) == "---");
+    if strip(lines.first()?) != "---" {
+        return None;
+    }
+    let end = end?;
+    let ending = |line: &str| line[line.trim_end_matches(['\r', '\n']).len()..].to_string();
+    let eol = ending(&lines[0]);
+    let found = (1..end).find(|&i| {
+        let line = &lines[i];
+        line.contains(':')
+            && !strip(line).starts_with('#')
+            && strip(line.split(':').next().unwrap_or("")) == "device"
+    });
+    match found {
+        Some(i) => lines[i] = format!("device: {id}{}", ending(&lines[i])),
+        None => lines.insert(end, format!("device: {id}{eol}")),
+    }
+    Some(lines.concat())
 }
 
 pub fn explore(_call: &Call) -> Res<()> {
     Err(not_ported("explore"))
 }
 
-pub fn host_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("host"))
+/// Pair this device with a host a person added in Settings. The code goes only into the POST body.
+pub fn host_cmd(call: &Call) -> Res<()> {
+    let (sub, host_id, code) = (&call.args[0], &call.args[1], &call.args[2]);
+    if sub != "pair" {
+        return Err(fail("usage: host pair <id> <code>", 2));
+    }
+    if !HOST_NAME.is_full(host_id) {
+        return Err(fail(
+            "usage: host pair <id> <code>: the id is 1 to 64 letters, digits, ., - and _",
+            2,
+        ));
+    }
+    if !PAIRING_CODE.is_full(code) {
+        return Err(fail(
+            "usage: host pair <id> <code>: the code looks like XXXXX-XXXXX",
+            2,
+        ));
+    }
+    let home = factory_home()?;
+    let device = holder(&home)?.0;
+    if *host_id != device {
+        return Err(fail(format!("host id {host_id} does not match this device's name {device}. Board claims use {device}, so add the host in Settings as {device}."), 2));
+    }
+    let r = api(
+        &home,
+        "POST",
+        &format!("/api/hosts/{host_id}/pair"),
+        Some(dumps(&json!({"code": code}), DEFAULT).as_bytes()),
+        &[200, 403, 409],
+        &[("Content-Type", "application/json")],
+    )?;
+    let text = r.text()?;
+    if r.status == 403 && strip(&text) == PAIRING_FAILED {
+        return Err(fail(
+            format!("{PAIRING_FAILED}. Ask for a new code in Settings, Hosts."),
+            6,
+        ));
+    }
+    if r.status == 403 {
+        let env_file = abspath(&home.join(".env").to_string_lossy());
+        return Err(fail(access_message(&env_file), 5));
+    }
+    if r.status == 409 {
+        return Err(fail("this service token is already bound to another host. Each host needs its own Access service token.", 6));
+    }
+    let config = home.join("config.md");
+    let text = read_raw(&config).map_err(|e| os_fail(e, &config))?;
+    let updated = device_line(&text, host_id)
+        .ok_or_else(|| fail("config.md has no frontmatter; run /factory init again", 2))?;
+    if updated != text {
+        write_atomic(&config, updated.as_bytes()).map_err(|e| os_fail(e, &config))?;
+    }
+    report_status(&home, cached_status(&home), None);
+    println!("paired {host_id}. config.md now sets device: {host_id}. Confirm the host in Settings, Hosts.");
+    Ok(())
 }
 
 pub fn with_cloudflare_cmd(_call: &Call) -> Res<()> {
@@ -692,5 +1304,111 @@ mod tests {
             "keep me"
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn adopt_home_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("setup-adopt");
+        let (home, other) = (dir.join("home"), dir.join("other"));
+        for h in [&home, &other] {
+            fs::create_dir(h).unwrap();
+            fs::write(
+                h.join("config.md"),
+                "---\napi_url: https://example.invalid\n---\n",
+            )
+            .unwrap();
+        }
+        let pointer = dir.join("config/factory-location.json");
+        adopt_home(&home, &pointer).unwrap();
+        let text = fs::read_to_string(&pointer).unwrap();
+        assert_eq!(
+            text,
+            format!("{{\"version\": 1, \"home\": \"{}\"}}\n", home.display())
+        );
+        assert_eq!(
+            fs::metadata(&pointer).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        adopt_home(&home, &pointer).unwrap();
+        assert_eq!(fs::read_to_string(&pointer).unwrap(), text);
+        assert_eq!(fs::read_dir(dir.join("config")).unwrap().count(), 1);
+        let e = adopt_home(&other, &pointer).unwrap_err();
+        assert_eq!(e.code, 2);
+        assert_eq!(
+            e.stderr,
+            format!(
+                "factory.py: {}: a different factory home is selected\n",
+                pointer.display()
+            )
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cached_status_rules() {
+        let dir = temp_dir("setup-cached");
+        let none = ("none".to_string(), None, None);
+        assert_eq!(cached_status(&dir), none);
+        let write = |text: &str| fs::write(dir.join("host-status.json"), text).unwrap();
+        write(
+            r#"{"scheduler": "cron", "last_pickup": "2026-01-01T00:00:00Z", "triage_failed_since": "2026-01-02T00:00:00Z"}"#,
+        );
+        assert_eq!(
+            cached_status(&dir),
+            (
+                "cron".to_string(),
+                Some("2026-01-01T00:00:00Z".to_string()),
+                Some("2026-01-02T00:00:00Z".to_string())
+            )
+        );
+        write(r#"{"scheduler": "cron", "last_pickup": null, "triage_failed_since": "soon"}"#);
+        assert_eq!(cached_status(&dir), ("cron".to_string(), None, None));
+        for bad in [
+            r#"{"scheduler": "systemd", "last_pickup": null}"#,
+            r#"{"scheduler": "cron", "last_pickup": "2026-1-1T00:00:00Z"}"#,
+            r#"{"scheduler": "cron"}"#,
+            r#"["cron"]"#,
+            "not json",
+        ] {
+            write(bad);
+            assert_eq!(cached_status(&dir), none, "{bad}");
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn bundle_stamp_shape() {
+        let good = r#"{"commit": "abcdef0", "tree": "0123456789abcdef"}"#;
+        assert_eq!(stamp_shape(good), Some(loads(good).unwrap()));
+        for bad in [
+            r#"{"commit": "abcdef0", "tree": "0123456", "extra": "0123456"}"#,
+            r#"{"commit": "ABCDEF0", "tree": "0123456"}"#,
+            r#"{"commit": "abcdef", "tree": "0123456"}"#,
+            r#"{"commit": 1234567, "tree": "0123456"}"#,
+            "[]",
+        ] {
+            assert_eq!(stamp_shape(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn device_line_cases() {
+        assert_eq!(
+            device_line("---\r\ndevice: old\r\nx: 1\r\n---\r\nbody\r\n", "parity").unwrap(),
+            "---\r\ndevice: parity\r\nx: 1\r\n---\r\nbody\r\n"
+        );
+        assert_eq!(
+            device_line("---\r\napi_url: https://x\r\n---", "parity").unwrap(),
+            "---\r\napi_url: https://x\r\ndevice: parity\r\n---"
+        );
+        assert_eq!(
+            device_line("---\n# device: old\n---", "parity").unwrap(),
+            "---\n# device: old\ndevice: parity\n---"
+        );
+        assert_eq!(device_line("no frontmatter\n", "parity"), None);
+        assert_eq!(device_line("---\nopen: yes\n", "parity"), None);
+        assert_eq!(device_line("", "parity"), None);
     }
 }
