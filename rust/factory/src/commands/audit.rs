@@ -1,17 +1,94 @@
 //! The transcript commands: audit, usage, outcomes and bench.
 
-use std::fs::File;
+use std::collections::HashMap;
+use std::fs::{self, File};
 use std::io::{self, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::consts::NOTE_SECRETS;
-use crate::shared::exit::Res;
-use crate::shared::py::{is_space, repr, universal_newlines};
-use crate::shared::pyjson::float_repr;
+use crate::shared::conf::{fm_get, frontmatter};
+use crate::shared::consts::{NEW_JOB_ID, NOTE_SECRETS, PASEO_ID};
+use crate::shared::exit::{fail, Res};
+use crate::shared::fs::read_text;
+use crate::shared::home::factory_home;
+use crate::shared::http::{access_message, api};
+use crate::shared::proc::hostname;
+use crate::shared::py::{is_space, os_error, repr, rstrip, strip, universal_newlines};
+use crate::shared::pyjson::{dumps, float_repr, loads, DEFAULT};
 use crate::shared::pyre::{Captures, Flags, Pattern};
+
+static HOST_NAME: Pattern = Pattern::new(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", Flags::ASCII);
+const RETRO_DENIALS: &[&str] = &[
+    "denied by the Claude Code auto mode classifier",
+    "Permission to use",
+    "doesn't want to proceed",
+    "Blocked:",
+];
+static AUDIT_FLAGS: [(&str, Pattern); 9] = [
+    (
+        "force-push",
+        Pattern::new(
+            r"\bgit\b[^;&|\n]*\bpush\b[^;&|\n]*\s(?:--force(?:-with-lease)?|-f)(?=[\s=]|$)",
+            Flags::NONE,
+        ),
+    ),
+    (
+        "hard-reset",
+        Pattern::new(r"\bgit\b[^;&|\n]*\breset\b[^;&|\n]*\s--hard\b", Flags::NONE),
+    ),
+    (
+        "branch-delete",
+        Pattern::new(
+            r"\bgit\b[^;&|\n]*\bbranch\b[^;&|\n]*\s-D(?=\s|$)",
+            Flags::NONE,
+        ),
+    ),
+    (
+        "recursive-delete",
+        Pattern::new(
+            r"(?:^|[\s;&|(])rm\s+(?:-[A-Za-z]+\s+)*(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)(?=\s|$)",
+            Flags::NONE,
+        ),
+    ),
+    (
+        "no-verify",
+        Pattern::new(r"\bgit\b[^;&|\n]*\s--no-verify\b", Flags::NONE),
+    ),
+    ("sudo", Pattern::new(r"(?:^|[\s;&|(])sudo\s", Flags::NONE)),
+    (
+        "pipe-to-shell",
+        Pattern::new(
+            r"\b(?:curl|wget)\b[^|\n]*\|\s*(?:sudo\s+)?(?:ba|z)?sh\b",
+            Flags::NONE,
+        ),
+    ),
+    (
+        "deploy",
+        Pattern::new(
+            r"\bwrangler\s+(?:deploy|publish)\b|\bdeploy\.py\s+deploy\b",
+            Flags::NONE,
+        ),
+    ),
+    (
+        "pr-merge",
+        Pattern::new(r"\bgh\s+pr\s+merge\b", Flags::NONE),
+    ),
+];
+static AUDIT_SECRET_FILE: Pattern = Pattern::new(r#"(?:^|[\s/'\"=])\.env(?![\w.-])"#, Flags::NONE);
+static AUDIT_HEREDOC_OPEN: Pattern = Pattern::new(
+    r#"(?<!<)<<(-?)\s*(['\"]?)([A-Za-z_][\w.-]*)\2"#,
+    Flags::NONE,
+);
+static AUDIT_RUNS_OUTPUT: Pattern = Pattern::new(
+    r#"<\(|\beval\b|(?:^|\s)-(?=[A-Za-z]*c)[A-Za-z]+(?:\s|$)|(?:^|[;&|(])\s*\"?\$\([^()]*$"#,
+    Flags::NONE,
+);
+const AUDIT_FILE_TOOLS: &[&str] = &["Read", "Edit", "Write"];
+const AUDIT_MAX_BYTES: usize = 1 << 20;
+const AUDIT_WRITE_ONLY: &str = "audit rows are written only by the host's bound service token";
 
 macro_rules! secret_words {
     () => {
@@ -445,8 +522,515 @@ fn audit_target(raw: &str, home: &str) -> String {
         .collect()
 }
 
-pub fn audit_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("audit"))
+fn user_home() -> String {
+    std::env::home_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default()
+}
+
+fn env_dir(var: &str, fallback: &str) -> Option<PathBuf> {
+    match std::env::var_os(var).filter(|v| !v.is_empty()) {
+        Some(v) => Some(PathBuf::from(v)),
+        None => std::env::home_dir().map(|h| h.join(fallback)),
+    }
+}
+
+/// This host's Paseo server id, else None.
+fn paseo_server() -> Option<String> {
+    let text = read_text(&env_dir("PASEO_HOME", ".paseo")?.join("server-id")).ok()?;
+    let server = strip(&text);
+    PASEO_ID.is_full(server).then(|| server.to_string())
+}
+
+/// A message or tool_result content as text: a string, or its joined text blocks.
+fn retro_text(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter_map(|b| b.as_object()?.get("text")?.as_str())
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => String::new(),
+    }
+}
+
+/// The config.md frontmatter of home, or none when the file is missing.
+fn config_meta(config: &Path) -> Res<Vec<(String, String)>> {
+    if !config.is_file() {
+        return Ok(Vec::new());
+    }
+    Ok(frontmatter(config)
+        .map_err(|e| fail(os_error(&e, Some(config)), 1))?
+        .0)
+}
+
+fn retro_host() -> Res<String> {
+    let meta = config_meta(&factory_home()?.join("config.md"))?;
+    Ok(match fm_get(&meta, "device") {
+        Some(device) if !device.is_empty() => device.to_string(),
+        _ => hostname(),
+    })
+}
+
+fn retro_transcripts() -> PathBuf {
+    env_dir("CLAUDE_CONFIG_DIR", ".claude")
+        .unwrap_or_default()
+        .join("projects")
+}
+
+/// `sorted(folder.glob(prefix + "*" + suffix))`, by name. A folder that cannot be listed has none.
+fn glob(folder: &Path, prefix: &str, suffix: &str) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    let mut found: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.len() >= prefix.len() + suffix.len()
+                && name.starts_with(prefix)
+                && name.ends_with(suffix)
+        })
+        .map(|e| e.path())
+        .collect();
+    found.sort();
+    found
+}
+
+fn file_name(p: &Path) -> String {
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+fn stem(p: &Path) -> String {
+    p.file_stem()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// The one input field that says what a tool call acted on, or "" for a tool without one.
+fn audit_target_raw(name: &str, inp: &Map<String, Value>) -> String {
+    let text = |key: &str| inp.get(key).and_then(Value::as_str).unwrap_or("");
+    match name {
+        "Bash" => text("command").into(),
+        _ if AUDIT_FILE_TOOLS.contains(&name) => text("file_path").into(),
+        "Grep" | "Glob" => {
+            let path = text("path");
+            let tail = if path.is_empty() {
+                String::new()
+            } else {
+                format!(" in {path}")
+            };
+            format!("{}{tail}", text("pattern"))
+        }
+        "WebFetch" => text("url").into(),
+        "WebSearch" => text("query").into(),
+        "Agent" | "Task" => format!("{}: {}", text("subagent_type"), text("description")),
+        _ => String::new(),
+    }
+}
+
+/// command with the body lines of cat and tee heredocs blanked, unless Bash runs or expands them.
+fn audit_strip_data_heredocs(command: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    let mut pending: Vec<(String, bool, bool)> = Vec::new();
+    let mut depth: i64 = 0;
+    for line in command.split('\n') {
+        if let Some((delimiter, data, quoted)) = pending.first() {
+            if strip(line) == delimiter {
+                pending.remove(0);
+                depth = 0;
+                out.push(line);
+            } else if !quoted && (depth != 0 || line.contains("$(")) {
+                depth = (depth + line.matches('(').count() as i64
+                    - line.matches(')').count() as i64)
+                    .max(0);
+                out.push(line);
+            } else {
+                out.push(if *data && (*quoted || !line.contains('`')) {
+                    ""
+                } else {
+                    line
+                });
+            }
+            continue;
+        }
+        out.push(line);
+        for m in AUDIT_HEREDOC_OPEN.find_iter(line) {
+            let c = AUDIT_HEREDOC_OPEN.match_start(&line[m.start()..]).unwrap();
+            let (before, after) = (&line[..m.start()], &line[m.end()..]);
+            let segment = before.rsplit([';', '&', '|', '(']).next().unwrap_or("");
+            let first = segment.split(is_space).find(|w| !w.is_empty());
+            let data = matches!(first, Some("cat" | "tee"))
+                && after.chars().next().is_none_or(is_space)
+                && AUDIT_RUNS_OUTPUT.search(before).is_none()
+                && !(after.contains('|') || after.contains(">("));
+            pending.push((group(&c, 3).to_string(), data, !group(&c, 2).is_empty()));
+        }
+    }
+    out.join("\n")
+}
+
+/// The names of the risky shapes one call matches, matched on the raw target. main drops pr-merge.
+fn audit_flags(
+    name: &str,
+    inp: &Map<String, Value>,
+    raw: &str,
+    denied: bool,
+    main: bool,
+) -> Vec<&'static str> {
+    let mut flags: Vec<&'static str> = AUDIT_FLAGS
+        .iter()
+        .filter(|(flag, pattern)| {
+            name == "Bash" && !(main && *flag == "pr-merge") && pattern.search(raw).is_some()
+        })
+        .map(|(flag, _)| *flag)
+        .collect();
+    if name == "Bash" && inp.get("dangerouslyDisableSandbox") == Some(&Value::Bool(true)) {
+        flags.push("sandbox-off");
+    }
+    let path = match name {
+        "Bash" => Some(audit_strip_data_heredocs(raw)),
+        "Grep" => inp.get("path").and_then(Value::as_str).map(String::from),
+        _ if AUDIT_FILE_TOOLS.contains(&name) => Some(raw.to_string()),
+        _ => None,
+    };
+    if path.is_some_and(|p| AUDIT_SECRET_FILE.search(&p).is_some()) {
+        flags.push("secret-file");
+    }
+    if denied {
+        flags.push("denied");
+    }
+    flags
+}
+
+/// {time, tool, flags, target} for every tool_use block in one transcript. main skips isSidechain lines.
+fn audit_scan(path: &Path, main: bool) -> Res<Vec<Map<String, Value>>> {
+    let lines = read_lines(path, None).map_err(|e| fail(os_error(&e, Some(path)), 1))?;
+    let (mut calls, mut denied) = (Vec::new(), Vec::new());
+    for line in &lines {
+        let Ok(Value::Object(e)) = loads(line) else {
+            continue;
+        };
+        if main && truthy(e.get("isSidechain")) {
+            continue;
+        }
+        let kind = e.get("type").and_then(Value::as_str);
+        let content = e
+            .get("message")
+            .and_then(Value::as_object)
+            .and_then(|m| m.get("content"));
+        let blocks = content.and_then(Value::as_array).into_iter().flatten();
+        for b in blocks.filter_map(Value::as_object) {
+            let block = b.get("type").and_then(Value::as_str);
+            if kind == Some("assistant") && block == Some("tool_use") {
+                let stamp = e.get("timestamp").and_then(Value::as_str).unwrap_or("");
+                let inp = b
+                    .get("input")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                calls.push((
+                    b.get("id").cloned().unwrap_or(Value::Null),
+                    stamp.replace('T', " ").chars().take(19).collect::<String>(),
+                    py_str(b.get("name")),
+                    inp,
+                ));
+            } else if kind == Some("user")
+                && block == Some("tool_result")
+                && b.get("is_error") == Some(&Value::Bool(true))
+            {
+                let text = retro_text(b.get("content").unwrap_or(&Value::Null));
+                if RETRO_DENIALS.iter().any(|phrase| text.contains(phrase)) {
+                    denied.push(b.get("tool_use_id").cloned().unwrap_or(Value::Null));
+                }
+            }
+        }
+    }
+    let home = user_home();
+    Ok(calls
+        .into_iter()
+        .map(|(id, stamp, name, inp)| {
+            let raw = audit_target_raw(&name, &inp);
+            let flags = audit_flags(&name, &inp, &raw, denied.contains(&id), main);
+            let target = audit_target(&raw, &home);
+            let target = if target.is_empty() {
+                "-".into()
+            } else {
+                target
+            };
+            let row = json!({"time": stamp, "tool": name, "flags": flags, "target": target});
+            row.as_object().unwrap().clone()
+        })
+        .collect())
+}
+
+/// {Claude session id: Paseo agent id} from the agent files on this host. Skips files it cannot read.
+fn audit_paseo_agents() -> HashMap<String, String> {
+    let mut agents = HashMap::new();
+    let Some(root) = env_dir("PASEO_HOME", ".paseo") else {
+        return agents;
+    };
+    let mut paths: Vec<PathBuf> = Vec::new();
+    for folder in glob(&root.join("agents"), "", "") {
+        if folder.is_dir() {
+            paths.extend(glob(&folder, "", ".json"));
+        }
+    }
+    paths.sort();
+    for path in paths {
+        let Some(data) = read_text(&path).ok().and_then(|t| loads(&t).ok()) else {
+            continue;
+        };
+        let session = data.get("persistence").and_then(|p| p.get("sessionId"));
+        if let (Some(Value::String(session)), Some(Value::String(agent))) =
+            (session, data.get("id"))
+        {
+            if PASEO_ID.is_full(agent) {
+                agents.insert(session.clone(), agent.clone());
+            }
+        }
+    }
+    agents
+}
+
+/// The sorted transcript folders this host keeps from the job's worktrees.
+fn audit_folders(job_id: &str) -> io::Result<Vec<PathBuf>> {
+    let mut found = Vec::new();
+    for entry in fs::read_dir(retro_transcripts())? {
+        let path = entry?.path();
+        if path.is_dir() && folder_names_job(&file_name(&path), job_id) {
+            found.push(path);
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
+/// (rows, main session count) for every transcript this host keeps from the job's worktree.
+fn audit_rows(job_id: &str) -> Res<(Vec<Map<String, Value>>, usize)> {
+    let root = retro_transcripts();
+    if !root.is_dir() {
+        return Err(fail(
+            format!("no Claude Code transcripts at {}", root.display()),
+            4,
+        ));
+    }
+    let (mut rows, mut sessions) = (Vec::new(), 0);
+    let (server, agents) = (paseo_server(), audit_paseo_agents());
+    let folders = audit_folders(job_id).map_err(|e| fail(os_error(&e, Some(&root)), 1))?;
+    for project in folders {
+        for path in glob(&project, "", ".jsonl") {
+            sessions += 1;
+            let session_id = stem(&path);
+            let session: String = session_id.chars().take(8).collect();
+            let link = match (&server, agents.get(&session_id)) {
+                (Some(server), Some(agent)) => Some(json!({"server": server, "agent": agent})),
+                _ => None,
+            };
+            let mut add = |agent: &str, scanned: Vec<Map<String, Value>>| {
+                for row in scanned {
+                    let mut full = Map::new();
+                    full.insert("session".into(), Value::from(session.clone()));
+                    full.insert("agent".into(), Value::from(agent));
+                    full.extend(row);
+                    if let Some(link) = &link {
+                        full.insert("paseo".into(), link.clone());
+                    }
+                    rows.push(full);
+                }
+            };
+            add("main", audit_scan(&path, true)?);
+            for sub in glob(&project.join(&session_id).join("subagents"), "", ".jsonl") {
+                let meta = sub.with_file_name(format!("{}.meta.json", stem(&sub)));
+                let kind = match read_text(&meta).ok().and_then(|t| loads(&t).ok()) {
+                    Some(Value::Object(m)) if truthy(m.get("agentType")) => {
+                        py_str(m.get("agentType"))
+                    }
+                    _ => "unknown".into(),
+                };
+                let kind: String = kind
+                    .chars()
+                    .map(|c| if is_audit_control(c) { '?' } else { c })
+                    .collect();
+                add(&kind, audit_scan(&sub, false)?);
+            }
+        }
+    }
+    if sessions == 0 {
+        return Err(fail(
+            format!("no Claude Code session on this host ran in a factory-{job_id} worktree"),
+            4,
+        ));
+    }
+    let key = |r: &Map<String, Value>, k: &str| r[k].as_str().unwrap_or("").to_string();
+    rows.sort_by_key(|r| (key(r, "time"), key(r, "session")));
+    Ok((rows, sessions))
+}
+
+/// How many of the oldest lines to drop so the rest fit in max bytes.
+fn fit(lines: &[String], max: usize) -> usize {
+    let mut size: usize = lines.iter().map(String::len).sum();
+    let mut dropped = 0;
+    while size > max {
+        size -= lines[dropped].len();
+        dropped += 1;
+    }
+    dropped
+}
+
+/// PUT this host's audit rows for the job to the Worker under its device name, oldest rows dropped
+/// past 1 MiB.
+pub(crate) fn audit_push(job_id: &str) -> Res<()> {
+    let home = factory_home()?;
+    let config = home.join("config.md");
+    let meta = config_meta(&config)?;
+    let device = fm_get(&meta, "device").unwrap_or("");
+    let hint = format!(
+        "set device: in {}; pair this host with factory.py host pair <id> <code>",
+        config.display()
+    );
+    if !HOST_NAME.is_full(device) {
+        return Err(fail(hint, 2));
+    }
+    let rows = audit_rows(job_id)?.0;
+    let lines: Vec<String> = rows
+        .into_iter()
+        .map(|row| {
+            let mut full = Map::new();
+            full.insert("host".into(), Value::from(device));
+            full.insert("job".into(), Value::from(job_id));
+            full.extend(row);
+            dumps(&Value::Object(full), DEFAULT) + "\n"
+        })
+        .collect();
+    let dropped = fit(&lines, AUDIT_MAX_BYTES);
+    let key = format!("audit/{job_id}/{device}.jsonl");
+    let r = api(
+        &home,
+        "PUT",
+        &format!("/api/{key}"),
+        Some(lines[dropped..].concat().as_bytes()),
+        &[200, 403],
+        &[("Content-Type", "application/x-ndjson")],
+    )?;
+    if r.status == 403 && strip(&r.text()?) == AUDIT_WRITE_ONLY {
+        return Err(fail(format!("{AUDIT_WRITE_ONLY}. {hint}"), 2));
+    }
+    if r.status == 403 {
+        return Err(fail(access_message(&home.join(".env")), 5));
+    }
+    let n = lines.len();
+    let calls = if n == 1 { "call" } else { "calls" };
+    if dropped > 0 {
+        println!(
+            "pushed {} of {n} {calls} to {key}; the oldest {dropped} did not fit in 1 MiB",
+            n - dropped
+        );
+    } else {
+        println!("pushed {n} {calls} to {key}");
+    }
+    Ok(())
+}
+
+/// The newest mtime in nanoseconds of the job's session and subagent transcripts here, or None
+/// with no session.
+#[allow(dead_code)] // pickup calls it
+pub(crate) fn audit_stamp(job_id: &str) -> Option<i128> {
+    let folders = audit_folders(job_id).ok()?;
+    let mut files: Vec<PathBuf> = Vec::new();
+    for folder in &folders {
+        files.extend(glob(folder, "", ".jsonl"));
+    }
+    if files.is_empty() {
+        return None;
+    }
+    for folder in &folders {
+        for sub in glob(folder, "", "") {
+            files.extend(glob(&sub.join("subagents"), "", ".jsonl"));
+        }
+    }
+    let mut newest = None;
+    for path in files {
+        let modified = fs::metadata(path).ok()?.modified().ok()?;
+        let ns = match modified.duration_since(UNIX_EPOCH) {
+            Ok(d) => d.as_nanos() as i128,
+            Err(e) => -(e.duration().as_nanos() as i128),
+        };
+        newest = newest.max(Some(ns));
+    }
+    newest
+}
+
+pub fn audit_cmd(call: &Call) -> Res<()> {
+    let args = &call.args;
+    if args.len() == 2 {
+        if args[0] != "push" || !NEW_JOB_ID.is_full(&args[1]) {
+            return Err(fail(
+                "usage: factory.py audit push <job-id>, a full job id such as 1017-add-x",
+                2,
+            ));
+        }
+        return audit_push(&args[1]);
+    }
+    let job_id = &args[0];
+    if !NEW_JOB_ID.is_full(job_id) {
+        return Err(fail(
+            "usage: factory.py audit <job-id>, a full job id such as 1017-add-x",
+            2,
+        ));
+    }
+    let (rows, sessions) = audit_rows(job_id)?;
+    let flagged = rows
+        .iter()
+        .filter(|r| r["flags"].as_array().is_some_and(|f| !f.is_empty()))
+        .count();
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
+    println!(
+        "job {job_id} on {}: {} call{} in {sessions} session{}, {flagged} flagged",
+        retro_host()?,
+        rows.len(),
+        plural(rows.len()),
+        plural(sessions)
+    );
+    let columns = ["time", "session", "agent", "tool", "flags", "target"];
+    let mut lines: Vec<Vec<String>> = vec![columns.iter().map(|c| c.to_string()).collect()];
+    for r in &rows {
+        let text = |k: &str| r[k].as_str().unwrap_or("").to_string();
+        let flags: Vec<&str> = r["flags"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        let flags = if flags.is_empty() {
+            "-".to_string()
+        } else {
+            flags.join(",")
+        };
+        lines.push(vec![
+            text("time"),
+            text("session"),
+            text("agent"),
+            text("tool"),
+            flags,
+            text("target"),
+        ]);
+    }
+    let widths: Vec<usize> = (0..columns.len())
+        .map(|i| lines.iter().map(|l| l[i].chars().count()).max().unwrap())
+        .collect();
+    for line in &lines {
+        let cells: Vec<String> = line
+            .iter()
+            .zip(&widths)
+            .map(|(cell, w)| format!("{cell:<w$}"))
+            .collect();
+        println!("{}", rstrip(&cells.join("  ")));
+    }
+    Ok(())
 }
 
 pub fn usage_cmd(_call: &Call) -> Res<()> {
@@ -574,5 +1158,43 @@ mod tests {
             t("echo ok\x1b[1A\x1b[2K\rgit status\u{9b}"),
             "echo ok?[1A?[2K git status?"
         );
+    }
+
+    #[test]
+    fn runs_output_is_linear() {
+        let start = std::time::Instant::now();
+        let text = format!(" -{}!", "c".repeat(100_000));
+        assert!(AUDIT_RUNS_OUTPUT.search(&text).is_none());
+        assert!(start.elapsed().as_secs_f64() < 1.0);
+    }
+
+    #[test]
+    fn pr_merge_main_only() {
+        let merge = json!({"command": "gh pr merge 7"});
+        let merge = merge.as_object().unwrap();
+        let raw = audit_target_raw("Bash", merge);
+        assert!(audit_flags("Bash", merge, &raw, false, true).is_empty());
+        assert_eq!(audit_flags("Bash", merge, &raw, false, false), ["pr-merge"]);
+        let push = json!({"command": "gh pr merge 7 && git push --force"});
+        let push = push.as_object().unwrap();
+        let raw = audit_target_raw("Bash", push);
+        assert_eq!(audit_flags("Bash", push, &raw, false, true), ["force-push"]);
+    }
+
+    #[test]
+    fn push_trims_oldest() {
+        let lines: Vec<String> = (0..6).map(|n| format!("{{\"row\": {n}}}\n")).collect();
+        let full: usize = lines.iter().map(String::len).sum();
+        assert_eq!(fit(&lines, full), 0);
+        assert_eq!(fit(&lines, full - 1), 1);
+    }
+
+    #[test]
+    fn names_job_boundary() {
+        let needles = ["1017-add-x".to_string()];
+        assert!(names_job("jobs/a/1017-add-x/spec.md", &needles));
+        assert!(names_job("jobs/a/1017-add-x", &needles));
+        assert!(!names_job("jobs/a/1017-add-xy", &needles));
+        assert!(!names_job("jobs/a/1017-add-x-2", &needles));
     }
 }
