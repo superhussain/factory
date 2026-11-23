@@ -546,6 +546,15 @@ fn transcript_lines(path: &Path, mut each: impl FnMut(&str)) -> io::Result<()> {
     Ok(())
 }
 
+/// RETRO_POLLS then ROUND_DIR as linear-time supersets, so scan runs their searches only on a hit.
+fn scan_set() -> &'static RegexSet {
+    static SET: OnceLock<RegexSet> = OnceLock::new();
+    SET.get_or_init(|| {
+        let polls = RETRO_POLLS.iter().map(|(_, p)| p.linear());
+        RegexSet::new(polls.chain([ROUND_DIR.linear()])).unwrap()
+    })
+}
+
 /// One transcript reduced to digest fields. main=false also counts isSidechain lines.
 fn scan(path: &Path, main: bool) -> io::Result<Value> {
     let (mut usage, mut usage_at) = (Vec::<[i64; 4]>::new(), HashMap::<String, usize>::new());
@@ -619,7 +628,13 @@ fn scan(path: &Path, main: bool) -> io::Result<Value> {
                     dumps(b.get("id").unwrap_or(&Value::Null), DEFAULT),
                     (name.clone(), inp.clone()),
                 );
-                for m in ROUND_DIR.find_iter(&dumps(&inp, DEFAULT)) {
+                let dumped = dumps(&inp, DEFAULT);
+                let rounds = if scan_set().matches(&dumped).matched(RETRO_POLLS.len()) {
+                    ROUND_DIR.find_iter(&dumped).collect()
+                } else {
+                    Vec::new()
+                };
+                for m in rounds {
                     let digits =
                         m.as_str()["round-".len()..m.as_str().len() - 1].trim_start_matches('0');
                     let digits = if digits.is_empty() { "0" } else { digits };
@@ -642,8 +657,9 @@ fn scan(path: &Path, main: bool) -> io::Result<Value> {
                     _ => None,
                 };
                 if let Some(Value::String(target)) = target {
+                    let hits = scan_set().matches(target);
                     for (n, (_, p)) in RETRO_POLLS.iter().enumerate() {
-                        polls[n] += i64::from(p.search(target).is_some());
+                        polls[n] += i64::from(hits.matched(n) && p.search(target).is_some());
                     }
                     if name == "Bash" {
                         count(&mut cmds, command_key(target));
@@ -5810,7 +5826,7 @@ mod tests {
         out
     }
 
-    /// Texts each REDACT_ORDER pattern matches, with Unicode case and space look-alikes. Tokens are built
+    /// Texts each REDACT_ORDER and scan_set pattern matches, with Unicode case and space look-alikes. Tokens are built
     /// at run time so no secret-shaped literal sits in the source.
     fn crafted_corpus() -> Vec<String> {
         let (a24, a70) = ("a1B2".repeat(6), "a".repeat(70));
@@ -5843,6 +5859,10 @@ mod tests {
             "cf-access-client-secret",
             "CF-Access-Client-Secret: v",
             "-----BEGIN RSA PRIVATE KEY-----",
+            "until [ -f done ]; do sleep 1; done",
+            "cat /tmp/x/tasks/b1-2.output",
+            "stat -f %m file",
+            "{\"file_path\": \"jobs/x/round-2/review.md\"}",
         ]
         .map(String::from)
         .into();
@@ -5899,6 +5919,26 @@ mod tests {
             // tool_pass reads its gates one line at a time.
             if text.contains('\n') {
                 text.split('\n').for_each(|line| check(line, TOOL_GATES));
+            }
+        }
+        assert!(matched.iter().all(|&n| n > 0), "{matched:?}");
+    }
+
+    #[test]
+    fn scan_supersets_cover_every_match() {
+        let scan: Vec<&Pattern> = RETRO_POLLS
+            .iter()
+            .map(|(_, p)| p)
+            .chain([&ROUND_DIR])
+            .collect();
+        let mut matched = vec![0; scan.len()];
+        for text in parity_corpus().iter().chain(&crafted_corpus()) {
+            let hits = scan_set().matches(text);
+            for (i, p) in scan.iter().enumerate() {
+                if p.search(text).is_some() {
+                    matched[i] += 1;
+                    assert!(hits.matched(i), "pattern {i} on {text:?}");
+                }
             }
         }
         assert!(matched.iter().all(|&n| n > 0), "{matched:?}");
