@@ -41,17 +41,17 @@ is involved.
 
 The pnpm scripts are the source of truth (`package.json`):
 
-| Script | What it runs |
-| --- | --- |
-| `lint` | `oxlint` over `worker tools tests` |
-| `format:check` | `oxfmt --check` over `worker tools tests paseo-plugin` (CI gate; `tests/fixtures/` excluded by `.oxfmtrc.json`) |
-| `format` | `oxfmt` over `worker tools tests paseo-plugin`, rewriting in place |
-| `test:assets` | Asset build, deployment dry-run, bundle verification |
-| `test:auth` | Asset preparation, then production auth unit suites |
-| `test:protocol` | Asset preparation, then v1 protocol, settings, lockfile suites |
-| `test:local` | Local integration check on owned loopback ports |
-| `test:browser` | Full browser suite |
-| `test:deploy` | Deployment tooling tests and projections |
+| Script          | What it runs                                                                                                    |
+| --------------- | --------------------------------------------------------------------------------------------------------------- |
+| `lint`          | `oxlint` over `worker tools tests`                                                                              |
+| `format:check`  | `oxfmt --check` over `worker tools tests paseo-plugin` (CI gate; `tests/fixtures/` excluded by `.oxfmtrc.json`) |
+| `format`        | `oxfmt` over `worker tools tests paseo-plugin`, rewriting in place                                              |
+| `test:assets`   | Asset build, deployment dry-run, bundle verification                                                            |
+| `test:auth`     | Asset preparation, then production auth unit suites                                                             |
+| `test:protocol` | Asset preparation, then v1 protocol, settings, lockfile suites                                                  |
+| `test:local`    | Local integration check on owned loopback ports                                                                 |
+| `test:browser`  | Full browser suite                                                                                              |
+| `test:deploy`   | Deployment tooling tests and projections                                                                        |
 
 Type checking is allowlisted per module: `mise exec -- pnpm run check:types` runs `tsc --strict` over the converted modules only (`worker/access.ts` today). Modules join the allowlist by adding them to `tsconfig.json` `include` as they are converted.
 
@@ -112,12 +112,12 @@ mise exec -- pnpm exec nx affected -t auth protocol assets deploy local browser 
 mise exec -- pnpm exec nx run-many -t cli install verify
 ```
 
-| Project | Target | Runs |
-| --- | --- | --- |
-| `worker-hosted` | `auth`, `protocol` | `pnpm run test:auth`, `pnpm run test:protocol` |
-| `web-dashboard` | `assets` | `pnpm run test:assets` |
-| `tooling` | `deploy`, `local`, `browser`, `verify` | `pnpm run test:deploy`, `pnpm run test:local`, `pnpm run test:browser`, `pnpm run test:verify` |
-| `device-bundle` | `cli`, `install` | `pnpm run test:cli`, `pnpm run test:install` |
+| Project         | Target                                 | Runs                                                                                           |
+| --------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `worker-hosted` | `auth`, `protocol`                     | `pnpm run test:auth`, `pnpm run test:protocol`                                                 |
+| `web-dashboard` | `assets`                               | `pnpm run test:assets`                                                                         |
+| `tooling`       | `deploy`, `local`, `browser`, `verify` | `pnpm run test:deploy`, `pnpm run test:local`, `pnpm run test:browser`, `pnpm run test:verify` |
+| `device-bundle` | `cli`, `install`                       | `pnpm run test:cli`, `pnpm run test:install`                                                   |
 
 Selection is input-based, so shared Worker code invalidates the assets build and
 both Worker suites. `worker-hosted`'s suites depend on `web-dashboard:assets`
@@ -141,14 +141,14 @@ runs them directly with no Node. Lint and format run as package scripts (`pnpm r
 records matched before and after views. Each `view(...)` line in
 `tests/browser/run.mjs` sets one view's name, viewport and theme.
 
-| Viewport | Used by |
-| --- | --- |
-| 1440x900 | desktop views, `retros-flags-offline-desktop`, `board-merged-all-1440`, `board-merged-header-1440`, `board-merged-loading-1440`, `board-merged-saved-click-1440`, `board-banner-saved-1440`, `board-offline-deeplink-1440`, `board-saved-deeplink-1440`, `board-saved-deeplink-back-1440`, `board-merged-160-1763`, `board-merged-160-1763-loading`, `header-badges-1440`, `halt-banner-1440`, `backlog-lesson-desktop` |
-| 1280x900 | settings, archive and agent-run views, `notify-toast-1280`, `notify-toast-top-left-1280`, `notify-toast-bottom-center-status-1280`, `notify-toast-corner-status-1280`, `display-toast-position-1280`, `notifications-menu-kinds-1280`, `notifications-split-1280`, `notifications-page-hidden-links-1280`, `notify-sound-wait-1280`, `retros-split-1280`, `settings-split-1280`, `approve-spec-drawer-1280`, `approve-spec-failed-1280`, `inbox-spec-1280`, `inbox-unblock-1280`, `resolve-drawer-1280`, `inbox-resolve-1280`, `steer-drawer-1280`, `steer-human-1280`, `grounding-tab-1280`, `grounding-chips-1280`, `not-before-launch-1280`, `job-tokens-1280`, `settings-halt-1280`, `settings-halt-blank-1280`, `inbox-lesson-1280`, `pipeline-trials-1280` |
-| 390x844 | mobile views, `notify-toast-390`, `notify-toast-swipe-390` (touch), `notify-toast-bottom-status-390`, `notify-alerts-390`, `board-merged-header-390`, `approve-spec-drawer-390`, `babysit-drawer-390`, `rework-dialog-390`, `rework-dialog-saving-390`, `steer-dialog-390`, `grounding-tab-390` (touch), `job-tokens-390`, `halt-banner-390`, `backlog-lesson-mobile`, `inbox-lesson-390` and `pipeline-trials-390` |
-| 375x667 | `drawer-mobile-scrolled` |
-| 320x844 | `header-notifications-320` |
-| 900x900 | `inbox-split-900` |
+| Viewport | Used by                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1440x900 | desktop views, `retros-flags-offline-desktop`, `board-merged-all-1440`, `board-merged-header-1440`, `board-merged-loading-1440`, `board-merged-saved-click-1440`, `board-banner-saved-1440`, `board-offline-deeplink-1440`, `board-saved-deeplink-1440`, `board-saved-deeplink-back-1440`, `board-merged-160-1763`, `board-merged-160-1763-loading`, `header-badges-1440`, `halt-banner-1440`, `backlog-lesson-desktop`                                                                                                                                                                                                                                                                                                                                                                     |
+| 1280x900 | settings, archive and agent-run views, `notify-toast-1280`, `notify-toast-top-left-1280`, `notify-toast-bottom-center-status-1280`, `notify-toast-corner-status-1280`, `display-toast-position-1280`, `notifications-menu-kinds-1280`, `notifications-split-1280`, `notifications-page-hidden-links-1280`, `notify-sound-wait-1280`, `retros-split-1280`, `settings-split-1280`, `approve-spec-drawer-1280`, `approve-spec-failed-1280`, `inbox-spec-1280`, `inbox-unblock-1280`, `resolve-drawer-1280`, `inbox-resolve-1280`, `steer-drawer-1280`, `steer-human-1280`, `grounding-tab-1280`, `grounding-chips-1280`, `not-before-launch-1280`, `job-tokens-1280`, `settings-halt-1280`, `settings-halt-blank-1280`, `inbox-lesson-1280`, `pipeline-trials-1280`, `idea-chips-loading-1280` |
+| 390x844  | mobile views, `notify-toast-390`, `notify-toast-swipe-390` (touch), `notify-toast-bottom-status-390`, `notify-alerts-390`, `board-merged-header-390`, `approve-spec-drawer-390`, `babysit-drawer-390`, `rework-dialog-390`, `rework-dialog-saving-390`, `steer-dialog-390`, `grounding-tab-390` (touch), `job-tokens-390`, `halt-banner-390`, `backlog-lesson-mobile`, `inbox-lesson-390` and `pipeline-trials-390`                                                                                                                                                                                                                                                                                                                                                                         |
+| 375x667  | `drawer-mobile-scrolled`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 320x844  | `header-notifications-320`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 900x900  | `inbox-split-900`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 - Board data is the fixed `CAPTURE_JOBS`, `CAPTURE_MERGED` and `CAPTURE_BACKLOG` fixtures.
 - `FACTORY_CAPTURE_VIEWS=a,b` limits a run to the named views.
