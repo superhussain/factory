@@ -188,7 +188,7 @@ class WatchTest(IsolatedTestCase):
 
     def test_skill_uses_watch(self):
         skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn('`python3 "$RUNTIME" watch "$SLUG/<id>" <artifact>...` with the Bash tool timeout at 600000 ms',
+        self.assertIn('`"$RUNTIME" watch "$SLUG/<id>" <artifact>...` with the Bash tool timeout at 600000 ms',
                       skill)
         self.assertIn('`"event": "timeout"`', skill)
         self.assertIn('"event": "malformed"', skill)

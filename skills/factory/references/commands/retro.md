@@ -5,18 +5,18 @@ and the unacknowledged red flags (`red_flags` in `aggregate.json`) and closed or
 into a ranked `findings.md`, up to 5 backlog lines that wait for a person, and up to 2
 stage-note edits that retro admit saves as restorable pipeline versions.
 
-1. Run `python3 "$RUNTIME" trial settle`. Report its output. On a nonzero exit, note
+1. Run `"$RUNTIME" trial settle`. Report its output. On a nonzero exit, note
    the exit code and continue.
-2. Run `python3 "$RUNTIME" retro push`. On a nonzero exit, note the exit code and
+2. Run `"$RUNTIME" retro push`. On a nonzero exit, note the exit code and
    continue.
-3. Run `python3 "$RUNTIME" retro aggregate [--days N]`. On exit 3, report the stderr
+3. Run `"$RUNTIME" retro aggregate [--days N]`. On exit 3, report the stderr
    line and stop. On any other nonzero exit, report the exit code and stop. On exit 0,
    read `run`, `aggregate`, `digest`, `transcripts`, `out`, `findings` and `stale`
    from the printed JSON, and `host` from the `aggregate` file.
 4. Dispatch one `factory-retro` subagent, giving it `run`, `aggregate`, `digest`,
    `transcripts` and `host`.
 5. Write its reply byte for byte to `out`.
-6. Run `python3 "$RUNTIME" retro admit <run>`. Report its output and the `findings`
+6. Run `"$RUNTIME" retro admit <run>`. Report its output and the `findings`
    path. Then name each host in `stale` as `stale: <host>, latest digest <latest>`,
    with `latest` from that host's entry in the `aggregate` file's `hosts`. Exit 3
    means the agent found nothing, autonomy is paused, or every card was a duplicate,

@@ -135,7 +135,7 @@ class WaitTest(IsolatedTestCase):
         ban = ("Never poll for job files with `until` or `while` loops, `sleep`, file mtimes, quiet windows, "
                "Monitor or a task's output file.")
         self.assertIn(ban, skill)
-        self.assertIn('`python3 "$RUNTIME" wait "$SLUG/<id>" <artifact>...` once, with the Bash tool timeout at '
+        self.assertIn('`"$RUNTIME" wait "$SLUG/<id>" <artifact>...` once, with the Bash tool timeout at '
                       '600000 ms.', skill)
         self.assertIn("`watch` and `wait` print those first lines.", skill)
         rest = skill.replace(ban, "")

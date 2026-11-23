@@ -10,7 +10,7 @@ Keep secrets out of it: the Worker serves it to anyone past Access. Use 1 to 4
 questions, 2 to 4 options each, the recommended option first, and `Pick: one` or
 `Pick: many`. Add a numbered `## Steps` section for action asks and a
 `## When you are done` section with the exact command that lets you continue.
-An orchestrator may submit a person's chat answers with `factory.py needs answer`, as
+An orchestrator may submit a person's chat answers with `factory needs answer`, as
 [chat decisions](chat-decisions.md) says; its answers.md says `from chat by <device>`.
 
 ```text

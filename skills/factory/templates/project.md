@@ -12,7 +12,7 @@ Project context for the factory agents. The orchestrator passes this file to
 every agent, and each one reads the sections named for it. Keep it to what is true
 of this repo. The installed factory skill owns the shared loop and agents.
 
-This file lives in R2 behind the factory Worker, outside the repo. `factory.py`
+This file lives in R2 behind the factory Worker, outside the repo. `factory`
 caches it in `<factory-home>/projects/`. The frontmatter names the
 GitHub repo, the base branch for PRs, and a display title. `repo`, `base` and
 `title` are required. `archive`, `buildkite_org`, `auto_babysit` and `weekly_tokens` are optional. Uncomment
