@@ -3127,8 +3127,18 @@ def autonomy_cmd(sub, slug=None, cls=None):
         if gate["why"]:
             fail(f"{slug} {cls} cannot be promoted yet: {'; '.join(gate['why'])}; nothing was changed", 3)
         return gate
-    if sub == "promote":
-        promotion(read_board(home))
+
+    def restored_map(data):
+        raw = data.get("autonomy")
+        stored = raw.get("restored", {}) if isinstance(raw, dict) else {}
+        if not isinstance(stored, dict):
+            fail("autonomy.restored is not a map; nothing was changed", 3)
+        return stored
+    if lifts:
+        fresh = read_board(home)
+        if sub == "promote":
+            promotion(fresh)
+        restored_map(fresh)
     listed = load_autonomy(read_board(home))["projects"] if sub == "allow" else []
     if listed and slug not in listed:
         fail(f"only one project may be on the autonomy allowlist; run autonomy deny {listed[0]} first", 2)
@@ -3156,7 +3166,7 @@ def autonomy_cmd(sub, slug=None, cls=None):
             record["projects"] = [p for p in record["projects"] if p != slug]
         elif lifts:
             gate = promotion(data) if sub == "promote" else None
-            record["restored"] = {**autonomy_restored(data), f"{slug}/{cls}": stamp}
+            record["restored"] = {**restored_map(data), f"{slug}/{cls}": stamp}
             if gate:
                 until = (stamp_of(stamp) + timedelta(days=AUTONOMY_COOLDOWN_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
                 raw = data.get("autonomy")
