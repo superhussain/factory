@@ -10,9 +10,9 @@ use serde_json::{json, Value};
 use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use ureq::Agent;
 
-use crate::cli::Call;
+use crate::cli::{not_ported, Call};
 use crate::shared::board::{dump_board, load_board, read_board};
-use crate::shared::consts::{NOTE_INVISIBLE, SLUG};
+use crate::shared::consts::{IDEA, IN_FLIGHT, JOB_ID, NOTE_INVISIBLE, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
 use crate::shared::fs::{read_text, regular_metadata};
 use crate::shared::home::factory_home;
@@ -38,6 +38,7 @@ const TRACER_STAGES: [&str; 7] = [
 const TRACER_GATHER_STAGES: [&str; 2] = ["idea", "spec"];
 pub(crate) const TRACER_GATE_NOTE: &str = "gate: tracer-scope";
 pub(crate) const TRACER_APPROVED_NOTE: &str = "spec approved in Tracer";
+#[allow(dead_code)] // The claims slice reads it.
 pub(crate) const SPEC_APPROVED_NOTES: [&str; 2] =
     [TRACER_APPROVED_NOTE, "spec approved on the dashboard"];
 const TRACER_STARTING: &str = "The companion is starting this build";
@@ -472,7 +473,7 @@ struct TracerCfg {
 /// projects' entries are not validated.
 fn read_tracer(home: &Path, only: Option<&str>) -> Res<BTreeMap<String, TracerCfg>> {
     let path = home.join("tracer.json");
-    if std::fs::symlink_metadata(&path).is_err() {
+    if !lexists(&path) {
         return Ok(BTreeMap::new());
     }
     let bad = |what: &str| fail(format!("{}: {what}", path.display()), 2);
@@ -1135,6 +1136,441 @@ pub(crate) fn receipt_cas<T>(
     Ok(result)
 }
 
+fn lexists(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).is_ok()
+}
+
+/// Create the job's Tracer feature with a gather run and record its scope.
+fn tracer_gather(
+    home: &Path,
+    slug: &str,
+    job: &Value,
+    cfg: &TracerCfg,
+    log: &mut String,
+) -> Res<()> {
+    job.get("id").ok_or_else(|| py_error("KeyError"))?;
+    let base = cfg.url.as_str();
+    let token = tracer_token(slug, Path::new(&cfg.token_file))?;
+    let (ticket, feature_id) = tracer_ids(job)?;
+    let origin = api_url(home)?;
+    let job_id = job["id"].as_str().ok_or_else(|| py_error("TypeError"))?;
+    let link = format!("{origin}/#{job_id}");
+    let idea = strip(&text_of(job.get("idea"))).to_string();
+    let title = text_of(job.get("title"));
+    let first_line = strip(idea.split('\n').next().unwrap_or(""));
+    let title = [strip(&title), first_line, job_id]
+        .into_iter()
+        .find(|t| !t.is_empty())
+        .unwrap_or("");
+    let title = chars(title, 200);
+    let ticket_text = chars(if idea.is_empty() { &title } else { &idea }, 20000);
+    let body = json!({
+        "id": feature_id,
+        "job": job_id,
+        "ticket": ticket,
+        "title": title,
+        "ticket_text": ticket_text,
+        "services": [{"name": cfg.service, "language": cfg.language}],
+        "start_gather": true,
+        "reading": format!("Gathered for factory job {job_id}: {link}. Approve or decline scope here. The factory builds this feature from its own spec and stops any Tracer build that approval starts."),
+    });
+    let feature = tracer_create(base, &token, &body, &ticket)?;
+    let id = match &feature {
+        Value::Object(f) => f.get("id").ok_or_else(|| py_error("KeyError"))?,
+        _ => return Err(py_error("TypeError")),
+    };
+    let scope = tracer_scope(&feature)?;
+    let receipt = tracer_receipt(&feature, &feature_id, &ticket, job_id)?;
+    let Value::String(id) = id else {
+        return Err(py_error("TypeError"));
+    };
+    tracer_record(home, job, base, id, Some(scope), receipt.as_ref(), log)
+}
+
+/// Record the scope of a gathering job's Tracer feature once Tracer decides it. Polls only the
+/// feature id the job itself maps to, and only when the board names that feature. Returns the
+/// scope it read, or None when it polled nothing.
+fn tracer_poll_scope(
+    home: &Path,
+    slug: &str,
+    job: &Value,
+    cfg: &TracerCfg,
+    log: &mut String,
+) -> Res<Option<&'static str>> {
+    let (ticket, feature_id) = tracer_ids(job)?;
+    if job["tracer"].get("feature").and_then(Value::as_str) != Some(feature_id.as_str()) {
+        return Ok(None);
+    }
+    let base = cfg.url.as_str();
+    let token = tracer_token(slug, Path::new(&cfg.token_file))?;
+    let path = format!("api/features/{feature_id}");
+    let (_, feature) = tracer_call(base, &token, "GET", &path, None, &[200])?;
+    if !feature.is_object() {
+        return Err(fail(
+            format!("Tracer GET {path} returned a body that is not a feature"),
+            5,
+        ));
+    }
+    if ticket_of(feature.get("ticket")) != ticket {
+        return Err(fail(
+            format!(
+                "Tracer feature {feature_id} for job {} belongs to {}",
+                py_str(&job["id"]),
+                tracer_ticket_label(feature.get("ticket").unwrap_or(&Value::Null))
+            ),
+            5,
+        ));
+    }
+    let scope = tracer_scope(&feature)?;
+    if scope != "gathering" {
+        let job_id = job["id"].as_str().unwrap_or_default();
+        let receipt = tracer_receipt(&feature, &feature_id, &ticket, job_id)?;
+        tracer_record(
+            home,
+            job,
+            base,
+            &feature_id,
+            Some(scope),
+            receipt.as_ref(),
+            log,
+        )?;
+    }
+    Ok(Some(scope))
+}
+
+/// Stop the Tracer build that scope approval queued for the job's own feature and record
+/// tracer.stopped. While the companion is still starting the run, leave it for the next pickup.
+fn tracer_stop_build(home: &Path, slug: &str, job: &Value, cfg: &TracerCfg) -> Res<()> {
+    let feature_id = tracer_ids(job)?.1;
+    if job["tracer"].get("feature").and_then(Value::as_str) != Some(feature_id.as_str()) {
+        return Ok(());
+    }
+    let token = tracer_token(slug, Path::new(&cfg.token_file))?;
+    let (status, answer) = tracer_call(
+        &cfg.url,
+        &token,
+        "POST",
+        &format!("api/features/{feature_id}/build-runs/stop"),
+        Some(&json!({})),
+        &[202, 404, 409],
+    )?;
+    let detail = answer.get("detail").and_then(Value::as_str);
+    if status == 409 && detail.is_some_and(|d| d.starts_with(TRACER_STARTING)) {
+        return Ok(());
+    }
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        let Some(found) = board_job(&mut data, job.get("id")) else {
+            return Ok((None, ()));
+        };
+        let mut tracer = match found.get("tracer") {
+            Some(Value::Object(t)) => t.clone(),
+            _ => serde_json::Map::new(),
+        };
+        tracer.insert("stopped".into(), json!(true));
+        found["tracer"] = Value::Object(tracer);
+        data["updated"] = json!(now());
+        Ok((Some(dump_board(&data)), ()))
+    })
+}
+
+/// Mirror the job a board patch just changed, when its project is configured. A pending Tracer
+/// build stop runs first, and the stage mirror still follows it. A Tracer failure costs one
+/// warning line on stderr, never the board change.
+#[allow(dead_code)] // The board command in the claims slice calls it.
+pub(crate) fn tracer_after_board(home: &Path, job: &Value) {
+    after_board_to(home, job, &mut std::io::stderr().lock());
+}
+
+fn after_board_to(home: &Path, job: &Value, err: &mut dyn Write) {
+    let slug = job.get("project").unwrap_or(&Value::Null);
+    let job_id = py_str(job.get("id").unwrap_or(&Value::Null));
+    if !lexists(&home.join("tracer.json")) || !JOB_ID.is_full(&job_id) || job_id.contains("..") {
+        return;
+    }
+    let mut step = "mirror";
+    let mut log = String::new();
+    let Err(e) = after_board_steps(home, slug, &job_id, job, &mut step, &mut log) else {
+        return;
+    };
+    let reason = match py_kind(&e) {
+        Some(kind) => kind.to_string(),
+        None => squash(&(log + &e.stderr)).replacen("factory.py: ", "", 1),
+    };
+    let reason = if reason.is_empty() {
+        "unknown error"
+    } else {
+        &reason
+    };
+    let slug = py_str(slug);
+    let retry = if step == "mirror" {
+        format!("run factory.py tracer sync {slug}/{job_id} to retry")
+    } else {
+        "the next pickup retries (or run factory.py pickup)".to_string()
+    };
+    let _ = writeln!(
+        err,
+        "factory.py: warning: Tracer {step} of {slug}/{job_id} failed: {}. The board change was saved; {retry}.",
+        reason.trim_end_matches('.')
+    );
+}
+
+fn after_board_steps(
+    home: &Path,
+    slug: &Value,
+    job_id: &str,
+    job: &Value,
+    step: &mut &'static str,
+    log: &mut String,
+) -> Res<()> {
+    let cfgs = read_tracer(home, slug.as_str())?;
+    let Some((slug, cfg)) = slug.as_str().and_then(|s| Some((s, cfgs.get(s)?))) else {
+        return Ok(());
+    };
+    let tracer = job.get("tracer").filter(|t| t.is_object());
+    let get = |key: &str| tracer.and_then(|t| t.get(key));
+    if !tracer_enabled(home)? {
+        return Ok(());
+    }
+    if is_true(get("follow"))
+        && is_true(get("gather"))
+        && !get("feature").is_some_and(truthy)
+        && stage_of(job).is_some_and(|s| TRACER_GATHER_STAGES.contains(&s))
+    {
+        *step = "gather";
+        tracer_gather(home, slug, job, cfg, log)?;
+    } else if get("scope").and_then(Value::as_str) == Some("gathering") {
+        *step = "scope poll";
+        if tracer_poll_scope(home, slug, job, cfg, log)? == Some("approved")
+            && is_true(get("gather"))
+        {
+            *step = "build stop";
+            tracer_stop_build(home, slug, job, cfg)?;
+        }
+    } else {
+        if tracer_stop_due(job) {
+            *step = "build stop";
+            tracer_stop_build(home, slug, job, cfg)?;
+            *step = "mirror";
+        }
+        let spec = home.join("jobs").join(slug).join(job_id).join("spec.md");
+        if stage_of(job).is_some_and(|s| TRACER_STAGES.contains(&s)) && spec.is_file() {
+            tracer_mirror(home, slug, job, cfg, log)?;
+        }
+    }
+    Ok(())
+}
+
+/// Stands in for the sync slice's `pull_job` until that slice lands.
+fn deferred_pull_job(_home: &Path, _slug: &str, _job_id: &str) -> Res<()> {
+    Err(not_ported("pull"))
+}
+
+/// Mirror each followed job that has no Tracer link yet, pulling its spec.md first when this
+/// device lacks it. A job that gathers in Tracer, or asks to, is gathered or polled without a
+/// pull. Silent on a device without tracer.json.
+#[allow(dead_code)] // The pickup slice calls it.
+pub(crate) fn tracer_follow_pass(home: &Path) -> Res<()> {
+    follow_pass_to(home, &mut std::io::stderr().lock())
+}
+
+fn follow_pass_to(home: &Path, err: &mut dyn Write) -> Res<()> {
+    if !lexists(&home.join("tracer.json")) || !tracer_enabled(home)? {
+        return Ok(());
+    }
+    let board = read_board(home)?;
+    for job in board["jobs"].as_array().into_iter().flatten() {
+        let Some(tracer) = job.get("tracer").filter(|t| t.is_object()) else {
+            continue;
+        };
+        if !is_true(tracer.get("follow")) {
+            continue;
+        }
+        let stage = stage_of(job);
+        let has_url = tracer.get("url").is_some_and(truthy);
+        let gathering = tracer.get("scope").and_then(Value::as_str) == Some("gathering")
+            || is_true(tracer.get("gather"))
+                && !has_url
+                && stage.is_some_and(|s| TRACER_GATHER_STAGES.contains(&s))
+            || tracer_stop_due(job);
+        if !gathering && (has_url || !stage.is_some_and(|s| TRACER_STAGES.contains(&s))) {
+            continue;
+        }
+        let Some(slug) = job
+            .get("project")
+            .and_then(Value::as_str)
+            .filter(|s| SLUG.is_full(s))
+        else {
+            continue;
+        };
+        let job_id = py_str(job.get("id").unwrap_or(&Value::Null));
+        if !JOB_ID.is_full(&job_id) || job_id.contains("..") {
+            continue;
+        }
+        let spec = home.join("jobs").join(slug).join(&job_id).join("spec.md");
+        if !gathering && !spec.is_file() {
+            // Python ignores every pull failure here.
+            let _ = deferred_pull_job(home, slug, &job_id);
+        }
+        after_board_to(home, job, err);
+    }
+    Ok(())
+}
+
+/// What the build check found for one job: (job id, building, task summary or None).
+type BuildMark = (String, bool, Option<Value>);
+
+/// Mark each idea or in-flight job whose Tracer feature a Tracer build agent holds, and clear
+/// the mark when it stops. Save the feature's task summary once it builds and refresh it while
+/// the job stays checked; a 404 drops it. A Tracer failure costs one stderr warning and leaves
+/// unchecked jobs as they were. A device without tracer.json only clears marks, and only while
+/// Tracer is off. True when it wrote the board.
+#[allow(dead_code)] // The pickup slice calls it.
+pub(crate) fn tracer_build_pass(home: &Path, jobs: Option<&[Value]>) -> Res<bool> {
+    build_pass_to(home, jobs, &mut std::io::stderr().lock())
+}
+
+fn build_pass_to(home: &Path, jobs: Option<&[Value]>, err: &mut dyn Write) -> Res<bool> {
+    let configured = lexists(&home.join("tracer.json"));
+    let mut found: Vec<BuildMark> = Vec::new();
+    if let Err(e) = build_check(home, jobs, configured, &mut found) {
+        let reason = squash(&e.stderr).replacen("factory.py: ", "", 1);
+        let reason = if reason.is_empty() {
+            "unknown error"
+        } else {
+            &reason
+        };
+        let _ = writeln!(
+            err,
+            "factory.py: warning: Tracer build check failed: {}. Unchecked jobs keep their Building in Tracer mark.",
+            reason.trim_end_matches('.')
+        );
+    }
+    if found.is_empty() {
+        return Ok(false);
+    }
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        for j in data["jobs"].as_array_mut().into_iter().flatten() {
+            let id = j.get("id").and_then(Value::as_str);
+            let Some((_, building, tasks)) = found.iter().find(|f| Some(f.0.as_str()) == id) else {
+                continue;
+            };
+            let mut tracer = match j.get("tracer") {
+                Some(Value::Object(t)) => t.clone(),
+                _ => serde_json::Map::new(),
+            };
+            if *building {
+                tracer.insert("building".into(), json!(true));
+            } else {
+                tracer.shift_remove("building");
+            }
+            match tasks {
+                None => {
+                    tracer.shift_remove("tasks");
+                }
+                Some(tasks) => {
+                    tracer.insert("tasks".into(), tasks.clone());
+                }
+            }
+            if tracer.is_empty() {
+                j.as_object_mut().unwrap().shift_remove("tracer");
+            } else {
+                j["tracer"] = Value::Object(tracer);
+            }
+        }
+        data["updated"] = json!(now());
+        Ok((Some(dump_board(&data)), ()))
+    })?;
+    Ok(true)
+}
+
+fn build_check(
+    home: &Path,
+    jobs: Option<&[Value]>,
+    configured: bool,
+    found: &mut Vec<BuildMark>,
+) -> Res<()> {
+    let board;
+    let jobs = match jobs {
+        Some(jobs) => jobs,
+        None => {
+            board = read_board(home)?;
+            board["jobs"].as_array().map_or(&[][..], Vec::as_slice)
+        }
+    };
+    let cfgs = if configured {
+        if tracer_enabled(home)? {
+            read_tracer(home, None)?
+        } else {
+            BTreeMap::new()
+        }
+    } else if jobs.iter().any(tracer_building) && !tracer_enabled(home)? {
+        BTreeMap::new()
+    } else {
+        return Ok(());
+    };
+    let mut mark = |job_id: String, building: bool, tasks: Option<Value>| match found
+        .iter_mut()
+        .find(|f| f.0 == job_id)
+    {
+        Some(f) => *f = (job_id, building, tasks),
+        None => found.push((job_id, building, tasks)),
+    };
+    for job in jobs {
+        let job_id = py_str(job.get("id").unwrap_or(&Value::Null));
+        if !JOB_ID.is_full(&job_id) || job_id.contains("..") {
+            continue;
+        }
+        let held = job.get("tracer").filter(|t| t.is_object());
+        let held_tasks = held.and_then(|t| t.get("tasks")).filter(|t| !t.is_null());
+        let slug = job.get("project").and_then(Value::as_str);
+        let in_scope = slug.is_some_and(|s| cfgs.contains_key(s))
+            && stage_of(job).is_some_and(|s| s == IDEA || IN_FLIGHT.contains(&s));
+        if !in_scope {
+            if tracer_building(job) {
+                mark(job_id, false, held_tasks.cloned());
+            }
+            continue;
+        }
+        let (ticket, feature_id) = tracer_ids(job)?;
+        match held.and_then(|t| t.get("feature")) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(f)) if *f == feature_id => {}
+            Some(_) => continue,
+        }
+        let slug = slug.unwrap();
+        let cfg = &cfgs[slug];
+        let path = format!("api/features/{}", quote_all(&feature_id));
+        let token = tracer_token(slug, Path::new(&cfg.token_file))?;
+        let (status, feature) = tracer_call(&cfg.url, &token, "GET", &path, None, &[200, 404])?;
+        if status == 200 && !feature.is_object() {
+            return Err(fail(
+                format!("Tracer GET {path} returned a body that is not a feature"),
+                5,
+            ));
+        }
+        if status == 200 && ticket_of(feature.get("ticket")) != ticket {
+            return Err(fail(
+                format!(
+                    "Tracer feature {feature_id} for job {} belongs to {}",
+                    py_str(&job["id"]),
+                    tracer_ticket_label(feature.get("ticket").unwrap_or(&Value::Null))
+                ),
+                5,
+            ));
+        }
+        let building = tracer_feature_building(&feature, &ticket);
+        let keeps_tasks = held.is_some_and(|t| t.get("tasks").is_some());
+        let tasks = (status == 200 && feature.is_object() && (building || keeps_tasks))
+            .then(|| Value::Array(tracer_task_summary(&feature)));
+        if building != tracer_building(job) || tasks.as_ref() != held_tasks {
+            mark(job_id, building, tasks);
+        }
+    }
+    Ok(())
+}
+
 /// `tracer sync`, writing its lines to out.
 fn sync(home: &Path, slug: &str, job_id: &str, out: &mut dyn Write) -> Res<()> {
     if !tracer_enabled(home)? {
@@ -1243,6 +1679,7 @@ pub fn tracer_cmd(call: &Call) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::board::merge_patch;
     use crate::shared::fs::{resolve, temp_dir};
     use serde_json::Map;
     use std::io::{BufRead, BufReader, Read, Write};
@@ -2375,5 +2812,1005 @@ Nothing.
         let (code, out, _) = run_sync(&t, "");
         assert_eq!((code, out.lines().count()), (0, 1));
         assert!(out.contains("nothing to mirror"), "{out}");
+    }
+
+    const PICKUP_TAIL: &str = "the next pickup retries (or run factory.py pickup).";
+    const APPROVED_AT: &str = "2026-01-02T00:00:00Z";
+    const UNSIGNED_NEEDS: &str = "Tracer approved scope for factory-1 without a signed receipt: run /factory approve-spec 001-sample or press Approve spec to build";
+
+    fn receipt(feature: &str, ticket: &str, job: &str) -> Value {
+        json!({"job": job, "feature": feature, "ticket": ticket, "approved_at": APPROVED_AT,
+               "signature": format!("{}==", "A".repeat(86))})
+    }
+
+    /// The board command's merge patch and write, then the Tracer hook on the patched job.
+    fn board_patch(fake: &Fake, t: &TempHome, patch: Value) -> String {
+        let job = {
+            let mut s = fake.state();
+            let job = merge_patch(s.board["jobs"][0].take(), &patch);
+            s.board["jobs"][0] = job.clone();
+            s.board_writes += 1;
+            job
+        };
+        let mut err = Vec::new();
+        after_board_to(&t.path, &job, &mut err);
+        String::from_utf8(err).unwrap()
+    }
+
+    fn follow(t: &TempHome) -> String {
+        let mut err = Vec::new();
+        follow_pass_to(&t.path, &mut err).unwrap();
+        String::from_utf8(err).unwrap()
+    }
+
+    fn writes(fake: &Fake) -> u32 {
+        fake.state().board_writes
+    }
+
+    fn stops(fake: &Fake) -> Vec<(String, Value)> {
+        fake.requests()
+            .into_iter()
+            .filter(|r| r.1 == "/api/features/factory-1/build-runs/stop")
+            .map(|r| (r.0, r.2))
+            .collect()
+    }
+
+    #[test]
+    fn board_stage_patch_mirrors_feature() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        assert_eq!(board_patch(&fake, &t, json!({"stage": "spec"})), "");
+        let feature = fake.feature("plan-1234");
+        assert_eq!(feature["ticket"], "PLAN-1234");
+        assert_eq!(feature["title"], "Sample feature");
+        assert_eq!(
+            feature["services"],
+            json!([{"name": "sample", "language": "Python"}])
+        );
+        assert_eq!(
+            feature["reading"],
+            format!("Built by the factory as job 001-sample: {}/#001-sample. The factory builds this feature, so approving scope in Tracer starts a second build.", fake.origin)
+        );
+        let requests = fake.requests();
+        let posted = requests
+            .iter()
+            .find(|r| r.0 == "POST" && r.1 == "/api/features")
+            .unwrap();
+        assert!(posted.2.get("start_gather").is_none());
+        assert_eq!(
+            feature["agents"],
+            json!([{"name": "Factory builder", "role": "Builds 001-sample from its spec", "id": "factory-builder"}])
+        );
+        let tasks: BTreeMap<String, Value> = feature["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| (t["id"].as_str().unwrap().to_string(), t.clone()))
+            .collect();
+        assert_eq!(tasks.keys().collect::<Vec<_>>(), ["t1", "t2", "t3"]);
+        let field = |key: &str| tasks.values().map(|t| t[key].clone()).collect::<Vec<_>>();
+        assert_eq!(
+            field("title"),
+            [
+                json!("First step"),
+                json!("Second step"),
+                json!("Third step")
+            ]
+        );
+        assert_eq!(tasks["t1"]["path"], "src/one.py");
+        assert!(tasks["t2"].get("path").is_none());
+        assert!(tasks["t1"]["what"].as_str().unwrap().contains("do one."));
+        assert_eq!(
+            field("depends_on"),
+            [json!([]), json!(["t1"]), json!(["t2"])]
+        );
+        assert_eq!(
+            tasks["t3"]["why"],
+            "Task 3 of the factory spec for 001-sample."
+        );
+        assert!(field("agent").iter().all(|a| a == "factory-builder"));
+        assert!(field("status").iter().all(|s| s == "not_started"));
+    }
+
+    #[test]
+    fn follow_patch_mirrors_and_links() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        assert_eq!(
+            board_patch(&fake, &t, json!({"tracer": {"follow": true}})),
+            ""
+        );
+        assert!(fake.state().features.contains_key("plan-1234"));
+        assert_eq!(
+            fake.job()["tracer"],
+            json!({"follow": true, "feature": "plan-1234", "url": format!("{}/#/f/plan-1234", fake.url())})
+        );
+        assert_eq!(writes(&fake), 2);
+        board_patch(&fake, &t, json!({"stage": "build"}));
+        assert_eq!(writes(&fake), 3);
+    }
+
+    #[test]
+    fn follow_pass_once() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        set_job(&fake, "stage", json!("build"));
+        set_job(&fake, "tracer", json!({"follow": true}));
+        set_job(&fake, "jira", Value::Null);
+        std::fs::remove_file(t.folder().join("spec.md")).unwrap();
+        std::fs::remove_file(t.path.join("tracer.json")).unwrap();
+        assert_eq!(follow(&t), "");
+        assert_eq!((writes(&fake), fake.requests().len()), (0, 0));
+        t.configure(&fake.url());
+        // The pull of a missing spec.md waits for the sync slice, so nothing mirrors yet.
+        assert_eq!(follow(&t), "");
+        assert_eq!((writes(&fake), fake.requests().len()), (0, 0));
+        std::fs::write(t.folder().join("spec.md"), SPEC).unwrap();
+        assert_eq!(follow(&t), "");
+        assert_eq!(fake.feature("factory-1")["ticket"], "FACTORY-1");
+        assert_eq!(
+            fake.job()["tracer"],
+            json!({"follow": true, "feature": "factory-1", "url": format!("{}/#/f/factory-1", fake.url())})
+        );
+        let calls = fake.requests().len();
+        follow(&t);
+        assert_eq!(fake.requests().len(), calls);
+    }
+
+    #[test]
+    fn unconfigured_project_and_unmirrored_stage_are_silent() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        assert_eq!(board_patch(&fake, &t, json!({"stage": "idea"})), "");
+        set_job(&fake, "project", json!("other"));
+        assert_eq!(board_patch(&fake, &t, json!({"stage": "build"})), "");
+        assert!(fake.requests().is_empty());
+    }
+
+    #[test]
+    fn unreachable_tracer_keeps_board_patch() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        t.configure(&dead_origin());
+        let err = board_patch(&fake, &t, json!({"stage": "build"}));
+        assert_eq!(fake.job()["stage"], "build");
+        assert_eq!(err.lines().count(), 1, "{err}");
+        assert!(err.starts_with(
+            "factory.py: warning: Tracer mirror of sample/001-sample failed: can't reach Tracer at "
+        ));
+        assert!(err.contains("run factory.py tracer sync sample/001-sample to retry."));
+    }
+
+    #[test]
+    fn slow_tracer_times_out_once() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        fake.state().delay = Duration::from_secs(6);
+        let started = std::time::Instant::now();
+        let err = board_patch(&fake, &t, json!({"stage": "build"}));
+        assert!(started.elapsed() < Duration::from_secs(6));
+        assert_eq!(err.lines().count(), 1, "{err}");
+        assert!(err.contains("failed: can't reach Tracer"), "{err}");
+        assert_eq!(fake.requests().len(), 1);
+    }
+
+    #[test]
+    fn another_projects_broken_entry_stays_silent() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        let doc = json!({"version": 1, "projects": {"other": {"url": "ftp://x", "token_file": "/x", "service": "x"}}});
+        std::fs::write(t.path.join("tracer.json"), doc.to_string()).unwrap();
+        assert_eq!(board_patch(&fake, &t, json!({"stage": "build"})), "");
+    }
+
+    #[test]
+    fn warning_does_not_double_a_final_period() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        fake.state().answer = Some((500, json!({"detail": "boom."})));
+        let err = board_patch(&fake, &t, json!({"stage": "build"}));
+        assert!(
+            err.contains("returned 500: boom. The board change was saved"),
+            "{err}"
+        );
+        assert!(!err.contains(".."), "{err}");
+    }
+
+    #[test]
+    fn broken_config_warns_without_failing_the_patch() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        std::fs::write(t.path.join("tracer.json"), "{nope").unwrap();
+        let err = board_patch(&fake, &t, json!({"stage": "build"}));
+        assert_eq!(err.lines().count(), 1, "{err}");
+        assert!(err.contains("failed:"), "{err}");
+    }
+
+    #[test]
+    fn token_never_printed() {
+        let fake = Fake::on();
+        let t = home(&fake);
+        fake.state().token = "another-token".into();
+        let (code, out, err) = run_sync(&t, "sample/001-sample");
+        assert_eq!(code, 5);
+        assert!(err.contains("returned 401"), "{err}");
+        assert!(err.contains("check token_file"), "{err}");
+        let err2 = board_patch(&fake, &t, json!({"stage": "build"}));
+        for text in [&out, &err, &err2] {
+            assert!(!text.contains(TOKEN), "{text}");
+        }
+        let fake = Fake::on();
+        let t = home(&fake);
+        fake.state().answer = Some((500, json!({"detail": format!("boom {TOKEN} boom")})));
+        let (code, out, err) = run_sync(&t, "sample/001-sample");
+        assert_eq!(code, 5);
+        assert!(err.contains("returned 500: boom [token] boom"), "{err}");
+        assert!(!(out + &err).contains(TOKEN));
+    }
+
+    fn gather_setup(fake: &Fake, t: &TempHome) {
+        set_job(fake, "stage", json!("idea"));
+        set_job(
+            fake,
+            "idea",
+            json!("Export samples as CSV\nWith a header row."),
+        );
+        set_job(fake, "jira", Value::Null);
+        set_job(fake, "title", Value::Null);
+        std::fs::remove_file(t.folder().join("spec.md")).unwrap();
+    }
+
+    fn gather(fake: &Fake, t: &TempHome) {
+        let err = board_patch(fake, t, json!({"tracer": {"follow": true, "gather": true}}));
+        assert_eq!(err, "");
+    }
+
+    fn hold_at_gate(fake: &Fake) {
+        set_job(fake, "stage", json!("needs-human"));
+        set_job(fake, "note", json!("gate: tracer-scope"));
+        set_job(fake, "needs", json!("waiting on Tracer"));
+    }
+
+    fn update_feature(fake: &Fake, id: &str, change: Value) {
+        let mut s = fake.state();
+        for (k, v) in change.as_object().unwrap() {
+            s.features[id][k] = v.clone();
+        }
+    }
+
+    /// A gathered job held at the gate whose feature Tracer approved with a signed receipt.
+    fn approve(fake: &Fake, t: &TempHome) {
+        gather(fake, t);
+        hold_at_gate(fake);
+        let signed = receipt("factory-1", "FACTORY-1", "001-sample");
+        update_feature(
+            fake,
+            "factory-1",
+            json!({"scope_approved_at": APPROVED_AT, "scope_receipt": signed}),
+        );
+    }
+
+    fn gather_home() -> (Fake, TempHome) {
+        let fake = Fake::on();
+        let t = home(&fake);
+        gather_setup(&fake, &t);
+        (fake, t)
+    }
+
+    #[test]
+    fn gather_patch_starts_gather() {
+        let (fake, t) = gather_home();
+        gather(&fake, &t);
+        let requests = fake.requests();
+        let posted = &requests
+            .iter()
+            .find(|r| r.0 == "POST" && r.1 == "/api/features")
+            .unwrap()
+            .2;
+        assert_eq!(posted["start_gather"], true);
+        assert_eq!(posted["job"], "001-sample");
+        assert_eq!(posted["ticket"], "FACTORY-1");
+        assert_eq!(posted["title"], "Export samples as CSV");
+        assert_eq!(
+            posted["ticket_text"],
+            "Export samples as CSV\nWith a header row."
+        );
+        assert_eq!(
+            posted["services"],
+            json!([{"name": "sample", "language": "Python"}])
+        );
+        assert_eq!(
+            posted["reading"],
+            format!("Gathered for factory job 001-sample: {}/#001-sample. Approve or decline scope here. The factory builds this feature from its own spec and stops any Tracer build that approval starts.", fake.origin)
+        );
+        assert_eq!(
+            fake.job()["tracer"],
+            json!({"follow": true, "gather": true, "feature": "factory-1",
+                   "url": format!("{}/#/f/factory-1", fake.url()), "scope": "gathering"})
+        );
+    }
+
+    #[test]
+    fn gathering_skips_task_mirror() {
+        let (fake, t) = gather_home();
+        gather(&fake, &t);
+        std::fs::write(t.folder().join("spec.md"), SPEC).unwrap();
+        let before = fake.requests().len();
+        assert_eq!(board_patch(&fake, &t, json!({"stage": "spec"})), "");
+        let after: Vec<String> = fake.requests()[before..]
+            .iter()
+            .map(|r| r.0.clone())
+            .collect();
+        assert_eq!(after, ["GET"]);
+        let (code, out, err) = run_sync(&t, "sample/001-sample");
+        assert_eq!((code, err.as_str()), (0, ""), "{err}");
+        assert_eq!(
+            out,
+            "sample/001-sample: skipped: Tracer is gathering scope\n"
+        );
+        assert_eq!(methods(&fake.requests(), "PUT"), 0);
+    }
+
+    #[test]
+    fn follow_pass_starts_gather_at_idea() {
+        let (fake, t) = gather_home();
+        set_job(&fake, "tracer", json!({"follow": true, "gather": true}));
+        assert_eq!(follow(&t), "");
+        assert_eq!(fake.feature("factory-1")["start_gather"], true);
+        assert_eq!(fake.job()["tracer"]["scope"], "gathering");
+    }
+
+    #[test]
+    fn scope_approval_starts_build() {
+        let (fake, t) = gather_home();
+        gather(&fake, &t);
+        hold_at_gate(&fake);
+        follow(&t);
+        assert_eq!(fake.job()["note"], "gate: tracer-scope");
+        let signed = receipt("factory-1", "FACTORY-1", "001-sample");
+        update_feature(
+            &fake,
+            "factory-1",
+            json!({"scope_approved_at": APPROVED_AT, "scope_receipt": signed}),
+        );
+        follow(&t);
+        let job = fake.job();
+        assert_eq!(
+            (
+                &job["stage"],
+                &job["note"],
+                &job["tracer"]["scope"],
+                &job["tracer"]["receipt"]
+            ),
+            (
+                &json!("build"),
+                &json!("spec approved in Tracer"),
+                &json!("approved"),
+                &signed
+            )
+        );
+        assert!(job.get("needs").is_none());
+        assert_eq!(job["updated"], fake.state().board["updated"]);
+        let calls = fake.requests().len();
+        follow(&t);
+        assert_eq!(fake.requests().len(), calls);
+    }
+
+    fn assert_unsigned_hold(fake: &Fake) {
+        let job = fake.job();
+        assert_eq!(
+            (
+                &job["stage"],
+                &job["note"],
+                &job["needs"],
+                &job["tracer"]["scope"]
+            ),
+            (
+                &json!("needs-human"),
+                &json!("gate: spec-approval"),
+                &json!(UNSIGNED_NEEDS),
+                &json!("approved")
+            )
+        );
+        assert!(job["tracer"].get("receipt").is_none());
+    }
+
+    #[test]
+    fn unsigned_scope_approval_holds_for_a_person() {
+        let (fake, t) = gather_home();
+        gather(&fake, &t);
+        hold_at_gate(&fake);
+        update_feature(
+            &fake,
+            "factory-1",
+            json!({"scope_approved_at": APPROVED_AT}),
+        );
+        follow(&t);
+        assert_unsigned_hold(&fake);
+    }
+
+    #[test]
+    fn receipt_for_another_feature_is_dropped() {
+        let (fake, t) = gather_home();
+        gather(&fake, &t);
+        hold_at_gate(&fake);
+        let other = receipt("factory-7", "FACTORY-7", "001-sample");
+        update_feature(
+            &fake,
+            "factory-1",
+            json!({"scope_approved_at": APPROVED_AT, "scope_receipt": other}),
+        );
+        follow(&t);
+        assert_unsigned_hold(&fake);
+    }
+
+    #[test]
+    fn receipt_for_another_job_is_dropped() {
+        let (fake, t) = gather_home();
+        gather(&fake, &t);
+        hold_at_gate(&fake);
+        let other = receipt("factory-1", "FACTORY-1", "007-sample-other");
+        update_feature(
+            &fake,
+            "factory-1",
+            json!({"scope_approved_at": APPROVED_AT, "scope_receipt": other}),
+        );
+        follow(&t);
+        assert_unsigned_hold(&fake);
+    }
+
+    #[test]
+    fn scope_approval_before_gate_keeps_stage() {
+        let (fake, t) = gather_home();
+        gather(&fake, &t);
+        follow(&t);
+        update_feature(
+            &fake,
+            "factory-1",
+            json!({"scope_approved_at": APPROVED_AT}),
+        );
+        follow(&t);
+        let job = fake.job();
+        assert_eq!(
+            (&job["stage"], &job["tracer"]["scope"]),
+            (&json!("idea"), &json!("approved"))
+        );
+        assert!(job.get("note").is_none());
+    }
+
+    #[test]
+    fn scope_decline_releases_gate() {
+        let (fake, t) = gather_home();
+        gather(&fake, &t);
+        hold_at_gate(&fake);
+        update_feature(&fake, "factory-1", json!({"closed": true}));
+        follow(&t);
+        let job = fake.job();
+        assert_eq!(
+            (&job["note"], &job["tracer"]["scope"]),
+            (&json!("gate: spec-approval"), &json!("declined"))
+        );
+        assert_eq!(
+            job["needs"],
+            "Tracer scope for factory-1 was declined: run /factory approve-spec 001-sample to build anyway, or close the job"
+        );
+    }
+
+    #[test]
+    fn refused_receipt_holds_for_a_person() {
+        let (fake, t) = gather_home();
+        approve(&fake, &t);
+        fake.state().refuse_receipt = true;
+        assert_eq!(follow(&t), "");
+        assert_unsigned_hold(&fake);
+    }
+
+    #[test]
+    fn receipt_cas_logs_the_refusal() {
+        let (fake, t) = gather_home();
+        fake.state().refuse_receipt = true;
+        let mut log = String::new();
+        let mut signed_tries = Vec::new();
+        receipt_cas(&t.path, &mut log, |text, signed, sent| {
+            signed_tries.push(signed);
+            let mut data = load_board(text)?;
+            if signed {
+                data["jobs"][0]["tracer"] = json!({"receipt": {}});
+                sent.push("001-sample".to_string());
+            }
+            Ok((Some(dump_board(&data)), ()))
+        })
+        .unwrap();
+        assert_eq!(signed_tries, [true, false]);
+        assert_eq!(
+            log,
+            format!("factory.py: PUT {}/api/board returned 400: {REFUSAL_TEXT}\nfactory.py: the Worker refused Tracer's receipt (check tracer_receipt_key); 001-sample waits at gate: spec-approval instead\n", fake.origin)
+        );
+        assert_eq!(writes(&fake), 1);
+    }
+
+    #[test]
+    fn poll_ignores_a_board_feature_that_is_not_the_jobs() {
+        let (fake, t) = gather_home();
+        gather(&fake, &t);
+        hold_at_gate(&fake);
+        fake.state().features.insert(
+            "factory-7".into(),
+            json!({"id": "factory-7", "ticket": "FACTORY-7", "tasks": [], "agents": [], "scope_approved_at": APPROVED_AT}),
+        );
+        fake.state().board["jobs"][0]["tracer"]["feature"] = json!("factory-7");
+        let before = fake.requests().len();
+        follow(&t);
+        assert_eq!(fake.requests().len(), before);
+        let job = fake.job();
+        assert_eq!(
+            (&job["note"], &job["tracer"]["scope"]),
+            (&json!("gate: tracer-scope"), &json!("gathering"))
+        );
+    }
+
+    #[test]
+    fn poll_refuses_a_feature_with_another_ticket() {
+        let (fake, t) = gather_home();
+        gather(&fake, &t);
+        hold_at_gate(&fake);
+        update_feature(
+            &fake,
+            "factory-1",
+            json!({"ticket": "FACTORY-7", "scope_approved_at": APPROVED_AT}),
+        );
+        let err = follow(&t);
+        assert!(
+            err.contains("Tracer feature factory-1 for job 001-sample belongs to FACTORY-7"),
+            "{err}"
+        );
+        let job = fake.job();
+        assert_eq!(
+            (&job["note"], &job["tracer"]["scope"]),
+            (&json!("gate: tracer-scope"), &json!("gathering"))
+        );
+        update_feature(&fake, "factory-1", json!({"ticket": null}));
+        let err = follow(&t);
+        assert!(err.contains("belongs to no ticket"), "{err}");
+    }
+
+    #[test]
+    fn scope_approval_stops_tracer_build() {
+        let (fake, t) = gather_home();
+        fake.state().stop_answer = (202, json!({"detail": "Stopped from Tracer."}));
+        approve(&fake, &t);
+        follow(&t);
+        assert_eq!(stops(&fake), [("POST".to_string(), json!({}))]);
+        let job = fake.job();
+        assert_eq!(
+            (
+                &job["stage"],
+                &job["tracer"]["scope"],
+                &job["tracer"]["stopped"]
+            ),
+            (&json!("build"), &json!("approved"), &json!(true))
+        );
+        let calls = fake.requests().len();
+        follow(&t);
+        assert_eq!(fake.requests().len(), calls);
+    }
+
+    const STARTING: &str = "The companion is starting this build. Try again shortly.";
+
+    #[test]
+    fn stop_retries_while_companion_starts() {
+        let (fake, t) = gather_home();
+        fake.state().stop_answer = (409, json!({ "detail": STARTING }));
+        approve(&fake, &t);
+        assert_eq!(follow(&t), "");
+        assert_eq!(stops(&fake).len(), 1);
+        assert!(fake.job()["tracer"].get("stopped").is_none());
+        fake.state().stop_answer = (202, json!({"detail": "Stopped from Tracer."}));
+        follow(&t);
+        assert_eq!(stops(&fake).len(), 2);
+        assert_eq!(fake.job()["tracer"]["stopped"], true);
+    }
+
+    #[test]
+    fn stop_done_when_nothing_to_stop() {
+        for answer in [
+            (409, json!({"detail": "No build is running."})),
+            (404, json!({"detail": "no feature"})),
+        ] {
+            let (fake, t) = gather_home();
+            fake.state().stop_answer = answer;
+            approve(&fake, &t);
+            follow(&t);
+            assert_eq!(stops(&fake).len(), 1);
+            assert_eq!(fake.job()["tracer"]["stopped"], true);
+        }
+    }
+
+    #[test]
+    fn stop_failure_warns() {
+        let (fake, t) = gather_home();
+        fake.state().stop_answer = (500, json!({"detail": "boom"}));
+        approve(&fake, &t);
+        let err = follow(&t);
+        assert_eq!(err.lines().count(), 1, "{err}");
+        assert!(err.contains("Tracer build stop of sample/001-sample failed: Tracer POST api/features/factory-1/build-runs/stop returned 500: boom"), "{err}");
+        assert!(
+            err.contains(&format!("The board change was saved; {PICKUP_TAIL}")),
+            "{err}"
+        );
+        assert!(!err.contains("tracer sync"));
+        let job = fake.job();
+        assert_eq!(job["tracer"]["scope"], "approved");
+        assert!(job["tracer"].get("stopped").is_none());
+    }
+
+    fn task_put_after_last_stop(fake: &Fake) -> bool {
+        let sent = fake.requests();
+        let last = sent
+            .iter()
+            .rposition(|r| r.1 == "/api/features/factory-1/build-runs/stop")
+            .unwrap();
+        sent[last + 1..]
+            .iter()
+            .any(|r| r.0 == "PUT" && r.1 == "/api/features/factory-1/tasks/t1")
+    }
+
+    #[test]
+    fn patch_with_pending_stop_mirrors_stage() {
+        let (fake, t) = gather_home();
+        fake.state().stop_answer = (409, json!({ "detail": STARTING }));
+        approve(&fake, &t);
+        follow(&t);
+        std::fs::write(t.folder().join("spec.md"), SPEC).unwrap();
+        fake.state().stop_answer = (500, json!({"detail": "boom"}));
+        let err = board_patch(&fake, &t, json!({"stage": "review"}));
+        assert_eq!(err.lines().count(), 1, "{err}");
+        assert!(
+            err.contains(&format!("The board change was saved; {PICKUP_TAIL}")),
+            "{err}"
+        );
+        assert!(!fake
+            .requests()
+            .iter()
+            .any(|r| r.0 == "PUT" && r.1 == "/api/features/factory-1/tasks/t1"));
+        fake.state().stop_answer = (202, json!({"detail": "Stopped from Tracer."}));
+        assert_eq!(board_patch(&fake, &t, json!({"stage": "review"})), "");
+        assert_eq!(stops(&fake).len(), 3);
+        assert_eq!(fake.job()["tracer"]["stopped"], true);
+        assert!(task_put_after_last_stop(&fake));
+    }
+
+    #[test]
+    fn patch_with_starting_stop_still_mirrors() {
+        let (fake, t) = gather_home();
+        fake.state().stop_answer = (409, json!({ "detail": STARTING }));
+        approve(&fake, &t);
+        follow(&t);
+        std::fs::write(t.folder().join("spec.md"), SPEC).unwrap();
+        assert_eq!(board_patch(&fake, &t, json!({"stage": "review"})), "");
+        assert_eq!(stops(&fake).len(), 2);
+        assert!(fake.job()["tracer"].get("stopped").is_none());
+        assert!(task_put_after_last_stop(&fake));
+    }
+
+    #[test]
+    fn gather_failure_names_the_step() {
+        let (fake, t) = gather_home();
+        t.configure(&dead_origin());
+        let err = board_patch(
+            &fake,
+            &t,
+            json!({"tracer": {"follow": true, "gather": true}}),
+        );
+        assert_eq!(err.lines().count(), 1, "{err}");
+        assert!(err.starts_with(
+            "factory.py: warning: Tracer gather of sample/001-sample failed: can't reach Tracer at "
+        ));
+        assert!(err.contains(PICKUP_TAIL));
+        assert!(!err.contains("tracer sync"));
+    }
+
+    #[test]
+    fn ungathered_job_never_stops() {
+        let (fake, t) = gather_home();
+        set_job(&fake, "stage", json!("build"));
+        set_job(&fake, "tracer", json!({"follow": true}));
+        std::fs::write(t.folder().join("spec.md"), SPEC).unwrap();
+        follow(&t);
+        update_feature(
+            &fake,
+            "factory-1",
+            json!({"scope_approved_at": APPROVED_AT}),
+        );
+        follow(&t);
+        board_patch(&fake, &t, json!({"stage": "review"}));
+        assert!(!fake.requests().is_empty());
+        assert!(stops(&fake).is_empty());
+        assert!(fake.job()["tracer"].get("stopped").is_none());
+    }
+
+    fn build_feature(change: Value) -> Value {
+        let mut feature = json!({"id": "plan-1234", "ticket": "PLAN-1234", "stage": "build", "tasks": [],
+            "agents": [{"id": "tracer-build-1", "stage": "build", "kind": "session"},
+                       {"id": "factory-builder", "stage": "build", "kind": "session"}]});
+        for (k, v) in change.as_object().unwrap() {
+            feature[k] = v.clone();
+        }
+        feature
+    }
+
+    fn build_tasks() -> Value {
+        json!([{"id": "t1", "title": "Add export button", "status": "done"},
+               {"id": "t2", "title": "Write CSV encoder", "status": "in_progress"},
+               {"id": "t3", "title": "Document export", "status": "not_started"}])
+    }
+
+    fn build_home() -> (Fake, TempHome) {
+        let fake = Fake::on();
+        let t = home(&fake);
+        set_job(&fake, "stage", json!("idea"));
+        (fake, t)
+    }
+
+    fn run_pass(t: &TempHome) -> String {
+        let mut err = Vec::new();
+        build_pass_to(&t.path, None, &mut err).unwrap();
+        String::from_utf8(err).unwrap()
+    }
+
+    fn put_feature(fake: &Fake, feature: Value) {
+        let id = feature["id"].as_str().unwrap().to_string();
+        fake.state().features.insert(id, feature);
+    }
+
+    #[test]
+    fn build_pass_marks_and_clears() {
+        let (fake, t) = build_home();
+        put_feature(&fake, build_feature(json!({})));
+        assert_eq!(run_pass(&t), "");
+        assert_eq!(fake.job()["tracer"], json!({"building": true, "tasks": []}));
+        assert_eq!(writes(&fake), 1);
+        run_pass(&t);
+        assert_eq!(writes(&fake), 1);
+        set_job(&fake, "tracer", json!({"follow": true, "building": true}));
+        update_feature(
+            &fake,
+            "plan-1234",
+            json!({"agents": [{"id": "factory-builder", "stage": "build", "kind": "session"}]}),
+        );
+        run_pass(&t);
+        assert_eq!(fake.job()["tracer"], json!({"follow": true}));
+        assert_eq!(writes(&fake), 2);
+        set_job(&fake, "tracer", json!({"building": true}));
+        assert!(build_pass_to(&t.path, None, &mut Vec::new()).unwrap());
+        assert!(fake.job().get("tracer").is_none());
+    }
+
+    #[test]
+    fn build_pass_without_tracer_json_keeps_mark_while_on() {
+        let (fake, t) = build_home();
+        set_job(&fake, "tracer", json!({"follow": true, "building": true}));
+        std::fs::remove_file(t.path.join("tracer.json")).unwrap();
+        assert!(!build_pass_to(&t.path, None, &mut Vec::new()).unwrap());
+        assert_eq!(
+            fake.job()["tracer"],
+            json!({"follow": true, "building": true})
+        );
+        assert_eq!(writes(&fake), 0);
+        assert!(fake.requests().is_empty());
+    }
+
+    #[test]
+    fn build_pass_not_building() {
+        let (fake, t) = build_home();
+        let run_agent = json!([{"id": "tracer-build-1", "stage": "build", "kind": "run"}]);
+        for feature in [
+            Some(build_feature(json!({"stage": "gather"}))),
+            Some(build_feature(json!({"closed": true}))),
+            Some(build_feature(json!({ "agents": run_agent }))),
+            None,
+        ] {
+            fake.state().features.clear();
+            if let Some(feature) = feature {
+                put_feature(&fake, feature);
+            }
+            assert_eq!(run_pass(&t), "");
+            assert!(fake.job().get("tracer").is_none());
+            assert_eq!(writes(&fake), 0);
+        }
+    }
+
+    #[test]
+    fn build_pass_saves_tasks() {
+        let (fake, t) = build_home();
+        let tasks: Vec<Value> = build_tasks()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| {
+                let mut t = t.clone();
+                t["kind"] = json!("code");
+                t
+            })
+            .collect();
+        put_feature(&fake, build_feature(json!({ "tasks": tasks })));
+        assert_eq!(run_pass(&t), "");
+        assert_eq!(
+            fake.job()["tracer"],
+            json!({"building": true, "tasks": build_tasks()})
+        );
+        assert_eq!(writes(&fake), 1);
+        run_pass(&t);
+        assert_eq!(writes(&fake), 1);
+    }
+
+    #[test]
+    fn build_pass_refreshes_and_drops_tasks() {
+        let (fake, t) = build_home();
+        put_feature(&fake, build_feature(json!({ "tasks": build_tasks() })));
+        run_pass(&t);
+        {
+            let mut s = fake.state();
+            let feature = &mut s.features["plan-1234"];
+            feature["agents"] = json!([]);
+            feature["tasks"][1]["status"] = json!("done");
+        }
+        assert_eq!(run_pass(&t), "");
+        let mut done = build_tasks();
+        done[1]["status"] = json!("done");
+        assert_eq!(fake.job()["tracer"], json!({ "tasks": done }));
+        assert_eq!(writes(&fake), 2);
+        run_pass(&t);
+        assert_eq!(writes(&fake), 2);
+        fake.state().features.clear();
+        assert_eq!(run_pass(&t), "");
+        assert!(fake.job().get("tracer").is_none());
+        assert_eq!(writes(&fake), 3);
+    }
+
+    #[test]
+    fn build_pass_tracer_down_keeps_board() {
+        let (fake, t) = build_home();
+        t.configure(&dead_origin());
+        set_job(&fake, "tracer", json!({"building": true}));
+        let err = run_pass(&t);
+        assert_eq!(err.lines().count(), 1, "{err}");
+        assert!(err.contains("warning: Tracer build check failed"), "{err}");
+        assert_eq!(fake.job()["tracer"], json!({"building": true}));
+        assert_eq!(writes(&fake), 0);
+    }
+
+    #[test]
+    fn build_pass_ignores_a_board_feature_that_is_not_the_jobs() {
+        let (fake, t) = build_home();
+        put_feature(&fake, build_feature(json!({"id": "factory-7"})));
+        set_job(
+            &fake,
+            "tracer",
+            json!({"feature": "factory-7", "tasks": []}),
+        );
+        assert_eq!(run_pass(&t), "");
+        assert!(fake.requests().is_empty());
+        assert_eq!(writes(&fake), 0);
+        assert_eq!(
+            fake.job()["tracer"],
+            json!({"feature": "factory-7", "tasks": []})
+        );
+        put_feature(&fake, build_feature(json!({})));
+        set_job(&fake, "tracer", json!({"feature": "plan-1234"}));
+        run_pass(&t);
+        assert_eq!(fake.job()["tracer"]["building"], true);
+    }
+
+    #[test]
+    fn build_pass_refuses_a_feature_with_another_ticket() {
+        let (fake, t) = build_home();
+        put_feature(&fake, build_feature(json!({"ticket": "PLAN-9"})));
+        set_job(&fake, "tracer", json!({"building": true}));
+        let err = run_pass(&t);
+        assert_eq!(err.lines().count(), 1, "{err}");
+        assert!(err.contains("Tracer build check failed: Tracer feature plan-1234 for job 001-sample belongs to PLAN-9."), "{err}");
+        assert_eq!(fake.job()["tracer"], json!({"building": true}));
+        assert_eq!(writes(&fake), 0);
+        fake.state().answer = Some((200, json!(["not", "a", "feature"])));
+        let err = run_pass(&t);
+        assert_eq!(err.lines().count(), 1, "{err}");
+        assert!(err.contains("not a feature"), "{err}");
+    }
+
+    #[test]
+    fn build_pass_cleans_tracer_ticket_text() {
+        for (ticket, label) in [
+            (json!(null), "belongs to no ticket."),
+            (json!("PLAN-\u{1b}9\u{202e}"), "belongs to PLAN-9."),
+        ] {
+            let (fake, t) = build_home();
+            put_feature(&fake, build_feature(json!({ "ticket": ticket })));
+            let err = run_pass(&t);
+            assert_eq!(err.lines().count(), 1, "{err}");
+            assert!(err.contains(label), "{err}");
+            assert!(NOTE_INVISIBLE.search(&err).is_none());
+        }
+    }
+
+    /// A job id that passes JOB_ID never needs quoting, so this checks the quoting itself.
+    #[test]
+    fn build_pass_quotes_feature_id() {
+        assert_eq!(
+            format!("api/features/{}", quote_all("plan 1234/x")),
+            "api/features/plan%201234%2Fx"
+        );
+    }
+
+    #[test]
+    fn build_pass_clears_out_of_scope_mark() {
+        for (change, tracer, left) in [
+            (
+                json!({"stage": "pr-open"}),
+                json!({"building": true, "tasks": build_tasks()}),
+                Some(json!({ "tasks": build_tasks() })),
+            ),
+            (json!({"project": "other"}), json!({"building": true}), None),
+        ] {
+            let (fake, t) = build_home();
+            set_job(&fake, "tracer", tracer);
+            for (k, v) in change.as_object().unwrap() {
+                set_job(&fake, k, v.clone());
+            }
+            assert_eq!(run_pass(&t), "");
+            assert_eq!(fake.job().get("tracer").cloned(), left);
+            assert_eq!(writes(&fake), 1);
+            assert!(fake.requests().is_empty());
+        }
+    }
+
+    fn off_home() -> (Fake, TempHome) {
+        let fake = Fake::new(Some(json!({"schema": 1, "tracer": {"enabled": false}})));
+        let t = home(&fake);
+        (fake, t)
+    }
+
+    #[test]
+    fn off_follow_pass_and_sync() {
+        let (fake, t) = off_home();
+        set_job(&fake, "stage", json!("build"));
+        set_job(&fake, "tracer", json!({"follow": true}));
+        assert_eq!(follow(&t), "");
+        for target in ["", "sample", "sample/001-sample"] {
+            assert_eq!(
+                run_sync(&t, target),
+                (
+                    0,
+                    "nothing to mirror: Tracer is off in Settings, Pipeline\n".to_string(),
+                    String::new()
+                )
+            );
+        }
+        assert_eq!(writes(&fake), 0);
+        assert!(fake.requests().is_empty());
+    }
+
+    #[test]
+    fn off_build_pass_clears_mark() {
+        let (fake, t) = off_home();
+        set_job(&fake, "stage", json!("idea"));
+        set_job(&fake, "tracer", json!({"follow": true, "building": true}));
+        put_feature(&fake, build_feature(json!({})));
+        assert_eq!(run_pass(&t), "");
+        assert_eq!(fake.job()["tracer"], json!({"follow": true}));
+        assert_eq!(writes(&fake), 1);
+        assert!(fake.requests().is_empty());
+    }
+
+    #[test]
+    fn off_build_pass_without_tracer_json_clears_mark() {
+        let (fake, t) = off_home();
+        set_job(&fake, "stage", json!("idea"));
+        set_job(&fake, "tracer", json!({"follow": true, "building": true}));
+        std::fs::remove_file(t.path.join("tracer.json")).unwrap();
+        assert!(build_pass_to(&t.path, None, &mut Vec::new()).unwrap());
+        assert_eq!(fake.job()["tracer"], json!({"follow": true}));
+        assert_eq!(writes(&fake), 1);
+        assert!(fake.requests().is_empty());
     }
 }
