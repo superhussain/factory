@@ -1434,7 +1434,8 @@ class RetroRoleCardTest(unittest.TestCase):
 
     def test_role_reads_lessons(self):
         role = (ROOT / "skills/factory/agents/factory-retro.md").read_text(encoding="utf-8")
-        for text in ("`lessons`", "Most rows teach nothing.", "Notes: lesson from <job>"):
+        for text in ("`lessons`", "Most rows teach nothing.", "Notes: lesson from <job>", "`lesson_cards`",
+                     "A run holds at most 1 lesson"):
             self.assertIn(text, role)
 
     def test_role_reads_reviewers(self):
