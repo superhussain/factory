@@ -267,6 +267,21 @@ class CatchUpTest(IsolatedTestCase):
         self.assertEqual(git(self.checkout, "rev-parse", "HEAD"), local)
         self.assertEqual(self.installed(), self.b)
 
+        # Newer git prints hint lines before fatal; older git prints only the fatal line.
+        hints = "hint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint:   git merge --no-ff\n"
+        timer_run = self.runtime.subprocess.run
+        for stderr, line in ((hints + "fatal: Not possible to fast-forward, aborting.\n",
+                              "checkout: fatal: Not possible to fast-forward, aborting."),
+                             ("\nerror: synthetic merge error\n", "checkout: error: synthetic merge error")):
+            def run(argv, *args, **kwargs):
+                if "merge" in argv:
+                    return subprocess.CompletedProcess(argv, 128, "", stderr)
+                return timer_run(argv, *args, **kwargs)
+            with self.subTest(line), patch.object(self.runtime.subprocess, "run", run), \
+                    patch.object(self.runtime, "timer_drift", Mock(return_value=None)):
+                code, out, _ = self.call()
+                self.assertEqual((code, out.splitlines()[1]), (1, line))
+
     def test_worker_states(self):
         self.assertEqual(self.call()[0], 0)
         b7 = self.b[:7]

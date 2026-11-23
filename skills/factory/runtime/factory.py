@@ -5774,7 +5774,8 @@ def catch_up_cmd():
         r = subprocess.run(["git", "-C", repo, "merge", "-q", "--ff-only", head], capture_output=True, text=True)
         if r.returncode:
             failed += 1
-            print(f"checkout: {r.stderr.strip()}")
+            lines = [line for line in r.stderr.splitlines() if line.strip()] or [""]
+            print("checkout: " + next((line for line in lines if line.startswith("fatal:")), lines[0]))
         else:
             wrote = True
             print(f"checkout: fast-forwarded to {git(repo, 'rev-parse', 'HEAD')[:7]}")
