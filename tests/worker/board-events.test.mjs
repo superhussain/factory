@@ -116,6 +116,62 @@ test("no BoardEvents binding gets 404", async () => {
   assert.equal(response.status, 404);
 });
 
+const HOST = ORIGIN + "/events/host";
+const hostConnect = (
+  env,
+  { method = "GET", headers = { Upgrade: "websocket" }, principal = device } = {},
+) => serveFactory(new Request(HOST, { method, headers }), env, principal);
+
+test("a device's upgrade to /events/host reaches the room with no expiry", async () => {
+  const events = fakeEvents();
+  await hostConnect(
+    { BUCKET: memoryBucket(), BoardEvents: events },
+    {
+      headers: {
+        Upgrade: "websocket",
+        "Sec-WebSocket-Key": NONCE,
+        "Sec-WebSocket-Version": "13",
+        "X-Factory-Exp": "4102444800",
+      },
+    },
+  );
+  assert.equal(events.fetches().length, 1);
+  const [forwarded] = events.requests;
+  assert.deepEqual([...forwarded.headers].sort(), [
+    ["sec-websocket-key", NONCE],
+    ["sec-websocket-version", "13"],
+    ["upgrade", "websocket"],
+  ]);
+});
+
+for (const [name, options] of [
+  ["a person", { principal: person }],
+  ["POST", { method: "POST" }],
+  ["GET without Upgrade", { headers: {} }],
+]) {
+  test(`${name} on /events/host gets 404 and never reaches the room`, async () => {
+    const events = fakeEvents();
+    const response = await hostConnect({ BUCKET: memoryBucket(), BoardEvents: events }, options);
+    assert.equal(response.status, 404);
+    assert.deepEqual(events.calls, []);
+  });
+}
+
+test("/events/host with no BoardEvents binding gets 404", async () => {
+  const response = await hostConnect({ BUCKET: memoryBucket() });
+  assert.equal(response.status, 404);
+});
+
+test("/events/host with no verified principal gets 403", async () => {
+  const events = fakeEvents();
+  const response = await hostConnect(
+    { BUCKET: memoryBucket(), BoardEvents: events },
+    { principal: { verified: false } },
+  );
+  assert.equal(response.status, 403);
+  assert.deepEqual(events.calls, []);
+});
+
 const writes = [
   ["/api/board", "board.json", JSON.stringify({ jobs: [] }), "application/json"],
   ["/api/backlog", "backlog.md", "# Backlog\n", "text/markdown"],
