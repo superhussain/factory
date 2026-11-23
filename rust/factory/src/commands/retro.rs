@@ -1,17 +1,26 @@
 //! retro: digest, push, pull, aggregate and admit.
 
 use std::collections::hash_map::RandomState;
+use std::collections::{BTreeSet, HashMap};
+use std::fs::{self, File};
 use std::hash::{BuildHasher, Hasher};
+use std::io::{self, BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::consts::tag_lookalike;
-use crate::shared::consts::NOTE_TAG;
-use crate::shared::exit::Res;
-use crate::shared::py::repr;
-use crate::shared::pyjson::float_repr;
-use crate::shared::pyre::{Flags, Pattern};
+use crate::shared::conf::{fm_get, frontmatter};
+use crate::shared::consts::{tag_lookalike, NOTE_SECRETS, NOTE_TAG};
+use crate::shared::exit::{fail, Res};
+use crate::shared::fs::write_atomic;
+use crate::shared::home::factory_home;
+use crate::shared::http::{access_message, api, Response};
+use crate::shared::proc::hostname;
+use crate::shared::py::{is_space, os_error, repr, round_int, strip};
+use crate::shared::pyjson::{dumps, float_repr, loads, DEFAULT};
+use crate::shared::pyre::{Captures, Flags, Pattern};
 use crate::shared::time::{format_stamp, unix_now};
 use crate::shared::unicode::nfkc;
 
@@ -199,9 +208,709 @@ const MAX_EXPLORER_PROJECTS: usize = 1;
 const TRIAL_PAUSE_REVERTS: usize = 2;
 const MAX_PER_RUN: usize = 5;
 const ENV_SECRET_MIN: usize = 12;
+static DIGITS: Pattern = Pattern::new(r"\d+", Flags::NONE);
+static ROUND_DIR: Pattern = Pattern::new(r"\bround-(\d+)/", Flags::NONE);
+const USAGE: &str = "usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>, N from 1 to 90 for digest and 1 to 30 for aggregate";
 
-pub fn retro_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("retro"))
+pub fn retro_cmd(call: &Call) -> Res<()> {
+    let (action, args) = (call.args[0].as_str(), &call.args[1..]);
+    if action == "push" && args.is_empty() {
+        return retro_push();
+    }
+    if action == "pull" && args.len() == 1 && is_date(&args[0]) {
+        return pull(&args[0]);
+    }
+    if action == "admit" && args.len() == 1 && RUN_TAG.is_full(&args[0]) {
+        return Err(not_ported("retro admit"));
+    }
+    let most = match action {
+        "digest" => 90,
+        "aggregate" => 30,
+        _ => 0,
+    };
+    let days = match args {
+        [] if action == "aggregate" => "7",
+        [] => "1",
+        [flag, n] if flag == "--days" => n.as_str(),
+        _ => "",
+    };
+    let n = if days.bytes().all(|b| b.is_ascii_digit()) {
+        days.parse::<u64>().ok()
+    } else {
+        None
+    };
+    let Some(n) = n.filter(|n| (1..=most).contains(n)) else {
+        return Err(fail(USAGE, 2));
+    };
+    if action == "digest" {
+        digest(n as i64)
+    } else {
+        Err(not_ported("retro aggregate"))
+    }
+}
+
+fn group<'t>(c: &Captures<'t>, i: usize) -> &'t str {
+    c.get(i).map_or("", |m| m.as_str())
+}
+
+/// The first n characters of s.
+fn cut(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+/// `p.sub(r"\1[redacted]", text, count=count)`; a count of 0 replaces every match.
+fn redact_after_group(p: &Pattern, text: &str, count: usize) -> String {
+    let mut seen = 0;
+    p.replace_all(text, |c| {
+        seen += 1;
+        if count == 0 || seen <= count {
+            format!("{}[redacted]", group(c, 1))
+        } else {
+            c.get(0).unwrap().as_str().to_string()
+        }
+    })
+}
+
+/// Whether every secret word in name is token followed by s, as in max_tokens.
+fn count_name(name: &str) -> bool {
+    RETRO_SECRET_WORD.find_iter(name).all(|m| {
+        m.as_str().to_lowercase() == "token"
+            && matches!(name[m.end()..].chars().next(), Some('s' | 'S'))
+    })
+}
+
+fn secret_pair(c: &Captures) -> String {
+    let (name, sep, value) = (group(c, 1), group(c, 2), group(c, 3));
+    if RETRO_SECRET_WORD.search(name).is_none() || (RETRO_COUNT.is_full(value) && count_name(name))
+    {
+        return c.get(0).unwrap().as_str().to_string();
+    }
+    format!("{name}{sep}[redacted]")
+}
+
+/// One command with every -k, -K and bare -pass, -passin or -passout value after its openssl as [redacted].
+fn openssl_part(part: &str) -> String {
+    let Some(end) = RETRO_OPENSSL.search(part).map(|c| c.get(0).unwrap().end()) else {
+        return part.to_string();
+    };
+    let rest = redact_after_group(
+        &RETRO_OPENSSL_BARE,
+        &redact_after_group(&RETRO_OPENSSL_K, &part[end..], 0),
+        0,
+    );
+    format!("{}{rest}", &part[..end])
+}
+
+/// line with the password after a mysql glued -p, after the first sshpass -p, redis-cli -a or --pass and
+/// docker login -p, after every openssl -pass, -passin or -passout pass:, after every openssl -k, -K or bare
+/// -pass, -passin or -passout in that command, and in an echo piped to docker login --password-stdin, as
+/// [redacted].
+fn tool_pass(line: &str) -> String {
+    let mut line = line.to_string();
+    for (tool, flag, count) in [
+        (&RETRO_MYSQL, &RETRO_MYSQL_PASS, 0),
+        (&RETRO_SSHPASS, &RETRO_SSHPASS_PASS, 1),
+        (&RETRO_REDIS, &RETRO_REDIS_PASS, 1),
+        (&RETRO_DOCKER_LOGIN, &RETRO_SSHPASS_PASS, 1),
+        (&RETRO_OPENSSL, &RETRO_OPENSSL_PASS, 0),
+    ] {
+        if let Some(end) = tool.search(&line).map(|c| c.get(0).unwrap().end()) {
+            line = format!(
+                "{}{}",
+                &line[..end],
+                redact_after_group(flag, &line[end..], count)
+            );
+        }
+    }
+    let mut line: String = RETRO_COMMAND_SPLIT
+        .find_iter(&line)
+        .map(|m| openssl_part(m.as_str()))
+        .collect();
+    if let Some(hit) = RETRO_DOCKER_LOGIN
+        .search(&line)
+        .map(|c| c.get(0).unwrap().range())
+    {
+        // The login's own last letter sits before hit.end, so searching from there sees no new left edge.
+        if RETRO_PASSWORD_STDIN.search(&line[hit.end..]).is_some() {
+            let head = RETRO_ECHO_PASS.replace_all(&line[..hit.start], |c| {
+                format!("{}[redacted]{}", group(c, 1), group(c, 3))
+            });
+            line = head + &line[hit.start..];
+        }
+    }
+    line
+}
+
+fn redact(text: &str) -> String {
+    let text = RETRO_HEADERS.replace_all(text, |c| {
+        format!("{}{}[redacted]", group(c, 1), group(c, 2))
+    });
+    let text = RETRO_URL_CREDS.replace_all(&text, |_| "://[redacted]@".into());
+    let text = redact_after_group(&RETRO_BEARER, &text, 0);
+    let text = redact_after_group(&RETRO_USER_PASS, &text, 0);
+    let mut text = text
+        .split('\n')
+        .map(tool_pass)
+        .collect::<Vec<_>>()
+        .join("\n");
+    for p in [
+        &RETRO_KEYVALUE,
+        &RETRO_FLAG,
+        &RETRO_LONG_KEYVALUE,
+        &RETRO_LONG_FLAG,
+    ] {
+        text = p.replace_all(&text, secret_pair);
+    }
+    for p in &NOTE_SECRETS {
+        text = p.replace_all(&text, |_| "[redacted]".into());
+    }
+    text
+}
+
+/// name with its home prefix as ~. A slug turns every non-alphanumeric into -, so this host's
+/// home slug finds where a hyphenated user name ends; any other home loses its first segment.
+fn project_slug(name: &str, home: &str) -> String {
+    let home: String = home
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    if name == home || name.starts_with(&format!("{home}-")) {
+        return format!("~{}", &name[home.len()..]);
+    }
+    RETRO_HOME.replace_all(name, |_| "~".into())
+}
+
+/// v with every string, and every object key, cut to 160 characters.
+fn clip(v: Value) -> Value {
+    match v {
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(k, v)| (cut(&k, 160), clip(v)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.into_iter().map(clip).collect()),
+        Value::String(s) => Value::String(cut(&s, 160)),
+        v => v,
+    }
+}
+
+fn pattern(text: &str) -> String {
+    let joined = redact(text)
+        .split(is_space)
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let pathed = RETRO_PATH.replace_all(&joined, |_| "<path>".into());
+    cut(&DIGITS.replace_all(&pathed, |_| "N".into()), 160)
+}
+
+fn command_key(cmd: &str) -> String {
+    pattern(&RETRO_ASSIGN.replace_all(cmd, |_| String::new()))
+}
+
+/// A message or tool_result content as text: a string, or its joined text blocks.
+fn text_of(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter_map(|b| b.as_object()?.get("text")?.as_str())
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => String::new(),
+    }
+}
+
+fn count(counts: &mut Map<String, Value>, key: String) {
+    let n = counts.get(&key).and_then(Value::as_i64).unwrap_or(0);
+    counts.insert(key, json!(n + 1));
+}
+
+/// counts in descending count order, ties in their first-seen order.
+fn ranked(counts: Map<String, Value>) -> Map<String, Value> {
+    let mut items: Vec<(String, Value)> = counts.into_iter().collect();
+    items.sort_by_key(|(_, n)| std::cmp::Reverse(n.as_i64().unwrap_or(0)));
+    items.into_iter().collect()
+}
+
+/// A usage field as Python's `isinstance(value, int)` reads it: bools count as 0 and 1.
+fn usage_int(v: Option<&Value>) -> Option<i64> {
+    match v? {
+        Value::Bool(b) => Some(i64::from(*b)),
+        v if is_int(v) => v.as_i64(),
+        _ => None,
+    }
+}
+
+/// The lines of a transcript as Python's text mode reads them: invalid UTF-8 replaced, and
+/// `\r\n` and a lone `\r` ending a line like `\n`.
+fn transcript_lines(path: &Path, mut each: impl FnMut(&str)) -> io::Result<()> {
+    for chunk in BufReader::new(File::open(path)?).split(b'\n') {
+        let chunk = chunk?;
+        let text = String::from_utf8_lossy(&chunk);
+        let text = text.strip_suffix('\r').unwrap_or(&text);
+        text.split('\r').for_each(&mut each);
+    }
+    Ok(())
+}
+
+/// One transcript reduced to digest fields. main=false also counts isSidechain lines.
+fn scan(path: &Path, main: bool) -> io::Result<Value> {
+    let (mut usage, mut usage_at) = (Vec::<[i64; 4]>::new(), HashMap::<String, usize>::new());
+    let (mut tools, mut cmds, mut attachments) = (Map::new(), Map::new(), Map::new());
+    let mut models = BTreeSet::new();
+    let mut calls: HashMap<String, (String, Value)> = HashMap::new();
+    let mut results: Vec<(String, Value, String, bool)> = Vec::new();
+    let (mut start, mut end): (Option<String>, Option<String>) = (None, None);
+    let (mut human, mut interrupts, mut seen_assistant) = (0i64, 0i64, false);
+    let mut round_max: Option<String> = None;
+    let (mut prompt_count, mut prompt_chars) = (0i64, 0i64);
+    let mut polls = [0i64; 3];
+    let empty = Map::new();
+    transcript_lines(path, |line| {
+        let Ok(Value::Object(e)) = serde_json::from_str::<Value>(line) else {
+            return;
+        };
+        if main && truthy(e.get("isSidechain")) {
+            return;
+        }
+        if let Some(Value::String(stamp)) = e.get("timestamp") {
+            start.get_or_insert_with(|| stamp.clone());
+            end = Some(stamp.clone());
+        }
+        let msg = e
+            .get("message")
+            .and_then(Value::as_object)
+            .unwrap_or(&empty);
+        let content = msg.get("content");
+        let blocks: Vec<&Map<String, Value>> = match content {
+            Some(Value::Array(items)) => items.iter().filter_map(Value::as_object).collect(),
+            _ => Vec::new(),
+        };
+        let kind = e.get("type").and_then(Value::as_str);
+        let attachment = e.get("attachment").and_then(Value::as_object);
+        if kind == Some("attachment") && !seen_assistant && attachment.is_some() {
+            let attachment = attachment.unwrap();
+            let name = py_str(attachment.get("type").unwrap_or(&Value::Null));
+            let size = dumps(&Value::Object(attachment.clone()), DEFAULT).len() as i64;
+            let total = attachments.get(&name).and_then(Value::as_i64).unwrap_or(0);
+            attachments.insert(name, json!(total + size));
+        } else if kind == Some("assistant") {
+            seen_assistant = true;
+            if let Some(Value::String(model)) = msg.get("model") {
+                models.insert(model.clone());
+            }
+            if let (Some(Value::String(id)), Some(Value::Object(used))) =
+                (msg.get("id"), msg.get("usage"))
+            {
+                let at = *usage_at.entry(id.clone()).or_insert_with(|| {
+                    usage.push([0; 4]);
+                    usage.len() - 1
+                });
+                for (i, (_, field)) in RETRO_TOKENS.iter().enumerate() {
+                    if let Some(n) = usage_int(used.get(*field)) {
+                        usage[at][i] = usage[at][i].max(n);
+                    }
+                }
+            }
+            for b in &blocks {
+                if b.get("type").and_then(Value::as_str) != Some("tool_use") {
+                    continue;
+                }
+                let name = py_str(b.get("name").unwrap_or(&Value::Null));
+                let inp = match b.get("input") {
+                    Some(Value::Object(m)) => Value::Object(m.clone()),
+                    _ => json!({}),
+                };
+                count(&mut tools, name.clone());
+                calls.insert(
+                    dumps(b.get("id").unwrap_or(&Value::Null), DEFAULT),
+                    (name.clone(), inp.clone()),
+                );
+                for m in ROUND_DIR.find_iter(&dumps(&inp, DEFAULT)) {
+                    let digits =
+                        m.as_str()["round-".len()..m.as_str().len() - 1].trim_start_matches('0');
+                    let digits = if digits.is_empty() { "0" } else { digits };
+                    let higher = round_max
+                        .as_deref()
+                        .is_none_or(|max| (digits.len(), digits) > (max.len(), max));
+                    if higher {
+                        round_max = Some(digits.to_string());
+                    }
+                }
+                if name == "Agent" || name == "Task" {
+                    if let Some(Value::String(prompt)) = inp.get("prompt") {
+                        prompt_count += 1;
+                        prompt_chars += prompt.chars().count() as i64;
+                    }
+                }
+                let target = match name.as_str() {
+                    "Bash" => inp.get("command"),
+                    "Read" => inp.get("file_path"),
+                    _ => None,
+                };
+                if let Some(Value::String(target)) = target {
+                    for (n, (_, p)) in RETRO_POLLS.iter().enumerate() {
+                        polls[n] += i64::from(p.search(target).is_some());
+                    }
+                    if name == "Bash" {
+                        count(&mut cmds, command_key(target));
+                    }
+                }
+            }
+        } else if kind == Some("user") {
+            let text = text_of(content);
+            interrupts += i64::from(text.contains("[Request interrupted"));
+            let is_result = |b: &&Map<String, Value>| {
+                b.get("type").and_then(Value::as_str) == Some("tool_result")
+            };
+            if blocks.iter().any(|b| is_result(&b)) {
+                for b in blocks.iter().filter(|b| is_result(b)) {
+                    let id = dumps(b.get("tool_use_id").unwrap_or(&Value::Null), DEFAULT);
+                    let (name, inp) = calls.get(&id).cloned().unwrap_or(("?".into(), json!({})));
+                    results.push((
+                        name,
+                        inp,
+                        text_of(b.get("content")),
+                        b.get("is_error") == Some(&Value::Bool(true)),
+                    ));
+                }
+            } else if !truthy(e.get("isMeta"))
+                && !truthy(e.get("isSidechain"))
+                && !text.is_empty()
+                && !text.starts_with('<')
+            {
+                human += 1;
+            }
+        }
+    })?;
+    let (mut errors, mut benign, mut error_patterns) = (0i64, 0i64, Map::new());
+    let (mut denials, mut blocked_sleep, mut denial_patterns) = (0i64, 0i64, Map::new());
+    let mut noise = [0i64; 4];
+    for (i, (name, inp, text, is_error)) in results.iter().enumerate() {
+        for (n, (_, needle)) in RETRO_ENV_NOISE.iter().enumerate() {
+            noise[n] += i64::from(text.contains(needle));
+        }
+        if !is_error {
+            continue;
+        }
+        let command = inp.get("command").and_then(Value::as_str).unwrap_or("");
+        if text.contains("Blocked: sleep") {
+            blocked_sleep += 1;
+        } else if RETRO_DENIALS.iter().any(|phrase| text.contains(phrase)) {
+            denials += 1;
+            count(&mut denial_patterns, pattern(text));
+        } else if i == results.len() - 1
+            && ((name == "Bash" && command.contains("archive-workspace") && text.contains("137"))
+                || (name.contains("archive_workspace")
+                    && text.to_lowercase().contains("connection closed")))
+        {
+            benign += 1;
+        } else {
+            errors += 1;
+            count(&mut error_patterns, pattern(text));
+        }
+    }
+    let contexts: Vec<i64> = usage.iter().map(|u| u[2] + u[0] + u[1]).collect();
+    let tokens: Map<String, Value> = RETRO_TOKENS
+        .iter()
+        .enumerate()
+        .map(|(i, (key, _))| {
+            (
+                key.to_string(),
+                json!(usage.iter().map(|u| u[i]).sum::<i64>()),
+            )
+        })
+        .collect();
+    let mean = if contexts.is_empty() {
+        0
+    } else {
+        round_int(contexts.iter().sum::<i64>() as f64 / contexts.len() as f64)
+    };
+    let repeated: Map<String, Value> = ranked(cmds)
+        .into_iter()
+        .take(5)
+        .filter(|(_, n)| n.as_i64().unwrap_or(0) >= 3)
+        .collect();
+    let round_max = match round_max {
+        Some(digits) => Value::Number(digits.parse().unwrap()),
+        None => Value::Null,
+    };
+    Ok(json!({
+        "start": start, "end": end, "turns": usage.len(), "human_msgs": human, "interrupts": interrupts,
+        "models": models.into_iter().collect::<Vec<_>>(), "tools": ranked(tools), "tokens": tokens,
+        "context": {"first_turn": contexts.first().copied().unwrap_or(0), "mean_per_turn": mean},
+        "first_turn_attachments": attachments,
+        "agent_prompts": {"count": prompt_count, "chars": prompt_chars},
+        "review_round_max": round_max,
+        "polls": RETRO_POLLS.iter().zip(polls).map(|((k, _), n)| (k.to_string(), json!(n))).collect::<Map<_, _>>(),
+        "env_noise": RETRO_ENV_NOISE.iter().zip(noise).map(|((k, _), n)| (k.to_string(), json!(n))).collect::<Map<_, _>>(),
+        "errors": {"count": errors, "benign": benign, "patterns": ranked(error_patterns)},
+        "denials": {"count": denials, "blocked_sleep": blocked_sleep, "patterns": ranked(denial_patterns)},
+        "repeated_cmds": repeated,
+    }))
+}
+
+/// config.md's device, else the hostname.
+fn host(home: &Path) -> Res<String> {
+    let config = home.join("config.md");
+    if !config.is_file() {
+        return Ok(hostname());
+    }
+    let meta = frontmatter(&config)
+        .map_err(|e| fail(os_error(&e, Some(&config)), 1))?
+        .0;
+    Ok(match fm_get(&meta, "device") {
+        Some(device) if !device.is_empty() => device.to_string(),
+        _ => hostname(),
+    })
+}
+
+pub(crate) fn retro_transcripts() -> PathBuf {
+    let config = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::home_dir().unwrap_or_default().join(".claude"));
+    config.join("projects")
+}
+
+/// The entries of folder, sorted by name; with a suffix, only the names ending in it.
+fn listed(folder: &Path, suffix: &str) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = fs::read_dir(folder)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().ends_with(suffix))
+        })
+        .collect();
+    paths.sort();
+    paths
+}
+
+fn mtime(path: &Path) -> io::Result<f64> {
+    let modified = fs::metadata(path)?.modified()?;
+    Ok(match modified.duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_secs_f64(),
+        Err(e) => -e.duration().as_secs_f64(),
+    })
+}
+
+/// The clipped digest rows of every transcript under root changed since cutoff, oldest session first.
+fn rows_in(root: &Path, host: &str, home: &str, cutoff: f64) -> Vec<Value> {
+    let mut rows = Vec::new();
+    for project in listed(root, "").into_iter().filter(|p| p.is_dir()) {
+        let project_name = project.file_name().unwrap().to_string_lossy().into_owned();
+        for path in listed(&project, ".jsonl") {
+            if !mtime(&path).is_ok_and(|t| t >= cutoff) {
+                continue;
+            }
+            let Ok(Value::Object(scanned)) = scan(&path, true) else {
+                continue;
+            };
+            if scanned["start"].is_null() {
+                continue;
+            }
+            let session = path.file_stem().unwrap().to_string_lossy().into_owned();
+            let job = RETRO_JOB
+                .search(&project_name)
+                .map_or("ad-hoc".to_string(), |c| group(&c, 1).to_string());
+            let mut row = Map::new();
+            row.insert("host".into(), json!(host));
+            row.insert("project".into(), json!(project_slug(&project_name, home)));
+            row.insert("session".into(), json!(session));
+            row.insert("job".into(), json!(job));
+            row.extend(scanned);
+            let (mut by_type, mut subagents) = (Map::new(), 0);
+            for sub in listed(&project.join(&session).join("subagents"), ".jsonl") {
+                let meta = fs::read_to_string(sub.with_extension("meta.json")).ok();
+                let kind = match meta.and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+                    Some(Value::Object(m)) if truthy(m.get("agentType")) => py_str(&m["agentType"]),
+                    _ => "unknown".to_string(),
+                };
+                let Ok(d) = scan(&sub, false) else {
+                    continue;
+                };
+                subagents += 1;
+                let t = by_type.entry(kind).or_insert_with(|| {
+                    json!({"count": 0, "turns": 0, "tokens": {"cache_read": 0, "cache_write": 0, "uncached_input": 0, "output": 0},
+                           "errors": 0, "denials": 0, "models": [], "first_turns": []})
+                });
+                let add = |t: &mut Value, key: &str, n: &Value| {
+                    t[key] = json!(t[key].as_i64().unwrap() + n.as_i64().unwrap())
+                };
+                add(t, "count", &json!(1));
+                add(t, "turns", &d["turns"]);
+                t["first_turns"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(d["context"]["first_turn"].clone());
+                add(t, "errors", &d["errors"]["count"]);
+                add(t, "denials", &d["denials"]["count"]);
+                let mut models: BTreeSet<String> = BTreeSet::new();
+                for m in t["models"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .chain(d["models"].as_array().unwrap())
+                {
+                    models.insert(m.as_str().unwrap().to_string());
+                }
+                t["models"] = json!(models);
+                for (key, _) in RETRO_TOKENS {
+                    add(&mut t["tokens"], key, &d["tokens"][key]);
+                }
+                for (key, _) in RETRO_ENV_NOISE {
+                    add(&mut row["env_noise"], key, &d["env_noise"][key]);
+                }
+            }
+            row.insert(
+                "subagents".into(),
+                json!({"count": subagents, "by_type": by_type}),
+            );
+            rows.push(clip(Value::Object(row)));
+        }
+    }
+    rows.sort_by(|a, b| {
+        (a["start"].as_str(), a["session"].as_str())
+            .cmp(&(b["start"].as_str(), b["session"].as_str()))
+    });
+    rows
+}
+
+/// This host's clipped digest rows from the last days, oldest session first.
+fn rows(days: i64) -> Res<Vec<Value>> {
+    let root = retro_transcripts();
+    if !root.is_dir() {
+        return Err(fail(
+            format!("no Claude Code transcripts at {}", root.display()),
+            4,
+        ));
+    }
+    let host = host(&factory_home()?)?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64();
+    let home = std::env::home_dir().unwrap_or_default();
+    Ok(rows_in(
+        &root,
+        &host,
+        &home.to_string_lossy(),
+        now - days as f64 * 86400.0,
+    ))
+}
+
+fn digest(days: i64) -> Res<()> {
+    for row in rows(days)? {
+        println!("{}", dumps(&row, DEFAULT));
+    }
+    Ok(())
+}
+
+/// config.md's device, or "" when there is none.
+fn config_device(home: &Path) -> Res<String> {
+    let config = home.join("config.md");
+    if !config.is_file() {
+        return Ok(String::new());
+    }
+    let meta = frontmatter(&config)
+        .map_err(|e| fail(os_error(&e, Some(&config)), 1))?
+        .0;
+    Ok(fm_get(&meta, "device").unwrap_or("").to_string())
+}
+
+/// PUT this host's digest to the Worker under its device name and today's local date.
+pub(crate) fn retro_push() -> Res<()> {
+    let home = factory_home()?;
+    let config = home.join("config.md");
+    let device = config_device(&home)?;
+    let hint = format!(
+        "set device: in {}; pair this host with factory.py host pair <id> <code>",
+        config.display()
+    );
+    if !HOST_NAME.is_full(&device) {
+        return Err(fail(hint, 2));
+    }
+    let (rows, date) = (rows(1)?, local_today());
+    let key = format!("retro/{device}/{date}.jsonl");
+    let body: String = rows.iter().map(|r| dumps(r, DEFAULT) + "\n").collect();
+    let r = api(
+        &home,
+        "PUT",
+        &format!("/api/{key}"),
+        Some(body.as_bytes()),
+        &[200, 403],
+        &[("Content-Type", "application/x-ndjson")],
+    )?;
+    push_outcome(r.status, &r.text()?, &hint, &home.join(".env"))?;
+    let record = dumps(&json!({"version": 1, "date": date}), DEFAULT) + "\n";
+    let path = home.join(RETRO_PUSH_FILE);
+    write_atomic(&path, record.as_bytes()).map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
+    println!("pushed {} sessions to {key}", rows.len());
+    Ok(())
+}
+
+/// Fails on the Worker's two 403 answers to a digest PUT.
+fn push_outcome(status: u16, text: &str, hint: &str, env: &Path) -> Res<()> {
+    if status == 403 && strip(text) == RETRO_WRITE_ONLY {
+        return Err(fail(format!("{RETRO_WRITE_ONLY}. {hint}"), 2));
+    }
+    if status == 403 {
+        return Err(fail(access_message(env), 5));
+    }
+    Ok(())
+}
+
+/// A GET of a Worker path with its ok statuses.
+type Get<'a> = dyn FnMut(&str, &[u16]) -> Res<Response> + 'a;
+
+fn json_of(text: &str) -> Res<Value> {
+    loads(text).map_err(|e| fail(format!("the Worker sent JSON that does not parse: {e}"), 1))
+}
+
+/// What a Python for loop walks over a parsed value: list items, dict keys or string characters.
+fn py_iter(v: &Value) -> Res<Vec<Value>> {
+    Ok(match v {
+        Value::Array(items) => items.clone(),
+        Value::Object(map) => map.keys().map(|k| json!(k)).collect(),
+        Value::String(s) => s.chars().map(|c| json!(c.to_string())).collect(),
+        other => return Err(fail(format!("{} is not iterable", py_repr(other)), 1)),
+    })
+}
+
+/// (host, text) for every host's pushed digest for date, in the order the Worker lists the hosts.
+fn fetch(date: &str, get: &mut Get) -> Res<Vec<(String, String)>> {
+    let listed = json_of(&get(&format!("/api/retro/{date}"), &[200])?.text()?)?;
+    let hosts: Vec<String> = py_iter(&listed)?
+        .into_iter()
+        .filter_map(|h| {
+            h.as_str()
+                .filter(|h| HOST_NAME.is_full(h))
+                .map(str::to_string)
+        })
+        .collect();
+    let mut out = Vec::new();
+    for host in hosts {
+        let text = get(&format!("/api/retro/{host}/{date}.jsonl"), &[200])?.text()?;
+        out.push((host, text));
+    }
+    Ok(out)
+}
+
+/// Print every host's pushed digest for date, in the order the Worker lists the hosts.
+fn pull(date: &str) -> Res<()> {
+    let home = factory_home()?;
+    let pushed = fetch(date, &mut |p, ok| api(&home, "GET", p, None, ok, &[]))?;
+    if pushed.is_empty() {
+        eprintln!("no host pushed a retro digest for {date}");
+    }
+    for (_, text) in pushed {
+        print!("{text}");
+    }
+    Ok(())
 }
 
 /// Python truthiness of a value that may be missing.
@@ -523,7 +1232,958 @@ fn has_envelope_tag(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::fs::temp_dir;
     use serde_json::json;
+    use std::time::{Duration, Instant};
+
+    const SLUG: &str = "-home-u--paseo-worktrees-ab12-factory-1017-add-x";
+
+    fn copy_dir(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap().flatten() {
+            if entry.path().is_dir() {
+                copy_dir(&entry.path(), &to.join(entry.file_name()));
+            } else {
+                fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
+            }
+        }
+    }
+
+    /// A temp folder holding a copy of tests/fixtures/retro/projects, as RetroCase sets up.
+    fn projects(name: &str) -> PathBuf {
+        let root = temp_dir(&format!("retro-{name}"));
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/retro/projects");
+        copy_dir(&fixture, &root.join("projects"));
+        root.join("projects")
+    }
+
+    fn session(projects: &Path, slug: &str, name: &str, entries: &[Value]) -> PathBuf {
+        let path = projects.join(slug).join(format!("{name}.jsonl"));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut text = String::new();
+        for e in entries {
+            let mut line = Map::new();
+            line.insert("timestamp".into(), json!("2026-11-10T10:00:00Z"));
+            line.extend(e.as_object().unwrap().clone());
+            text += &(dumps(&Value::Object(line), DEFAULT) + "\n");
+        }
+        fs::write(&path, text).unwrap();
+        path
+    }
+
+    fn scan_of(projects: &Path, entries: &[Value]) -> Value {
+        scan(&session(projects, "-home-u-scratch", "s2", entries), true).unwrap()
+    }
+
+    fn digest_of(projects: &Path, days: f64) -> Vec<Value> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        rows_in(
+            projects,
+            "host-x",
+            "/nonexistent/home",
+            now - days * 86400.0,
+        )
+    }
+
+    fn assistant(mid: &str, tools: &[(&str, Value)]) -> Value {
+        let content: Vec<Value> = tools
+            .iter()
+            .enumerate()
+            .map(|(n, (name, inp))| json!({"type": "tool_use", "id": format!("{mid}-{n}"), "name": name, "input": inp}))
+            .collect();
+        json!({"type": "assistant", "timestamp": "2026-11-10T10:00:00Z",
+               "message": {"id": mid, "model": "claude-opus-5-5", "usage": {"input_tokens": 1}, "content": content}})
+    }
+
+    fn result(mid: &str, text: &str, is_error: bool, n: usize) -> Value {
+        json!({"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": format!("{mid}-{n}"), "is_error": is_error, "content": text}]}})
+    }
+
+    fn bash(cmd: &str) -> (&'static str, Value) {
+        ("Bash", json!({"command": cmd}))
+    }
+
+    fn strings_in(v: &Value, out: &mut Vec<String>) {
+        match v {
+            Value::String(s) => out.push(s.clone()),
+            Value::Array(items) => items.iter().for_each(|i| strings_in(i, out)),
+            Value::Object(map) => map.iter().for_each(|(k, v)| {
+                out.push(k.clone());
+                strings_in(v, out)
+            }),
+            _ => {}
+        }
+    }
+
+    fn all_clipped(rows: &[Value]) -> bool {
+        let mut found = Vec::new();
+        rows.iter().for_each(|r| strings_in(r, &mut found));
+        found.iter().all(|s| s.chars().count() <= 160)
+    }
+
+    #[test]
+    fn redact_running_example_and_header_shapes() {
+        let text = "CF_API_TOKEN=xyz curl -H 'Authorization: Bearer abc' https://ci:hunter2@git.example.test/r"; // gitleaks:allow
+        assert_eq!(
+            pattern(text),
+            "CF_API_TOKEN=[redacted] curl -H 'Authorization: [redacted]' https:<path>"
+        );
+        for (text, secret) in [
+            ("Cookie: session=c00kie-value", "c00kie"),
+            ("set-cookie: sid=abc; Path=/", "sid=abc"),
+            ("proxy-authorization: Basic dXNlcjpw", "dXNlcjpw"),
+            ("X-Api-Key: k3y-value", "k3y"),
+            ("cf-access-client-secret: s3cr3t-value", "s3cr3t"),
+            ("retry with bearer eyJabc.def-ghi", "eyJabc"),
+            ("ssh://git:pw0rd@host.example.test/r", "pw0rd"), // gitleaks:allow
+            ("db_password = \"two words\"", "two words"),
+            ("GH_TOKEN=gh-value", "gh-value"),
+            ("client_credential: cred-value", "cred-value"),
+            ("passwd=pw-value", "pw-value"),
+            ("{\"token\":\"abcdefsecret\"}", "abcdef"),
+            ("{\"api_key\": \"zzsecretvalue123\"}", "zzsecret"), // gitleaks:allow
+            ("mysql --password hunter2 db", "hunter"),
+            ("gh auth login --with-token abc-tok", "abc-tok"),
+            ("curl -u ci:hunter2 https://example.test", "hunter"), // gitleaks:allow
+            ("curl --user=ci:hunter2 https://example.test", "hunter"), // gitleaks:allow
+            ("Authorization=Basic dXNlcjpw", "dXNlcjpw"),
+            ("{'token': 'abcsecret'}", "abcsecret"),
+            ("{'password': 'hunter2'}", "hunter"),
+            ("{'Cookie': 'session=abc'}", "session=abc"),
+            ("{'Authorization': 'Basic dXNl'}", "dXNl"),
+            ("{\\\"token\\\":\\\"abc123secret\\\"}", "abc123"),
+            ("--api_key hunter2", "hunter"),
+            ("-u ci:hunter2 https://example.test", "hunter"), // gitleaks:allow
+        ] {
+            let out = redact(text);
+            assert!(
+                !out.contains(secret) && out.contains("[redacted]"),
+                "{text}: {out}"
+            );
+        }
+        for (text, kept) in [
+            ("{\"token\":\"abcdefsecret\"}", "{\"token\":[redacted]}"),
+            ("CF_API_TOKEN=xyz curl", "CF_API_TOKEN=[redacted] curl"),
+            ("git push -u origin main", "git push -u origin main"),
+        ] {
+            assert_eq!(redact(text), kept);
+        }
+    }
+
+    #[test]
+    fn redact_numeric_uid_gid_is_kept() {
+        for text in [
+            "docker run -u 1000:1000 img",
+            "docker run --user=0:0 img",
+            "docker run -u=1000:1000 img",
+        ] {
+            assert_eq!(redact(text), text);
+        }
+        for text in [
+            "docker run -u ci:hunter2 img", // gitleaks:allow
+            "docker run -u 1000:pw img",
+            "docker run --user=1000:pw img",
+            "docker run -u 1000:1000x img",
+        ] {
+            assert!(redact(text).contains("[redacted]"), "{text}");
+        }
+    }
+
+    #[test]
+    fn redact_tool_call_credential_forms() {
+        for (text, out) in [
+            (
+                "mysql -u root -phunter2 db",
+                "mysql -u root -p[redacted] db",
+            ), // gitleaks:allow
+            (
+                "sshpass -p hunter2 ssh host",
+                "sshpass -p [redacted] ssh host",
+            ), // gitleaks:allow
+            ("MYSQL_PWD=hunter2 mysql", "MYSQL_PWD=[redacted] mysql"), // gitleaks:allow
+            (
+                "curl -H Authorization:\\ Bearer\\ abc123 x",
+                "curl -H Authorization:\\[redacted]",
+            ),
+            ("mariadb-dump -phunter2 db", "mariadb-dump -p[redacted] db"), // gitleaks:allow
+            ("mysql -p\"hunter 2\" db", "mysql -p[redacted] db"),          // gitleaks:allow
+            (
+                "sshpass -phunter2 ssh host",
+                "sshpass -p[redacted] ssh host",
+            ), // gitleaks:allow
+            ("redis-cli -a hunter2 ping", "redis-cli -a [redacted] ping"), // gitleaks:allow
+            (
+                "redis-cli --pass hunter2 ping",
+                "redis-cli --pass [redacted] ping",
+            ), // gitleaks:allow
+            (
+                "docker login -u me -p hunter2 ghcr.io",
+                "docker login -u me -p [redacted] ghcr.io",
+            ), // gitleaks:allow
+            (
+                "openssl rsa -passin pass:hunter2",
+                "openssl rsa -passin pass:[redacted]",
+            ), // gitleaks:allow
+            (
+                "SSHPASS=hunter2 sshpass -e ssh h",
+                "SSHPASS=[redacted] sshpass -e ssh h",
+            ), // gitleaks:allow
+            (
+                "REDISCLI_AUTH=hunter2 redis-cli ping",
+                "REDISCLI_AUTH=[redacted] redis-cli ping",
+            ), // gitleaks:allow
+            (
+                "redis-cli -a hunter2 ping && ls -a /tmp",
+                "redis-cli -a [redacted] ping && ls -a /tmp",
+            ), // gitleaks:allow
+            (
+                "curl -H Authorization:\\ Bearer\\ abc\\$x",
+                "curl -H Authorization:\\[redacted]",
+            ),
+            (
+                "openssl enc -aes-256-cbc -k hunter2 -in a.txt",
+                "openssl enc -aes-256-cbc -k [redacted] -in a.txt",
+            ), // gitleaks:allow
+            (
+                "openssl enc -K 00ff -iv 01 -in a",
+                "openssl enc -K [redacted] -iv 01 -in a",
+            ), // gitleaks:allow
+            (
+                "openssl enc -k \"a|b\" -in x",
+                "openssl enc -k [redacted] -in x",
+            ), // gitleaks:allow
+            (
+                "openssl enc -k 'a;b' -in x",
+                "openssl enc -k [redacted] -in x",
+            ), // gitleaks:allow
+            (
+                "openssl rsa -passin hunter2 -in key.pem",
+                "openssl rsa -passin [redacted] -in key.pem",
+            ), // gitleaks:allow
+            (
+                "openssl pkcs12 -export -passout hunter2 -in a",
+                "openssl pkcs12 -export -passout [redacted] -in a",
+            ), // gitleaks:allow
+            (
+                "echo hunter2 | docker login ghcr.io -u me --password-stdin", // gitleaks:allow
+                "echo [redacted] | docker login ghcr.io -u me --password-stdin",
+            ),
+            (
+                "echo -n \"hunter 2\" | docker login ghcr.io -u me --password-stdin", // gitleaks:allow
+                "echo -n [redacted] | docker login ghcr.io -u me --password-stdin",
+            ),
+        ] {
+            assert_eq!(redact(text), out, "{text}");
+        }
+    }
+
+    #[test]
+    fn redact_tool_call_lookalikes_kept() {
+        for (text, out) in [
+            ("mysql -u root -p db", "mysql -u root -p db"),
+            ("mkdir -p a/b && ps -p 123", "mkdir -p a/b && ps -p 123"),
+            (
+                "sshpass -p hunter2 ssh -p 2222 host",
+                "sshpass -p [redacted] ssh -p 2222 host",
+            ), // gitleaks:allow
+            (
+                "sshpass -f pw.txt ssh -p 2222 host",
+                "sshpass -f pw.txt ssh -p [redacted] host",
+            ),
+        ] {
+            assert_eq!(redact(text), out, "{text}");
+        }
+        for text in [
+            "redis-cli -h h -p 6379 ping",
+            "docker run -p 8080:80 nginx",
+            "docker login ghcr.io",
+            "openssl rsa -passin env:KEY_PW",
+            "openssl rsa -passin file:pw.txt",
+            "sshpass -e ssh host",
+            "export SSHPASS",
+            "openssl enc -d -kfile pw.txt -in a",
+            "openssl rsa -passin stdin",
+            "openssl rsa -passin fd:3",
+            "openssl version && curl -k https://example.test",
+            "cat pw.txt | docker login ghcr.io -u me --password-stdin",
+            "echo hunter2 | grep h",
+            "echo hi; docker login ghcr.io",
+        ] {
+            assert_eq!(redact(text), text);
+        }
+    }
+
+    #[test]
+    #[cfg_attr(debug_assertions, ignore = "timing runs under --release")]
+    fn redact_long_name_run_redacts_in_linear_time() {
+        let a = "a".repeat(30000);
+        for text in [
+            a.clone(),
+            "-".repeat(30000),
+            "a1".repeat(15000),
+            format!("--{a}"),
+            format!("\"{a}"),
+        ] {
+            let start = Instant::now();
+            assert_eq!(redact(&text), text);
+            assert!(start.elapsed() < Duration::from_secs(1), "{}", &text[..3]);
+        }
+        let x = "x".repeat(63);
+        assert_eq!(
+            redact(&format!("{x}_token=xyz")),
+            format!("{x}_token=[redacted]")
+        );
+    }
+
+    #[test]
+    #[cfg_attr(debug_assertions, ignore = "timing runs under --release")]
+    fn redact_glued_scheme_redacts_in_linear_time() {
+        let a = "a".repeat(30000);
+        let start = Instant::now();
+        assert_eq!(
+            redact(&format!("{a}https://u:p@host")),
+            format!("{a}https://[redacted]@host")
+        );
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn redact_closed_edge_cases() {
+        let (long_a, a40, b70) = ("a".repeat(70), "a".repeat(40), "b".repeat(70));
+        for (text, out) in [
+            (
+                "x=.https://u:p@host".to_string(),
+                "x=.https://[redacted]@host".to_string(),
+            ),
+            (
+                "(-https://u:p@host".into(),
+                "(-https://[redacted]@host".into(),
+            ),
+            (
+                format!("{a40}https://u:p@host"),
+                format!("{a40}https://[redacted]@host"),
+            ),
+            (
+                format!("{long_a}_token=abc"),
+                format!("{long_a}_token=[redacted]"),
+            ),
+            (
+                format!("my_token_{b70}=abc"),
+                format!("my_token_{b70}=[redacted]"),
+            ),
+            (
+                format!("--{long_a}-token abc"),
+                format!("--{long_a}-token [redacted]"),
+            ),
+            ("max_tokens: 4096".into(), "max_tokens: 4096".into()),
+            (
+                "{\"max_tokens\": 4096}".into(),
+                "{\"max_tokens\": 4096}".into(),
+            ),
+            ("--max-tokens 4096".into(), "--max-tokens 4096".into()),
+            ("MAX_TOKENS=abc".into(), "MAX_TOKENS=[redacted]".into()),
+            ("api_token=4096".into(), "api_token=[redacted]".into()),
+            ("TokenSecret=123456".into(), "TokenSecret=[redacted]".into()),
+            ("tokensecret: 42".into(), "tokensecret: [redacted]".into()),
+            (
+                "secretokens=1234567".into(),
+                "secretokens=[redacted]".into(),
+            ),
+            (
+                "git clone https://u:p@ss@host/r".into(),
+                "git clone https://[redacted]@host/r".into(),
+            ),
+            (
+                "https://u:p@host/a@b".into(),
+                "https://[redacted]@host/a@b".into(),
+            ),
+        ] {
+            assert_eq!(redact(&text), out, "{}", cut(&text, 20));
+        }
+    }
+
+    /// Every pattern this file declares, by name.
+    fn retro_patterns() -> Vec<(&'static str, &'static Pattern)> {
+        vec![
+            ("RETRO_JOB", &RETRO_JOB),
+            ("RETRO_PATH", &RETRO_PATH),
+            ("RETRO_ASSIGN", &RETRO_ASSIGN),
+            ("RETRO_HEADERS", &RETRO_HEADERS),
+            ("RETRO_URL_CREDS", &RETRO_URL_CREDS),
+            ("RETRO_BEARER", &RETRO_BEARER),
+            ("RETRO_USER_PASS", &RETRO_USER_PASS),
+            ("RETRO_MYSQL", &RETRO_MYSQL),
+            ("RETRO_MYSQL_PASS", &RETRO_MYSQL_PASS),
+            ("RETRO_SSHPASS", &RETRO_SSHPASS),
+            ("RETRO_SSHPASS_PASS", &RETRO_SSHPASS_PASS),
+            ("RETRO_REDIS", &RETRO_REDIS),
+            ("RETRO_REDIS_PASS", &RETRO_REDIS_PASS),
+            ("RETRO_DOCKER_LOGIN", &RETRO_DOCKER_LOGIN),
+            ("RETRO_OPENSSL", &RETRO_OPENSSL),
+            ("RETRO_OPENSSL_PASS", &RETRO_OPENSSL_PASS),
+            ("RETRO_OPENSSL_K", &RETRO_OPENSSL_K),
+            ("RETRO_OPENSSL_BARE", &RETRO_OPENSSL_BARE),
+            ("RETRO_COMMAND_SPLIT", &RETRO_COMMAND_SPLIT),
+            ("RETRO_PASSWORD_STDIN", &RETRO_PASSWORD_STDIN),
+            ("RETRO_ECHO_PASS", &RETRO_ECHO_PASS),
+            ("RETRO_SECRET_WORD", &RETRO_SECRET_WORD),
+            ("RETRO_COUNT", &RETRO_COUNT),
+            ("RETRO_KEYVALUE", &RETRO_KEYVALUE),
+            ("RETRO_FLAG", &RETRO_FLAG),
+            ("RETRO_LONG_KEYVALUE", &RETRO_LONG_KEYVALUE),
+            ("RETRO_LONG_FLAG", &RETRO_LONG_FLAG),
+            ("RETRO_HOME", &RETRO_HOME),
+            ("RETRO_SESSION_REF", &RETRO_SESSION_REF),
+            ("RETRO_SESSION", &RETRO_SESSION),
+            ("RETRO_FLAG_NAME", &RETRO_FLAG_NAME),
+            ("RETRO_POLLS[0]", &RETRO_POLLS[0].1),
+            ("RETRO_POLLS[1]", &RETRO_POLLS[1].1),
+            ("RETRO_POLLS[2]", &RETRO_POLLS[2].1),
+            ("HOST_NAME", &HOST_NAME),
+            ("RUN_TAG", &RUN_TAG),
+            ("SIGNATURE", &SIGNATURE),
+            ("DISPUTE_ROW", &DISPUTE_ROW),
+            ("REPEATED_SIGNATURE", &REPEATED_SIGNATURE),
+            ("DIGITS", &DIGITS),
+            ("ROUND_DIR", &ROUND_DIR),
+        ]
+    }
+
+    #[test]
+    #[cfg_attr(debug_assertions, ignore = "timing runs under --release")]
+    fn redact_every_retro_pattern_runs_in_linear_time() {
+        let a70 = "a".repeat(70) + " ";
+        let a40 = "a".repeat(40) + "://";
+        let a40u = "a".repeat(40) + "://u:p@";
+        let a40s = "a".repeat(40) + "://u:p@ss@";
+        let mut units: Vec<&str> = "aZ09-.+_:/".split("").filter(|s| !s.is_empty()).collect();
+        units.extend([
+            " ",
+            "\t",
+            "a.",
+            "a-",
+            "a+",
+            "a1",
+            "--a",
+            "token",
+            "password",
+            "bearer ",
+            "-u ",
+            "://",
+            "a=",
+            "--a ",
+            "_token=",
+            "tokens",
+            &a70,
+            &a40,
+            &a40u,
+            "@",
+            "://u:p@ss@",
+            &a40s,
+            "mysql ",
+            "sshpass ",
+            "mysql -p\"",
+            "mysql -p'",
+            " -p",
+            "sshpass -p \"",
+            "Authorization:\\ ",
+            "redis-cli ",
+            "redis-cli -a ",
+            "docker login ",
+            "openssl ",
+            " -passin pass:",
+            "SSHPASS=",
+            "Authorization:\\$",
+            "\\$",
+            "openssl -k ",
+            " -k ",
+            " -passin ",
+            "echo ",
+            "echo a | ",
+            "echo \"",
+            "| docker login --password-stdin ",
+            "docker login echo a | ",
+        ]);
+        for unit in units {
+            let text: String = unit.repeat(30000).chars().take(30000).collect();
+            for (name, p) in retro_patterns() {
+                let start = Instant::now();
+                p.replace_all(&text, |_| String::new());
+                assert!(
+                    start.elapsed() < Duration::from_secs(1),
+                    "{name} on {unit:?}"
+                );
+            }
+            let start = Instant::now();
+            redact(&text);
+            assert!(
+                start.elapsed() < Duration::from_secs(1),
+                "redact on {unit:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg_attr(debug_assertions, ignore = "timing runs under --release")]
+    fn retro_patterns_adversarial_inputs() {
+        let inputs = [
+            "a".repeat(16384),
+            "a.".repeat(8192),
+            " ".repeat(16384),
+            "ignore ".repeat(2340),
+            ":/".repeat(8192),
+            "<".repeat(16384),
+        ];
+        for (name, p) in retro_patterns() {
+            for text in &inputs {
+                let best = (0..3)
+                    .map(|_| {
+                        let start = Instant::now();
+                        p.search(text);
+                        start.elapsed()
+                    })
+                    .min()
+                    .unwrap();
+                assert!(
+                    best < Duration::from_millis(50),
+                    "{name} on {:?}",
+                    &text[..8]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn redact_project_folds_home() {
+        let rows = digest_of(&projects("fold"), 1.0);
+        assert_eq!(
+            rows[0]["project"],
+            "~--paseo-worktrees-ab12-factory-1017-add-x"
+        );
+        assert_eq!(project_slug("-Users-x-dev", "/nonexistent"), "~-dev");
+        assert_eq!(project_slug("C--Users-x-dev", "/nonexistent"), "~-dev");
+        assert_eq!(project_slug("-srv-home-x", "/nonexistent"), "-srv-home-x");
+    }
+
+    #[test]
+    fn redact_project_folds_a_hyphenated_home() {
+        for (home, slug, folded) in [
+            ("/Users/john.doe", "-Users-john-doe-dev", "~-dev"),
+            ("/home/john-doe", "-home-john-doe", "~"),
+            ("C:\\Users\\john.doe", "C--Users-john-doe-dev", "~-dev"),
+        ] {
+            assert_eq!(project_slug(slug, home), folded, "{home}");
+        }
+        assert_eq!(
+            project_slug("-Users-john-doer-dev", "/Users/john.doe"),
+            "~-doer-dev"
+        );
+    }
+
+    #[test]
+    fn redact_every_string_and_key_clipped() {
+        let projects = projects("clip");
+        let tool = "T".repeat(300);
+        session(
+            &projects,
+            &format!("-home-u-{}", "p".repeat(200)),
+            "s2",
+            &[
+                assistant("a1", &[(&tool, json!({}))]),
+                result("a1", &"x ".repeat(300), true, 0),
+            ],
+        );
+        let rows = digest_of(&projects, 1.0);
+        let s2 = rows.iter().find(|r| r["session"] == "s2").unwrap();
+        assert_eq!(s2["tools"], json!({"T".repeat(160): 1}));
+        assert!(all_clipped(&rows));
+        assert_eq!(
+            clip(json!({"k".repeat(200): ["v".repeat(200), {"n": 1}]})),
+            json!({"k".repeat(160): ["v".repeat(160), {"n": 1}]})
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn digest_vanished_files_skipped() {
+        let projects = projects("vanished");
+        let sub = projects.join(SLUG).join("s1/subagents/agent-b1.jsonl");
+        fs::remove_file(&sub).unwrap();
+        fs::create_dir(&sub).unwrap();
+        std::os::unix::fs::symlink(
+            projects.join("gone.jsonl"),
+            projects.join(SLUG).join("s2.jsonl"),
+        )
+        .unwrap();
+        fs::create_dir(projects.join(SLUG).join("s3.jsonl")).unwrap();
+        let rows = digest_of(&projects, 1.0);
+        let sessions: Vec<&Value> = rows.iter().map(|r| &r["session"]).collect();
+        assert_eq!(sessions, [&json!("s1")]);
+        assert_eq!(rows[0]["subagents"], json!({"count": 0, "by_type": {}}));
+    }
+
+    #[test]
+    fn digest_usage_dedupes_by_message_id() {
+        let row = &digest_of(&projects("dedupe"), 1.0)[0];
+        assert_eq!(row["turns"], 2);
+        assert_eq!(
+            row["tokens"],
+            json!({"cache_read": 170000, "cache_write": 0, "uncached_input": 3000, "output": 600})
+        );
+    }
+
+    #[test]
+    fn digest_subagent_errors_by_type() {
+        let projects = projects("subagent");
+        let row = &digest_of(&projects, 1.0)[0];
+        let builder = &row["subagents"]["by_type"]["factory-builder"];
+        assert_eq!(row["subagents"]["count"], 1);
+        assert_eq!(
+            (&builder["count"], &builder["turns"], &builder["errors"]),
+            (&json!(1), &json!(1), &json!(1))
+        );
+        assert_eq!(builder["tokens"]["cache_write"], 19000);
+        assert_eq!(builder["first_turns"], json!([19100]));
+        assert_eq!(row["errors"]["count"], 0);
+        fs::remove_file(projects.join(SLUG).join("s1/subagents/agent-b1.meta.json")).unwrap();
+        assert_eq!(
+            digest_of(&projects, 1.0)[0]["subagents"]["by_type"]["unknown"]["errors"],
+            1
+        );
+    }
+
+    #[test]
+    fn digest_list_form_human_messages() {
+        let projects = projects("human");
+        let scan = scan_of(
+            &projects,
+            &[
+                json!({"type": "user", "message": {"content": [{"type": "text", "text": "ship it"}]}}),
+                json!({"type": "user", "message": {"content": "plain words"}}),
+                json!({"type": "user", "message": {"content": [{"type": "text", "text": "[Request interrupted by user]"}]}}),
+                json!({"type": "user", "message": {"content": "<command-name>/clear</command-name>"}}),
+                json!({"type": "user", "isMeta": true, "message": {"content": "meta"}}),
+                json!({"type": "user", "message": {"content": [{"type": "text", "text": ""}]}}),
+                assistant("a1", &[bash("ls")]),
+                result("a1", "fine", false, 0),
+            ],
+        );
+        assert_eq!(
+            (&scan["human_msgs"], &scan["interrupts"]),
+            (&json!(3), &json!(1))
+        );
+        assert_eq!(digest_of(&projects, 1.0)[0]["human_msgs"], 1);
+    }
+
+    #[test]
+    fn digest_denials_and_blocked_sleep() {
+        let mut entries = Vec::new();
+        for (n, text) in [
+            "Permission to use Bash has been denied by the Claude Code auto mode classifier.",
+            "The user doesn't want to proceed with this tool use.",
+            "Blocked: sleep 30 is not allowed",
+            "Exit code 1 Permission denied",
+        ]
+        .iter()
+        .enumerate()
+        {
+            entries.push(assistant(&format!("a{n}"), &[bash("ls")]));
+            entries.push(result(&format!("a{n}"), text, true, 0));
+        }
+        entries.push(assistant("z", &[bash("ls")]));
+        entries.push(result("z", "ok", false, 0));
+        let scan = scan_of(&projects("denials"), &entries);
+        assert_eq!(
+            (&scan["denials"]["count"], &scan["denials"]["blocked_sleep"]),
+            (&json!(2), &json!(1))
+        );
+        assert_eq!(scan["errors"]["count"], 1);
+        let patterns: Vec<&String> = scan["errors"]["patterns"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        assert_eq!(patterns, ["Exit code N Permission denied"]);
+    }
+
+    #[test]
+    fn digest_final_self_termination_is_benign() {
+        let projects = projects("benign");
+        let archive = bash("python3 factory.py archive-workspace factory/1017-add-x");
+        let paseo = ("mcp__paseo__archive_workspace", json!({"id": "w1"}));
+        let counts = |s: &Value| (s["errors"]["count"].clone(), s["errors"]["benign"].clone());
+        let last = scan_of(
+            &projects,
+            &[
+                assistant("a1", &[archive.clone()]),
+                result("a1", "Exit code 137", true, 0),
+            ],
+        );
+        assert_eq!(counts(&last), (json!(0), json!(1)));
+        let closed = scan_of(
+            &projects,
+            &[
+                assistant("a1", &[paseo]),
+                result("a1", "MCP error: Connection closed", true, 0),
+            ],
+        );
+        assert_eq!(counts(&closed), (json!(0), json!(1)));
+        let middle = scan_of(
+            &projects,
+            &[
+                assistant("a1", &[archive]),
+                result("a1", "Exit code 137", true, 0),
+                assistant("a2", &[bash("ls")]),
+                result("a2", "ok", false, 0),
+            ],
+        );
+        assert_eq!(counts(&middle), (json!(1), json!(0)));
+        fs::remove_file(projects.join("-home-u-scratch/s2.jsonl")).unwrap();
+        assert_eq!(counts(&digest_of(&projects, 1.0)[0]), (json!(0), json!(1)));
+    }
+
+    #[test]
+    fn digest_repeated_cmds_strip_assignments() {
+        let cmds = [
+            "FOO=1 git status",
+            "git status",
+            "A='x y' B=2 git status",
+            "git log",
+        ];
+        let entries: Vec<Value> = cmds
+            .iter()
+            .enumerate()
+            .map(|(n, c)| assistant(&format!("a{n}"), &[bash(c)]))
+            .collect();
+        let scan = scan_of(&projects("repeated"), &entries);
+        assert_eq!(scan["repeated_cmds"], json!({"git status": 3}));
+        assert_eq!(command_key("FOO=1 git status"), command_key("git status"));
+    }
+
+    #[test]
+    fn digest_context_and_markers() {
+        let projects = projects("context");
+        let row = &digest_of(&projects, 1.0)[0];
+        assert_eq!(
+            row["context"],
+            json!({"first_turn": 82000, "mean_per_turn": 86500})
+        );
+        assert_eq!(row["agent_prompts"], json!({"count": 1, "chars": 40}));
+        let kinds: Vec<&String> = row["first_turn_attachments"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        assert_eq!(kinds, ["skill_listing"]);
+        assert!(
+            row["first_turn_attachments"]["skill_listing"]
+                .as_i64()
+                .unwrap()
+                > 100
+        );
+        assert!(row["review_round_max"].is_null());
+        let scan = scan_of(
+            &projects,
+            &[
+                json!({"type": "attachment", "attachment": {"type": "skill_listing", "content": "x"}}),
+                assistant(
+                    "a1",
+                    &[
+                        bash("until [ -f /tmp/done ]; do sleep 5; done"),
+                        ("Read", json!({"file_path": "/tmp/tasks/b7-x.output"})),
+                        bash("stat -c %Y round-2/review.md"),
+                        ("Read", json!({"file_path": "jobs/round-3/review.md"})),
+                    ],
+                ),
+                json!({"type": "attachment", "attachment": {"type": "late", "content": "y"}}),
+                result(
+                    "a1",
+                    "zsh: command not found: foo\nNode.js v24.0.0",
+                    true,
+                    0,
+                ),
+                result("a1", "zsh: no matches found: *.png", true, 1),
+            ],
+        );
+        assert_eq!(
+            scan["polls"],
+            json!({"until_file": 1, "task_output": 1, "quiet_window": 1})
+        );
+        assert_eq!(scan["review_round_max"], 3);
+        let kinds: Vec<&String> = scan["first_turn_attachments"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
+        assert_eq!(kinds, ["skill_listing"]);
+        assert_eq!(
+            scan["env_noise"],
+            json!({"winsize_crash": 0, "command_not_found": 1, "zsh_no_matches": 1, "node_crash": 1})
+        );
+        fs::write(
+            projects.join(SLUG).join("s1/subagents/agent-b2.jsonl"),
+            dumps(
+                &result("x", "undefined method `winsize' for nil", true, 0),
+                DEFAULT,
+            ) + "\n",
+        )
+        .unwrap();
+        assert_eq!(
+            digest_of(&projects, 1.0)[0]["env_noise"]["winsize_crash"],
+            1
+        );
+    }
+
+    #[test]
+    fn digest_error_patterns_normalized() {
+        let mut entries = Vec::new();
+        for n in 0..20 {
+            let text = format!("cat: /tmp/run{n}/x.txt: No such file or directory (exit {n})");
+            entries.push(assistant(&format!("a{n}"), &[bash("cat")]));
+            entries.push(result(&format!("a{n}"), &text, true, 0));
+            entries.push(assistant(&format!("b{n}"), &[bash("cat")]));
+            entries.push(result(
+                &format!("b{n}"),
+                &format!("error kind {}", (b'a' + n as u8) as char),
+                true,
+                0,
+            ));
+        }
+        let scan = scan_of(&projects("patterns"), &entries);
+        assert_eq!(scan["errors"]["count"], 40);
+        assert_eq!(
+            scan["errors"]["patterns"]["cat: <path>: No such file or directory (exit N)"],
+            20
+        );
+        assert_eq!(scan["errors"]["patterns"].as_object().unwrap().len(), 21);
+    }
+
+    #[test]
+    fn digest_excerpts_redacted_and_clipped() {
+        let projects = projects("excerpts");
+        let github = format!("ghp_{}", "A".repeat(36));
+        let key = format!("sk-{}", "b".repeat(30));
+        let texts = [
+            format!("push failed with {github} {}", "y ".repeat(200)),
+            format!("curl -H password={key}x"),
+            "api_key: hunter-value".to_string(),
+        ];
+        let mut entries = Vec::new();
+        for (n, text) in texts.iter().enumerate() {
+            entries.push(assistant(&format!("a{n}"), &[bash(text)]));
+            entries.push(result(&format!("a{n}"), text, true, 0));
+        }
+        entries.push(assistant("d", &[bash("ls")]));
+        entries.push(result(
+            "d",
+            &format!("Permission to use Bash with {github}"),
+            true,
+            0,
+        ));
+        session(&projects, SLUG, "s3", &entries);
+        let rows = digest_of(&projects, 1.0);
+        let out = dumps(&json!(rows), DEFAULT);
+        for secret in [github.as_str(), key.as_str(), "hunter"] {
+            assert!(!out.contains(secret), "{secret}");
+        }
+        assert!(out.contains("[redacted]"));
+        assert!(all_clipped(&rows));
+        assert_eq!(pattern(&"z".repeat(400)).chars().count(), 160);
+    }
+
+    #[test]
+    fn digest_window_job_and_host() {
+        let projects = projects("window");
+        let old = session(
+            &projects,
+            "-home-u-scratch",
+            "old",
+            &[json!({"type": "user", "message": {"content": "old"}})],
+        );
+        File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(3 * 86400))
+            .unwrap();
+        session(
+            &projects,
+            "-home-u-scratch",
+            "s2",
+            &[
+                json!({"type": "user", "message": {"content": "hi"}, "timestamp": "2026-11-10T08:00:00Z"}),
+            ],
+        );
+        session(
+            &projects,
+            "-home-u-scratch",
+            "empty",
+            &[json!({"type": "summary", "timestamp": null})],
+        );
+        let rows = digest_of(&projects, 1.0);
+        let got: Vec<(&Value, &Value, &Value)> = rows
+            .iter()
+            .map(|r| (&r["session"], &r["job"], &r["host"]))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (&json!("s2"), &json!("ad-hoc"), &json!("host-x")),
+                (&json!("s1"), &json!("1017"), &json!("host-x"))
+            ]
+        );
+        let mut five: Vec<String> = digest_of(&projects, 5.0)
+            .iter()
+            .map(|r| r["session"].as_str().unwrap().to_string())
+            .collect();
+        five.sort();
+        assert_eq!(five, ["old", "s1", "s2"]);
+        let home = projects.parent().unwrap();
+        fs::write(home.join("config.md"), "---\ndevice: example-host\n---\n").unwrap();
+        assert_eq!(host(home).unwrap(), "example-host");
+        fs::remove_file(home.join("config.md")).unwrap();
+        assert_eq!(host(home).unwrap(), hostname());
+    }
+
+    const PAIR_HINT: &str = "pair this host with factory.py host pair <id> <code>";
+
+    #[test]
+    fn push_outcome_write_only_names_the_pairing() {
+        let e = push_outcome(
+            403,
+            &format!("{RETRO_WRITE_ONLY}\n"),
+            PAIR_HINT,
+            Path::new("/h/.env"),
+        )
+        .unwrap_err();
+        assert_eq!(e.code, 2);
+        assert_eq!(
+            e.stderr,
+            format!("factory.py: {RETRO_WRITE_ONLY}. {PAIR_HINT}\n")
+        );
+    }
+
+    #[test]
+    fn push_outcome_forbidden_is_an_access_failure() {
+        let e = push_outcome(403, "Forbidden", PAIR_HINT, Path::new("/h/.env")).unwrap_err();
+        assert_eq!(e.code, 5);
+        assert!(
+            e.stderr.contains("Access rejected the service token"),
+            "{}",
+            e.stderr
+        );
+        assert!(e.stderr.contains("/h/.env"));
+    }
+
+    #[test]
+    fn push_outcome_ok_passes() {
+        assert!(push_outcome(200, "ok", PAIR_HINT, Path::new("/h/.env")).is_ok());
+    }
 
     #[test]
     fn py_str_matches_python() {
