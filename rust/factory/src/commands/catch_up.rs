@@ -626,6 +626,9 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             // The installer refuses a source path with a symlinked parent, and macOS's temp
             // root is under /var -> private/var, so build the path from the canonical root.
             let root = temp_root()?;
+            // Unix only: canonicalize on Windows gives a \\?\ path that git and the installer
+            // were never tested with.
+            #[cfg(unix)]
             let root = fs::canonicalize(&root).map_err(|e| fail(os_error(&e, Some(&root)), 1))?;
             let tmp = root.join(format!("factory-catch-up-{}", random_hex(4)));
             #[cfg_attr(not(unix), allow(unused_mut))]
@@ -1424,10 +1427,11 @@ mod tests {
             .to_str()
             .unwrap()
             .starts_with("factory-catch-up-"));
-        assert_eq!(
-            tmp.parent().unwrap(),
-            fs::canonicalize(temp_root().unwrap()).unwrap()
-        );
+        #[cfg(unix)]
+        let expected = fs::canonicalize(temp_root().unwrap()).unwrap();
+        #[cfg(not(unix))]
+        let expected = temp_root().unwrap();
+        assert_eq!(tmp.parent().unwrap(), expected);
         assert!(!tmp.exists());
         assert_eq!(
             *t.installs.borrow(),
