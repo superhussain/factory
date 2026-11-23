@@ -1,4 +1,5 @@
 pub mod board;
+pub mod build;
 pub mod conf;
 pub mod consts;
 pub mod exit;

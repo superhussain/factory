@@ -19,6 +19,24 @@ def git(cwd, *args):
     return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
+# Python catch-up runs the fetched tools/install.py. The real one builds the Rust binary and runs its install,
+# which the Rust catch-up and install tests cover; this stand-in copies the skill and stamps its commit.
+INSTALLER = """import argparse, json, shutil, subprocess
+from pathlib import Path
+parser = argparse.ArgumentParser()
+parser.add_argument("--destination", required=True, type=Path)
+parser.add_argument("--replace", action="store_true")
+args = parser.parse_args()
+source = Path(__file__).resolve().parents[1]
+commit = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+target = args.destination / "factory"
+if target.exists():
+    shutil.rmtree(target)
+shutil.copytree(source / "skills" / "factory", target)
+(target / "bundle.json").write_text(json.dumps({"commit": commit, "tree": commit}, sort_keys=True) + "\\n")
+"""
+
+
 def runs(status="completed", conclusion="success", attempt=1):
     return 0, json.dumps([{"databaseId": 7, "status": status, "conclusion": conclusion, "attempt": attempt,
                            "url": RUN_URL}])
@@ -33,7 +51,7 @@ class CatchUpTest(IsolatedTestCase):
         self.root = Path(os.environ["HOME"]).resolve()
         self.src, self.origin, self.checkout = self.root / "src", self.root / "origin.git", self.root / "checkout"
         (self.src / "tools").mkdir(parents=True)
-        shutil.copy(ROOT / "tools" / "install.py", self.src / "tools")
+        (self.src / "tools" / "install.py").write_text(INSTALLER)
         shutil.copytree(ROOT / "skills" / "factory", self.src / "skills" / "factory",
                         ignore=shutil.ignore_patterns("__pycache__"))
         (self.src / ".github" / "workflows").mkdir(parents=True)
@@ -181,8 +199,8 @@ class CatchUpTest(IsolatedTestCase):
 
     def test_runs_origin_installer(self):
         marker = self.root / "marker"
-        self.edit_installer("    args = parser.parse_args(argv)\n",
-                            f"    args = parser.parse_args(argv)\n    Path({str(marker)!r}).write_text(__file__)\n")
+        self.edit_installer("args = parser.parse_args()\n",
+                            f"args = parser.parse_args()\nPath({str(marker)!r}).write_text(__file__)\n")
         c = self.commit("C")
         git(self.checkout, "checkout", "-q", "--detach")
         code, out, _ = self.call()
@@ -229,8 +247,8 @@ class CatchUpTest(IsolatedTestCase):
         self.assertEqual((code, len(calls), len(self.backups())), (0, 2, 2))
         self.assertEqual(out.splitlines()[-1], "catch-up: done")
 
-        self.edit_installer('json.dumps({"commit": commit, "tree": tree.hexdigest()}',
-                            'json.dumps({"commit": commit, "tree": tree.hexdigest(), "entry": ["bin/factory", "-q"]}')
+        self.edit_installer('json.dumps({"commit": commit, "tree": commit}',
+                            'json.dumps({"commit": commit, "tree": commit, "entry": ["bin/factory", "-q"]}')
         self.commit("C")
         self.assertEqual(self.call()[0], 0)
         self.assertEqual(calls[-1], [str(self.skill / "bin" / "factory"), "-q"] + tail)
