@@ -208,6 +208,16 @@ jobs:
           name: factory-linux-x64
           path: rust/target/host/factory
           retention-days: 1
+      # A first install with no Python: a temp HOME, so a cold cache, and a temp skills root. install.sh finds the
+      # binary built above in rust/target, and factory install caches that build instead of compiling again.
+      - name: Install with tools/install.sh
+        run: |
+          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+          rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+          root="$(mktemp -d)"
+          HOME="$root/home" CARGO_HOME="$cargo_home" RUSTUP_HOME="$rustup_home" sh ../tools/install.sh "$root/skills"
+          test -x "$root/skills/factory/runtime/factory"
+          grep -q '"entry": \["runtime/factory"\]' "$root/skills/factory/bundle.json"
   rust-test:
     needs: plan
     if: needs.plan.outputs.all != 'true' && needs.plan.outputs.rust != 'true'

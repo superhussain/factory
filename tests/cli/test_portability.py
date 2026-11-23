@@ -1,5 +1,4 @@
 import ast
-import importlib.util
 import json
 import os
 import re
@@ -92,11 +91,11 @@ class PortabilityTest(IsolatedTestCase):
         self.assertEqual(rejected_imports(ast.parse("def f():\n    import requests\n")), [["requests"]])
 
     def test_exact_bundle_and_relative_installed_references(self):
-        spec = importlib.util.spec_from_file_location("installer", ROOT / "tools/install.py")
-        installer = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(installer)
-        files, _ = installer.tree(SKILL, source=True)
-        self.assertEqual(set(files), set(installer.REQUIRED))
+        # factory install checks the exact file list; these are the files it ships.
+        files = {path.relative_to(SKILL).as_posix(): path.read_bytes() for path in SKILL.rglob("*")
+                 if path.is_file() and not any(part.startswith(".") or part == "__pycache__"
+                                               for part in path.relative_to(SKILL).parts)
+                 and path.suffix not in (".pyc", ".pyo")}
         self.assertIn("runtime/pr_screenshots.py", files)
         self.assertEqual(len(files), 44)
         for name, data in files.items():

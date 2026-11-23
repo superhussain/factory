@@ -3,6 +3,7 @@ pub mod catch_up;
 pub mod checks;
 pub mod claims;
 pub mod daemon;
+pub mod install;
 pub mod intake;
 pub mod lookup;
 pub mod ops;
