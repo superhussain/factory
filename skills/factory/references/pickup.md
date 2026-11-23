@@ -27,6 +27,11 @@ Set up automatic factory pickup on this host. You are a coding agent on the mach
 A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.
 ```
 
+When the installed skill is older than this setup, run
+`python3 <installed-skill>/runtime/factory.py catch-up`, or install with
+`tools/install.py` if no skill exists yet. Catch-up backs up the skill, timer and
+home config, installs origin's skill and rewrites the pickup timer through it.
+
 ## Set up and check
 
 Run this on each host. It checks every piece pickup needs, in order, and prints
@@ -105,7 +110,9 @@ Each run, in order:
   replaces a batch line for the same idea. Set it in the dashboard under
   Settings, Pipeline, Review backpressure. The board shows
   "Paused: <n> waiting on you" on each idea card pickup holds this way, in
-  place of its batch chip.
+  place of its batch chip. Until the board has read the project's effective
+  pipeline, it shows no Paused chip, and a held idea reads
+  "Held for batching". A failed read falls back to the defaults.
 - Skips a project whose checkout fails the `unsafe checkout` check, when pickup
   is on and lists this host. It fetches `origin/<base>` (with
   `GIT_TERMINAL_PROMPT=0` and a 60 s limit, so a remote that asks for

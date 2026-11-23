@@ -44,6 +44,16 @@ installers, not arbitrary external filesystem writers. An existing lock fails
 closed; inspect its owner and resolve it manually, never auto-break a stale lock.
 The installer touches no device state, native roles or schedules. It leaves other skills alone, except that it removes a `huss-factory` link beside `factory`, the retired runtime that skips the job id check. A real `huss-factory` folder stays, with a warning to remove it by hand.
 
+### Staying current
+
+Once a skill is installed, run `python3 <installed-skill>/runtime/factory.py catch-up`
+on each host instead of rerunning the installer by hand. It backs up first, installs
+origin's skill with origin's `tools/install.py`, and has the new bundle rewrite the
+pickup timer. The timer command comes from the installed `bundle.json`: its optional
+`entry` key, a list whose first item is a path relative to the skill, names the
+program to run; without it catch-up runs the bundle's `runtime/factory.py` with this
+Python. See [upgrade.md](upgrade.md) for the backup folder and how to restore it.
+
 ## Offline initialization and credentials
 
 `init` seeds only absent `config.md` and `.env`, prints `factory home: <home>` and
@@ -288,7 +298,11 @@ checks pause, fingerprint dedupe and both caps first, and exits 3 when nothing w
 added. A missing run, reply or `aggregate.json`
 exits 4. A linked `reply.json`, `aggregate.json`, `findings.md` or
 `suggestions.json` exits 2 with `is a link; nothing written`. A reply holding any
-`.env` value of 12 or more characters exits 2 with nothing written. Added lines go
+`.env` value of 12 or more characters exits 2 with nothing written. After any edits,
+each of the reply's at most 1 `lesson_cards` item is queued as a held lesson card (see
+[Lesson cards](autonomy.md#lesson-cards)); a bad card prints `rejected lesson_cards[N]...`,
+and a fact already in `notes.md` or paused autonomy prints `skipped lesson_cards[N]: ...`,
+without changing the exit code. Added lines go
 to the shared backlog, triage never rates them, and a person decides each one on the
 dashboard; the run folder's files stay on this host.
 
@@ -580,14 +594,14 @@ For each case, one at a time, it:
    and `git` in Bash allowed, `--add-dir` on the scratch job folder, and
    `--model` when given. Its output goes to `<arm>/<case-id>/replay.log`, and it
    stops after an hour.
-4. Copies the review to `<arm>/<case-id>/review-<role>.md` when its first line
+4. Copies the review to `<arm>/<case-id>/<reviewer>.md` when its first line
    starts `VERDICT: `, and writes `run.json` with role, model, head, base, exit,
    wall seconds and the session's token totals. `run.json` and `replay.log` stay
    even when the case fails.
 5. Removes the scratch worktree without `--force`. When that fails it names the
    folder on stderr for you to remove.
 
-Before each case it runs, it prints `<case-id>: running review-<role> ...`. It
+Before each case it runs, it prints `<case-id>: running <reviewer> ...`. It
 then prints one line per case and a total, and exits 1 when any case failed:
 
 ```text
