@@ -151,7 +151,7 @@ test("settings hosts", { timeout: 240000 }, async (t) => {
       const command = await read(live, "#host-code-command", "textContent");
       const code = command.split(" ").at(-1);
       assert.match(code, CODE);
-      assert.equal(command, "factory.py host pair test-host " + code);
+      assert.equal(command, "factory host pair test-host " + code);
       assert.ok(
         (await read(live, "#host-code-text", "textContent")).startsWith(
           "Pairing code for test-host: " + code + ". It works once and expires at ",

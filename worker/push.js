@@ -134,7 +134,7 @@ const parked = (j) =>
     !Array.isArray(j.move) &&
     !("claimed" in j.move));
 
-// Ports is_stuck in factory.py stuck. Change both together.
+// Ports is_stuck in factory stuck. Change both together.
 /** The stuck events for in-flight jobs whose claim (or, with no claim, update) went stale in
  * the hour ending STUCK_MINUTES before at, so each stale claim is pushed by one hourly run. */
 export function stuckPushes(jobs, at) {

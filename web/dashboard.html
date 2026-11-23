@@ -1016,7 +1016,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
           </select></label>
           <label for="pipeline-triage-threshold">Confidence threshold (%)<input type="number" id="pipeline-triage-threshold" min="1" max="100" step="1"></label>
           <label for="pipeline-triage-rules">Triage rules<textarea id="pipeline-triage-rules" spellcheck="false"></textarea></label>
-          <p id="pipeline-triage-help" class="muted">When on, factory.py backlog add asks Cloudflare's clef-flash model whether a new item should be built without your review under these rules. Its yes probability, as a percent, is the confidence. At or above the threshold, the item moves to the idea column for pickup. Below it, the item waits here for you. Items that recommend deny always wait. Items that ask questions also wait, with the model's pick and a reason for each answer. Rules cannot contain links, secrets or instructions to skip review. A project value replaces the global one whole.</p>
+          <p id="pipeline-triage-help" class="muted">When on, factory backlog add asks Cloudflare's clef-flash model whether a new item should be built without your review under these rules. Its yes probability, as a percent, is the confidence. At or above the threshold, the item moves to the idea column for pickup. Below it, the item waits here for you. Items that recommend deny always wait. Items that ask questions also wait, with the model's pick and a reason for each answer. Rules cannot contain links, secrets or instructions to skip review. A project value replaces the global one whole.</p>
         </fieldset>
         <fieldset id="pipeline-hold">
           <legend>Batch follow-ups</legend>
@@ -1069,7 +1069,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <label for="pipeline-note-babysit" id="pipeline-note-panel-babysit" role="tabpanel" aria-labelledby="pipeline-note-tab-babysit" hidden>Babysit stage note<textarea id="pipeline-note-babysit" spellcheck="false" placeholder="Name the readings to act on (fix-ci, fix-reviews, rebase, merge), how to reply in review threads, and the skills to load. With no note, Babysit PR waits and hands the PR back."></textarea></label>
         <section id="pipeline-trials" aria-labelledby="pipeline-trials-heading">
           <h4 id="pipeline-trials-heading">Stage-note trials</h4>
-          <p id="pipeline-trials-help" class="muted">Retro admit opens a trial for each stage-note edit it saves. Arm a jobs keep the old note and arm b jobs read the edit. <code>factory.py trial settle</code> compares the arms and reverts an edit when b reads higher on rounds or tokens.</p>
+          <p id="pipeline-trials-help" class="muted">Retro admit opens a trial for each stage-note edit it saves. Arm a jobs keep the old note and arm b jobs read the edit. <code>factory trial settle</code> compares the arms and reverts an edit when b reads higher on rounds or tokens.</p>
           <div id="pipeline-trials-paused" role="status" hidden></div>
           <div class="reference-scroll" id="pipeline-trials-wrap" tabindex="0" role="region" aria-label="Stage-note trials table" hidden>
             <table id="pipeline-trials-table" class="project-list">
@@ -1175,7 +1175,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     </section>
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
       <h3 id="scheduler-settings-heading" tabindex="-1">Scheduler</h3>
-      <p class="muted" id="scheduler-intro">Automatic pickup needs each host to run factory.py pickup every 5 minutes, with a launcher for each route. Let a coding agent on the host set it up, or follow the manual steps.</p>
+      <p class="muted" id="scheduler-intro">Automatic pickup needs each host to run factory pickup every 5 minutes, with a launcher for each route. Let a coding agent on the host set it up, or follow the manual steps.</p>
       <p class="muted" id="scheduler-not-a-prompt">A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the host timer runs pickup.</p>
       <div class="settings-tabs" id="scheduler-mode-tabs" role="tablist" aria-label="Setup method">
         <button type="button" role="tab" id="scheduler-mode-tab-agent" aria-controls="scheduler-mode-panel-agent" aria-selected="true" tabindex="0">Agent</button>
@@ -1185,7 +1185,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
         <p class="muted">Paste this prompt into a coding agent running on the host, such as Paseo, Claude Code or OpenCode. The agent runs pickup setup and fixes each missing check in order. It asks before it installs the timer, and tells you what to click when a fix is a dashboard setting.</p>
         <div class="snippet"><div class="actions"><button class="btn" type="button" data-copy="scheduler-agent-prompt" aria-label="Copy agent setup prompt">Copy</button></div><pre class="wrap"><code id="scheduler-agent-prompt">Set up automatic factory pickup on this host. You are a coding agent on the machine that should pick up ideas. Work through these steps in order.
 
-1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory.py, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: python3 SKILL/runtime/factory.py pickup setup
+1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: SKILL/runtime/factory pickup setup
    If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with python3 tools/install.py --destination &lt;skills folder&gt; --replace from a clone of the factory repo, then start again.
 2. It prints 7 numbered checks, each ok or missing, with a fix under each missing one. Fix checks 1 to 6 in order. After each fix, run pickup setup again.
    - home: run the doctor line it prints. If the factory home or its credentials are missing, stop and tell me. Never print or copy values from the .env file.
@@ -1194,9 +1194,9 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
    - routes: write routes.md from providers and models that exist on this host. Find them first, for example with paseo provider ls and paseo provider models &lt;provider&gt;, opencode models, or the model aliases claude --help lists. Never copy route, provider or model names from another person's setup.
    - launchers: write launchers.json with one launcher per route, copied from the matching example in SKILL/references/pickup.md. Keep every argument the example shows, including its permission mode. Never add --dangerously-skip-permissions or any flag that approves every action.
    - pipeline: pickup must be on for the project and list this host exactly as pickup setup prints it. That is a dashboard setting under Settings, Pipeline, or Settings, Projects, then the project. If you cannot change it yourself, tell me exactly what to click and type, and wait until I say it is done.
-3. Run python3 SKILL/runtime/factory.py pickup --dry-run and show me what it would launch.
-4. Check 7 is the timer. Show me the command python3 SKILL/runtime/factory.py pickup setup --install and say that it writes and loads a 5 minute timer for this host. Run it only after I answer yes. Otherwise I run it myself.
-5. Run pickup setup again until it prints 7 of 7 ok. Then tell me which python the timer runs and any note it printed.
+3. Run SKILL/runtime/factory pickup --dry-run and show me what it would launch.
+4. Check 7 is the timer. Show me the command SKILL/runtime/factory pickup setup --install and say that it writes and loads a 5 minute timer for this host. Run it only after I answer yes. Otherwise I run it myself.
+5. Run pickup setup again until it prints 7 of 7 ok. Then tell me which program the timer runs and any note it printed.
 
 A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.</code></pre></div>
       </div>
@@ -1204,9 +1204,9 @@ A stored Paseo or Claude schedule prompt does not pick up ideas, so do not creat
       <p class="muted">Nothing here is saved. Copy a snippet, then replace each placeholder with this host's values.</p>
       <h4>Start here</h4>
       <p class="muted">Run this on each host. It checks every piece pickup needs, in order, and prints the exact fix for each missing one with this host's own paths. It exits non-zero until every check is ok.</p>
-      <div class="snippet"><pre class="wrap"><code id="scheduler-snippet-setup">python3 &lt;installed-skill&gt;/runtime/factory.py pickup setup</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup" aria-label="Copy setup check command">Copy</button></div></div>
+      <div class="snippet"><pre class="wrap"><code id="scheduler-snippet-setup">&lt;installed-skill&gt;/runtime/factory pickup setup</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup" aria-label="Copy setup check command">Copy</button></div></div>
       <p class="muted">Then install the 5 minute timer for this host's scheduler. Running it again changes nothing. The sections below show what it writes, if you prefer to set it up by hand.</p>
-      <div class="snippet"><pre class="wrap"><code id="scheduler-snippet-setup-install">python3 &lt;installed-skill&gt;/runtime/factory.py pickup setup --install</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup-install" aria-label="Copy timer install command">Copy</button></div></div>
+      <div class="snippet"><pre class="wrap"><code id="scheduler-snippet-setup-install">&lt;installed-skill&gt;/runtime/factory pickup setup --install</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-setup-install" aria-label="Copy timer install command">Copy</button></div></div>
       <h4>What runs pickup</h4>
       <ul class="scheduler-list">
         <li>Scheduler: the host's own timer, such as cron, launchd or Task Scheduler. It runs pickup every 5 minutes. Pickup never calls a model and prints nothing when there is no work.</li>
@@ -1225,7 +1225,7 @@ A stored Paseo or Claude schedule prompt does not pick up ideas, so do not creat
       <div class="snippet"><pre class="wrap"><code id="scheduler-snippet-launchers">{"version": 1, "launchers": {"primary": ["&lt;program&gt;", "&lt;arg&gt;", "..."]}}</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-launchers" aria-label="Copy launchers.json template">Copy</button></div></div>
       <h4>Try it first</h4>
       <p class="muted">This prints what pickup would launch and changes nothing.</p>
-      <div class="snippet"><pre><code id="scheduler-snippet-dry-run">python3 &lt;installed-skill&gt;/runtime/factory.py pickup --dry-run</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-dry-run" aria-label="Copy dry run command">Copy</button></div></div>
+      <div class="snippet"><pre><code id="scheduler-snippet-dry-run">&lt;installed-skill&gt;/runtime/factory pickup --dry-run</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-dry-run" aria-label="Copy dry run command">Copy</button></div></div>
       <h4>Run it every 5 minutes</h4>
       <div class="settings-tabs sub-tabs" id="scheduler-tabs" role="tablist" aria-label="Scheduler platform">
         <button type="button" role="tab" id="scheduler-tab-cron" aria-controls="scheduler-panel-cron" aria-selected="true" tabindex="0">cron</button>
@@ -1234,7 +1234,7 @@ A stored Paseo or Claude schedule prompt does not pick up ideas, so do not creat
       </div>
       <div id="scheduler-panel-cron" role="tabpanel" aria-labelledby="scheduler-tab-cron">
         <p class="muted">Linux and WSL. Add this line with crontab -e.</p>
-        <div class="snippet"><pre><code id="scheduler-snippet-cron">*/5 * * * * PATH=&lt;launcher bin dir&gt;:/usr/bin:/bin python3 &lt;installed-skill&gt;/runtime/factory.py pickup &gt;&gt; &lt;home&gt;/logs/pickup.log 2&gt;&amp;1</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-cron" aria-label="Copy cron line">Copy</button></div></div>
+        <div class="snippet"><pre><code id="scheduler-snippet-cron">*/5 * * * * PATH=&lt;launcher bin dir&gt;:/usr/bin:/bin &lt;installed-skill&gt;/runtime/factory --home &lt;home&gt; pickup &gt;&gt; &lt;home&gt;/logs/pickup.log 2&gt;&amp;1</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-cron" aria-label="Copy cron line">Copy</button></div></div>
         <p class="muted">WSL without systemd needs service cron start, plus the /etc/wsl.conf [boot] line.</p>
       </div>
       <div id="scheduler-panel-launchd" role="tabpanel" aria-labelledby="scheduler-tab-launchd" hidden>
@@ -1246,8 +1246,9 @@ A stored Paseo or Claude schedule prompt does not pick up ideas, so do not creat
   &lt;key&gt;Label&lt;/key&gt;&lt;string&gt;factory.pickup&lt;/string&gt;
   &lt;key&gt;ProgramArguments&lt;/key&gt;
   &lt;array&gt;
-    &lt;string&gt;/usr/bin/python3&lt;/string&gt;
-    &lt;string&gt;&lt;installed-skill&gt;/runtime/factory.py&lt;/string&gt;
+    &lt;string&gt;&lt;installed-skill&gt;/runtime/factory&lt;/string&gt;
+    &lt;string&gt;--home&lt;/string&gt;
+    &lt;string&gt;&lt;home&gt;&lt;/string&gt;
     &lt;string&gt;pickup&lt;/string&gt;
   &lt;/array&gt;
   &lt;key&gt;EnvironmentVariables&lt;/key&gt;
@@ -1264,11 +1265,9 @@ A stored Paseo or Claude schedule prompt does not pick up ideas, so do not creat
         <p class="muted">Windows. Save this wrapper as %USERPROFILE%\.config\factory-pickup.cmd.</p>
         <div class="snippet"><pre><code id="scheduler-snippet-windows-cmd">@echo off
 set "PATH=&lt;launcher bin dir&gt;;%PATH%"
-py -3 &lt;installed-skill&gt;\runtime\factory.py pickup &gt;&gt; &lt;home&gt;\logs\pickup.log 2&gt;&amp;1</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-windows-cmd" aria-label="Copy wrapper script">Copy</button></div></div>
+&lt;installed-skill&gt;\runtime\factory.exe --home &lt;home&gt; pickup &gt;&gt; &lt;home&gt;\logs\pickup.log 2&gt;&amp;1</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-windows-cmd" aria-label="Copy wrapper script">Copy</button></div></div>
         <p class="muted">Then create the task.</p>
         <div class="snippet"><pre><code id="scheduler-snippet-windows-task">schtasks /Create /TN factory-pickup /SC MINUTE /MO 5 /TR "%USERPROFILE%\.config\factory-pickup.cmd" /F</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-windows-task" aria-label="Copy schtasks command">Copy</button></div></div>
-        <p class="muted">Python on Windows has no time zone data. Install it so usage-limit reset times parse. Without it, limits default to 60 minutes.</p>
-        <div class="snippet"><pre><code id="scheduler-snippet-windows-tzdata">py -3 -m pip install --user tzdata</code></pre><div class="actions"><button class="btn" type="button" data-copy="scheduler-snippet-windows-tzdata" aria-label="Copy tzdata install command">Copy</button></div></div>
       </div>
       </div>
       <p id="scheduler-status" role="status"></p>
@@ -1487,11 +1486,11 @@ const prUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+
 const runUrl = (repo) => new RegExp('^https://github\\.com/' + repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/actions/runs/(\\d+)$');
 const REF_KINDS = { 'rework-of': 'rework of', 'follow-up-of': 'follow-up of', 'sub-job-of': 'sub-job of', 'batched-into': 'batched into', 'depends-on': 'depends on' };
 const BUILD_STATES = ['queued', 'running', 'done', 'failed'];
-// The stages factory.py mirrors into Tracer.
+// The stages the runtime mirrors into Tracer.
 const TRACER_STAGES = ['spec', 'build', 'review', 'approve', 'needs-human', 'pr-open', 'merged'];
 // The stages where following asks Tracer to gather scope first.
 const TRACER_GATHER_STAGES = ['idea', 'spec'];
-// The spec gate's hold note, and the note Approve spec sets, which factory.py pickup starts the build on.
+// The spec gate's hold note, and the note Approve spec sets, which factory pickup starts the build on.
 const SPEC_GATE_NOTE = 'gate: spec-approval';
 const DASHBOARD_APPROVED_NOTE = 'spec approved on the dashboard';
 // The Worker serves projects.json, and each job links PRs only for its own project's repo.
@@ -1893,7 +1892,7 @@ async function poll({ ifChanged = false, withBacklog = true } = {}) {
 
 const REVIEW_STATE_WORDS = { PASS: 'passed', CHANGES: 'changes requested', SKIPPED: 'skipped', pending: 'pending' };
 
-// Mirrors GROUNDING_BOARD_MAX in factory.py. Change both together.
+// Mirrors GROUNDING_BOARD_MAX in the runtime. Change both together.
 const GROUNDING_BOARD_MAX = 20;
 
 // Round n's unverified citations as a chip, or '' when grounding flagged none.
@@ -2193,7 +2192,7 @@ function renderTokens(j) {
   }));
 }
 
-// The Tracer scope decision factory.py recorded, as one drawer line, or '' when there is none.
+// The Tracer scope decision the runtime recorded, as one drawer line, or '' when there is none.
 function tracerScopeText(j) {
   return { gathering: 'Tracer: gathering scope', approved: 'Tracer: scope approved', declined: 'Tracer: scope declined' }[j.tracer?.scope] || '';
 }
@@ -2214,7 +2213,7 @@ function refs(j) {
   return Array.isArray(j.refs) ? j.refs.filter((r) => r && typeof r.id === 'string' && REF_KINDS[r.kind]) : [];
 }
 
-// The lead a rider is batched into, as in factory.py lead_of.
+// The lead a rider is batched into, as in the runtime's lead_of.
 const leadOf = (j) => refs(j).find((r) => r.kind === 'batched-into')?.id ?? null;
 
 // The riders batched into a lead, in board order.
@@ -2240,7 +2239,7 @@ function stamp(j) {
   return [j.updated, j.project, j.stage, j.idea, j.pr, JSON.stringify(j.rounds), JSON.stringify(j.paseo), JSON.stringify(j.paseo_writer), JSON.stringify(owner && sessionLink(owner)), JSON.stringify(j.refs), JSON.stringify(j.build), JSON.stringify(j.idea_images), JSON.stringify(j.idea_files), JSON.stringify(j.tracer), JSON.stringify(j.claim), JSON.stringify(j.move), JSON.stringify(j.paused), ridersOf(j.id).join(',')].join('|');
 }
 
-// A holder's stop is recorded only when stopped is a string, as in factory.py.
+// A holder's stop is recorded only when stopped is a string, as in the runtime.
 const moveStopped = (x) => typeof x?.stopped === 'string';
 
 // Every holder of a move whose host has not stopped it yet, earlier ones first.
@@ -2276,7 +2275,7 @@ function ideaBody(j) {
 
 const asks = (s) => typeof s === 'string' && s.trim() !== '';
 
-// A job waiting on you. Terminal jobs never wait. The note prefix matches factory.py's escalated(),
+// A job waiting on you. Terminal jobs never wait. The note prefix matches the runtime's escalated(),
 // which covers jobs from before the escalated field.
 function waitsOnYou(j) {
   if (TERMINAL.includes(j.stage)) return false;
@@ -2298,11 +2297,11 @@ function nextWaitingJob() {
   return list[at + 1] ?? list[0] ?? null;
 }
 
-// Prioritized jobs first, as factory.py pickup takes them. The sort is stable, so ties keep board order.
+// Prioritized jobs first, as factory pickup takes them. The sort is stable, so ties keep board order.
 function prioritizedFirst(list) { return list.sort((a, b) => Number(!!b.priority?.at) - Number(!!a.priority?.at)); }
 function starredFirst(list) { return starView === 'float' ? list.sort((a, b) => Number(starred.has(b.id)) - Number(starred.has(a.id))) : list; }
 
-// Mirrors batch_hold in factory.py, plus no claim: a follow-up or triage-queued idea that no
+// Mirrors batch_hold in the runtime, plus no claim: a follow-up or triage-queued idea that no
 // person added, approved or prioritized. batchState mirrors batch_holds. Change both together.
 function batchHeld(j) {
   return j.stage === 'idea' && !('capture_id' in j) && typeof j.priority?.at !== 'string' && !j.claim &&
@@ -2386,7 +2385,7 @@ function batchRunnable(j) {
   return batchHeld(j) && pickupCanLaunch(j);
 }
 
-// Mirrors backpressure_holds in factory.py. Change both together.
+// Mirrors backpressure_holds in the runtime. Change both together.
 function backpressurePlain(j) {
   return j.stage === 'idea' && typeof j.project === 'string' && typeof j.priority?.at !== 'string' && !j.claim && !notBefore(j) && pickupCanLaunch(j);
 }
@@ -2410,7 +2409,7 @@ function batchStarter(x, project) {
   return x.stage === 'idea' && x.project === project && x.priority?.batch === true && pickupCanLaunch(x);
 }
 
-// The held chip as { text, title }, or null when the idea is not held. Mirrors batch_holds in factory.py.
+// The held chip as { text, title }, or null when the idea is not held. Mirrors batch_holds in the runtime.
 function batchState(j) {
   if (!batchHeld(j)) return null;
   if (!batchRunnable(j)) return { text: 'Held for batching', title: HELD_TITLE };
@@ -2434,7 +2433,7 @@ function batchState(j) {
   };
 }
 
-// The not-before chip as { text, title } while j.not_before is still ahead, or null. Mirrors waiting_until in factory.py.
+// The not-before chip as { text, title } while j.not_before is still ahead, or null. Mirrors waiting_until in the runtime.
 const NOT_BEFORE_STAMP = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/;
 function notBefore(j) {
   const at = j.not_before;
@@ -2446,7 +2445,7 @@ function notBefore(j) {
   return { text: 'Not before ' + local, title: 'Pickup leaves this job alone until ' + local + ' (' + at + ').' + failed };
 }
 
-// Mirrors AUTO_BABYSIT_COPY in factory.py. Change both together.
+// Mirrors AUTO_BABYSIT_COPY in the runtime. Change both together.
 const AUTO_BABYSIT_COPY = { 'fix-reviews': 'has an open review thread', rebase: 'has a merge conflict', 'fix-ci': 'has a failing required check' };
 
 // The babysit chip and drawer line for a babysit pickup started on its own, or null for a person's babysit.
@@ -2679,7 +2678,7 @@ function renderJobResults() {
   const query = $('job-search').value.trim().toLowerCase();
   const actions = actionRows(query);
   const matched = jobs.filter((j) => jobSearchText(j).includes(query) || prQueryMatch(j, query))
-    // Newest first: factory.py next_id makes the leading id digits grow, so a bigger prefix is newer.
+    // Newest first: the runtime's next_id makes the leading id digits grow, so a bigger prefix is newer.
     // Unprefixed ids sort last; the sort is stable, so ties keep board order.
     .sort((a, b) => (/^(\d+)/.exec(b.id)?.[1] ?? 0) - (/^(\d+)/.exec(a.id)?.[1] ?? 0));
   // The command mirrors the New idea button: present only while that trigger is visible and enabled.
@@ -3648,7 +3647,7 @@ function retroPickerRows(tokens) {
   return { runs, findings };
 }
 
-// Each Retro provenance line indented under a backlog line, checked or not, as factory.py retro_marks reads them.
+// Each Retro provenance line indented under a backlog line, checked or not, as the runtime's retro_marks reads them.
 function retroMarks(text) {
   const marks = [];
   let under = null;
@@ -3877,7 +3876,7 @@ $('audit-flags-next').addEventListener('click', () => auditFlagsMove(1, $('audit
 
 // Cost per merged PR: the Worker's /api/spend rollup, one table per project.
 let spend = null, spendExpected = [], spendFailed = false;
-const SPEND_LOADED = 'Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged.';
+const SPEND_LOADED = 'Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory outcomes record has judged.';
 const SPEND_HINT = ' Set weekly_tokens in a project file to see this week\'s share of it and get a nudge at 50, 80 and 100 percent.';
 
 async function loadSpend() {
@@ -4552,7 +4551,7 @@ const pipelineLoads = new Map();
 let pipelineGeneration = 0;
 const PIPELINE_STAGES = ['spec', 'build', 'review', 'approve', 'babysit'];
 const PIPELINE_GATES = ['spec-approval'];
-// Same as factory.py TRIAL_PAUSE_REVERTS.
+// Same as the runtime's TRIAL_PAUSE_REVERTS.
 const TRIAL_PAUSE_REVERTS = 2;
 const pipelineObject = doc => !!doc && typeof doc === 'object' && !Array.isArray(doc);
 // Same pattern and messages as the pickup block of validatePipeline in worker/admission.js.
@@ -4962,7 +4961,7 @@ function selectPipelineScope() {
 // Board trials are agent-written records, so every cell is textContent.
 const trialRow = (t) => !!t && typeof t === 'object' && ['id', 'project', 'stage', 'status'].every((k) => typeof t[k] === 'string');
 
-// Same count as factory.py trials_paused: any record object, not only the ones that render as rows.
+// Same count as the runtime's trials_paused: any record object, not only the ones that render as rows.
 const trialRecord = (t) => !!t && typeof t === 'object' && !Array.isArray(t);
 function trialsPaused(slug) {
   return boardTrials.filter((t) => trialRecord(t) && t.project === slug && t.status === 'reverted' && !t.resumed).length >= TRIAL_PAUSE_REVERTS;
@@ -5001,7 +5000,7 @@ function renderPipelineTrials() {
       const code = document.createElement('code');
       const reason = document.createElement('span');
       reason.textContent = '"<reason>"';
-      code.append('factory.py trial resume ' + p + ' ', reason);
+      code.append('factory trial resume ' + p + ' ', reason);
       line.append('Stage-note trials for ' + p + ' are paused after ' + TRIAL_PAUSE_REVERTS + ' reverts. Retro edits no ' + p + ' stage note until a person runs ', code, ' or asks an agent to run it.');
       return line;
     }));
@@ -5348,7 +5347,7 @@ async function hostWrite(id, method, path, body, etag, done) {
 
 function showHostCode(id, code, expires) {
   $('host-code-text').textContent = 'Pairing code for ' + id + ': ' + code + '. It works once and expires at ' + expires.slice(11, 16) + ' UTC. It is not shown again.';
-  $('host-code-command').textContent = 'factory.py host pair ' + id + ' ' + code;
+  $('host-code-command').textContent = 'factory host pair ' + id + ' ' + code;
   $('host-code').hidden = false;
 }
 function clearHostCode() {
@@ -7581,17 +7580,17 @@ function md(src) {
 }
 
 // Board writes. The helpers are pure functions over the parsed board, and casBoard
-// is the browser's copy of factory.py's cas, so ideas and device claims never collide.
+// is the browser's copy of the runtime's cas, so ideas and device claims never collide.
 
-// factory.py's now(): whole seconds, so builds can parse it.
+// The runtime's now(): whole seconds, so builds can parse it.
 const isoNow = () => new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 
-// factory.py feature_slug.
+// The runtime's feature_slug.
 function ideaSlug(text) {
   return (String(text).toLowerCase().match(/[a-z0-9]+/g) || []).slice(0, 3).join('-').slice(0, 40).replace(/^-+|-+$/g, '') || 'item';
 }
 
-// factory.py claim_id's next_id, over every board id, staged or stub.
+// The runtime's claim_id's next_id, over every board id, staged or stub.
 // Ids up to archived.max_id belong to jobs the Worker archived off the board.
 function nextJobId(board, slug) {
   const used = board.jobs.map((j) => /^(\d{3,})-/.exec(String(j.id ?? ''))).filter(Boolean).map((m) => Number(m[1]));
@@ -7625,10 +7624,10 @@ function addIdea(board, snap, now) {
   return id;
 }
 
-// factory.py BACKLOG_LINE, and the (kind id) suffix /factory next turns into refs.
+// The runtime's BACKLOG_LINE, and the (kind id) suffix /factory next turns into refs.
 const BACKLOG_LINE = /^- \[ \] ([\w-]+): (\S.*)$/;
 const BACKLOG_REF = / \((rework-of|follow-up-of|sub-job-of|depends-on) (\w[\w.-]*)\)$/;
-// factory.py LESSON_MARK: a lesson card's provenance line. Approve adds a notes.md bullet, never a job.
+// The runtime's LESSON_MARK: a lesson card's provenance line. Approve adds a notes.md bullet, never a job.
 const LESSON_CARD_MARK = /^Lesson: from \w[\w.-]{0,80}, queued \d{4}-\d\d-\d\d$/m;
 function isLessonCard(item) {
   return item.feature.startsWith('Lesson: ') && LESSON_CARD_MARK.test(item.context ?? '');
@@ -7672,7 +7671,7 @@ function backlogItems(text) {
   return items;
 }
 
-// factory.py backlog_depends: a depends-on ref per Depends on: item checked off as a job, and the
+// The runtime's backlog_depends: a depends-on ref per Depends on: item checked off as a job, and the
 // first item whose backlog line is still unchecked. A missing item adds nothing.
 function backlogDepends(context, text) {
   const lines = text.split('\n').map((l) => l.trimEnd());
@@ -7696,7 +7695,7 @@ function backlogWaitsText(waiting) {
   return 'Approve "' + waiting + '" first. Its backlog line is still unchecked.';
 }
 
-// factory.py backlog_context rules. null means the text is not in the backlog context format.
+// The runtime's backlog_context rules. null means the text is not in the backlog context format.
 function parseBacklogContext(text) {
   const lines = trimBlankEdges(text.replace(/\r\n?/g, '\n')).split('\n');
   const recommend = { 'Recommend: approve': 'approved', 'Recommend: deny': 'denied' }[lines[0]];
@@ -7793,7 +7792,7 @@ function syncBacklogRoute() {
 
 // head, the backlog context block, then tail, in at most 4000 UTF-16 units. A long context is cut
 // with a note, never inside a surrogate pair; if even that does not fit, the block is left out.
-// factory.py idea_with_context matches.
+// The runtime's idea_with_context matches.
 function ideaWithContext(head, context, tail) {
   if (!context) return head + tail;
   const intro = '\n\nContext from the backlog:\n';
@@ -8372,7 +8371,7 @@ function closeIdeaEditor() {
 
 const MOVE_STAGES = ['spec', 'build', 'review', 'approve'];
 
-// Writes the move and drops the claim, so factory.py fences the old session and the target host
+// Writes the move and drops the claim, so the runtime fences the old session and the target host
 // picks the job up. Returns an error message, '' once the board is changed, or 'unchanged' when
 // the board already holds this move and no pickup has claimed it.
 function moveJob(board, id, to, now) {
@@ -8433,7 +8432,7 @@ function prioritizeReads(board, id, mode) {
   return mode === 'batch' && project ? board.jobs.filter((x) => x.id !== id && x.project === project && batchHeld(x)).map((x) => x.id) : [];
 }
 
-// factory.py pickup claims prioritized jobs first and nudges a running agent once.
+// factory pickup claims prioritized jobs first and nudges a running agent once.
 // Returns an error message, 'unchanged', or '' once the board is changed.
 function prioritizeJob(board, id, now, mode = '') {
   const j = board.jobs.find((x) => x.id === id);
@@ -8448,7 +8447,7 @@ function prioritizeJob(board, id, now, mode = '') {
   return '';
 }
 
-// A job held at the spec gate. Approving it moves it to build, and factory.py pickup launches /factory recover.
+// A job held at the spec gate. Approving it moves it to build, and factory pickup launches /factory recover.
 function canApproveSpec(j) {
   return !!j.project && j.stage === 'needs-human' && j.note === SPEC_GATE_NOTE && !leadOf(j) && !j.paused && !j.close;
 }
@@ -8469,7 +8468,7 @@ function approveSpecJob(board, id, now) {
 }
 
 // A job held for a person after a round cap or agent failure. Rework or Approve as is sets resolve,
-// and factory.py pickup launches /factory rework or /factory approve with it.
+// and factory pickup launches /factory rework or /factory approve with it.
 function canResolve(j) {
   return !!j.project && j.stage === 'needs-human' && inboxKind(j) === 'human' && !j.resolve && !leadOf(j) && !j.paused && !j.close;
 }
@@ -8507,7 +8506,7 @@ function steerJob(board, id, note, now) {
   return '';
 }
 
-// A pr-open job with a PR a person can hand to a /factory babysit session, which factory.py pickup launches.
+// A pr-open job with a PR a person can hand to a /factory babysit session, which factory pickup launches.
 function canBabysit(j) {
   return !!j.project && j.stage === 'pr-open' && !!prLink(j) && !leadOf(j) && !j.babysit && !j.paused && !j.close;
 }
@@ -8569,7 +8568,7 @@ function removePriority(board, id, now) {
   return '';
 }
 
-// factory.py pickup and stuck leave a paused job alone; pickup stops its running Paseo session.
+// factory pickup and stuck leave a paused job alone; pickup stops its running Paseo session.
 // Each returns an error message, 'unchanged', or '' once the board is changed.
 function pauseJob(board, id, now) {
   const j = board.jobs.find((x) => x.id === id);
@@ -8592,7 +8591,7 @@ function resumeJob(board, id, now) {
   return '';
 }
 
-// factory.py pickup writes decision.md with the reason, then moves the job to closed.
+// factory pickup writes decision.md with the reason, then moves the job to closed.
 // Returns an error message, '' once the board is changed, 'unchanged' when the board already
 // holds this close, or 'saved' when it holds a close with another reason.
 function closeJob(board, id, reason, now) {

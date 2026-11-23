@@ -205,7 +205,7 @@ function reply(body, status = 200, type = "text/plain", headers = {}) {
 
 const notFound = () => reply("not found", 404);
 
-// Flat `key: value` frontmatter between --- lines, as factory.py reads it.
+// Flat `key: value` frontmatter between --- lines, as the runtime reads it.
 function frontmatter(text) {
   const lines = text.split(/\r?\n/);
   if (lines[0].trim() !== "---") return {};
@@ -1088,7 +1088,7 @@ function changedChars(a, b) {
   return x.length - start - end + (y.length - start - end);
 }
 
-// factory.py's MAX_EXPLORER_PROJECTS: a longer allowlist makes the autonomy record malformed.
+// The runtime's MAX_EXPLORER_PROJECTS: a longer allowlist makes the autonomy record malformed.
 const MAX_EXPLORER_PROJECTS = 1;
 const RETRO_EDIT_CHANGE = 600;
 const RETRO_EDITS_PER_DAY = 2;
@@ -1099,7 +1099,7 @@ const RUN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345678
 const RETRO_DOC_EDIT_SCOPE = "retro edits only allowlisted projects";
 
 // The board's autonomy record as { running, projects }. running needs a well-formed record
-// with paused set to false; a missing or malformed record counts as paused, as in factory.py.
+// with paused set to false; a missing or malformed record counts as paused, as in the runtime.
 // projects is the allowlist when it is a well-formed list, else empty.
 async function boardAutonomy(env) {
   const object = await env.BUCKET.get("board.json");
@@ -2829,7 +2829,7 @@ function quoteIdCut(id, max) {
   return quoteId(id.slice(0, n)).slice(0, -1) + '..."';
 }
 
-// An error message, or null. A row's goal is the spec Goal paragraph, which factory.py push
+// An error message, or null. A row's goal is the spec Goal paragraph, which factory push
 // cuts to 300 code points, so anything else is a client bug.
 function checkGoals(jobs) {
   for (const row of jobs) {
@@ -2870,7 +2870,7 @@ function checkNewIds(storedJobs, jobs) {
     const id = j?.id;
     if (ids.has(id) || (typeof id === "string" && /^\w[\w.-]*$/.test(id) && !/^\d+$/.test(id)))
       continue;
-    return `a board write cannot add ${quoteIdCut(String(id), QUOTED_ID_MAX)}: a job id has no project prefix and is never a bare number, like 003-rate-limiting. Nothing was written. Upgrade the factory skill, or claim new ids with factory.py claim.`;
+    return `a board write cannot add ${quoteIdCut(String(id), QUOTED_ID_MAX)}: a job id has no project prefix and is never a bare number, like 003-rate-limiting. Nothing was written. Upgrade the factory skill, or claim new ids with factory claim.`;
   }
   return null;
 }
@@ -2935,7 +2935,7 @@ function checkRiderControls(storedJobs, jobs) {
   return null;
 }
 
-// [ticket, feature] Tracer knows a row by, as factory.py tracer_ids: the Jira key, else
+// [ticket, feature] Tracer knows a row by, as the runtime's tracer_ids: the Jira key, else
 // FACTORY-<n> from the id's leading digits, else the id.
 function tracerIds(row) {
   if (typeof row.jira === "string" && /^[A-Za-z][A-Za-z0-9]*-[1-9][0-9]*$/.test(row.jira))
@@ -3135,7 +3135,7 @@ const unbatchedAtSpec = (storedRow, row, storedLead, lead) =>
   storedLead?.stage === "spec" &&
   lead?.stage === "spec";
 
-// Only factory.py batch adds a batched-into ref, into a lead stored at spec or new in this write.
+// Only factory batch adds a batched-into ref, into a lead stored at spec or new in this write.
 // Only the lead's close or merge drops one or deletes its rider row, besides the dashboard's
 // Remove from batch while the lead is at spec. An error message, or null.
 function checkBatchRefs(storedJobs, jobs) {
@@ -3174,7 +3174,7 @@ function checkBatchRefs(storedJobs, jobs) {
         (!stored.get(added) || stored.get(added).stage === "spec")
       )
     )
-      return `a board write cannot batch ${quoteIdCut(row.id, QUOTED_ID_MAX)} into ${quoteIdCut(added, QUOTED_ID_MAX)}: factory.py batch does that, while the lead is at spec. Nothing was written.`;
+      return `a board write cannot batch ${quoteIdCut(row.id, QUOTED_ID_MAX)} into ${quoteIdCut(added, QUOTED_ID_MAX)}: factory batch does that, while the lead is at spec. Nothing was written.`;
   }
   for (const [id, storedRow] of stored) {
     if (written.has(id)) continue;
@@ -3554,7 +3554,7 @@ async function api(request, env, path, principal, ctx) {
     if (m[3] === "" && method === "GET") {
       const { objects } = await env.BUCKET.list({ prefix });
       const name = (o) => o.key.slice(prefix.length);
-      // ?etags=1 adds each file's version for factory.py's sync manifest. Older devices get names only.
+      // ?etags=1 adds each file's version for the runtime's sync manifest. Older devices get names only.
       const list = new URL(request.url).searchParams.has("etags")
         ? objects.map((o) => ({ name: name(o), etag: o.httpEtag }))
         : objects.map(name);

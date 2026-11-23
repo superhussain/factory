@@ -37,7 +37,7 @@ const refusal = (field) =>
   `a board write cannot add ${field} to "1203-cache-headers": it is batched into "1201-sync-retry" and follows its lead. Act on the lead instead. Nothing was written.`;
 
 const batchRefusal = (row, lead) =>
-  `a board write cannot batch "${row}" into "${lead}": factory.py batch does that, while the lead is at spec. Nothing was written.`;
+  `a board write cannot batch "${row}" into "${lead}": factory batch does that, while the lead is at spec. Nothing was written.`;
 const unbatchRefusal = (row, lead) =>
   `a board write cannot unbatch "${row}": its lead "${lead}" is still open. Only the lead's close or merge drops the ref. Nothing was written.`;
 const deleteRefusal = (row, lead) =>

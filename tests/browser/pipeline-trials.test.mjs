@@ -52,7 +52,7 @@ const TRIALS = [
   { id: XSS, project: "other", stage: "spec", status: "open", opened: "2026-11-13T09:00:00Z" },
 ];
 const BANNER =
-  'Stage-note trials for sample are paused after 2 reverts. Retro edits no sample stage note until a person runs factory.py trial resume sample "<reason>" or asks an agent to run it.';
+  'Stage-note trials for sample are paused after 2 reverts. Retro edits no sample stage note until a person runs factory trial resume sample "<reason>" or asks an agent to run it.';
 const wait = { polling: 50 };
 
 const rows = (page) =>
@@ -144,7 +144,7 @@ test("pipeline stage-note trials", { timeout: 180000 }, async (t) => {
       );
       assert.equal(
         await page.$eval("#pipeline-trials-paused p code", (el) => el.textContent),
-        'factory.py trial resume sample "<reason>"',
+        'factory trial resume sample "<reason>"',
       );
       // The quoted reason never wraps apart, so a lone quote never ends a line.
       assert.deepEqual(
@@ -200,7 +200,7 @@ test("pipeline stage-note trials", { timeout: 180000 }, async (t) => {
       );
       assert.deepEqual(
         await page.$$eval("#pipeline-trials-paused code", (els) => els.map((el) => el.textContent)),
-        ['factory.py trial resume other "<reason>"', 'factory.py trial resume sample "<reason>"'],
+        ['factory trial resume other "<reason>"', 'factory trial resume sample "<reason>"'],
       );
       assert.equal((await rows(page)).length, 4);
     });
