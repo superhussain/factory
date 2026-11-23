@@ -11,15 +11,18 @@ use serde_json::{json, Map, Value};
 use crate::cli::{not_ported, Call};
 use crate::shared::board::{dump_board, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
-use crate::shared::consts::{NEW_JOB_ID, NOTE_SECRETS, PASEO_ID, ROUTE_MODEL, SLUG};
+use crate::shared::consts::{JOB_ID, NEW_JOB_ID, NOTE_SECRETS, PASEO_ID, ROUTE_MODEL, SLUG};
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::read_text;
-use crate::shared::home::factory_home;
+use crate::shared::home::{device_name, factory_home};
 use crate::shared::http::{access_message, api, cas};
-use crate::shared::proc::hostname;
+use crate::shared::proc::{hostname, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
-use crate::shared::py::{is_space, os_error, repr, rstrip, strip, universal_newlines};
-use crate::shared::pyjson::{dumps, float_repr, loads, DEFAULT};
+use crate::shared::py::{
+    is_space, os_error, repr, round_half_even, round_int, rstrip, splitlines, strip,
+    universal_newlines,
+};
+use crate::shared::pyjson::{dumps, float_repr, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Captures, Flags, Pattern};
 use crate::shared::time::{now, parse_stamp, unix_now};
 
@@ -1632,8 +1635,450 @@ pub fn outcomes_cmd(call: &Call) -> Res<()> {
     result
 }
 
-pub fn bench_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("bench"))
+static COMMIT: Pattern = Pattern::new("[0-9a-f]{40}", Flags::ASCII);
+static CITATION: Pattern = Pattern::new(
+    r"(?<![\w./:-])((?:[\w.-]+/)*[\w-][\w.-]*\.[A-Za-z][A-Za-z0-9]{0,9}):([0-9]+)(?:-([0-9]+))?((?:,[0-9]+)*)(?![\w])",
+    Flags::NONE,
+);
+static ARM_NAME: Pattern = Pattern::new(r"[\w.-]+", Flags::ASCII);
+const BENCH_WEIGHTS: [(&str, i64); 3] = [("high", 3), ("medium", 2), ("low", 1)];
+const BENCH_USAGE: &str = "usage: factory.py bench score <cases-file> <arm-folder>... | bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] | bench cases <project-slug>";
+const BENCH_DRAFT_USAGE: &str = "usage: factory.py bench cases <project-slug>";
+const ROLE_ALIASES: [(&str, &str); 10] = [
+    ("builder", "build"),
+    ("factory-builder", "build"),
+    ("spec-writer", "spec"),
+    ("factory-spec-writer", "spec"),
+    ("approver", "approve"),
+    ("factory-approver", "approve"),
+    ("factory-review-security", "review-security"),
+    ("factory-review-ux", "review-ux"),
+    ("factory-review-ui", "review-ui"),
+    ("factory-review-code", "review-code"),
+];
+const REVIEW_ROLES: [&str; 4] = ["review-security", "review-ux", "review-ui", "review-code"];
+
+type Citation = (String, String, Vec<i64>, Option<(i64, i64)>);
+
+/// [(citation, path, lines, span)] for each distinct path:line a review cites, in order of first
+/// appearance. span is (start, end) for a path:a-b range, else None.
+fn find_citations(text: &str) -> Vec<Citation> {
+    let mut found: Vec<Citation> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    let number = |s: &str| s.parse::<i64>().unwrap_or(i64::MAX);
+    for m in CITATION.find_iter(text) {
+        let c = CITATION.match_start(&text[m.start()..]).unwrap();
+        let whole = group(&c, 0).to_string();
+        let mut path = group(&c, 1);
+        while let Some(rest) = path.strip_prefix("./") {
+            path = rest;
+        }
+        if seen.contains(&whole) || path.split('/').any(|p| p == "..") {
+            continue;
+        }
+        seen.push(whole.clone());
+        let mut lines = vec![number(group(&c, 2))];
+        let end = c.get(3).map(|e| number(e.as_str()));
+        lines.extend(end);
+        lines.extend(
+            group(&c, 4)
+                .split(',')
+                .filter(|x| !x.is_empty())
+                .map(number),
+        );
+        let span = end.map(|_| (lines[0], lines[1]));
+        found.push((whole, path.to_string(), lines, span));
+    }
+    found
+}
+
+/// The validated case list of a reviewer-benchmark cases file, failing on the first bad field.
+fn bench_cases(path: &str) -> Res<Vec<Value>> {
+    if !Path::new(path).is_file() {
+        return Err(fail(format!("bench: no cases file at {path}"), 4));
+    }
+    let data = read_text(Path::new(path)).ok().and_then(|t| loads(&t).ok());
+    let cases = match data.as_ref().and_then(|d| d.get("cases")) {
+        Some(Value::Array(cases))
+            if data.as_ref().is_some_and(Value::is_object) && !cases.is_empty() =>
+        {
+            cases.clone()
+        }
+        _ => {
+            return Err(fail(
+                format!(r#"bench: {path} is not a cases file: needs {{"cases": [...]}}"#),
+                2,
+            ))
+        }
+    };
+    let mut seen: Vec<String> = Vec::new();
+    for (n, c) in cases.iter().enumerate() {
+        let empty = Map::new();
+        let c = c.as_object().unwrap_or(&empty);
+        let text = |k: &str| c.get(k).and_then(Value::as_str);
+        let reason = match text("id") {
+            None => Some("id must look like 1018-add-y".to_string()),
+            Some(id) if !JOB_ID.is_full(id) => Some("id must look like 1018-add-y".to_string()),
+            Some(id) if seen.iter().any(|s| s == id) => Some(format!("duplicate id {id}")),
+            _ if !text("pr").is_some_and(|p| GH_PR_PARTS.is_full(p)) => {
+                Some("pr must be a GitHub pull request URL".into())
+            }
+            _ if !text("head").is_some_and(|h| COMMIT.is_full(h)) => {
+                Some("head must be a 40-character commit".into())
+            }
+            _ if !matches!(text("source"), Some("reverted" | "reworked")) => {
+                Some("source must be reverted or reworked".into())
+            }
+            _ => match c.get("defects").and_then(Value::as_array) {
+                Some(defects) if !defects.is_empty() => {
+                    defects.iter().enumerate().find_map(|(m, d)| {
+                        let m = m + 1;
+                        let d = d.as_object().unwrap_or(&empty);
+                        let path = d.get("path").and_then(Value::as_str);
+                        let lines = d.get("lines").and_then(Value::as_array);
+                        let ints: Option<Vec<i64>> = lines
+                            .map(|l| l.iter().map(|x| int_of(Some(x))).collect::<Option<_>>())
+                            .flatten();
+                        if !path.is_some_and(|p| {
+                            !p.is_empty()
+                                && !p.starts_with('/')
+                                && !p.contains('\\')
+                                && !p.split('/').any(|s| s == "..")
+                        }) {
+                            Some(format!(
+                                "defect {m}: path must be a relative repository path"
+                            ))
+                        } else if !ints.is_some_and(|l| l.len() == 2 && 1 <= l[0] && l[0] <= l[1]) {
+                            Some(format!(
+                                "defect {m}: lines must be [start, end] with 1 <= start <= end"
+                            ))
+                        } else if !d
+                            .get("severity")
+                            .and_then(Value::as_str)
+                            .is_some_and(|s| BENCH_WEIGHTS.iter().any(|(w, _)| *w == s))
+                        {
+                            Some(format!("defect {m}: severity must be high, medium or low"))
+                        } else {
+                            None
+                        }
+                    })
+                }
+                _ => Some("defects must be a non-empty list".into()),
+            },
+        };
+        if let Some(reason) = reason {
+            return Err(fail(format!("bench: {path}: case {}: {reason}", n + 1), 2));
+        }
+        seen.push(text("id").unwrap().to_string());
+    }
+    Ok(cases)
+}
+
+/// True when a cite names the defect's path, or its basename with no folder, and a cited line or
+/// span overlaps the defect's lines.
+fn bench_hit(path: &str, start: i64, end: i64, citations: &[Citation]) -> bool {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    citations.iter().any(|(_, cited, lines, span)| {
+        (cited == path || (!cited.contains('/') && cited == base))
+            && (lines.iter().any(|n| start <= *n && *n <= end)
+                || span.is_some_and(|(a, b)| a <= end && b >= start))
+    })
+}
+
+/// Recall, tokens and seconds for one arm folder of saved reviews, scored against the cases.
+fn bench_arm(folder: &str, cases: &[Value]) -> Res<Value> {
+    let mut severity: Map<String, Value> = BENCH_WEIGHTS
+        .iter()
+        .map(|(s, _)| (s.to_string(), json!({"caught": 0, "of": 0})))
+        .collect();
+    let (mut weight, mut caught_weight, mut caught, mut tokens, mut runs) =
+        (0i64, 0i64, 0i64, 0i64, 0i64);
+    let mut seconds = 0.0f64;
+    let (mut missed, mut missing, mut no_run) = (
+        Vec::<String>::new(),
+        Vec::<String>::new(),
+        Vec::<String>::new(),
+    );
+    for c in cases {
+        let id = c["id"].as_str().unwrap();
+        let case_dir = Path::new(folder).join(id);
+        if !case_dir.is_dir() {
+            missing.push(id.into());
+        }
+        let mut citations = Vec::new();
+        for review in glob(&case_dir, "review-", ".md") {
+            if !review.is_file() {
+                continue;
+            }
+            let text = read_lines(&review, None)
+                .map_err(|e| fail(os_error(&e, Some(&review)), 1))?
+                .concat();
+            if splitlines(&text, false).first() == Some(&"VERDICT: CHANGES") {
+                citations.extend(find_citations(&text));
+            }
+        }
+        for d in c["defects"].as_array().unwrap() {
+            let sev = d["severity"].as_str().unwrap();
+            let w = BENCH_WEIGHTS.iter().find(|(s, _)| *s == sev).unwrap().1;
+            weight += w;
+            let slot = &mut severity[sev];
+            slot["of"] = Value::from(slot["of"].as_i64().unwrap() + 1);
+            let path = d["path"].as_str().unwrap();
+            let (start, end) = (
+                int_of(d["lines"].get(0)).unwrap(),
+                int_of(d["lines"].get(1)).unwrap(),
+            );
+            if bench_hit(path, start, end, &citations) {
+                caught += 1;
+                caught_weight += w;
+                slot["caught"] = Value::from(slot["caught"].as_i64().unwrap() + 1);
+            } else {
+                missed.push(format!("{id} {path}:{start}-{end}"));
+            }
+        }
+        let run = read_text(&case_dir.join("run.json"))
+            .ok()
+            .and_then(|t| loads(&t).ok());
+        let secs = run
+            .as_ref()
+            .and_then(|r| r.get("seconds"))
+            .filter(|s| s.is_number())
+            .and_then(Value::as_f64)
+            .filter(|s| (0.0..f64::INFINITY).contains(s));
+        match (
+            secs,
+            run.as_ref()
+                .and_then(|r| r.get("models"))
+                .filter(|m| m.is_object()),
+        ) {
+            (Some(secs), Some(models)) if run.as_ref().is_some_and(Value::is_object) => {
+                tokens += token_count(models);
+                seconds += secs;
+                runs += 1;
+            }
+            _ => no_run.push(id.into()),
+        }
+    }
+    let recall = round_half_even(caught_weight as f64 / weight as f64, 2);
+    Ok(
+        json!({"arm": py_name(folder), "weighted_recall": recall, "caught": caught,
+        "severity": severity, "missed": missed, "tokens": tokens, "seconds": round_int(seconds),
+        "runs": runs, "missing": missing, "no_run": no_run}),
+    )
+}
+
+/// Each case's job folder, project and checkout, failing on the first case that cannot run. The
+/// merge commits come from GitHub, which the checks slice reads.
+fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<()> {
+    let (paths, device) = (read_paths(home), device_name(home));
+    for c in cases {
+        let id = c["id"].as_str().unwrap();
+        let mut jobs: Vec<PathBuf> = glob(&home.join("jobs"), "", "")
+            .into_iter()
+            .filter(|p| p.is_dir() && p.join(id).is_dir() && p.join(id).join("spec.md").exists())
+            .map(|p| p.join(id))
+            .collect();
+        jobs.sort();
+        if jobs.is_empty() {
+            return Err(fail(
+                format!(
+                    "bench: {id}: no job folder with spec.md under {}; pull it with factory.py pull <project>/{id}",
+                    home.join("jobs").display()
+                ),
+                4,
+            ));
+        }
+        if jobs.len() > 1 {
+            return Err(fail(
+                format!("bench: {id}: job folders in more than one project"),
+                2,
+            ));
+        }
+        let slug = file_name(jobs[0].parent().unwrap());
+        let project = project_files(home, &slug)?.0;
+        let meta = if project.exists() {
+            frontmatter(&project)
+                .map_err(|e| fail(os_error(&e, Some(&project)), 1))?
+                .0
+        } else {
+            Vec::new()
+        };
+        let repo = fm_get(&meta, "repo").unwrap_or("");
+        if repo.is_empty() {
+            return Err(fail(
+                format!(
+                    "bench: {id}: project {slug} has no repo; pull it with factory.py pull {slug}"
+                ),
+                4,
+            ));
+        }
+        let (pr_repo, _) = pr_parts(c.get("pr")).unwrap();
+        if pr_repo.to_lowercase() != repo.to_lowercase() {
+            return Err(fail(
+                format!("bench: {id}: pr is not in {repo}, the repo of project {slug}"),
+                2,
+            ));
+        }
+        if fm_get(&paths, &slug).unwrap_or("").is_empty() {
+            return Err(fail(
+                format!("bench: {id}: no checkout of {slug} in paths.md on {device}"),
+                4,
+            ));
+        }
+    }
+    Err(not_ported("bench replay"))
+}
+
+/// bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>].
+fn bench_replay(args: &[String]) -> Res<()> {
+    let usage = || fail(BENCH_USAGE, 2);
+    let rest = args.get(2..).unwrap_or(&[]);
+    if args.len() < 2 || args[..2].iter().any(|a| a.starts_with("--")) || rest.len() % 2 == 1 {
+        return Err(usage());
+    }
+    let mut flags: Vec<(&str, &str)> = Vec::new();
+    for pair in rest.chunks(2) {
+        let (flag, value) = (pair[0].as_str(), pair[1].as_str());
+        if !["--role", "--model"].contains(&flag) || flags.iter().any(|(f, _)| *f == flag) {
+            return Err(usage());
+        }
+        flags.push((flag, value));
+    }
+    let get = |name: &str| flags.iter().find(|(f, _)| *f == name).map(|(_, v)| *v);
+    let Some(role) = get("--role") else {
+        return Err(usage());
+    };
+    let role = ROLE_ALIASES
+        .iter()
+        .find(|(a, _)| *a == role)
+        .map_or(role, |(_, r)| *r);
+    if !REVIEW_ROLES.contains(&role) {
+        return Err(fail(
+            "bench: --role must be review-security, review-ux, review-ui or review-code",
+            2,
+        ));
+    }
+    if get("--model").is_some_and(|m| !ROUTE_MODEL.is_full(m)) {
+        return Err(fail(
+            "bench: --model must be 1 to 200 letters, digits or _ . / : @ [ ] -",
+            2,
+        ));
+    }
+    let cases = bench_cases(&args[0])?;
+    let (arm, name) = (Path::new(&args[1]), py_name(&args[1]));
+    if !ARM_NAME.is_full(&name) {
+        return Err(fail(
+            format!("bench: arm name {name} must be unique letters, digits, ., _ or -"),
+            2,
+        ));
+    }
+    if arm.exists() && !arm.is_dir() {
+        return Err(fail(format!("bench: {} is not a folder", arm.display()), 2));
+    }
+    if which("claude").is_none() {
+        return Err(fail("bench: replay needs claude on PATH", 4));
+    }
+    bench_replay_plan(&factory_home()?, &cases)
+}
+
+/// bench cases <project-slug>: draft cases for the project's reverted or reworked jobs. The PR
+/// heads come from GitHub, which the checks slice reads.
+fn bench_draft(args: &[String]) -> Res<()> {
+    if args.len() != 1 || !SLUG.is_full(&args[0]) {
+        return Err(fail(BENCH_DRAFT_USAGE, 2));
+    }
+    let (slug, home) = (&args[0], factory_home()?);
+    let md = project_files(&home, slug)?.0;
+    if !md.exists() {
+        return Err(fail(format!("bench: no project file for {slug}"), 4));
+    }
+    let meta = frontmatter(&md)
+        .map_err(|e| fail(os_error(&e, Some(&md)), 1))?
+        .0;
+    let repo = fm_get(&meta, "repo").unwrap_or("");
+    let board = read_board(&home)?;
+    let mut jobs: Vec<&Value> = board["jobs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|j| {
+            j.get("project").and_then(Value::as_str) == Some(slug)
+                && matches!(
+                    j.get("outcome")
+                        .and_then(Value::as_object)
+                        .and_then(|o| o.get("result"))
+                        .and_then(Value::as_str),
+                    Some("reverted" | "reworked")
+                )
+        })
+        .collect();
+    jobs.sort_by_key(|j| py_str(j.get("id")));
+    let mut prs = 0;
+    for j in jobs {
+        match pr_parts(j.get("pr")) {
+            Some((pr_repo, _)) if pr_repo.to_lowercase() == repo.to_lowercase() => prs += 1,
+            _ => {
+                let repo = if repo.is_empty() {
+                    "the project file repo"
+                } else {
+                    repo
+                };
+                eprintln!(
+                    "factory.py: bench cases skips {}: PR is not in {repo}",
+                    py_str(j.get("id"))
+                );
+            }
+        }
+    }
+    if prs > 0 {
+        return Err(not_ported("bench cases"));
+    }
+    Err(fail(
+        format!("bench: no reverted or reworked jobs to draft in {slug}"),
+        3,
+    ))
+}
+
+pub fn bench_cmd(call: &Call) -> Res<()> {
+    let args = &call.args;
+    match args.first().map(String::as_str) {
+        Some("replay") => return bench_replay(&args[1..]),
+        Some("cases") => return bench_draft(&args[1..]),
+        _ => {}
+    }
+    if args.len() < 3 || args[0] != "score" {
+        return Err(fail(BENCH_USAGE, 2));
+    }
+    let cases = bench_cases(&args[1])?;
+    let mut names: Vec<String> = Vec::new();
+    for folder in &args[2..] {
+        if !Path::new(folder).is_dir() {
+            return Err(fail(format!("bench: no arm folder at {folder}"), 4));
+        }
+        let name = py_name(folder);
+        if !ARM_NAME.is_full(&name) || names.contains(&name) {
+            return Err(fail(
+                format!("bench: arm name {name} must be unique letters, digits, ., _ or -"),
+                2,
+            ));
+        }
+        names.push(name);
+    }
+    let arms = args[2..]
+        .iter()
+        .map(|f| bench_arm(f, &cases))
+        .collect::<Res<Vec<_>>>()?;
+    let weights: Map<String, Value> = BENCH_WEIGHTS
+        .iter()
+        .map(|(s, w)| (s.to_string(), Value::from(*w)))
+        .collect();
+    let defects: usize = cases
+        .iter()
+        .map(|c| c["defects"].as_array().unwrap().len())
+        .sum();
+    let out = json!({"cases": cases.len(), "defects": defects, "weights": weights, "arms": arms});
+    println!("{}", dumps(&out, INDENT2));
+    Ok(())
 }
 
 #[cfg(test)]
