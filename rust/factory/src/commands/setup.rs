@@ -28,7 +28,7 @@ use crate::shared::http::{
 };
 use crate::shared::proc::{git, git_ok, origin_git};
 use crate::shared::project::{
-    local_bytes, project_files, pull_project, read_paths, read_project_state, save_project_state,
+    local_bytes, project_files, pull_project, read_project_state, save_project_state,
 };
 use crate::shared::py::{is_space, lstrip, os_error, repr, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
@@ -118,6 +118,15 @@ fn dict(pairs: Vec<(String, String)>) -> Vec<(String, String)> {
         }
     }
     out
+}
+
+/// `read_paths` as Python runs it: a paths.md that exists but cannot be read or decoded fails 1.
+fn read_paths_strict(home: &Path) -> Res<Vec<(String, String)>> {
+    let path = home.join("paths.md");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    Ok(frontmatter(&path).map_err(|e| os_fail(e, &path))?.0)
 }
 
 /// `frontmatter` on text already read.
@@ -469,7 +478,7 @@ fn register_project(home: &Path, repo_path: &str) -> Res<()> {
         }
         println!("project file: {}", project.display());
     }
-    let mut paths = dict(read_paths(home));
+    let mut paths = dict(read_paths_strict(home)?);
     paths.push((slug.clone(), main.display().to_string()));
     let paths = dict(paths);
     let listed: String = paths.iter().map(|(k, v)| format!("{k}: {v}\n")).collect();
@@ -876,7 +885,12 @@ fn read_limits(home: &Path) -> Res<Vec<(String, String)>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let limits = read_text(&path).ok().and_then(|text| {
+    // A decode error is a ValueError in Python, so it fails 2 like bad JSON; any other read error fails 1.
+    let text = match read_text(&path) {
+        Err(e) if e.kind() != io::ErrorKind::InvalidData => return Err(os_fail(e, &path)),
+        read => read.ok(),
+    };
+    let limits = text.and_then(|text| {
         let value = loads(&text).ok()?;
         value
             .as_object()?
@@ -946,8 +960,8 @@ fn checkout_slug(slug: &str) -> bool {
 
 /// When the first merge on origin's base that commit lacks landed, from the first checkout
 /// holding commit. None when commit is current or no checkout holds it.
-fn bundle_behind_since(home: &Path, commit: &str) -> Option<String> {
-    let mut paths = dict(read_paths(home));
+fn bundle_behind_since(home: &Path, commit: &str) -> Res<Option<String>> {
+    let mut paths = dict(read_paths_strict(home)?);
     paths.sort();
     for (slug, repo) in paths {
         let repo = Path::new(&repo);
@@ -958,7 +972,7 @@ fn bundle_behind_since(home: &Path, commit: &str) -> Option<String> {
             continue;
         };
         let meta = if project.exists() {
-            frontmatter(&project).map(|(m, _)| m).unwrap_or_default()
+            frontmatter(&project).map_err(|e| os_fail(e, &project))?.0
         } else {
             Vec::new()
         };
@@ -979,23 +993,24 @@ fn bundle_behind_since(home: &Path, commit: &str) -> Option<String> {
                 &format!("{commit}..{origin}"),
             ],
         );
-        return times
+        return Ok(times
             .split_whitespace()
             .last()
             .and_then(|t| t.parse().ok())
-            .map(format_stamp);
+            .map(format_stamp));
     }
-    None
+    Ok(None)
 }
 
 /// The status body the Worker's PUT /api/hosts/<id>/status accepts. Holds no path or secret.
+/// None when a local file it reads cannot be read or decoded, where Python raises.
 fn host_status(
     home: &Path,
     report: &Value,
     scheduler: &str,
     last: Option<&str>,
     triage: Option<&str>,
-) -> Value {
+) -> Option<Value> {
     let failed: Vec<Value> = report["checks"]
         .as_array()
         .into_iter()
@@ -1003,9 +1018,11 @@ fn host_status(
         .filter(|c| c["status"] != "pass")
         .map(|c| c["name"].clone())
         .collect();
-    let (routes, limits) = match (read_routes(home), read_limits(home)) {
-        (Ok(routes), Ok(limits)) => (routes, limits),
-        _ => (Vec::new(), Vec::new()),
+    // Python catches only fail's SystemExit (exit 2) here; a read error (exit 1) stops the status.
+    let (routes, limits) = match read_routes(home).and_then(|r| Ok((r, read_limits(home)?))) {
+        Ok(read) => read,
+        Err(e) if e.code == 2 => (Vec::new(), Vec::new()),
+        Err(_) => return None,
     };
     let stamp = now();
     let routes: Vec<Value> = routes
@@ -1020,7 +1037,7 @@ fn host_status(
                    "limited_until": until})
         })
         .collect();
-    let mut checkouts: Vec<String> = dict(read_paths(home))
+    let mut checkouts: Vec<String> = dict(read_paths_strict(home).ok()?)
         .into_iter()
         .filter(|(slug, path)| checkout_slug(slug) && Path::new(path).is_dir())
         .map(|(slug, _)| slug)
@@ -1037,13 +1054,15 @@ fn host_status(
         "doctor": doctor, "routes": routes, "checkouts": checkouts,
     });
     let commit = body["bundle"]["commit"].as_str().map(String::from);
-    if let Some(behind) = commit.and_then(|c| bundle_behind_since(home, &c)) {
-        body["bundle_behind_since"] = json!(behind);
+    if let Some(commit) = commit {
+        if let Some(behind) = bundle_behind_since(home, &commit).ok()? {
+            body["bundle_behind_since"] = json!(behind);
+        }
     }
     if let Some(triage) = triage {
         body["triage_failed_since"] = json!(triage);
     }
-    body
+    Some(body)
 }
 
 /// PUT this host's status when config.md sets device:. Silent in every outcome, so a caller's
@@ -1074,7 +1093,10 @@ fn report_status(
         }
     };
     let (scheduler, last, triage) = cached;
-    let body = host_status(home, report, &scheduler, last.as_deref(), triage.as_deref());
+    let Some(body) = host_status(home, report, &scheduler, last.as_deref(), triage.as_deref())
+    else {
+        return false;
+    };
     api(
         home,
         "PUT",
@@ -1148,8 +1170,9 @@ fn run_tag() -> String {
 }
 
 /// (name, data) for each regular file and folder in a tar stream, folders with None data.
-/// Links, other types and names `check_path` refuses are skipped.
-fn tar_members(data: &[u8]) -> Vec<(String, Option<Vec<u8>>)> {
+/// Links, other types and names `check_path` refuses are skipped. A size field that is not
+/// octal, or a body that runs past the end, fails as tarfile does.
+fn tar_members(data: &[u8]) -> Result<Vec<(String, Option<Vec<u8>>)>, ()> {
     let mut members = Vec::new();
     let (mut pos, mut pax_path) = (0, None::<String>);
     while pos + 512 <= data.len() {
@@ -1161,11 +1184,13 @@ fn tar_members(data: &[u8]) -> Vec<(String, Option<Vec<u8>>)> {
             let f = &header[a..b];
             &f[..f.iter().position(|c| *c == 0).unwrap_or(f.len())]
         };
-        let size = std::str::from_utf8(field(124, 136))
-            .ok()
-            .and_then(|s| usize::from_str_radix(s.trim(), 8).ok())
-            .unwrap_or(0);
-        let body = &data[(pos + 512).min(data.len())..(pos + 512 + size).min(data.len())];
+        let size = std::str::from_utf8(field(124, 136)).map_err(|_| ())?.trim();
+        let size = if size.is_empty() {
+            0
+        } else {
+            usize::from_str_radix(size, 8).map_err(|_| ())?
+        };
+        let body = data.get(pos + 512..pos + 512 + size).ok_or(())?;
         pos += 512 + size.div_ceil(512) * 512;
         let kind = header[156];
         if kind == b'x' {
@@ -1204,7 +1229,7 @@ fn tar_members(data: &[u8]) -> Vec<(String, Option<Vec<u8>>)> {
             members.push((name, entry));
         }
     }
-    members
+    Ok(members)
 }
 
 /// Write commit's regular files and folders into dest, with no .git and no links.
@@ -1219,11 +1244,17 @@ fn snapshot(repo: &Path, commit: &str, dest: &Path) -> Res<()> {
     if !out.status.success() {
         return Err(failed());
     }
+    let members = tar_members(&out.stdout).map_err(|()| {
+        fail(
+            format!("git archive in {} sent a malformed tar", repo.display()),
+            1,
+        )
+    })?;
     let parent = dest.parent().unwrap_or(Path::new("/"));
     fs::create_dir_all(parent)
         .and_then(|()| fs::create_dir(dest))
         .map_err(|e| os_fail(e, dest))?;
-    for (name, data) in tar_members(&out.stdout) {
+    for (name, data) in members {
         let path = dest.join(&name);
         match data {
             None => fs::create_dir_all(&path),
@@ -1270,7 +1301,7 @@ pub fn explore(call: &Call) -> Res<()> {
             3,
         ));
     }
-    let paths = read_paths(&home);
+    let paths = read_paths_strict(&home)?;
     let repo = fm_get(&paths, slug).unwrap_or("");
     if repo.is_empty() {
         return Err(fail(
@@ -1834,6 +1865,89 @@ mod tests {
         assert_eq!(found, vec![".env.example", "a.txt", "deep", long.as_str()]);
         assert_eq!(fs::read_to_string(dest.join(&long)).unwrap(), "long\n");
         assert!(snapshot(&repo, "no-such-commit", &dir.join("out/other")).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// One ustar header block for name, followed by body padded to 512 bytes.
+    fn tar_entry(name: &str, kind: u8, body: &[u8]) -> Vec<u8> {
+        let mut header = [0u8; 512];
+        header[..name.len()].copy_from_slice(name.as_bytes());
+        header[124..135].copy_from_slice(format!("{:011o}", body.len()).as_bytes());
+        header[156] = kind;
+        header[257..262].copy_from_slice(b"ustar");
+        let mut entry = header.to_vec();
+        entry.extend_from_slice(body);
+        entry.resize(512 + body.len().div_ceil(512) * 512, 0);
+        entry
+    }
+
+    #[test]
+    fn tar_refuses_hostile_members() {
+        let mut data = Vec::new();
+        for entry in [
+            tar_entry("../x", b'0', b"up"),
+            tar_entry("/etc/x", b'0', b"abs"),
+            tar_entry("pax", b'x', b"13 path=../x\n"),
+            tar_entry("innocent.txt", b'0', b"renamed"),
+            tar_entry("link", b'2', b""),
+            tar_entry("good.txt", b'0', b"g"),
+        ] {
+            data.extend(entry);
+        }
+        data.extend([0u8; 1024]);
+        assert_eq!(
+            tar_members(&data).unwrap(),
+            vec![("good.txt".to_string(), Some(b"g".to_vec()))]
+        );
+        let mut bad_size = tar_entry("a.txt", b'0', b"a");
+        bad_size[124..135].copy_from_slice(b"zzzzzzzzzzz");
+        assert!(tar_members(&bad_size).is_err());
+        let mut truncated = tar_entry("a.txt", b'0', &[b'a'; 600]);
+        truncated.truncate(700);
+        assert!(tar_members(&truncated).is_err());
+    }
+
+    #[test]
+    fn strict_paths_refuse_bad_bytes() {
+        let dir = temp_dir("setup-paths");
+        assert_eq!(read_paths_strict(&dir).unwrap(), Vec::new());
+        fs::write(dir.join("paths.md"), b"---\nsample: /srv/\xff\n---\n").unwrap();
+        assert_eq!(read_paths_strict(&dir).unwrap_err().code, 1);
+        assert_eq!(
+            fs::read(dir.join("paths.md")).unwrap(),
+            b"---\nsample: /srv/\xff\n---\n"
+        );
+        let report = json!({"checks": []});
+        assert_eq!(host_status(&dir, &report, "none", None, None), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn host_status_refuses_unreadable_routes() {
+        let dir = temp_dir("setup-status");
+        let report = json!({"checks": []});
+        let routes =
+            |dir: &Path| host_status(dir, &report, "none", None, None).map(|b| b["routes"].clone());
+        fs::write(
+            dir.join("routes.md"),
+            "---\nprimary: provider-a model-a\n---\n",
+        )
+        .unwrap();
+        assert_eq!(routes(&dir).unwrap().as_array().unwrap().len(), 1);
+        fs::write(dir.join("route-limits.json"), b"\xff").unwrap();
+        assert_eq!(routes(&dir), Some(json!([])));
+        fs::remove_file(dir.join("route-limits.json")).unwrap();
+        fs::create_dir(dir.join("route-limits.json")).unwrap();
+        assert_eq!(routes(&dir), None);
+        fs::remove_dir(dir.join("route-limits.json")).unwrap();
+        fs::write(dir.join("routes.md"), "---\nprimary: one-word\n---\n").unwrap();
+        assert_eq!(routes(&dir), Some(json!([])));
+        fs::write(
+            dir.join("routes.md"),
+            b"---\nprimary: provider-a \xff\n---\n",
+        )
+        .unwrap();
+        assert_eq!(routes(&dir), None);
         fs::remove_dir_all(dir).unwrap();
     }
 }
