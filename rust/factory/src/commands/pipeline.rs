@@ -8,17 +8,22 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::cli::{not_ported, Call};
+use crate::shared::board::{escalated, read_board};
+use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{
-    tag_lookalike, BABYSIT_SENTENCE, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS,
-    NOTE_TAG, PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE, SLUG,
+    tag_lookalike, BABYSIT_SENTENCE, JOB_ID, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS,
+    NOTE_TAG, PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE, REVIEW_ROUTE_KEYS,
+    ROUTE_EFFORTS, ROUTE_MODEL, SLUG,
 };
 use crate::shared::exit::{fail, Res};
-use crate::shared::fs::{is_link, write_atomic};
+use crate::shared::fs::{is_link, read_text, write_atomic};
 use crate::shared::home::factory_home;
 use crate::shared::http::api;
 use crate::shared::project::project_files;
-use crate::shared::py::{os_error, strip};
+use crate::shared::py::{is_space, os_error, repr, round_half_even, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
+use crate::shared::pyre::{Flags, Pattern};
+use crate::shared::time::{format_stamp, now, parse_stamp, unix_now};
 use crate::shared::unicode::nfkc;
 
 /// What a command prints, held until the handler flushes it.
@@ -541,15 +546,773 @@ pub fn documents_cmd(call: &Call) -> Res<()> {
     flushed(|o| documents(&home, slug, o))
 }
 
+// ---- routes and experiment ----
+
+/// Python's `str.split()`: runs of whitespace separate, ends are dropped.
+fn py_split(s: &str) -> Vec<&str> {
+    s.split(is_space).filter(|w| !w.is_empty()).collect()
+}
+
+/// A frontmatter block as a dict: each key once, in first place, with its last value.
+fn fm_dict(meta: Vec<(String, String)>) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for (k, v) in meta {
+        match out.iter_mut().find(|(key, _)| *key == k) {
+            Some(slot) => slot.1 = v,
+            None => out.push((k, v)),
+        }
+    }
+    out
+}
+
+/// routes.md's frontmatter, or nothing when the file is missing.
+fn routes_meta(path: &Path) -> Res<Vec<(String, String)>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let meta = frontmatter(path)
+        .map_err(|e| fail(os_error(&e, Some(path)), 1))?
+        .0;
+    Ok(fm_dict(meta))
+}
+
+type Route = (String, String, String, Option<String>);
+
+/// (provider, model, effort or None) from "<provider> <model> [<effort>]", or None when it is malformed.
+fn parse_route(value: &str) -> Option<(String, String, Option<String>)> {
+    let parts = py_split(value);
+    if !(2..=3).contains(&parts.len())
+        || !SLUG.is_full(parts[0])
+        || !ROUTE_MODEL.is_full(parts[1])
+        || parts.len() == 3 && !ROUTE_EFFORTS.contains(&parts[2])
+    {
+        return None;
+    }
+    Some((
+        parts[0].to_string(),
+        parts[1].to_string(),
+        parts.get(2).map(|e| e.to_string()),
+    ))
+}
+
+/// [(name, provider, model, effort or None)] from this host's routes.md, in preference order.
+fn read_routes(home: &Path) -> Res<Vec<Route>> {
+    let path = home.join("routes.md");
+    let meta = routes_meta(&path)?;
+    if meta.is_empty() {
+        return Err(fail(
+            format!(
+                "no routes in {}: list this host's dispatch routes, primary first, as <name>: <provider> <model> [<effort>]",
+                path.display()
+            ),
+            2,
+        ));
+    }
+    let mut routes = Vec::new();
+    for (name, value) in meta {
+        if name == "experiment" || REVIEW_ROUTE_KEYS.contains(&name.as_str()) {
+            continue;
+        }
+        let route = parse_route(&value);
+        let Some((provider, model, effort)) = route.filter(|_| SLUG.is_full(&name)) else {
+            return Err(fail(
+                format!(
+                    "bad route {} in {}: use <name>: <provider> <model> [<effort>]",
+                    repr(&name),
+                    path.display()
+                ),
+                2,
+            ));
+        };
+        routes.push((name, provider, model, effort));
+    }
+    Ok(routes)
+}
+
+/// {"low": route or None, "medium": route or None} from routes.md's optional review lines.
+fn read_review_routes(home: &Path) -> Res<Value> {
+    let path = home.join("routes.md");
+    let meta = routes_meta(&path)?;
+    let mut routes = Map::new();
+    for key in REVIEW_ROUTE_KEYS {
+        let tier = key.split_once('-').unwrap().1;
+        let Some(value) = fm_get(&meta, key) else {
+            routes.insert(tier.into(), Value::Null);
+            continue;
+        };
+        let Some((provider, model, effort)) = parse_route(value) else {
+            return Err(fail(
+                format!(
+                    "bad review route {key} in {}: use {key}: <provider> <model> [<effort>]",
+                    path.display()
+                ),
+                2,
+            ));
+        };
+        routes.insert(
+            tier.into(),
+            json!({"name": key, "provider": provider, "model": model, "effort": effort}),
+        );
+    }
+    Ok(Value::Object(routes))
+}
+
+struct Experiment {
+    name: String,
+    provider: String,
+    model: String,
+    effort: Option<String>,
+    percent: u32,
+}
+
+/// None, or the experiment from routes.md's optional experiment line.
+fn read_experiment(home: &Path, route_names: &[String]) -> Res<Option<Experiment>> {
+    let path = home.join("routes.md");
+    let meta = routes_meta(&path)?;
+    let Some(line) = fm_get(&meta, "experiment") else {
+        return Ok(None);
+    };
+    let bad = || {
+        fail(
+            format!(
+                "bad experiment in {}: use experiment: <name> <provider> <model> [<effort>] <percent>",
+                path.display()
+            ),
+            2,
+        )
+    };
+    let parts = py_split(line);
+    if !(4..=5).contains(&parts.len()) {
+        return Err(bad());
+    }
+    let (name, provider, model) = (parts[0], parts[1], parts[2]);
+    let effort = (parts.len() == 5).then(|| parts[3]);
+    let percent = parts[parts.len() - 1];
+    let percent_ok = (1..=3).contains(&percent.len())
+        && percent.bytes().all(|b| b.is_ascii_digit())
+        && percent.parse::<u32>().unwrap() <= 100;
+    if !SLUG.is_full(name)
+        || !SLUG.is_full(provider)
+        || !ROUTE_MODEL.is_full(model)
+        || route_names.iter().any(|r| r == name)
+        || effort.is_some_and(|e| !ROUTE_EFFORTS.contains(&e))
+        || !percent_ok
+    {
+        return Err(bad());
+    }
+    Ok(Some(Experiment {
+        name: name.into(),
+        provider: provider.into(),
+        model: model.into(),
+        effort: effort.map(String::from),
+        percent: percent.parse().unwrap(),
+    }))
+}
+
+/// {route name: limited until} from this host's route-limits.json.
+fn read_limits(home: &Path) -> Res<Vec<(String, String)>> {
+    let path = home.join("route-limits.json");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let corrupt = || {
+        fail(
+            format!(
+                "cannot read {}: delete it to clear every route limit",
+                path.display()
+            ),
+            2,
+        )
+    };
+    let text = read_text(&path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::InvalidData => corrupt(),
+        _ => fail(os_error(&e, Some(&path)), 1),
+    })?;
+    let limits = loads(&text).map_err(|_| corrupt())?;
+    let Some(map) = limits.as_object() else {
+        return Err(corrupt());
+    };
+    let mut out = Vec::new();
+    for (k, v) in map {
+        let Some(until) = v.as_str() else {
+            return Err(corrupt());
+        };
+        out.push((k.clone(), until.to_string()));
+    }
+    if out.iter().any(|(_, until)| parse_stamp(until).is_none()) {
+        return Err(corrupt());
+    }
+    Ok(out)
+}
+
+/// The end of provider's extends chain in this host's Paseo config.json, else provider itself.
+fn provider_runtime(provider: &str) -> Res<String> {
+    let base = match std::env::var_os("PASEO_HOME").filter(|v| !v.is_empty()) {
+        Some(home) => PathBuf::from(home),
+        None => match std::env::home_dir() {
+            Some(home) => home.join(".paseo"),
+            None => return Ok(provider.into()),
+        },
+    };
+    let path = base.join("config.json");
+    if !path.is_file() {
+        return Ok(provider.into());
+    }
+    let unreadable = || {
+        fail(
+            format!(
+                "cannot read {}: routes pick needs it to find the base runtime of {provider}",
+                path.display()
+            ),
+            2,
+        )
+    };
+    let config = read_text(&path)
+        .ok()
+        .and_then(|t| loads(&t).ok())
+        .ok_or_else(unreadable)?;
+    let Some(config) = config.as_object() else {
+        return Err(unreadable());
+    };
+    let agents = config.get("agents").cloned().unwrap_or(json!({}));
+    let Some(agents) = agents.as_object() else {
+        return Err(unreadable());
+    };
+    let providers = agents.get("providers").cloned().unwrap_or(json!({}));
+    let Some(providers) = providers.as_object() else {
+        return Err(unreadable());
+    };
+    let mut seen = vec![provider.to_string()];
+    while let Some(entry) = providers
+        .get(seen.last().unwrap())
+        .and_then(Value::as_object)
+        .filter(|p| p.contains_key("extends"))
+    {
+        let base = entry["extends"]
+            .as_str()
+            .filter(|b| SLUG.is_full(b) && !seen.iter().any(|s| s == b));
+        let Some(base) = base else {
+            return Err(fail(
+                format!(
+                    "bad extends under provider {} in {}: use a provider name, with no loop",
+                    repr(seen.last().unwrap()),
+                    path.display()
+                ),
+                2,
+            ));
+        };
+        seen.push(base.to_string());
+    }
+    Ok(seen.pop().unwrap())
+}
+
+/// True when name is the experiment, False when it is a route, else exit 2 naming what is accepted.
+fn check_limit_name(home: &Path, name: &str) -> Res<bool> {
+    let routes: Vec<String> = read_routes(home)?.into_iter().map(|r| r.0).collect();
+    let experiment = read_experiment(home, &routes)?;
+    if experiment.as_ref().is_some_and(|e| e.name == name) {
+        return Ok(true);
+    }
+    if routes.iter().any(|r| r == name) {
+        return Ok(false);
+    }
+    let path = home.join("routes.md");
+    let what = if experiment.is_some() {
+        "route or experiment"
+    } else {
+        "route"
+    };
+    Err(fail(
+        format!("unknown {what} {}: not in {}", repr(name), path.display()),
+        2,
+    ))
+}
+
+fn write_limits(path: &Path, limits: &[(String, String)]) -> Res<()> {
+    let map: Map<String, Value> = limits
+        .iter()
+        .map(|(k, v)| (k.clone(), Value::from(v.clone())))
+        .collect();
+    let text = dumps(&Value::Object(map), INDENT2) + "\n";
+    write_atomic(path, text.as_bytes()).map_err(|e| fail(os_error(&e, Some(path)), 1))
+}
+
+/// Mark one route or the experiment limited for minutes from now.
+fn limit_route(home: &Path, name: &str, minutes: i64) -> Res<(String, bool)> {
+    let experiment = check_limit_name(home, name)?;
+    let stamp = now();
+    let mut limits: Vec<(String, String)> = read_limits(home)?
+        .into_iter()
+        .filter(|(_, until)| *until > stamp)
+        .collect();
+    let until = format_stamp(unix_now() + minutes * 60);
+    match limits.iter_mut().find(|(k, _)| k == name) {
+        Some(slot) => slot.1 = until.clone(),
+        None => limits.push((name.to_string(), until.clone())),
+    }
+    write_limits(&home.join("route-limits.json"), &limits)?;
+    Ok((until, experiment))
+}
+
+static MINUTES: Pattern = Pattern::new("[1-9][0-9]*", Flags::NONE);
+
+fn routes(home: &Path, sub: &str, args: &[String], o: &mut Out) -> Res<()> {
+    let path = home.join("route-limits.json");
+    let stamp = now();
+    if (sub == "pick" || sub == "list") && args.is_empty() {
+        let routes = read_routes(home)?;
+        let active: Vec<(String, String)> = read_limits(home)?
+            .into_iter()
+            .filter(|(_, until)| *until > stamp)
+            .collect();
+        let active_for = |n: &str| {
+            active
+                .iter()
+                .find(|(k, _)| k == n)
+                .map(|(_, u)| Value::from(u.clone()))
+                .unwrap_or(Value::Null)
+        };
+        if sub == "list" {
+            let mut rows: Vec<Value> = Vec::new();
+            for (n, p, m, e) in &routes {
+                let mut row = json!({"route": n, "provider": p, "model": m});
+                if let Some(e) = e {
+                    row["effort"] = Value::from(e.clone());
+                }
+                row["limited_until"] = active_for(n);
+                rows.push(row);
+            }
+            let names: Vec<String> = routes.iter().map(|r| r.0.clone()).collect();
+            if let Some(x) = read_experiment(home, &names)? {
+                let mut row =
+                    json!({"experiment": x.name, "provider": x.provider, "model": x.model});
+                if let Some(e) = &x.effort {
+                    row["effort"] = Value::from(e.clone());
+                }
+                row["percent"] = Value::from(x.percent);
+                row["limited_until"] = active_for(&x.name);
+                rows.push(row);
+            }
+            writeln!(o.out, "{}", dumps(&Value::Array(rows), INDENT2)).unwrap();
+            return Ok(());
+        }
+        let Some((name, provider, model, effort)) = routes
+            .iter()
+            .find(|r| !active.iter().any(|(k, _)| *k == r.0))
+            .cloned()
+        else {
+            let listed: Vec<String> = routes
+                .iter()
+                .map(|r| format!("{} until {}", r.0, active_for(&r.0).as_str().unwrap()))
+                .collect();
+            return Err(fail(
+                format!("no available route: {}", listed.join(", ")),
+                3,
+            ));
+        };
+        let runtime = provider_runtime(&provider)?;
+        let mut out =
+            json!({"route": name, "provider": provider, "runtime": runtime, "model": model});
+        if let Some(e) = effort {
+            out["effort"] = Value::from(e);
+        }
+        writeln!(o.out, "{}", dumps(&out, INDENT2)).unwrap();
+    } else if sub == "limit" && (1..=3).contains(&args.len()) {
+        if args.len() > 1
+            && (args.len() != 3
+                || args[1] != "--minutes"
+                || !MINUTES.is_full(&args[2])
+                || args[2].parse::<i64>().map_or(true, |n| n > 1440))
+        {
+            return Err(fail(
+                "usage: routes limit <name> [--minutes N], with N from 1 to 1440",
+                2,
+            ));
+        }
+        let name = &args[0];
+        let minutes = if args.len() == 3 {
+            args[2].parse().unwrap()
+        } else {
+            60
+        };
+        let (until, experiment) = limit_route(home, name, minutes)?;
+        let key = if experiment { "experiment" } else { "route" };
+        let mut out = Map::new();
+        out.insert(key.into(), Value::from(name.clone()));
+        out.insert("limited_until".into(), Value::from(until));
+        writeln!(o.out, "{}", dumps(&Value::Object(out), INDENT2)).unwrap();
+    } else if sub == "clear" && args.len() == 1 {
+        let name = &args[0];
+        check_limit_name(home, name)?;
+        let mut limits = read_limits(home)?;
+        if let Some(i) = limits.iter().position(|(k, _)| k == name) {
+            limits.remove(i);
+            write_limits(&path, &limits)?;
+        }
+    } else {
+        return Err(fail(
+            "usage: routes pick|list|limit <name> [--minutes N]|clear <name>",
+            2,
+        ));
+    }
+    Ok(())
+}
+
+/// This host's dispatch routes. Local only: no board, network or subprocess call.
+pub fn routes_cmd(call: &Call) -> Res<()> {
+    let home = factory_home()?;
+    flushed(|o| routes(&home, &call.args[0], &call.args[1..], o))
+}
+
+const REVIEW_PAST_STAGES: [&str; 4] = ["approve", "pr-open", "merged", "closed"];
+const WINDOW_SECONDS: i64 = 7 * 86400;
+const MIN_ARM_FINISHED: usize = 5;
+const DECISION_VERDICTS: [&str; 3] = ["APPROVE", "ESCALATE", "CLOSED:"];
+const TRACER_REVIEWERS: [&str; 4] = ["security", "ux", "ui", "code"];
+const USAGE_TOKENS: [&str; 4] = ["input", "output", "cache_write", "cache_read"];
+
+/// A board timestamp as seconds, or None when it is missing or unparseable.
+fn stamp_of(value: Option<&Value>) -> Option<i64> {
+    value.and_then(Value::as_str).and_then(parse_stamp)
+}
+
+/// A number that remembers whether Python holds it as an int.
+#[derive(Clone, Copy)]
+struct Num(f64, bool);
+
+impl Num {
+    fn value(self) -> Value {
+        if self.1 {
+            json!(self.0 as i64)
+        } else {
+            json!(self.0)
+        }
+    }
+}
+
+/// {n, median, mad} of a list of ints; median and mad are None when it is empty.
+fn spread(values: &[i64]) -> (usize, Option<(Num, Num)>) {
+    if values.is_empty() {
+        return (0, None);
+    }
+    let odd = values.len() % 2 == 1;
+    let mut v: Vec<f64> = values.iter().map(|x| *x as f64).collect();
+    let m = median(&mut v);
+    let mut dev: Vec<f64> = values.iter().map(|x| (*x as f64 - m).abs()).collect();
+    let mad = median(&mut dev);
+    let round = |x: f64| {
+        if odd {
+            x
+        } else {
+            round_half_even(x, 1)
+        }
+    };
+    (
+        values.len(),
+        Some((Num(round(m), odd), Num(round(mad), odd))),
+    )
+}
+
+fn spread_value(s: &(usize, Option<(Num, Num)>)) -> Value {
+    match s.1 {
+        None => json!({"n": 0, "median": null, "mad": null}),
+        Some((m, mad)) => json!({"n": s.0, "median": m.value(), "mad": mad.value()}),
+    }
+}
+
+/// A job's recorded token total, or None when no device entry has a models dict.
+fn job_tokens(j: &Value) -> Option<i64> {
+    let tokens = j.get("tokens")?.as_object()?;
+    let (mut total, mut found) = (0i64, false);
+    for entry in tokens.values() {
+        let Some(models) = entry.get("models").and_then(Value::as_object) else {
+            continue;
+        };
+        found = true;
+        for counts in models.values().filter_map(Value::as_object) {
+            total += USAGE_TOKENS
+                .iter()
+                .filter_map(|k| py_int(counts.get(*k)))
+                .sum::<i64>();
+        }
+    }
+    found.then_some(total)
+}
+
+fn str_of<'a>(j: &'a Value, key: &str) -> Option<&'a str> {
+    j.get(key).and_then(Value::as_str)
+}
+
+/// `len(x or [])` for a list value.
+fn list_of(j: &Value, key: &str) -> Vec<Value> {
+    j.get(key)
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// One arm's outcome metrics from the board and this host's local job folders.
+fn arm_metrics(arm_jobs: &Map<String, Value>, follow_ups: Value, jobs_root: &Path) -> Value {
+    let count_stage = |s: &str| {
+        arm_jobs
+            .values()
+            .filter(|j| str_of(j, "stage") == Some(s))
+            .count()
+    };
+    let means: Vec<i64> = arm_jobs
+        .values()
+        .filter(|j| str_of(j, "stage").is_some_and(|s| REVIEW_PAST_STAGES.contains(&s)))
+        .map(|j| {
+            let round = if truthy(j.get("round")) {
+                j["round"].as_i64().unwrap_or(0)
+            } else {
+                0
+            };
+            round.max(list_of(j, "rounds").len() as i64)
+        })
+        .collect();
+    let (mut missing_round_review, mut missing_decision, mut pr_before_approve) =
+        (Vec::new(), Vec::new(), Vec::new());
+    let mut coverage_unknown = 0;
+    let mut ids: Vec<&String> = arm_jobs.keys().collect();
+    ids.sort();
+    for job_id in ids {
+        let j = &arm_jobs[job_id];
+        let project = str_of(j, "project").filter(|p| SLUG.is_full(p));
+        let keys_ok = list_of(j, "rounds")
+            .iter()
+            .filter_map(Value::as_object)
+            .all(|entry| {
+                entry
+                    .keys()
+                    .all(|k| TRACER_REVIEWERS.contains(&k.as_str()) || k == "unverified")
+            });
+        let Some(project) =
+            project.filter(|_| JOB_ID.is_full(job_id) && !job_id.contains("..") && keys_ok)
+        else {
+            coverage_unknown += 1;
+            continue;
+        };
+        let folder = jobs_root.join(project).join(job_id);
+        if !folder.is_dir() || !folder.join("spec.md").is_file() {
+            coverage_unknown += 1;
+            continue;
+        }
+        let mut missed = false;
+        for (i, entry) in list_of(j, "rounds").iter().enumerate() {
+            let Some(entry) = entry.as_object() else {
+                continue;
+            };
+            for (reviewer, verdict) in entry {
+                if verdict.as_str().is_some_and(|v| v != "" && v != "pending")
+                    && !folder
+                        .join(format!("round-{}", i + 1))
+                        .join(format!("review-{reviewer}.md"))
+                        .is_file()
+                {
+                    missed = true;
+                }
+            }
+        }
+        if missed {
+            missing_round_review.push(job_id.clone());
+        }
+        let stage = str_of(j, "stage");
+        if matches!(stage, Some("pr-open" | "merged" | "closed"))
+            && !folder.join("decision.md").is_file()
+        {
+            missing_decision.push(job_id.clone());
+        }
+        if truthy(j.get("pr")) {
+            let decision = folder.join("decision.md");
+            if decision.is_file() {
+                let Ok(text) = read_text(&decision) else {
+                    coverage_unknown += 1;
+                    continue;
+                };
+                let first = splitlines(&text, false)
+                    .into_iter()
+                    .map(strip)
+                    .find(|l| !l.is_empty())
+                    .unwrap_or("");
+                if !DECISION_VERDICTS.iter().any(|v| first.starts_with(v)) {
+                    pr_before_approve.push(job_id.clone());
+                }
+            }
+        }
+    }
+    let counts: i64 = arm_jobs
+        .values()
+        .filter_map(|j| py_int(j.get("resumes").and_then(|r| r.as_object()?.get("count"))))
+        .sum();
+    let finished: Vec<&Value> = arm_jobs
+        .values()
+        .filter(|j| matches!(str_of(j, "stage"), Some("merged" | "closed")))
+        .collect();
+    let tokens: Vec<i64> = finished.iter().filter_map(|j| job_tokens(j)).collect();
+    let mean = if means.is_empty() {
+        json!(0)
+    } else {
+        json!(round_half_even(
+            means.iter().sum::<i64>() as f64 / means.len() as f64,
+            1
+        ))
+    };
+    let changes: usize = arm_jobs
+        .values()
+        .flat_map(|j| list_of(j, "rounds"))
+        .filter_map(|e| e.as_object().cloned())
+        .map(|e| e.values().filter(|v| v.as_str() == Some("CHANGES")).count())
+        .sum();
+    json!({"jobs": arm_jobs.len(), "merged": count_stage("merged"), "closed": count_stage("closed"),
+           "needs_human": count_stage("needs-human"),
+           "escalated": arm_jobs.values().filter(|j| escalated(j)).count(),
+           "mean_review_rounds": mean, "changes_verdicts": changes, "stuck_resumes": counts,
+           "follow_ups_7d": follow_ups,
+           "skipped_steps": {"missing_round_review": missing_round_review,
+                             "missing_decision": missing_decision, "pr_before_approve": pr_before_approve},
+           "coverage_unknown": coverage_unknown, "finished": finished.len(),
+           "rounds": spread_value(&spread(&means)), "tokens": spread_value(&spread(&tokens))})
+}
+
+/// The `spread` of a metric as its arm_metrics value holds it.
+fn spread_of(v: &Value) -> (usize, Option<(Num, Num)>) {
+    let num = |x: &Value| Num(x.as_f64().unwrap_or(0.0), x.is_i64() || x.is_u64());
+    let n = v["n"].as_u64().unwrap_or(0) as usize;
+    if v["median"].is_null() {
+        return (n, None);
+    }
+    (n, Some((num(&v["median"]), num(&v["mad"]))))
+}
+
+/// Whether two arm_metrics dicts can be compared, and per metric how b's median reads against a's.
+fn compare(a: &Value, b: &Value) -> Value {
+    let (fa, fb) = (
+        a["finished"].as_u64().unwrap_or(0) as usize,
+        b["finished"].as_u64().unwrap_or(0) as usize,
+    );
+    let ready = fa >= MIN_ARM_FINISHED && fb >= MIN_ARM_FINISHED;
+    let mut result = json!({"min_finished": MIN_ARM_FINISHED,
+        "verdict": if ready { "compared" } else { "inconclusive" },
+        "reason": format!("needs {MIN_ARM_FINISHED} finished jobs per arm: a has {fa}, b has {fb}")});
+    for metric in ["rounds", "tokens"] {
+        let (sa, sb) = (spread_of(&a[metric]), spread_of(&b[metric]));
+        let (Some((ma, da)), Some((mb, db))) = (sa.1, sb.1) else {
+            result[metric] = json!({"diff": null, "noise": null, "reads": "inconclusive"});
+            continue;
+        };
+        if !ready || sa.0 < MIN_ARM_FINISHED || sb.0 < MIN_ARM_FINISHED {
+            result[metric] = json!({"diff": null, "noise": null, "reads": "inconclusive"});
+            continue;
+        }
+        let both_int = ma.1 && mb.1;
+        let diff = Num(
+            if both_int {
+                mb.0 - ma.0
+            } else {
+                round_half_even(mb.0 - ma.0, 1)
+            },
+            both_int,
+        );
+        let noise = if db.0 > da.0 { db } else { da };
+        let reads = if diff.0.abs() <= noise.0 {
+            "no difference"
+        } else if diff.0 > 0.0 {
+            "b higher"
+        } else {
+            "b lower"
+        };
+        result[metric] = json!({"diff": diff.value(), "noise": noise.value(), "reads": reads});
+    }
+    result
+}
+
+fn experiment_report(home: &Path, name: &str, o: &mut Out) -> Res<()> {
+    let data = read_board(home)?;
+    let jobs = data["jobs"].as_array().cloned().unwrap_or_default();
+    let mut arm_jobs = [Map::new(), Map::new()];
+    let arm_index = |a: &str| match a {
+        "a" => Some(0),
+        "b" => Some(1),
+        _ => None,
+    };
+    for j in &jobs {
+        let Some(id) = str_of(j, "id") else {
+            continue;
+        };
+        let Some(record) = j.get("experiment").and_then(Value::as_object) else {
+            continue;
+        };
+        if record.get("name").and_then(Value::as_str) == Some(name) {
+            if let Some(i) = record
+                .get("arm")
+                .and_then(Value::as_str)
+                .and_then(arm_index)
+            {
+                arm_jobs[i].insert(id.to_string(), j.clone());
+            }
+        }
+    }
+    let mut follow = [
+        (Vec::<String>::new(), Vec::<String>::new(), 0usize),
+        (Vec::new(), Vec::new(), 0),
+    ];
+    for j in &jobs {
+        let (Some(refs), Some(id)) = (j.get("refs").and_then(Value::as_array), str_of(j, "id"))
+        else {
+            continue;
+        };
+        for r in refs {
+            let (Some(ref_id), Some(kind)) = (str_of(r, "id"), str_of(r, "kind")) else {
+                continue;
+            };
+            if kind != "rework-of" && kind != "follow-up-of" {
+                continue;
+            }
+            let Some(arm) = (0..2).find(|a| arm_jobs[*a].contains_key(ref_id)) else {
+                continue;
+            };
+            let original = &arm_jobs[arm][ref_id];
+            let anchor = stamp_of(original.get("done")).or(stamp_of(original.get("started")));
+            let age = stamp_of(j.get("started")).or(stamp_of(j.get("updated")));
+            match (anchor, age) {
+                (Some(anchor), Some(age)) => {
+                    if age - anchor <= WINDOW_SECONDS {
+                        if kind == "rework-of" {
+                            follow[arm].0.push(id.to_string());
+                        } else {
+                            follow[arm].1.push(id.to_string());
+                        }
+                    }
+                }
+                _ => follow[arm].2 += 1,
+            }
+        }
+    }
+    let follow_value = |f: &(Vec<String>, Vec<String>, usize)| json!({"rework_of": f.0, "surfaced": f.1, "unknown_window": f.2});
+    let root = home.join("jobs");
+    let a = arm_metrics(&arm_jobs[0], follow_value(&follow[0]), &root);
+    let b = arm_metrics(&arm_jobs[1], follow_value(&follow[1]), &root);
+    let comparison = compare(&a, &b);
+    let out = json!({"name": name, "a": a, "b": b, "comparison": comparison});
+    writeln!(o.out, "{}", dumps(&out, INDENT2)).unwrap();
+    Ok(())
+}
+
+/// Read-only per-arm outcome report for one owner-model experiment.
+pub fn experiment_cmd(call: &Call) -> Res<()> {
+    let (sub, name) = (call.args[0].as_str(), call.args[1].as_str());
+    if sub != "report" {
+        return Err(fail("usage: experiment report <name>", 2));
+    }
+    if !SLUG.is_full(name) {
+        return Err(fail(format!("bad experiment name {}", repr(name)), 2));
+    }
+    let home = factory_home()?;
+    flushed(|o| experiment_report(&home, name, o))
+}
+
 // ---- not ported yet ----
-
-pub fn routes_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("routes"))
-}
-
-pub fn experiment_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("experiment"))
-}
 
 pub fn trial_cmd(_call: &Call) -> Res<()> {
     Err(not_ported("trial"))
@@ -620,5 +1383,342 @@ mod tests {
     fn median_matches_statistics() {
         assert_eq!(median(&mut vec![3.0, 1.0, 2.0]), 2.0);
         assert_eq!(median(&mut vec![4.0, 1.0, 2.0, 3.0]), 2.5);
+    }
+
+    /// The exit code and stderr of a failed result.
+    fn failed<T>(r: Res<T>) -> (i32, String) {
+        match r {
+            Ok(_) => panic!("expected a failure"),
+            Err(e) => (e.code, e.stderr),
+        }
+    }
+
+    mod routes {
+        use super::super::*;
+        use super::failed;
+        use crate::shared::fs::temp_dir;
+        use std::fs;
+
+        const ROUTES: &str = "---\nalpha: provider-a model-a\nbeta: provider-b vendor/model-b[1m]\n---\n\nThis host's routes.\n";
+
+        fn home(name: &str, routes: &str) -> PathBuf {
+            let home = temp_dir(name);
+            fs::write(home.join("routes.md"), routes).unwrap();
+            home
+        }
+
+        fn run(home: &Path, args: &[&str]) -> (Res<()>, Out) {
+            let mut o = Out::default();
+            let rest: Vec<String> = args[1..].iter().map(|a| a.to_string()).collect();
+            let r = routes(home, args[0], &rest, &mut o);
+            (r, o)
+        }
+
+        fn limits(home: &Path) -> Value {
+            loads(&fs::read_to_string(home.join("route-limits.json")).unwrap()).unwrap()
+        }
+
+        #[test]
+        fn parse_route() {
+            let owned = |p: &str, m: &str, e: Option<&str>| {
+                Some((p.to_string(), m.to_string(), e.map(String::from)))
+            };
+            assert_eq!(
+                super::super::parse_route("provider-a model-a low"),
+                owned("provider-a", "model-a", Some("low"))
+            );
+            assert_eq!(
+                super::super::parse_route("provider-a model-a"),
+                owned("provider-a", "model-a", None)
+            );
+            for value in [
+                "provider-a",
+                "provider-a model-a extra",
+                "provider/a model-a",
+                "provider-a model;rm",
+                "a b low c",
+            ] {
+                assert_eq!(super::super::parse_route(value), None, "{value}");
+            }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn pick_runtime() {
+            let home = home("routes-runtime", ROUTES);
+            let paseo = home.join("paseo");
+            fs::create_dir(&paseo).unwrap();
+            let config = paseo.join("config.json");
+            std::env::set_var("PASEO_HOME", &paseo);
+            let providers = json!({"claude-factory": {"extends": "claude"}, "claude-x": {"extends": "opencode"},
+                                   "two-hop": {"extends": "claude-factory"}, "plain": {"label": "no extends"}});
+            fs::write(
+                &config,
+                json!({"agents": {"providers": providers}}).to_string(),
+            )
+            .unwrap();
+            for (provider, runtime) in [
+                ("claude-factory", "claude"),
+                ("claude-x", "opencode"),
+                ("two-hop", "claude"),
+                ("plain", "plain"),
+                ("missing", "missing"),
+            ] {
+                assert_eq!(provider_runtime(provider).unwrap(), runtime);
+            }
+            fs::remove_file(&config).unwrap();
+            assert_eq!(provider_runtime("missing").unwrap(), "missing");
+            for (text, message) in [
+                ("{", "cannot read"),
+                (r#"{"agents": {"providers": []}}"#, "cannot read"),
+                (
+                    r#"{"agents": {"providers": {"missing": {"extends": 5}}}}"#,
+                    "bad extends under provider 'missing'",
+                ),
+                (
+                    r#"{"agents": {"providers": {"missing": {"extends": "loop"}, "loop": {"extends": "missing"}}}}"#,
+                    "bad extends under provider",
+                ),
+            ] {
+                fs::write(&config, text).unwrap();
+                let (code, err) = failed(provider_runtime("missing"));
+                assert_eq!(code, 2);
+                assert!(err.contains(message), "{text}: {err}");
+            }
+            fs::write(&config, "{}").unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&config, fs::Permissions::from_mode(0o000)).unwrap();
+            if fs::read(&config).is_err() {
+                let (_, err) = failed(provider_runtime("missing"));
+                assert!(err.contains(&format!(
+                    "cannot read {}: routes pick needs it",
+                    config.display()
+                )));
+            }
+            std::env::remove_var("PASEO_HOME");
+        }
+
+        #[test]
+        fn limit_reads_routes_once() {
+            let home = home("routes-limit-once", ROUTES);
+            let (r, o) = run(&home, &["limit", "alpha"]);
+            r.unwrap();
+            let printed = loads(&o.out).unwrap();
+            assert_eq!(printed["route"], "alpha");
+            assert_eq!(printed["limited_until"], limits(&home)["alpha"]);
+        }
+
+        #[test]
+        fn limit_writes_and_prunes() {
+            let home = home("routes-limit-prunes", ROUTES);
+            fs::write(
+                home.join("route-limits.json"),
+                r#"{"beta": "2001-01-01T00:00:00Z"}"#,
+            )
+            .unwrap();
+            let before = unix_now();
+            let (r, o) = run(&home, &["limit", "alpha"]);
+            r.unwrap();
+            let after = unix_now();
+            let written = limits(&home);
+            assert_eq!(
+                written.as_object().unwrap().keys().collect::<Vec<_>>(),
+                ["alpha"]
+            );
+            assert_eq!(
+                loads(&o.out).unwrap(),
+                json!({"route": "alpha", "limited_until": written["alpha"]})
+            );
+            let until = parse_stamp(written["alpha"].as_str().unwrap()).unwrap();
+            assert!(before + 3600 <= until && until <= after + 3600);
+            let (r, _) = run(&home, &["limit", "beta", "--minutes", "1440"]);
+            r.unwrap();
+            let written = limits(&home);
+            let mut keys: Vec<&String> = written.as_object().unwrap().keys().collect();
+            keys.sort();
+            assert_eq!(keys, ["alpha", "beta"]);
+            let until = parse_stamp(written["beta"].as_str().unwrap()).unwrap();
+            assert!(until > after + 1439 * 60);
+        }
+
+        #[test]
+        fn limit_and_clear_experiment() {
+            let home = home(
+                "routes-limit-experiment",
+                &ROUTES.replace(
+                    "---\n\n",
+                    "experiment: pilot provider-c model-c 50\n---\n\n",
+                ),
+            );
+            let (r, o) = run(&home, &["limit", "pilot"]);
+            r.unwrap();
+            assert_eq!(
+                loads(&o.out).unwrap(),
+                json!({"experiment": "pilot", "limited_until": limits(&home)["pilot"]})
+            );
+            let (r, o) = run(&home, &["clear", "pilot"]);
+            r.unwrap();
+            assert_eq!(o.out, "");
+            assert_eq!(limits(&home), json!({}));
+        }
+    }
+
+    mod experiment {
+        use super::super::*;
+        use super::failed;
+        use crate::shared::fs::temp_dir;
+        use std::fs;
+
+        const ROUTES: &str =
+            "---\nprimary: provider-a model-a high\nfallback: provider-b model-b\n---\n";
+        const UNITS: [&str; 5] = [
+            "014-inline-images",
+            "015-report-cache",
+            "016-doc-lint",
+            "017-another",
+            "018-more",
+        ];
+
+        fn read(name: &str, line: Option<&str>) -> Res<Option<Experiment>> {
+            let home = temp_dir(name);
+            let text = match line {
+                Some(line) => format!("{}{line}{}", &ROUTES[..4], &ROUTES[4..]),
+                None => ROUTES.to_string(),
+            };
+            fs::write(home.join("routes.md"), text).unwrap();
+            read_experiment(&home, &["primary".to_string(), "fallback".to_string()])
+        }
+
+        fn exits(name: &str, line: &str) {
+            let home = temp_dir(name);
+            let (code, err) = failed(read(name, Some(line)));
+            assert_eq!(code, 2, "{line}");
+            assert_eq!(
+                err,
+                format!(
+                    "factory.py: bad experiment in {}: use experiment: <name> <provider> <model> [<effort>] <percent>\n",
+                    home.join("routes.md").display()
+                )
+            );
+        }
+
+        #[test]
+        fn no_line_reads_none() {
+            assert!(read("exp-none", None).unwrap().is_none());
+        }
+
+        #[test]
+        fn accepts_the_documented_line() {
+            let x = read(
+                "exp-doc",
+                Some("experiment: pilot provider-b model-b high 50\n"),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(
+                (
+                    x.name.as_str(),
+                    x.provider.as_str(),
+                    x.model.as_str(),
+                    x.effort.as_deref(),
+                    x.percent
+                ),
+                ("pilot", "provider-b", "model-b", Some("high"), 50)
+            );
+            let effort = |line| read("exp-doc", Some(line)).unwrap().unwrap();
+            assert_eq!(
+                effort("experiment: pilot provider-b model-b 50\n").effort,
+                None
+            );
+            assert_eq!(
+                effort("experiment: pilot provider-b model-b max 0\n").percent,
+                0
+            );
+            assert_eq!(
+                effort("experiment: pilot provider-b model-b low 100\n").percent,
+                100
+            );
+        }
+
+        #[test]
+        fn malformed_lines_exit_2() {
+            for line in [
+                "experiment: pilot provider-b model-b\n",
+                "experiment: pilot provider-b model-b high\n",
+                "experiment: pilot provider-b model-b high extra 50\n",
+                "experiment: pilot provider-b model;rm 50\n",
+                "experiment: pilot pro vider model-b 50\n",
+                "experiment: pri mary provider-b model-b 50\n",
+                "experiment: pilot provider-b model-b sideways 50\n",
+                "experiment: pilot provider-b model-b high 101\n",
+                "experiment: pilot provider-b model-b high -1\n",
+                "experiment: pilot provider-b model-b high fifty\n",
+            ] {
+                exits("exp-malformed", line);
+            }
+        }
+
+        #[test]
+        fn the_name_must_not_collide_with_a_route() {
+            exits("exp-collide", "experiment: primary provider-b model-b 50\n");
+        }
+
+        #[test]
+        fn percent_zero_sends_every_id_to_arm_a() {
+            for id in UNITS {
+                assert_eq!(experiment_arm(id, 0), "a");
+            }
+        }
+
+        #[test]
+        fn percent_100_sends_every_id_to_arm_b() {
+            for id in UNITS {
+                assert_eq!(experiment_arm(id, 100), "b");
+            }
+        }
+
+        #[test]
+        fn the_same_id_always_lands_in_the_same_arm() {
+            for id in UNITS {
+                let first = experiment_arm(id, 50);
+                assert!((0..5).all(|_| experiment_arm(id, 50) == first), "{id}");
+            }
+        }
+
+        #[test]
+        fn the_documented_buckets() {
+            assert_eq!(experiment_arm("014-inline-images", 50), "b");
+            assert_eq!(experiment_arm("015-report-cache", 50), "b");
+            assert_eq!(experiment_arm("016-doc-lint", 50), "a");
+        }
+
+        #[test]
+        fn traversal_keys_count_as_coverage_unknown_without_a_probe() {
+            let home = temp_dir("exp-traversal");
+            let planted = home.join("outside/030-up");
+            fs::create_dir_all(&planted).unwrap();
+            fs::write(planted.join("spec.md"), "# spec\n").unwrap();
+            for id in ["031-reviewer", "032-ok"] {
+                let folder = home.join("jobs/alpha").join(id);
+                fs::create_dir_all(&folder).unwrap();
+                fs::write(folder.join("spec.md"), "# spec\n").unwrap();
+            }
+            let mut arm = Map::new();
+            arm.insert(
+                "030-up".into(),
+                json!({"id": "030-up", "project": "../outside", "stage": "review"}),
+            );
+            arm.insert(
+                "031-reviewer".into(),
+                json!({"id": "031-reviewer", "project": "alpha", "stage": "review", "rounds": [{"../../x": "PASS"}]}),
+            );
+            arm.insert(
+                "032-ok".into(),
+                json!({"id": "032-ok", "project": "alpha", "stage": "review"}),
+            );
+            let follow = json!({"rework_of": [], "surfaced": [], "unknown_window": 0});
+            let metrics = arm_metrics(&arm, follow, &home.join("jobs"));
+            assert_eq!(metrics["coverage_unknown"], 2);
+        }
     }
 }

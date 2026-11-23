@@ -357,6 +357,3330 @@
       "routes": {},
       "exit": 2,
       "from": "tests/cli/test_documents.py::DocumentsTest.test_bad_slug_and_symlink"
+    },
+    {
+      "id": "pipeline/routes-pick-first",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_pick_first"
+    },
+    {
+      "id": "pipeline/routes-pick-skips-limited",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-pick-skips-limited",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_pick_skips_limited"
+    },
+    {
+      "id": "pipeline/routes-pick-ignores-expired",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-pick-ignores-expired",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_pick_ignores_expired"
+    },
+    {
+      "id": "pipeline/routes-pick-all-limited",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-pick-all-limited",
+      "stubs": {},
+      "exit": 3,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_pick_all_limited"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": null,
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-2",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": null,
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-3",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": null,
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-4",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": null,
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-5",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-routes-file-errors-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-6",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-routes-file-errors-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-7",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-8",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-9",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-routes-file-errors-3",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-10",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-routes-file-errors-3",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-11",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-3",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-12",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-3",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-13",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-routes-file-errors-4",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-14",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-routes-file-errors-4",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-15",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-4",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-16",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-4",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-17",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-routes-file-errors-5",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-18",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-routes-file-errors-5",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-19",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-5",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-20",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-5",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-21",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-routes-file-errors-6",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-22",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-routes-file-errors-6",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-23",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-6",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-24",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-6",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-25",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-routes-file-errors-7",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-26",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-routes-file-errors-7",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-27",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-7",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-28",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-7",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-29",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-routes-file-errors-8",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-30",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-routes-file-errors-8",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-31",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-8",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-32",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-8",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-33",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-routes-file-errors-9",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-34",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-routes-file-errors-9",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-35",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-9",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-routes-file-errors-36",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-routes-file-errors-9",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_routes_file_errors"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-limits-file-corrupt-1",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-2",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-limits-file-corrupt-1",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-3",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-limits-file-corrupt-1",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-4",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-limits-file-corrupt-1",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-5",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-limits-file-corrupt-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-6",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-limits-file-corrupt-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-7",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-limits-file-corrupt-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-8",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-limits-file-corrupt-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-9",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-limits-file-corrupt-3",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-10",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-limits-file-corrupt-3",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-11",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-limits-file-corrupt-3",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-12",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-limits-file-corrupt-3",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-13",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-limits-file-corrupt-4",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-14",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-limits-file-corrupt-4",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-15",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha"],
+      "home": "pipeline-routes-limits-file-corrupt-4",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limits-file-corrupt-16",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-limits-file-corrupt-4",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limits_file_corrupt"
+    },
+    {
+      "id": "pipeline/routes-limit-rejects",
+      "argv": ["--home", "{home}", "routes", "limit", "gamma"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limit_rejects"
+    },
+    {
+      "id": "pipeline/routes-limit-rejects-2",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha", "--minutes", "0"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limit_rejects"
+    },
+    {
+      "id": "pipeline/routes-limit-rejects-3",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha", "--minutes", "abc"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limit_rejects"
+    },
+    {
+      "id": "pipeline/routes-limit-rejects-4",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha", "--minutes", "1441"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limit_rejects"
+    },
+    {
+      "id": "pipeline/routes-limit-rejects-5",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha", "--minutes"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limit_rejects"
+    },
+    {
+      "id": "pipeline/routes-limit-rejects-6",
+      "argv": ["--home", "{home}", "routes", "limit", "alpha", "--hours", "1"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limit_rejects"
+    },
+    {
+      "id": "pipeline/routes-clear",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-clear",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_clear"
+    },
+    {
+      "id": "pipeline/routes-clear-2",
+      "argv": ["--home", "{home}", "routes", "clear", "alpha"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_clear"
+    },
+    {
+      "id": "pipeline/routes-clear-3",
+      "argv": ["--home", "{home}", "routes", "clear", "gamma"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_clear"
+    },
+    {
+      "id": "pipeline/routes-list",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-list",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_list"
+    },
+    {
+      "id": "pipeline/routes-list-without-experiment-is-unchanged",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_list_without_experiment_is_unchanged"
+    },
+    {
+      "id": "pipeline/routes-list-experiment-row",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-list-experiment-row",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_list_experiment_row"
+    },
+    {
+      "id": "pipeline/routes-list-experiment-row-2",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-list-experiment-row-2",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_list_experiment_row"
+    },
+    {
+      "id": "pipeline/routes-limit-and-clear-experiment",
+      "argv": ["--home", "{home}", "routes", "clear", "pilot"],
+      "home": "pipeline-routes-limit-and-clear-experiment-2",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limit_and_clear_experiment"
+    },
+    {
+      "id": "pipeline/routes-limit-and-clear-experiment-2",
+      "argv": ["--home", "{home}", "routes", "limit", "gamma"],
+      "home": "pipeline-routes-list-experiment-row-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limit_and_clear_experiment"
+    },
+    {
+      "id": "pipeline/routes-limit-and-clear-experiment-3",
+      "argv": ["--home", "{home}", "routes", "clear", "gamma"],
+      "home": "pipeline-routes-list-experiment-row-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limit_and_clear_experiment"
+    },
+    {
+      "id": "pipeline/routes-limit-and-clear-experiment-4",
+      "argv": ["--home", "{home}", "routes", "limit", "gamma"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limit_and_clear_experiment"
+    },
+    {
+      "id": "pipeline/routes-limit-and-clear-experiment-5",
+      "argv": ["--home", "{home}", "routes", "clear", "gamma"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_limit_and_clear_experiment"
+    },
+    {
+      "id": "pipeline/routes-effort",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-effort",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_effort"
+    },
+    {
+      "id": "pipeline/routes-effort-2",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-effort",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_effort"
+    },
+    {
+      "id": "pipeline/routes-effort-3",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-effort-3",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_effort"
+    },
+    {
+      "id": "pipeline/routes-effort-4",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-effort-bad-1",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_effort"
+    },
+    {
+      "id": "pipeline/routes-effort-5",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-effort-bad-1",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_effort"
+    },
+    {
+      "id": "pipeline/routes-effort-6",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-effort-bad-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_effort"
+    },
+    {
+      "id": "pipeline/routes-effort-7",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-effort-bad-2",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_effort"
+    },
+    {
+      "id": "pipeline/routes-effort-8",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-effort-bad-3",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_effort"
+    },
+    {
+      "id": "pipeline/routes-effort-9",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-effort-bad-3",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_effort"
+    },
+    {
+      "id": "pipeline/routes-usage",
+      "argv": ["--home", "{home}", "routes", "probe"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_usage"
+    },
+    {
+      "id": "pipeline/routes-usage-2",
+      "argv": ["--home", "{home}", "routes", "pick", "extra"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_usage"
+    },
+    {
+      "id": "pipeline/routes-usage-3",
+      "argv": ["--home", "{home}", "routes", "list", "extra"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_usage"
+    },
+    {
+      "id": "pipeline/routes-usage-4",
+      "argv": ["--home", "{home}", "routes", "clear"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_usage"
+    },
+    {
+      "id": "pipeline/routes-usage-5",
+      "argv": ["--home", "{home}", "routes", "clear", "a", "b"],
+      "home": "pipeline-routes-pick-first",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_usage"
+    },
+    {
+      "id": "pipeline/routes-review-lines-are-not-routes",
+      "argv": ["--home", "{home}", "routes", "pick"],
+      "home": "pipeline-routes-review-lines-are-not-routes",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_review_lines_are_not_routes"
+    },
+    {
+      "id": "pipeline/routes-review-lines-are-not-routes-2",
+      "argv": ["--home", "{home}", "routes", "list"],
+      "home": "pipeline-routes-review-lines-are-not-routes",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_routes.py::RoutesTest.test_review_lines_are_not_routes"
+    },
+    {
+      "id": "pipeline/experiment-the-report-prints-per-arm-metrics",
+      "argv": ["--home", "{home}", "experiment", "report", "pilot"],
+      "home": "pipeline-experiment-the-report-prints-per-arm-metrics",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "016-doc-lint",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/1",
+                "done": "2026-06-08T00:00:00Z",
+                "started": "2026-06-07T00:00:00Z",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "021-extra",
+                "stage": "approve",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "pending",
+                    "ux": "pending",
+                    "ui": "pending",
+                    "code": "pending"
+                  }
+                ],
+                "resumes": {
+                  "count": 2,
+                  "key": "000000000000"
+                },
+                "started": "not-a-stamp",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "014-inline-images",
+                "stage": "closed",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/2",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "017-skipped",
+                "stage": "pr-open",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/3",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "022-gone",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "escalated": true,
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "023-blank",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "pr": "https://github.com/o/r/pull/4",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "024-rework",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "025-surfaced",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T22:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "026-old",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-07-10T00:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "027-unreadable",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "garbage",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "028-unkanchor",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "021-extra",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "029-renamed",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "experiment": {
+                  "name": "pilot2",
+                  "arm": "b",
+                  "provider": "provider-z",
+                  "model": "model-z",
+                  "effort": "low"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_experiment.py::ReportTest.test_the_report_prints_per_arm_metrics"
+    },
+    {
+      "id": "pipeline/experiment-the-report-writes-nothing",
+      "argv": ["--home", "{home}", "experiment", "report", "pilot"],
+      "home": "pipeline-experiment-the-report-prints-per-arm-metrics",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "016-doc-lint",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/1",
+                "done": "2026-06-08T00:00:00Z",
+                "started": "2026-06-07T00:00:00Z",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "021-extra",
+                "stage": "approve",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "pending",
+                    "ux": "pending",
+                    "ui": "pending",
+                    "code": "pending"
+                  }
+                ],
+                "resumes": {
+                  "count": 2,
+                  "key": "000000000000"
+                },
+                "started": "not-a-stamp",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "014-inline-images",
+                "stage": "closed",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/2",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "017-skipped",
+                "stage": "pr-open",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/3",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "022-gone",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "escalated": true,
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "023-blank",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "pr": "https://github.com/o/r/pull/4",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "024-rework",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "025-surfaced",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T22:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "026-old",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-07-10T00:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "027-unreadable",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "garbage",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "028-unkanchor",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "021-extra",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "029-renamed",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "experiment": {
+                  "name": "pilot2",
+                  "arm": "b",
+                  "provider": "provider-z",
+                  "model": "model-z",
+                  "effort": "low"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_experiment.py::ReportTest.test_the_report_writes_nothing"
+    },
+    {
+      "id": "pipeline/experiment-the-report-matches-by-recorded-name",
+      "argv": ["--home", "{home}", "experiment", "report", "pilot2"],
+      "home": "pipeline-experiment-the-report-prints-per-arm-metrics",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "016-doc-lint",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/1",
+                "done": "2026-06-08T00:00:00Z",
+                "started": "2026-06-07T00:00:00Z",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "021-extra",
+                "stage": "approve",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "pending",
+                    "ux": "pending",
+                    "ui": "pending",
+                    "code": "pending"
+                  }
+                ],
+                "resumes": {
+                  "count": 2,
+                  "key": "000000000000"
+                },
+                "started": "not-a-stamp",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "014-inline-images",
+                "stage": "closed",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/2",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "017-skipped",
+                "stage": "pr-open",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/3",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "022-gone",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "escalated": true,
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "023-blank",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "pr": "https://github.com/o/r/pull/4",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "024-rework",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "025-surfaced",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T22:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "026-old",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-07-10T00:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "027-unreadable",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "garbage",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "028-unkanchor",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "021-extra",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "029-renamed",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "experiment": {
+                  "name": "pilot2",
+                  "arm": "b",
+                  "provider": "provider-z",
+                  "model": "model-z",
+                  "effort": "low"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_experiment.py::ReportTest.test_the_report_matches_by_recorded_name"
+    },
+    {
+      "id": "pipeline/experiment-the-report-rejects-bad-usage",
+      "argv": ["--home", "{home}", "experiment", "pick", "pilot"],
+      "home": "pipeline-experiment-the-report-prints-per-arm-metrics",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "016-doc-lint",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/1",
+                "done": "2026-06-08T00:00:00Z",
+                "started": "2026-06-07T00:00:00Z",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "021-extra",
+                "stage": "approve",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "pending",
+                    "ux": "pending",
+                    "ui": "pending",
+                    "code": "pending"
+                  }
+                ],
+                "resumes": {
+                  "count": 2,
+                  "key": "000000000000"
+                },
+                "started": "not-a-stamp",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "014-inline-images",
+                "stage": "closed",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/2",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "017-skipped",
+                "stage": "pr-open",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/3",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "022-gone",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "escalated": true,
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "023-blank",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "pr": "https://github.com/o/r/pull/4",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "024-rework",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "025-surfaced",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T22:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "026-old",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-07-10T00:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "027-unreadable",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "garbage",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "028-unkanchor",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "021-extra",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "029-renamed",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "experiment": {
+                  "name": "pilot2",
+                  "arm": "b",
+                  "provider": "provider-z",
+                  "model": "model-z",
+                  "effort": "low"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_experiment.py::ReportTest.test_the_report_rejects_bad_usage"
+    },
+    {
+      "id": "pipeline/experiment-the-report-rejects-bad-usage-2",
+      "argv": ["--home", "{home}", "experiment", "report", "al pha"],
+      "home": "pipeline-experiment-the-report-prints-per-arm-metrics",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "016-doc-lint",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/1",
+                "done": "2026-06-08T00:00:00Z",
+                "started": "2026-06-07T00:00:00Z",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "021-extra",
+                "stage": "approve",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "pending",
+                    "ux": "pending",
+                    "ui": "pending",
+                    "code": "pending"
+                  }
+                ],
+                "resumes": {
+                  "count": 2,
+                  "key": "000000000000"
+                },
+                "started": "not-a-stamp",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "014-inline-images",
+                "stage": "closed",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/2",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "017-skipped",
+                "stage": "pr-open",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/3",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "022-gone",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "escalated": true,
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "023-blank",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "pr": "https://github.com/o/r/pull/4",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "024-rework",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "025-surfaced",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T22:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "026-old",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-07-10T00:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "027-unreadable",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "garbage",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "028-unkanchor",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "021-extra",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "029-renamed",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "experiment": {
+                  "name": "pilot2",
+                  "arm": "b",
+                  "provider": "provider-z",
+                  "model": "model-z",
+                  "effort": "low"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_experiment.py::ReportTest.test_the_report_rejects_bad_usage"
+    },
+    {
+      "id": "pipeline/experiment-the-report-rejects-bad-usage-3",
+      "argv": ["--home", "{home}", "experiment", "report"],
+      "home": "pipeline-experiment-the-report-prints-per-arm-metrics",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "016-doc-lint",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "rounds": [
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "CHANGES"
+                  },
+                  {
+                    "security": "PASS",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/1",
+                "done": "2026-06-08T00:00:00Z",
+                "started": "2026-06-07T00:00:00Z",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "021-extra",
+                "stage": "approve",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "pending",
+                    "ux": "pending",
+                    "ui": "pending",
+                    "code": "pending"
+                  }
+                ],
+                "resumes": {
+                  "count": 2,
+                  "key": "000000000000"
+                },
+                "started": "not-a-stamp",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a",
+                  "provider": "provider-a",
+                  "model": "model-a",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "014-inline-images",
+                "stage": "closed",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/2",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "017-skipped",
+                "stage": "pr-open",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "rounds": [
+                  {
+                    "security": "CHANGES",
+                    "ux": "PASS",
+                    "ui": "PASS",
+                    "code": "PASS"
+                  }
+                ],
+                "pr": "https://github.com/o/r/pull/3",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "022-gone",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "escalated": true,
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "023-blank",
+                "stage": "review",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "pr": "https://github.com/o/r/pull/4",
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b",
+                  "provider": "provider-b",
+                  "model": "model-b",
+                  "effort": "high"
+                }
+              },
+              {
+                "id": "024-rework",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "025-surfaced",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T22:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "026-old",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-07-10T00:00:00Z",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "027-unreadable",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "garbage",
+                "refs": [
+                  {
+                    "id": "016-doc-lint",
+                    "kind": "follow-up-of"
+                  }
+                ]
+              },
+              {
+                "id": "028-unkanchor",
+                "stage": "idea",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "started": "2026-06-09T23:00:00Z",
+                "refs": [
+                  {
+                    "id": "021-extra",
+                    "kind": "rework-of"
+                  }
+                ]
+              },
+              {
+                "id": "029-renamed",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "experiment": {
+                  "name": "pilot2",
+                  "arm": "b",
+                  "provider": "provider-z",
+                  "model": "model-z",
+                  "effort": "low"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_experiment.py::ReportTest.test_the_report_rejects_bad_usage"
+    },
+    {
+      "id": "pipeline/experiment-a-short-arm-is-inconclusive",
+      "argv": ["--home", "{home}", "experiment", "report", "pilot"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "040-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 100,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "041-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 110,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "042-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 120,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "043-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 130,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "044-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 140,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "045-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 300,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "046-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 310,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "047-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 320,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "048-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 330,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "049-pilot-b",
+                "stage": "pr-open",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 340,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_experiment.py::ReportNoiseTest.test_a_short_arm_is_inconclusive"
+    },
+    {
+      "id": "pipeline/experiment-a-difference-inside-the-noise-is-no-difference",
+      "argv": ["--home", "{home}", "experiment", "report", "pilot"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "040-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 100,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "041-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 110,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "042-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 120,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "043-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 130,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "044-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 140,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "045-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 300,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "046-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 310,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "047-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 320,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "048-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 330,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "049-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 340,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_experiment.py::ReportNoiseTest.test_a_difference_inside_the_noise_is_no_difference"
+    },
+    {
+      "id": "pipeline/experiment-fewer-tokens-in-arm-b-read-b-lower",
+      "argv": ["--home", "{home}", "experiment", "report", "pilot"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "040-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 300,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "041-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 310,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "042-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 320,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "043-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 330,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "044-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 340,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "045-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 100,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "046-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 110,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "047-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 120,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "048-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 130,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "049-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 140,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_experiment.py::ReportNoiseTest.test_fewer_tokens_in_arm_b_read_b_lower"
+    },
+    {
+      "id": "pipeline/experiment-malformed-token-records-add-nothing",
+      "argv": ["--home", "{home}", "experiment", "report", "pilot"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "040-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 100,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "041-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 110,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "042-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 120,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "043-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 130,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "044-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 140,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                }
+              },
+              {
+                "id": "045-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 300,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "046-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 310,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "047-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 320,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "048-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 2,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 330,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "049-pilot-b",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 3,
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": 340,
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  }
+                },
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "b"
+                }
+              },
+              {
+                "id": "050-pilot-a",
+                "stage": "merged",
+                "project": "alpha",
+                "title": "Feature",
+                "idea": "Feature",
+                "updated": "2026-01-01T00:00:00Z",
+                "round": 1,
+                "experiment": {
+                  "name": "pilot",
+                  "arm": "a"
+                },
+                "tokens": {
+                  "host-a": {
+                    "models": {
+                      "model-a": {
+                        "input": "500",
+                        "output": 0,
+                        "cache_write": 0,
+                        "cache_read": 0
+                      }
+                    }
+                  },
+                  "host-b": "garbage"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_experiment.py::ReportNoiseTest.test_malformed_token_records_add_nothing"
     }
   ]
 }
