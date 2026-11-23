@@ -10671,4 +10671,1001 @@ exit "$archive_code"
             assert!(matches(LAUNCHED, &out));
         }
     }
+
+    pub(super) fn alpha_on(fx: &Fx) {
+        fx.view("alpha", 200, effective("alpha", Some(json!({"pickup": on()})), None));
+    }
+
+    pub(super) fn launched_only(out: &str, id: &str) -> bool {
+        matches(&format!("launched {id} alpha on primary session [0-9a-f]{{6}}\n"), out)
+    }
+
+    mod pause_test {
+        use super::*;
+
+        fn setup() -> (Fx, Paseo) {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            let p = Paseo::install(&fx, agents(&[("synthetic-agent", "idle")]));
+            fx.set_fakes(|f| f.paseo_run = Some(Rc::new(|_| (0, String::new()))));
+            (fx, p)
+        }
+
+        #[test]
+        fn test_paused_idea_is_skipped() {
+            let (fx, _p) = setup();
+            fx.jobs(json!([idea("100-sample-idea", "alpha", json!({"paused": {"at": "2026-01-02T12:00:00Z"}})), idea("101-sample-next", "alpha", json!({}))]));
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(lines(&out)[0], "skip 100-sample-idea alpha: paused");
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(launched_only(&out, "101-sample-next"));
+            assert!(fx.job("100-sample-idea").get("claim").is_none());
+        }
+
+        #[test]
+        fn test_paused_prioritized_job_is_not_nudged() {
+            let (fx, p) = setup();
+            fx.jobs(json!([{"id": "042-sample-export", "stage": "build", "project": "alpha", "updated": "2026-01-01T00:00:00Z",
+                "claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"},
+                "paseo": {"server": "synthetic-server", "agent": "synthetic-agent"},
+                "priority": {"at": "2026-01-02T12:00:00Z"}, "paused": {"at": "2026-01-02T12:00:00Z"}}]));
+            assert_eq!(fx.pickup(&[]), out_err(0, "stopped session synthetic-agent of 042-sample-export alpha: the job is paused\n", ""));
+            assert!(p.sent().is_empty());
+            assert_eq!(fx.puts(), [("PUT".to_string(), "/api/board".to_string())]);
+        }
+    }
+
+    const FOLLOW: &str = r#"[{"id": "090-alpha-old", "kind": "follow-up-of"}]"#;
+    const HELD: [&str; 5] = ["101-wrap-doc-line", "102-move-comment", "103-drop-double-period", "104-fix-typo", "105-rename-flag"];
+
+    fn follow() -> Value {
+        serde_json::from_str(FOLLOW).unwrap()
+    }
+
+    mod not_before_test {
+        use super::*;
+
+        #[test]
+        fn test_future_stamp_is_skipped() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            let later = stamp(600);
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({"not_before": later})), idea("121-sample-next", "alpha", json!({}))]));
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert_eq!(lines(&out)[0], format!("skip 120-sample-digest alpha: not before {later}"));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(launched_only(&out, "121-sample-next"));
+            assert!(fx.job("120-sample-digest").get("claim").is_none());
+        }
+
+        #[test]
+        fn test_past_or_malformed_stamp_launches() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            for value in [stamp(-60), "soon".to_string()] {
+                fx.jobs(json!([idea("120-sample-digest", "alpha", json!({"not_before": value}))]));
+                let (code, out, err) = fx.pickup(&[]);
+                assert_eq!((code, err.as_str()), (0, ""));
+                assert!(launched_only(&out, "120-sample-digest"), "{value}");
+            }
+        }
+
+        #[test]
+        fn test_claim_ideas_skips_a_deferred_job() {
+            let fx = Fx::new();
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({"not_before": stamp(600)})), idea("121-sample-next", "alpha", json!({}))]));
+            let paths = vec![("alpha".to_string(), fx.repo_a.display().to_string())];
+            let pick = Pick { max_inflight: None, project: None, by_host: false, builds: false, experiment: None, route: None, skip_ids: Vec::new() };
+            let picked = claim_ideas(&fx.home, DEVICE, "", 120, &paths, 5, &pick).unwrap();
+            assert_eq!(picked.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["121-sample-next"]);
+            assert!(fx.job("120-sample-digest").get("claim").is_none());
+        }
+
+        /// batch_problem belongs to the batch command's slice; its not-before reason is this
+        /// file's waiting_until, checked here.
+        #[test]
+        fn test_batch_problem_names_the_stamp() {
+            let later = stamp(600);
+            let j = idea("120-sample-digest", "alpha", json!({"not_before": later}));
+            assert_eq!(waiting_until(&j), Some(later));
+        }
+
+        #[test]
+        fn test_deferred_batch_starter_holds_nothing() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            let later = stamp(600);
+            let mut jobs: Vec<Value> = HELD[..3].iter().map(|id| idea(id, "alpha", json!({"refs": follow(), "updated": stamp(-10)}))).collect();
+            jobs.push(idea("110-add-csv-export", "alpha", json!({"refs": follow(), "updated": stamp(-10), "not_before": later, "priority": {"at": stamp(-1), "batch": true}})));
+            fx.jobs(Value::Array(jobs));
+            let (code, out, err) = fx.pickup(&["--dry-run", "--max-inflight", "5"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(lines(&out).contains(&format!("skip 110-add-csv-export alpha: not before {later}").as_str()));
+            assert!(!out.contains("batches behind"));
+        }
+    }
+
+    mod launch_backoff_test {
+        use super::*;
+
+        fn parked(fx: &Fx, id: &str) -> (i64, String, i64) {
+            let j = fx.job(id);
+            let record = &j["launch_failure"];
+            assert_eq!(record.as_object().unwrap().len(), 3);
+            let at = parse_stamp(record["at"].as_str().unwrap()).unwrap();
+            let until = parse_stamp(j["not_before"].as_str().unwrap()).unwrap();
+            (record["count"].as_i64().unwrap(), record["reason"].as_str().unwrap().to_string(), until - at)
+        }
+
+        #[test]
+        fn test_first_failure_backs_off() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
+            fx.configure("boom", 3, 0);
+            let before = unix_now();
+            let (code, out, err) = fx.pickup(&[]);
+            let after = unix_now();
+            let j = fx.job("120-sample-digest");
+            let until = j["not_before"].as_str().unwrap().to_string();
+            assert_eq!(code, 1);
+            assert_eq!(out, format!("released 120-sample-digest\nbacked off 120-sample-digest until {until} (launch failure 1)\n"));
+            assert!(err.starts_with("factory.py: launch of 120-sample-digest on primary failed: exit 3; see "));
+            assert!(j.get("claim").is_none());
+            assert_eq!(parked(&fx, "120-sample-digest"), (1, "exit 3".into(), 300));
+            let when = parse_stamp(&until).unwrap();
+            assert!(before + 300 <= when && when <= after + 300);
+        }
+
+        #[test]
+        fn test_delay_doubles_and_caps() {
+            let fx = Fx::new();
+            assert_eq!((1..9).map(launch_backoff_seconds).collect::<Vec<_>>(), [300, 600, 1200, 2400, 4800, 9600, 14400, 14400]);
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({"claim": held(DEVICE), "launch_failure": {"count": 2, "reason": "exit 3", "at": stamp(-10)}}))]));
+            let parked_at = back_off_launch(&fx.home, "120-sample-digest", DEVICE, "s1", "exit 4").unwrap();
+            let until = fx.job("120-sample-digest")["not_before"].as_str().unwrap().to_string();
+            assert_eq!(parked_at, Some((3, Some(until))));
+            assert!(fx.job("120-sample-digest").get("claim").is_none());
+            assert_eq!(parked(&fx, "120-sample-digest"), (3, "exit 4".into(), 1200));
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({"claim": held("other-host")}))]));
+            fx.clear_calls();
+            assert_eq!(back_off_launch(&fx.home, "120-sample-digest", DEVICE, "s1", "exit 4").unwrap(), None);
+            assert_eq!(back_off_launch(&fx.home, "999-gone", DEVICE, "s1", "exit 4").unwrap(), None);
+            assert!(fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_success_clears_the_record() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            let past = stamp(-1);
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({"not_before": past, "launch_failure": {"count": 3, "reason": "exit 3", "at": stamp(-21)}}))]));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(launched_only(&out, "120-sample-digest"));
+            let j = fx.job("120-sample-digest");
+            assert!(j.get("launch_failure").is_none());
+            assert_eq!(j["not_before"], Value::from(past));
+        }
+
+        #[test]
+        fn test_approved_build_backs_off() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            fx.jobs(json!([{"id": "120-sample-digest", "stage": "build", "project": "alpha", "note": "spec approved in Tracer", "updated": stamp(0)}]));
+            fx.configure("boom", 3, 0);
+            let (code, out, _) = fx.pickup(&[]);
+            assert_eq!(code, 1);
+            assert!(out.contains("backed off 120-sample-digest until "));
+            let j = fx.job("120-sample-digest");
+            assert_eq!((&j["stage"], &j["note"]), (&json!("build"), &json!("spec approved in Tracer")));
+            assert!(j.get("claim").is_none());
+            assert_eq!(parked(&fx, "120-sample-digest"), (1, "exit 3".into(), 300));
+        }
+
+        #[test]
+        fn test_fifth_failure_moves_to_needs_human() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({"launch_failure": {"count": 4, "reason": "exit 3", "at": stamp(-40)}}))]));
+            fx.configure("boom", 3, 0);
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!(code, 1);
+            assert_eq!(out, "released 120-sample-digest\nneeds-human 120-sample-digest after 5 launch failures in a row\n");
+            assert!(err.starts_with("factory.py: launch of 120-sample-digest on primary failed: exit 3; see "));
+            let j = fx.job("120-sample-digest");
+            assert_eq!(j["stage"], "needs-human");
+            assert_eq!(j["needs"], "Pickup launch failed 5 times in a row on host host-a. Last reason: exit 3. Fix the launcher, then clear this ask and move the job back to idea.");
+            assert!(j.get("claim").is_none() && j.get("not_before").is_none());
+            assert_eq!((&j["launch_failure"]["count"], &j["launch_failure"]["reason"]), (&json!(5), &json!("exit 3")));
+        }
+
+        #[test]
+        fn test_stop_keeps_the_note_and_names_the_stage() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            fx.jobs(json!([{"id": "120-sample-digest", "stage": "build", "project": "alpha", "note": "spec approved in Tracer", "updated": stamp(0), "launch_failure": {"count": 3, "reason": "exit 3", "at": stamp(-30)}}]));
+            fx.configure("boom", 3, 0);
+            let (code, out, _) = fx.pickup(&[]);
+            assert_eq!(code, 1);
+            assert!(out.contains("backed off 120-sample-digest until "));
+            assert_eq!(fx.job("120-sample-digest")["stage"], "build");
+            assert_eq!(parked(&fx, "120-sample-digest"), (4, "exit 3".into(), 2400));
+            fx.state.borrow_mut().board["jobs"][0].as_object_mut().unwrap().shift_remove("not_before");
+            let (code, out, _) = fx.pickup(&[]);
+            assert_eq!(code, 1);
+            assert!(out.contains("needs-human 120-sample-digest after 5 launch failures in a row"));
+            let j = fx.job("120-sample-digest");
+            assert_eq!((&j["stage"], &j["note"]), (&json!("needs-human"), &json!("spec approved in Tracer")));
+            assert!(j["needs"].as_str().unwrap().ends_with("move the job back to build."));
+            assert_eq!(j["launch_failure"]["count"], 5);
+        }
+
+        #[test]
+        fn test_limit_failure_does_not_back_off() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
+            fx.configure("You've hit your usage limit. Resets in 3 hours.", 1, 0);
+            let (code, _, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            let j = fx.job("120-sample-digest");
+            assert!(j.get("not_before").is_none() && j.get("launch_failure").is_none());
+        }
+
+        #[test]
+        fn test_reason_has_no_path() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
+            fx.write_launchers(json!({"primary": [fx.root.join("no-such-program")]}));
+            assert_eq!(fx.pickup(&[]).0, 1);
+            let reason = fx.job("120-sample-digest")["launch_failure"]["reason"].as_str().unwrap().to_string();
+            assert!(reason.starts_with("cannot start no-such-program: "), "{reason}");
+            assert!(!reason.contains(&fx.root.display().to_string()));
+            assert_eq!(launch_reason(&format!("exit\t3\n\u{200b}{}", "x".repeat(300))), format!("exit 3 {}", "x".repeat(193)));
+        }
+
+        /// The board command belongs to the claims slice and is not ported yet, so it writes nothing.
+        #[test]
+        fn test_board_refuses_the_field() {
+            let fx = Fx::new();
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
+            let home = fx.home.display().to_string();
+            assert_eq!(crate::cli::main(vec!["board".into(), home.into(), "120-sample-digest".into()]), 2);
+            assert!(fx.puts().is_empty());
+        }
+    }
+
+    mod depends_on_test {
+        use super::*;
+
+        fn depends() -> Value {
+            json!([{"id": "201-sample-csv-api", "kind": "depends-on"}])
+        }
+
+        fn api_row(stage: &str) -> Value {
+            json!({"id": "201-sample-csv-api", "stage": stage, "project": "alpha", "title": "Add a CSV API", "updated": "2026-01-01T00:00:00Z"})
+        }
+
+        #[test]
+        fn test_open_dependency_is_skipped() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            fx.jobs(json!([api_row("build"), idea("202-sample-csv-button", "alpha", json!({"refs": depends()}))]));
+            let (code, out, err) = fx.pickup(&["--dry-run"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(lines(&out).contains(&"skip 202-sample-csv-button alpha: waits on 201-sample-csv-api"));
+            fx.pickup(&[]);
+            assert!(fx.launched().is_empty());
+            assert!(fx.job("202-sample-csv-button").get("claim").is_none());
+        }
+
+        #[test]
+        fn test_merged_closed_or_missing_dependency_launches() {
+            let fx = Fx::new();
+            alpha_on(&fx);
+            for rows in [vec![api_row("merged")], vec![api_row("closed")], vec![]] {
+                let mut jobs = rows;
+                jobs.push(idea("202-sample-csv-button", "alpha", json!({"refs": depends()})));
+                fx.jobs(Value::Array(jobs));
+                let (code, out, err) = fx.pickup(&[]);
+                assert_eq!((code, err.as_str()), (0, ""));
+                assert!(out.ends_with("\n") && matches("(?s).*launched 202-sample-csv-button alpha on primary session [0-9a-f]{6}\n", &out));
+            }
+        }
+
+        #[test]
+        fn test_claim_ideas_skips_a_waiting_job() {
+            let fx = Fx::new();
+            fx.jobs(json!([api_row("build"), idea("202-sample-csv-button", "alpha", json!({"refs": depends()})), idea("203-sample-next", "alpha", json!({}))]));
+            let paths = vec![("alpha".to_string(), fx.repo_a.display().to_string())];
+            let pick = Pick { max_inflight: None, project: None, by_host: false, builds: false, experiment: None, route: None, skip_ids: Vec::new() };
+            let picked = claim_ideas(&fx.home, DEVICE, "", 120, &paths, 5, &pick).unwrap();
+            assert_eq!(picked.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["203-sample-next"]);
+            assert!(fx.job("202-sample-csv-button").get("claim").is_none());
+        }
+
+        /// batch_problem belongs to the batch command's slice; its depends-on reason is this file's
+        /// waiting_on, checked here.
+        #[test]
+        fn test_batch_problem_names_the_dependency() {
+            let j = idea("202-sample-csv-button", "alpha", json!({"refs": depends()}));
+            assert_eq!(waiting_on(&j, &[api_row("build"), j.clone()]), Some("201-sample-csv-api".into()));
+        }
+    }
+
+    /// The retro and audit pushes wait on their slices: past the transcripts gate pickup exits 2.
+    fn assert_push_deferred(result: (i32, String, String), what: &str) {
+        assert_eq!(result, out_err(2, "", &format!("factory.py: pickup {what} is not ported to the Rust binary yet\n")));
+    }
+
+    mod retro_pickup_test {
+        use super::*;
+
+        fn setup() -> Fx {
+            let fx = Fx::new();
+            let session = fx.root.join("claude/projects/-home-u-scratch/s1.jsonl");
+            fs::create_dir_all(session.parent().unwrap()).unwrap();
+            fs::write(&session, json!({"timestamp": "2026-11-10T10:00:00Z", "type": "user", "message": {"role": "user", "content": "hi"}}).to_string() + "\n").unwrap();
+            fx
+        }
+
+        fn today() -> String {
+            let (utc, offset) = local_now();
+            local_date(utc, offset)
+        }
+
+        #[test]
+        fn test_first_run_of_a_day_pushes_once() {
+            let fx = setup();
+            assert_push_deferred(fx.pickup(&[]), "retro push");
+            fs::write(fx.home.join(RETRO_PUSH_FILE), json!({"version": 1, "date": today()}).to_string()).unwrap();
+            assert_push_deferred(fx.pickup(&[]), "audit push");
+        }
+
+        #[test]
+        fn test_an_earlier_date_pushes_again() {
+            let fx = setup();
+            fs::write(fx.home.join(RETRO_PUSH_FILE), r#"{"version": 1, "date": "2026-01-01"}"#).unwrap();
+            assert_push_deferred(fx.pickup(&[]), "retro push");
+        }
+
+        #[test]
+        fn test_a_malformed_record_pushes_again() {
+            let fx = setup();
+            fs::write(fx.home.join(RETRO_PUSH_FILE), "{not json").unwrap();
+            assert_push_deferred(fx.pickup(&[]), "retro push");
+        }
+
+        #[test]
+        fn test_an_unknown_version_pushes_again() {
+            let fx = setup();
+            fs::write(fx.home.join(RETRO_PUSH_FILE), json!({"version": 2, "date": today()}).to_string()).unwrap();
+            assert_push_deferred(fx.pickup(&[]), "retro push");
+        }
+
+        #[test]
+        fn test_a_failed_push_warns_and_still_launches() {
+            let fx = setup();
+            alpha_on(&fx);
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
+            assert_push_deferred(fx.pickup(&[]), "retro push");
+            assert!(fx.launched().is_empty());
+            assert!(!fx.home.join(RETRO_PUSH_FILE).exists());
+        }
+
+        #[test]
+        fn test_no_transcripts_dir_sends_nothing() {
+            let fx = setup();
+            fx.set_env("CLAUDE_CONFIG_DIR", fx.root.join("gone"));
+            fx.assert_silent(fx.pickup(&[]));
+        }
+
+        #[test]
+        fn test_dry_run_never_pushes() {
+            let fx = setup();
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("host {DEVICE}: would launch 0\n"), ""));
+        }
+    }
+
+    mod retro_catchup_test {
+        use super::*;
+
+        const PROMPT: &str = "Run the weekday retro.\n\nStanding instruction: work unattended.\n";
+
+        fn setup() -> Fx {
+            let fx = Fx::new();
+            fs::write(fx.home.join(RETRO_PROMPT_FILE), PROMPT).unwrap();
+            fx
+        }
+
+        fn due_at(fx: &Fx, day: i64, hour: i64, minute: i64) -> bool {
+            let offset = -5 * 3600;
+            let wall = days_from_civil(2026, 11, day) * 86_400 + hour * 3600 + minute * 60;
+            retro_catchup_due(&fx.home, &Local { utc: wall - offset, offset })
+        }
+
+        fn due(fx: &Fx) -> bool {
+            due_at(fx, 18, 10, 15)
+        }
+
+        fn run_folder(fx: &Fx, name: &str) {
+            fs::create_dir_all(fx.home.join("retro").join(name)).unwrap();
+        }
+
+        fn today() -> String {
+            let (utc, offset) = local_now();
+            local_date(utc, offset)
+        }
+
+        fn job_id() -> String {
+            format!("retro-{}", today().replace('-', ""))
+        }
+
+        fn force_due(fx: &Fx) {
+            fx.set_fakes(|f| f.retro_catchup_due = Some(Rc::new(|_, _| true)));
+        }
+
+        #[test]
+        fn test_weekday_after_the_grace_is_due() {
+            let fx = setup();
+            assert!(due(&fx));
+            assert!(due_at(&fx, 18, 9, 30));
+        }
+
+        #[test]
+        fn test_before_the_grace_is_not_due() {
+            assert!(!due_at(&setup(), 18, 9, 29));
+        }
+
+        #[test]
+        fn test_weekend_is_not_due() {
+            let fx = setup();
+            assert!(!due_at(&fx, 21, 10, 15));
+            assert!(!due_at(&fx, 22, 10, 15));
+        }
+
+        #[test]
+        fn test_missing_prompt_file_is_not_due() {
+            let fx = setup();
+            fs::remove_file(fx.home.join(RETRO_PROMPT_FILE)).unwrap();
+            assert!(!due(&fx));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn test_linked_prompt_file_is_not_due() {
+            let fx = setup();
+            let target = fx.root.join("prompt.md");
+            fs::rename(fx.home.join(RETRO_PROMPT_FILE), &target).unwrap();
+            std::os::unix::fs::symlink(&target, fx.home.join(RETRO_PROMPT_FILE)).unwrap();
+            assert!(!due(&fx));
+        }
+
+        #[test]
+        fn test_a_run_folder_from_today_is_not_due() {
+            let fx = setup();
+            run_folder(&fx, "20261118T140034Z-c3ac38");
+            assert!(!due(&fx));
+        }
+
+        #[test]
+        fn test_a_late_utc_stamp_counts_by_local_date() {
+            let fx = setup();
+            run_folder(&fx, "20261119T030000Z-0a1b2c");
+            assert!(!due(&fx));
+        }
+
+        #[test]
+        fn test_a_run_folder_from_yesterday_is_due() {
+            let fx = setup();
+            run_folder(&fx, "20261117T140034Z-c3ac38");
+            run_folder(&fx, "20261118-notes");
+            assert!(due(&fx));
+        }
+
+        #[test]
+        fn test_a_record_for_today_is_not_due() {
+            let fx = setup();
+            fs::write(fx.home.join(RETRO_CATCHUP_FILE), r#"{"version": 1, "date": "2026-11-18"}"#).unwrap();
+            assert!(!due(&fx));
+        }
+
+        #[test]
+        fn test_an_older_or_unknown_record_is_due() {
+            let fx = setup();
+            for record in [r#"{"version": 1, "date": "2026-11-17"}"#, r#"{"version": 2, "date": "2026-11-18"}"#, "{not json"] {
+                fs::write(fx.home.join(RETRO_CATCHUP_FILE), record).unwrap();
+                assert!(due(&fx), "{record}");
+            }
+        }
+
+        #[test]
+        fn test_a_due_pickup_launches_once() {
+            let fx = setup();
+            force_due(&fx);
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(matches(&format!("launched retro catch-up {} on primary session [0-9a-f]{{6}}\n", job_id()), &out), "{out}");
+            let records = fx.launched();
+            assert_eq!(records.len(), 1);
+            let a = fx.repo_a.display().to_string();
+            assert_eq!(records[0].cwd, a);
+            let tag = out.split_whitespace().last().unwrap();
+            assert_eq!(records[0].argv[..4], [job_id(), "alpha".into(), a.clone(), tag.to_string()]);
+            assert_eq!(records[0].argv[7], PROMPT);
+            assert_eq!(records[0].env("FACTORY_PROMPT"), PROMPT);
+            assert_eq!(read_json(&fx.home.join(RETRO_CATCHUP_FILE)).unwrap(), json!({"version": 1, "date": today()}));
+            fx.set_fakes(|f| f.retro_catchup_due = None);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(fx.launched().len(), 1);
+        }
+
+        #[test]
+        fn test_a_second_run_the_same_day_launches_nothing() {
+            let fx = setup();
+            fs::write(fx.home.join(RETRO_CATCHUP_FILE), json!({"version": 1, "date": today()}).to_string()).unwrap();
+            fx.assert_silent(fx.pickup(&[]));
+        }
+
+        #[test]
+        fn test_dry_run_launches_nothing() {
+            let fx = setup();
+            force_due(&fx);
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("would launch retro catch-up {} on primary\nhost {DEVICE}: would launch 0\n", job_id()), ""));
+            assert!(fx.launched().is_empty());
+            assert!(!fx.home.join(RETRO_CATCHUP_FILE).exists());
+        }
+
+        #[test]
+        fn test_a_failed_launch_warns_and_the_idea_still_launches() {
+            let fx = setup();
+            force_due(&fx);
+            alpha_on(&fx);
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
+            fx.configure("started", 1, 0);
+            let root = fx.root.clone();
+            fx.set_fakes(|f| f.launch_idea = Some(Rc::new(move |home, entry, route, argv, env| {
+                let fake = FAKES.with(|f| f.borrow_mut().launch_idea.take());
+                let result = launch_idea(home, entry, route, argv, env);
+                FAKES.with(|f| f.borrow_mut().launch_idea = fake);
+                fs::write(root.join("fake.conf"), "line=started\ncode=0\nsleep=0\n").unwrap();
+                result
+            })));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert!(launched_only(&out, "120-sample-digest"), "{out}");
+            let log = sorted_entries(&fx.home.join("logs/pickup")).into_iter().find(|p| p.file_name().unwrap().to_string_lossy().starts_with(&format!("{}-", job_id()))).unwrap();
+            assert_eq!(err, format!("factory.py: retro catch-up {} failed to launch (exit 1); see {}; no retry today\n", job_id(), log.display()));
+            assert_eq!(fx.launched().iter().map(|r| r.argv[0].clone()).collect::<Vec<_>>(), [job_id(), "120-sample-digest".into()]);
+            assert!(fx.home.join(RETRO_CATCHUP_FILE).exists());
+        }
+
+        fn wait_record(reason: &str) -> Value {
+            json!({"version": 1, "date": today(), "reason": reason})
+        }
+
+        fn no_route(fx: &Fx) {
+            fx.set_fakes(|f| f.pick_route = Some(Rc::new(|_| Ok(None))));
+        }
+
+        #[test]
+        fn test_no_route_waits_once_a_day() {
+            let fx = setup();
+            force_due(&fx);
+            no_route(&fx);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: retro catch-up waits: no available route\n"));
+            assert!(!fx.home.join(RETRO_CATCHUP_FILE).exists());
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(read_json(&fx.home.join(RETRO_WAIT_FILE)).unwrap(), wait_record("no available route"));
+        }
+
+        #[test]
+        fn test_no_checkout_waits_once_a_day() {
+            let fx = setup();
+            force_due(&fx);
+            fx.set_fakes(|f| f.read_paths = Some(Rc::new(|_| Vec::new())));
+            assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: retro catch-up waits: no checkout in paths.md\n"));
+            assert!(!fx.home.join(RETRO_CATCHUP_FILE).exists());
+            assert!(fx.launched().is_empty());
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(read_json(&fx.home.join(RETRO_WAIT_FILE)).unwrap(), wait_record("no checkout in paths.md"));
+        }
+
+        #[test]
+        fn test_a_new_reason_prints_again() {
+            let fx = setup();
+            force_due(&fx);
+            no_route(&fx);
+            assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: retro catch-up waits: no available route\n"));
+            fx.set_fakes(|f| {
+                f.pick_route = None;
+                f.read_paths = Some(Rc::new(|_| Vec::new()));
+            });
+            assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: retro catch-up waits: no checkout in paths.md\n"));
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+        }
+
+        #[test]
+        fn test_a_wait_record_from_yesterday_prints_again() {
+            let fx = setup();
+            force_due(&fx);
+            no_route(&fx);
+            let (utc, offset) = local_now();
+            let yesterday = local_date(utc - 86_400, offset);
+            fs::write(fx.home.join(RETRO_WAIT_FILE), json!({"version": 1, "date": yesterday, "reason": "no available route"}).to_string()).unwrap();
+            assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: retro catch-up waits: no available route\n"));
+            assert_eq!(read_json(&fx.home.join(RETRO_WAIT_FILE)).unwrap(), wait_record("no available route"));
+        }
+
+        #[test]
+        fn test_dry_run_waits_print_without_a_record() {
+            let fx = setup();
+            force_due(&fx);
+            no_route(&fx);
+            for _ in 0..2 {
+                let (code, _, err) = fx.pickup(&["--dry-run"]);
+                assert_eq!((code, err.as_str()), (0, "factory.py: retro catch-up waits: no available route\n"));
+            }
+            assert!(!fx.home.join(RETRO_WAIT_FILE).exists());
+        }
+
+        #[test]
+        fn test_a_config_error_stops_the_catch_up_and_the_idea_still_launches() {
+            let fx = setup();
+            force_due(&fx);
+            alpha_on(&fx);
+            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
+            let calls = Rc::new(RefCell::new(0));
+            fx.set_fakes(|f| f.route_launcher = Some(Rc::new(move |home, route| {
+                *calls.borrow_mut() += 1;
+                if *calls.borrow() == 1 {
+                    return Err(Exit::raw(2, ""));
+                }
+                let fake = FAKES.with(|f| f.borrow_mut().route_launcher.take());
+                let result = route_launcher(home, route);
+                FAKES.with(|f| f.borrow_mut().route_launcher = fake);
+                result
+            })));
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert!(launched_only(&out, "120-sample-digest"));
+            assert_eq!(err, "factory.py: retro catch-up stopped (exit 2); the next pickup run retries it\n");
+            assert!(!fx.home.join(RETRO_CATCHUP_FILE).exists());
+            assert_eq!(fx.launched().iter().map(|r| r.argv[0].clone()).collect::<Vec<_>>(), ["120-sample-digest"]);
+        }
+    }
+
+    mod audit_pickup_test {
+        use super::*;
+
+        fn setup() -> Fx {
+            let fx = Fx::new();
+            let fixtures = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures/audit"));
+            let copy = Command::new("cp").arg("-R").arg(fixtures).arg(fx.root.join("claude")).status().unwrap();
+            assert!(copy.success());
+            let (utc, offset) = local_now();
+            fs::write(fx.home.join(RETRO_PUSH_FILE), json!({"version": 1, "date": local_date(utc, offset)}).to_string()).unwrap();
+            fx.jobs(json!([{"id": "1017-add-x", "project": "alpha", "stage": "build"}]));
+            fx
+        }
+
+        #[test]
+        fn test_pushes_once_until_a_transcript_changes() {
+            let fx = setup();
+            assert_push_deferred(fx.pickup(&[]), "audit push");
+            assert!(!fx.home.join("audit-push.json").exists());
+        }
+
+        #[test]
+        fn test_skips_other_jobs() {
+            let fx = setup();
+            for jobs in [json!([{"id": "1017-add-x", "project": "alpha", "stage": "merged"}]), json!([idea("1017-add-x", "alpha", json!({}))]), json!([{"id": "1018-other", "project": "alpha", "stage": "build"}])] {
+                fx.jobs(jobs);
+                assert_push_deferred(fx.pickup(&[]), "audit push");
+                assert!(!fx.home.join("audit-push.json").exists());
+            }
+        }
+
+        #[test]
+        fn test_dry_run_never_pushes() {
+            let fx = setup();
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("host {DEVICE}: would launch 0\n"), ""));
+        }
+
+        #[test]
+        fn test_a_failed_push_warns_and_still_launches() {
+            let fx = setup();
+            alpha_on(&fx);
+            assert_push_deferred(fx.pickup(&[]), "audit push");
+            assert!(fx.launched().is_empty());
+        }
+
+        #[test]
+        fn test_refreshes_token_share() {
+            let fx = setup();
+            assert_push_deferred(fx.pickup(&[]), "audit push");
+            assert!(fx.puts().is_empty());
+        }
+
+        #[test]
+        fn test_token_scan_error_warns() {
+            let fx = setup();
+            fx.set_fakes(|f| f.usage_totals = Some(Rc::new(|_, _, _| Err("ValueError".into()))));
+            assert_push_deferred(fx.pickup(&[]), "audit push");
+        }
+    }
+
+    fn hook_counter(fx: &Fx, orphan: bool) -> Rc<RefCell<Vec<PathBuf>>> {
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let log = seen.clone();
+        let hook: Hook = Some(Rc::new(move |home: &Path| log.borrow_mut().push(home.to_path_buf())));
+        fx.set_fakes(|f| if orphan { f.orphan_pickup_scan = hook } else { f.outcomes_pickup_record = hook });
+        seen
+    }
+
+    mod orphan_pickup_hook_test {
+        use super::*;
+
+        #[test]
+        fn test_pickup_calls_the_hook_once_and_dry_run_never() {
+            let fx = Fx::new();
+            let seen = hook_counter(&fx, true);
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("host {DEVICE}: would launch 0\n"), ""));
+            assert!(seen.borrow().is_empty());
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*seen.borrow(), vec![fx.home.clone()]);
+        }
+    }
+
+    mod outcomes_pickup_hook_test {
+        use super::*;
+
+        #[test]
+        fn test_pickup_calls_the_hook_once_and_dry_run_never() {
+            let fx = Fx::new();
+            let seen = hook_counter(&fx, false);
+            assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("host {DEVICE}: would launch 0\n"), ""));
+            assert!(seen.borrow().is_empty());
+            assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+            assert_eq!(*seen.borrow(), vec![fx.home.clone()]);
+        }
+    }
+
+    mod batch_hold_test {
+        use super::*;
+
+        fn setup() -> Fx {
+            let fx = Fx::new();
+            fx.view("alpha", 200, effective("alpha", None, Some(json!({"pickup": on()}))));
+            fx
+        }
+
+        fn held_ideas(count: usize, extra: Value) -> Vec<Value> {
+            HELD[..count].iter().map(|id| idea(id, "alpha", with(json!({"refs": follow(), "updated": stamp(-10)}), extra.clone()))).collect()
+        }
+
+        pub(super) fn dry(fx: &Fx) -> Vec<String> {
+            let (code, out, err) = fx.pickup(&["--dry-run", "--max-inflight", "5"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            // A launch line's argv carries the multi-line prompt; keep only the line starts.
+            lines(&out).into_iter().filter(|l| l.starts_with("skip ") || l.starts_with("would launch ") || l.starts_with("host ")).map(String::from).collect()
+        }
+
+        fn waits(ids: &[&str], line: &str) -> Vec<String> {
+            ids.iter().map(|id| format!("skip {id} alpha: waits for a batch ({line})")).collect()
+        }
+
+        fn plus(mut lines: Vec<String>, more: &[String]) -> Vec<String> {
+            lines.extend_from_slice(more);
+            lines
+        }
+
+        #[test]
+        fn test_three_fresh_wait() {
+            let fx = setup();
+            fx.jobs(Value::Array(held_ideas(3, json!({}))));
+            assert_eq!(dry(&fx), plus(waits(&HELD[..3], "3 of 5 held, oldest 0h of 12h"), &[format!("host {DEVICE}: would launch 0")]));
+        }
+
+        #[test]
+        fn test_five_release_one() {
+            let fx = setup();
+            fx.jobs(Value::Array(held_ideas(5, json!({}))));
+            let lines = dry(&fx);
+            assert!(lines[0].starts_with("would launch 101-wrap-doc-line alpha on primary: "));
+            let want: Vec<String> = HELD[1..].iter().map(|id| format!("skip {id} alpha: batches behind 101-wrap-doc-line")).collect();
+            assert_eq!(lines[1..], plus(want, &[format!("host {DEVICE}: would launch 1")])[..]);
+        }
+
+        #[test]
+        fn test_old_one_releases() {
+            let fx = setup();
+            fx.jobs(Value::Array(held_ideas(1, json!({"updated": stamp(-13 * 60)}))));
+            let lines = dry(&fx);
+            assert!(lines[0].starts_with("would launch 101-wrap-doc-line alpha on primary: "));
+            assert_eq!(lines[1..], [format!("host {DEVICE}: would launch 1")]);
+        }
+
+        #[test]
+        fn test_triage_idea_waits() {
+            let fx = setup();
+            fx.jobs(json!([idea(HELD[0], "alpha", json!({"updated": stamp(-10), "backlog": {"by": "triage", "decision": "approved"}}))]));
+            assert_eq!(dry(&fx), plus(waits(&HELD[..1], "1 of 5 held, oldest 0h of 12h"), &[format!("host {DEVICE}: would launch 0")]));
+        }
+
+        #[test]
+        fn test_person_idea_launches() {
+            let fx = setup();
+            let mut jobs = held_ideas(3, json!({}));
+            jobs.push(idea("110-add-csv-export", "alpha", json!({"refs": follow(), "updated": stamp(-10), "capture_id": "c1"})));
+            fx.jobs(Value::Array(jobs));
+            let lines = dry(&fx);
+            assert_eq!(lines[..3], waits(&HELD[..3], "3 of 5 held, oldest 0h of 12h")[..]);
+            assert!(lines[3].starts_with("would launch 110-add-csv-export alpha on primary: "));
+            assert_eq!(lines[4..], [format!("host {DEVICE}: would launch 1")]);
+        }
+
+        #[test]
+        fn test_batch_starter_holds_the_rest() {
+            let fx = setup();
+            let mut jobs = held_ideas(3, json!({}));
+            jobs.push(idea("110-add-csv-export", "alpha", json!({"refs": follow(), "updated": stamp(-10), "priority": {"at": stamp(-1), "batch": true}})));
+            fx.jobs(Value::Array(jobs));
+            let lines = dry(&fx);
+            assert!(lines[0].starts_with("would launch 110-add-csv-export alpha on primary: "));
+            let want: Vec<String> = HELD[..3].iter().map(|id| format!("skip {id} alpha: batches behind 110-add-csv-export")).collect();
+            assert_eq!(lines[1..], plus(want, &[format!("host {DEVICE}: would launch 1")])[..]);
+        }
+
+        #[test]
+        fn test_paused_or_gated_starter_holds_nothing() {
+            let fx = setup();
+            for extra in [json!({"paused": {"at": stamp(-1)}}), json!({"close": {"at": stamp(-1), "reason": "Synthetic duplicate"}}), json!({"needs": "Pick a format"}), json!({"origin": {"gate": "human"}})] {
+                let mut jobs = held_ideas(3, json!({}));
+                jobs.push(idea("110-add-csv-export", "alpha", with(json!({"refs": follow(), "updated": stamp(-10), "priority": {"at": stamp(-1), "batch": true}}), extra.clone())));
+                fx.jobs(Value::Array(jobs));
+                let lines = dry(&fx);
+                let mut batch: Vec<String> = lines.iter().filter(|l| l.contains("batch")).cloned().collect();
+                batch.sort();
+                assert_eq!(batch, waits(&HELD[..3], "3 of 5 held, oldest 0h of 12h"), "{extra}");
+                assert!(lines.iter().any(|l| l.starts_with("skip 110-add-csv-export alpha: ")), "{lines:?}");
+            }
+        }
+
+        #[test]
+        fn test_view_hold_settings() {
+            let fx = setup();
+            fx.jobs(Value::Array(held_ideas(3, json!({}))));
+            let view = effective("alpha", None, Some(json!({"pickup": on()})));
+            fx.view("alpha", 200, with(view.clone(), json!({"hold": {"min_ideas": 3, "max_wait_hours": 1}})));
+            let lines = dry(&fx);
+            assert!(lines[0].starts_with("would launch 101-wrap-doc-line alpha on primary: "));
+            let want: Vec<String> = HELD[1..3].iter().map(|id| format!("skip {id} alpha: batches behind 101-wrap-doc-line")).collect();
+            assert_eq!(lines[1..], plus(want, &[format!("host {DEVICE}: would launch 1")])[..]);
+            fx.view("alpha", 200, with(view, json!({"hold": {"min_ideas": 0, "max_wait_hours": 1}})));
+            assert_eq!(dry(&fx), plus(waits(&HELD[..3], "3 of 5 held, oldest 0h of 12h"), &[format!("host {DEVICE}: would launch 0")]));
+        }
+
+        #[test]
+        fn test_pickup_off_beats_hold() {
+            let fx = setup();
+            fx.jobs(Value::Array(held_ideas(3, json!({}))));
+            fx.view("alpha", 200, effective("alpha", None, None));
+            let want: Vec<String> = HELD[..3].iter().map(|id| format!("skip {id} alpha: pickup off")).collect();
+            assert_eq!(dry(&fx), plus(want, &[format!("host {DEVICE}: would launch 0")]));
+        }
+
+        #[test]
+        fn test_unlisted_host_beats_hold() {
+            let fx = setup();
+            fx.jobs(Value::Array(held_ideas(3, json!({}))));
+            fx.view("alpha", 200, effective("alpha", None, Some(json!({"pickup": {"enabled": true, "hosts": ["other-host"]}}))));
+            let want: Vec<String> = HELD[..3].iter().map(|id| format!("skip {id} alpha: pickup does not list host {DEVICE}")).collect();
+            assert_eq!(dry(&fx), plus(want, &[format!("host {DEVICE}: would launch 0")]));
+        }
+
+        #[test]
+        fn test_real_run_claims_lead_only() {
+            let fx = setup();
+            fx.jobs(Value::Array(held_ideas(5, json!({}))));
+            let (code, out, err) = fx.pickup(&["--limit", "5", "--max-inflight", "5"]);
+            assert_eq!((code, err.as_str()), (0, ""));
+            assert!(launched_only(&out, "101-wrap-doc-line"));
+            let claimed: Vec<Value> = fx.state.borrow().board["jobs"].as_array().unwrap().iter().filter(|j| j.get("claim").is_some()).map(|j| j["id"].clone()).collect();
+            assert_eq!(claimed, [json!("101-wrap-doc-line")]);
+        }
+    }
+
+    mod backpressure_test {
+        use super::*;
+        use super::batch_hold_test::dry;
+
+        fn hold(count: i64, at: i64) -> String {
+            format!("skip 120-add-csv-export alpha: backpressure ({count} waiting on you, pauses at {at})")
+        }
+
+        fn waiting_jobs(count: usize, project: &str) -> Vec<Value> {
+            let jobs = [json!({"id": "201-pick-format", "stage": "spec", "needs": "Pick a format"}), json!({"id": "202-pick-name", "stage": "build", "needs": "Pick a name"}), json!({"id": "203-sign-off", "stage": "needs-human"}), json!({"id": "204-held-pr", "stage": "pr-open", "escalated": true}), json!({"id": "205-held-pr", "stage": "pr-open", "escalated": true})];
+            jobs[..count].iter().map(|j| with(j.clone(), json!({"project": project, "updated": "2026-01-01T00:00:00Z"}))).collect()
+        }
+
+        fn board(fx: &Fx, mut jobs: Vec<Value>) {
+            jobs.push(idea("120-add-csv-export", "alpha", json!({})));
+            fx.jobs(Value::Array(jobs));
+        }
+
+        fn setup() -> Fx {
+            let fx = Fx::new();
+            fx.view("alpha", 200, effective("alpha", None, Some(json!({"pickup": on()}))));
+            fx
+        }
+
+        #[test]
+        fn test_five_waiting_hold() {
+            let fx = setup();
+            board(&fx, waiting_jobs(5, "alpha"));
+            assert_eq!(dry(&fx), [hold(5, 5), format!("host {DEVICE}: would launch 0")]);
+        }
+
+        #[test]
+        fn test_other_project_waiting_launch() {
+            let fx = setup();
+            board(&fx, waiting_jobs(5, "beta"));
+            let lines = dry(&fx);
+            assert!(lines[0].starts_with("would launch 120-add-csv-export alpha on primary: "), "{lines:?}");
+            assert_eq!(lines[1..], [format!("host {DEVICE}: would launch 1")]);
+        }
+
+        #[test]
+        fn test_counts_own_project_only() {
+            let fx = setup();
+            let mut jobs = waiting_jobs(4, "alpha");
+            jobs.extend(waiting_jobs(5, "beta").into_iter().skip(4));
+            board(&fx, jobs);
+            assert!(dry(&fx)[0].starts_with("would launch 120-add-csv-export alpha on primary: "));
+        }
+
+        #[test]
+        fn test_four_waiting_launch() {
+            let fx = setup();
+            board(&fx, waiting_jobs(4, "alpha"));
+            let lines = dry(&fx);
+            assert!(lines[0].starts_with("would launch 120-add-csv-export alpha on primary: "));
+            assert_eq!(lines[1..], [format!("host {DEVICE}: would launch 1")]);
+        }
+
+        #[test]
+        fn test_view_threshold() {
+            let fx = setup();
+            board(&fx, waiting_jobs(4, "alpha"));
+            let view = effective("alpha", None, Some(json!({"pickup": on()})));
+            fx.view("alpha", 200, with(view.clone(), json!({"backpressure": {"needs_you": 2}})));
+            assert_eq!(dry(&fx), [hold(4, 2), format!("host {DEVICE}: would launch 0")]);
+            board(&fx, waiting_jobs(5, "alpha"));
+            for bad in [json!(0), json!(51), json!("2"), json!(2.5), Value::Null] {
+                let mut v = view.clone();
+                v["backpressure"] = json!({"needs_you": bad});
+                fx.view("alpha", 200, v);
+                assert_eq!(dry(&fx), [hold(5, 5), format!("host {DEVICE}: would launch 0")], "{bad}");
+            }
+        }
+
+        #[test]
+        fn test_prioritized_and_approved_launch() {
+            let fx = setup();
+            let mut jobs = waiting_jobs(5, "alpha");
+            jobs.push(idea("121-add-pdf-export", "alpha", json!({"priority": {"at": stamp(-1)}})));
+            jobs.push(json!({"id": "122-approved-spec", "stage": "build", "project": "alpha", "updated": "2026-01-01T00:00:00Z", "note": "spec approved on the dashboard"}));
+            fx.jobs(Value::Array(jobs));
+            let lines = dry(&fx);
+            assert_eq!(lines[..2].iter().map(|l| l.split(':').next().unwrap()).collect::<Vec<_>>(), ["would launch 121-add-pdf-export alpha on primary", "would launch 122-approved-spec alpha on primary"]);
+            assert_eq!(lines[2..], [format!("host {DEVICE}: would launch 2")]);
+        }
+    }
 }
