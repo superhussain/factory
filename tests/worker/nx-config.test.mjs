@@ -120,6 +120,8 @@ const INPUTS = {
     "default",
     "shared",
     "{workspaceRoot}/tests/cli/**/*",
+    "{workspaceRoot}/tests/parity/**/*",
+    "{workspaceRoot}/rust/factory/src/usage.txt",
     "{workspaceRoot}/tools/install.py",
     "{workspaceRoot}/tests/tools/test_install.py",
     "{workspaceRoot}/tests/fixtures/cli-v1.json",
