@@ -217,7 +217,9 @@ fn check_untrusted(text: &str) -> Option<String> {
 }
 
 fn check_note(text: &Value) -> Option<String> {
-    let Value::String(text) = text else { return Some("must be text".into()) };
+    let Value::String(text) = text else {
+        return Some("must be text".into());
+    };
     if text.chars().count() > 2000 {
         return Some("over 2000 characters".into());
     }
@@ -251,7 +253,10 @@ fn steer_block(job_id: &str, steer: &Value) -> Res<Option<String>> {
             })
     });
     let Some(notes) = well_formed else {
-        return Err(fail(format!("steer on {job_id} is malformed. Nothing was written."), 5));
+        return Err(fail(
+            format!("steer on {job_id} is malformed. Nothing was written."),
+            5,
+        ));
     };
     let mut envelopes = Vec::new();
     for n in notes {
@@ -278,7 +283,9 @@ fn steer_block(job_id: &str, steer: &Value) -> Res<Option<String>> {
 /// Python's `pipeline_view`, returning only its `prompts`.
 fn pipeline_view(slug: &str, data: &Value) -> Res<Vec<(&'static str, String)>> {
     let malformed = |field: &str| fail(format!("malformed pipeline view for {slug}: {field}"), 5);
-    let Value::Object(view) = data else { return Err(malformed("body")) };
+    let Value::Object(view) = data else {
+        return Err(malformed("body"));
+    };
     if view.get("project").and_then(Value::as_str) != Some(slug) {
         return Err(malformed("project"));
     }
@@ -319,7 +326,9 @@ fn pipeline_view(slug: &str, data: &Value) -> Res<Vec<(&'static str, String)>> {
             && v.values()
                 .all(|n| int_text(n).is_some_and(|t| !t.starts_with('-')))
     });
-    let Some(versions) = versions else { return Err(malformed("versions")) };
+    let Some(versions) = versions else {
+        return Err(malformed("versions"));
+    };
     let notes = view
         .get("stage_notes")
         .and_then(Value::as_object)
@@ -331,7 +340,9 @@ fn pipeline_view(slug: &str, data: &Value) -> Res<Vec<(&'static str, String)>> {
                     })
             })
         });
-    let Some(notes) = notes else { return Err(malformed("stage_notes")) };
+    let Some(notes) = notes else {
+        return Err(malformed("stage_notes"));
+    };
     let mut prompts = Vec::new();
     for &stage in PIPELINE_STAGES {
         let mut envelopes = Vec::new();
@@ -348,7 +359,9 @@ fn pipeline_view(slug: &str, data: &Value) -> Res<Vec<(&'static str, String)>> {
                 .filter(|(who, n)| {
                     (*who == "global" || *who == slug) && (*n == "0" || positive_int(n))
                 });
-            let Some((who, number)) = matched else { return Err(malformed("source")) };
+            let Some((who, number)) = matched else {
+                return Err(malformed("source"));
+            };
             let key = if who == "global" { "global" } else { "project" };
             if int_text(&versions[key]).as_deref() != Some(number) {
                 return Err(malformed("source"));
@@ -443,11 +456,19 @@ fn fetch_pipeline(
 
 /// A well-formed trial record: a slug project, a pipeline stage, integer versions and its open_trial id.
 fn trial_valid(t: &Value) -> bool {
-    let Some(project) = t.get("project").and_then(Value::as_str) else { return false };
-    let Some(stage) = t.get("stage").and_then(Value::as_str).filter(|s| PIPELINE_STAGES.contains(s)) else {
+    let Some(project) = t.get("project").and_then(Value::as_str) else {
         return false;
     };
-    let Some(version) = t.get("version").and_then(int_text) else { return false };
+    let Some(stage) = t
+        .get("stage")
+        .and_then(Value::as_str)
+        .filter(|s| PIPELINE_STAGES.contains(s))
+    else {
+        return false;
+    };
+    let Some(version) = t.get("version").and_then(int_text) else {
+        return false;
+    };
     SLUG.is_full(project)
         && t.get("champion_version")
             .and_then(int_text)
@@ -471,7 +492,13 @@ fn open_trial_for<'a>(data: &'a Value, slug: &str, stage: &str) -> Option<&'a Va
 
 /// Whether the job is in the trial's arm a: started at or after the trial opened, and hashed to a.
 fn in_arm_a(data: &Value, trial: &Value, job_id: &str) -> bool {
-    let Some(opened) = trial.get("opened").and_then(Value::as_str).and_then(parse_stamp) else { return false };
+    let Some(opened) = trial
+        .get("opened")
+        .and_then(Value::as_str)
+        .and_then(parse_stamp)
+    else {
+        return false;
+    };
     let started = data["jobs"].as_array().into_iter().flatten().any(|j| {
         j.get("id").and_then(Value::as_str) == Some(job_id)
             && j.get("project") == trial.get("project")
@@ -518,7 +545,9 @@ fn trial_champion(home: &Path, trial: &Value) -> Res<String> {
             1,
         )
     };
-    let Value::Object(body) = loads(&r.text()?).map_err(|_| malformed())? else { return Err(malformed()) };
+    let Value::Object(body) = loads(&r.text()?).map_err(|_| malformed())? else {
+        return Err(malformed());
+    };
     let note = body
         .get("stage_notes")
         .and_then(|n| n.get(trial["stage"].as_str().unwrap_or_default()));
@@ -731,8 +760,14 @@ pub fn prompt_cmd(call: &Call) -> Res<()> {
         .as_array()
         .map(Vec::as_slice)
         .unwrap_or_default();
-    let Some(job) = jobs.iter().find(|j| j.get("id").and_then(Value::as_str) == Some(job_id.as_str())) else {
-        return Err(fail(format!("no job {job_id} on the board. Nothing was written."), 4));
+    let Some(job) = jobs
+        .iter()
+        .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id.as_str()))
+    else {
+        return Err(fail(
+            format!("no job {job_id} on the board. Nothing was written."),
+            4,
+        ));
     };
     let project_file = project_files(&home, &slug)?.0;
     let documents = project_file.with_file_name(format!("{slug}.documents.md"));
@@ -818,7 +853,9 @@ pub fn prompt_cmd(call: &Call) -> Res<()> {
         }
         if let Some(names) = job.get("idea_files").and_then(Value::as_array) {
             for (n, name) in names.iter().enumerate() {
-                let Some(name) = name.as_str().filter(|n| IDEA_FILE_NAME.is_full(n)) else { continue };
+                let Some(name) = name.as_str().filter(|n| IDEA_FILE_NAME.is_full(n)) else {
+                    continue;
+                };
                 let file = folder.join(format!("idea-file-{name}"));
                 if file.is_file() {
                     lines.push(format!("Idea file {}: {}", n + 1, file.display()));
