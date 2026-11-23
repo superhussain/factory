@@ -2,12 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::cli::Call;
 use crate::commands::intake::inferred_spec_approval;
 use crate::commands::pipeline::decision_verdict;
-use crate::shared::board::{escalated, read_board};
+use crate::shared::board::{escalated, load_board};
+use crate::shared::board_client;
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{IN_FLIGHT, JOB_ID, SLUG};
 use crate::shared::exit::{fail, Res};
@@ -193,7 +194,8 @@ pub fn job(call: &Call) -> Res<()> {
 
 /// The board or archive row job prints, with an inferred spec_approval on an old row.
 fn job_row(home: &Path, job_id: &str) -> Res<Value> {
-    let board = read_board(home)?;
+    let one = Map::from_iter([("job".to_string(), Value::from(job_id))]);
+    let board = load_board(board_client::read_view(home, one)?.as_deref())?;
     let found = board["jobs"].as_array().and_then(|jobs| {
         jobs.iter()
             .find(|j| j.get("id").and_then(Value::as_str) == Some(job_id))
@@ -237,7 +239,8 @@ pub fn builds(call: &Call) -> Res<()> {
     let home = factory_home()?;
     let minutes = holder(&home)?.2;
     let cutoff = unix_now() - i64::from(minutes) * 60;
-    let board = read_board(&home)?;
+    let project = Map::from_iter([("project".to_string(), Value::from(slug.as_str()))]);
+    let board = load_board(board_client::read_view(&home, project)?.as_deref())?;
     let jobs: Vec<&Value> = board["jobs"]
         .as_array()
         .into_iter()

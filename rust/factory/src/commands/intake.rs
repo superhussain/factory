@@ -11,6 +11,7 @@ use crate::cli::Call;
 use crate::commands::claims::{self, held_by, mine};
 use crate::commands::sync::{push_target, sync_problems, sync_state};
 use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, read_board};
+use crate::shared::board_client;
 use crate::shared::conf::{fm_get, read_env_ordered};
 use crate::shared::consts::{
     tag_lookalike, BACKLOG_LINE, BACKLOG_NOTES_TAG, BACKLOG_TEMPLATE, IDEA, IN_FLIGHT, JOB_ID,
@@ -2625,7 +2626,15 @@ fn claim_ideas(
     max_inflight: Option<usize>,
     project: Option<&str>,
 ) -> Res<Vec<Value>> {
-    cas(home, "/api/board", |text| {
+    // The claim decides from rows it doesn't write, so these go in as reads: every open row, and
+    // under a cap every row of the cap's project, merged or closed too, since a reopened one
+    // would count again.
+    let scope = |j: &Value| {
+        board_client::open_row(j)
+            || max_inflight.is_some()
+                && project.is_none_or(|p| j.get("project").and_then(Value::as_str) == Some(p))
+    };
+    board_client::cas_reading(home, Some(&scope), |text| {
         let mut data = load_board(text)?;
         let budget = match max_inflight {
             None => limit,

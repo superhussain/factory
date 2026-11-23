@@ -35,7 +35,7 @@ import {
   escalationInput,
   REVIEWERS,
 } from "./escalation.js";
-import { announce, connectEvents, EVENTS_PATH, HOST_EVENTS_PATH } from "./events.js";
+import { announce, connectEvents, EVENTS_PATH, HOST_EVENTS_PATH, revokeSeats } from "./events.js";
 import {
   boardPushes,
   pushKey,
@@ -496,7 +496,8 @@ async function boardRefusal(env, stored, data, sameBase, principal) {
         checkSpecApproval(stored.jobs, data.jobs, principal) ??
         checkResolve(stored.jobs, data.jobs, principal) ??
         checkSteer(stored.jobs, data.jobs, principal) ??
-        checkTrials(stored.doc, data))
+        checkTrials(stored.doc, data) ??
+        (await checkTrialSettle(env, stored, data)))
       : null)
   );
 }
@@ -529,7 +530,8 @@ const MAX_FRAME_BYTES = 262144;
 
 // The rows frame for a committed board write from stored to data at etag, or "" when
 // open tabs must read instead: no prior version, a top-level change other than jobs and
-// updated, ids that cannot be diffed, a finished row, or a frame too large.
+// updated, ids that cannot be diffed, a finished row, rows moved or added anywhere but
+// the end (a frame carries no order), or a frame too large.
 function rowsFrame(stored, data, etag) {
   if (!stored.etag || !stored.doc) return "";
   for (const k of new Set([...Object.keys(stored.doc), ...Object.keys(data)]))
@@ -550,6 +552,9 @@ function rowsFrame(stored, data, etag) {
   const before = ids(stored.jobs),
     after = ids(data.jobs);
   if (!before || !after) return "";
+  const kept = [...before.keys()].filter((id) => after.has(id));
+  const order = [...after.keys()];
+  if (kept.some((id, i) => order[i] !== id)) return "";
   const rows = [],
     removed = [];
   for (const [id, row] of after) {
@@ -635,14 +640,24 @@ async function rowSha256(row) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// rowSha256 of row, reused from memo when this request already hashed the same row text.
+async function digestOnce(memo, row) {
+  const key = JSON.stringify(row);
+  if (!memo.has(key)) memo.set(key, await rowSha256(row));
+  return memo.get(key);
+}
+
 const BOARD_PATCH_SHAPE =
   "a board patch needs rows: [{id, expect, row}], one entry per id. Nothing was written.";
 const READS_SHAPE =
-  "a board patch's reads need [{id, sha256}], one per id and none in rows. Nothing was written.";
+  "a board patch's reads need [{id, sha256}] or [{id, stage}], one per id and none in rows. Nothing was written.";
 
 // Applies the dashboard's changed rows, each with the row it expects to replace, to the
 // stored board. A row that changed since the client read it comes back as a 409 conflict;
-// an R2 race with another writer is retried here.
+// an R2 race with another writer is retried here. Each read names a row the write decided
+// from: {id, sha256} when the decision read the whole row, or {id, stage} when it read only
+// the stage, such as whether a merged row is still finished. A stage read is a string compare,
+// so a client can name thousands of rows without the Worker hashing them.
 async function boardPatch(request, env, principal, ctx) {
   const body = await readBody(request);
   if (body === null) return reply("body over 1 MiB", 413);
@@ -676,13 +691,16 @@ async function boardPatch(request, env, principal, ctx) {
     !reads.every(
       (r) =>
         typeof r?.id === "string" &&
-        typeof r.sha256 === "string" &&
-        /^[0-9a-f]{64}$/.test(r.sha256) &&
+        ("sha256" in r
+          ? typeof r.sha256 === "string" && /^[0-9a-f]{64}$/.test(r.sha256) && !("stage" in r)
+          : "stage" in r && (typeof r.stage === "string" || r.stage === null)) &&
         !entries.has(r.id),
     ) ||
     new Set(reads.map((r) => r.id)).size !== reads.length
   )
     return reply(READS_SHAPE, 400);
+  // Digests keyed by the row's JSON text, so an R2 retry hashes only rows that changed.
+  const digests = new Map();
   for (let attempt = 0; attempt < 10; attempt++) {
     const stored = await storedBoard(env);
     if (stored.etag && !stored.doc)
@@ -709,7 +727,10 @@ async function boardPatch(request, env, principal, ctx) {
     }
     for (const r of reads) {
       const row = byId.get(r.id);
-      if (!row || (await rowSha256(row)) !== r.sha256) conflicts.add(r.id);
+      if (!row) conflicts.add(r.id);
+      else if ("stage" in r) {
+        if ((row.stage ?? null) !== r.stage) conflicts.add(r.id);
+      } else if ((await digestOnce(digests, row)) !== r.sha256) conflicts.add(r.id);
     }
     if (conflicts.size)
       return reply(
@@ -1940,6 +1961,7 @@ async function hostPatch(request, env, principal, id) {
   }
   const headers = await hostSave(env, principal, next, cond);
   if (!headers) return reply("precondition failed", 412);
+  if (patch.state === "retired") await revokeSeats(env, host.token);
   return reply(JSON.stringify(hostView(next)), 200, "application/json", headers);
 }
 
@@ -3198,6 +3220,93 @@ function checkTrials(storedDoc, data) {
   return null;
 }
 
+const BOARD_STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+const TRIAL_SETTLED = ["kept", "reverted", "superseded", "inconclusive", "revert-failed"];
+const TRIAL_SETTLE_KEYS = ["status", "settled", "arms", "reads", "revert_version"];
+const TRIAL_MAX_DAYS = 28;
+const TRIAL_ARM_FINISHED = 5;
+const TRIAL_CLOCK_SKEW_MS = 300000;
+
+// The runtime's trial_arm: SHA-256 of <trialId>/<jobId>, first 4 bytes big-endian, mod 100,
+// below 50 is "b".
+async function trialArm(trialId, jobId) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${trialId}/${jobId}`),
+  );
+  return new DataView(digest).getUint32(0) % 100 < 50 ? "b" : "a";
+}
+
+// Only trial settle moves an open stage-note trial. A write keeps each stored open trial, changes
+// only its settle keys, and settles it only with evidence the Worker can check against the stored
+// board, the stored pipeline and its clock. An error message, or null.
+async function checkTrialSettle(env, stored, data) {
+  const trials = (doc) =>
+    (Array.isArray(doc?.trials) ? doc.trials : []).filter((t) => typeof t === "object" && t);
+  // A board stamp's time, or NaN when it is not one.
+  const time = (s) => (typeof s === "string" && BOARD_STAMP.test(s) ? Date.parse(s) : NaN);
+  const written = trials(data);
+  const seen = new Set();
+  for (const s of trials(stored.doc)) {
+    if (s.status !== "open" || typeof s.id !== "string" || seen.has(s.id)) continue;
+    seen.add(s.id);
+    const label = quoteIdCut(s.id, QUOTED_ID_MAX);
+    const w = written.find((t) => t.id === s.id);
+    if (!w)
+      return `a board write cannot drop the open trial ${label}: only trial settle moves an open stage-note trial. Nothing was written.`;
+    const free = w.status === "open" ? ["arms", "reads"] : TRIAL_SETTLE_KEYS;
+    const changed = [...new Set([...Object.keys(s), ...Object.keys(w)])]
+      .sort()
+      .find((k) => !free.includes(k) && canonicalJson(s[k]) !== canonicalJson(w[k]));
+    if (changed !== undefined)
+      return `a board write cannot change ${changed} on the open trial ${label}: trial settle sets only status, settled, arms, reads and revert_version. Nothing was written.`;
+    if (w.status === "open") continue;
+    if (!TRIAL_SETTLED.includes(w.status))
+      return `a board write cannot set the open trial ${label} to an unknown status: trial settle uses kept, reverted, superseded, inconclusive or revert-failed. Nothing was written.`;
+    const opened = time(s.opened);
+    let why = null;
+    if (Number.isNaN(time(w.settled))) why = "settled must be a board timestamp";
+    else if (w.status === "reverted") {
+      if (!Number.isInteger(w.revert_version) || !(w.revert_version > s.version))
+        why = "revert_version must be a whole number above the trial's version";
+    } else if (w.status === "superseded") {
+      try {
+        if (typeof s.project !== "string" || !/^[\w-]+$/.test(s.project)) throw new Error();
+        const obj = await env.BUCKET.get(pipelineKey("projects/" + s.project));
+        const notes = obj ? JSON.parse(await obj.text())?.stage_notes : undefined;
+        if ((notes?.[s.stage] ?? "") === s.challenger)
+          why = "the stored stage note still equals the challenger";
+      } catch {
+        why = "the stored pipeline for its project cannot be read";
+      }
+    } else if (w.status !== "kept") {
+      if (!(Date.now() >= opened + TRIAL_MAX_DAYS * DAY_MS - TRIAL_CLOCK_SKEW_MS))
+        why = `it opened less than ${TRIAL_MAX_DAYS} days ago`;
+    } else if (
+      !["rounds", "tokens"].every(
+        (m) => typeof w.reads?.[m] === "string" && w.reads[m] !== "b higher",
+      )
+    )
+      why = "reads.rounds and reads.tokens must each be a read other than b higher";
+    else {
+      const count = { a: 0, b: 0 };
+      for (const j of stored.jobs)
+        if (
+          typeof j?.id === "string" &&
+          j.project === s.project &&
+          time(j.started) >= opened &&
+          (j.stage === "merged" || j.stage === "closed")
+        )
+          count[await trialArm(s.id, j.id)]++;
+      if (count.a < TRIAL_ARM_FINISHED || count.b < TRIAL_ARM_FINISHED)
+        why = `each arm needs ${TRIAL_ARM_FINISHED} finished jobs on the board, and arm a has ${count.a}, arm b has ${count.b}`;
+    }
+    if (why)
+      return `a board write cannot settle the open trial ${label} as ${w.status}: ${why}. Nothing was written.`;
+  }
+  return null;
+}
+
 // The dashboard's Remove from batch: a rider that is not stacked, stored or written, goes from spec to idea and
 // drops its one ref, while its lead is at spec both stored and written.
 const unbatchedAtSpec = (storedRow, row, storedLead, lead) =>
@@ -3582,7 +3691,14 @@ async function api(request, env, path, principal, ctx) {
   if (path === "/api/board" || path === "/api/backlog") {
     const [key, type] =
       path === "/api/board" ? ["board.json", "application/json"] : ["backlog.md", "text/markdown"];
-    if (method === "GET") return getFile(env, key, type);
+    // Accept-Patch tells a device client it may write the board as row PATCHes.
+    if (method === "GET")
+      return getFile(
+        env,
+        key,
+        type,
+        key === "board.json" ? { "Accept-Patch": "application/json" } : {},
+      );
     if (method === "PUT") return casPut(request, env, key, type, principal, ctx);
     if (method === "PATCH" && key === "board.json") return boardPatch(request, env, principal, ctx);
     return notFound();
@@ -3695,7 +3811,8 @@ export async function serveFactory(request, env, principal, ctx) {
     return connectEvents(request, env, principal.exp);
   }
   if (path === HOST_EVENTS_PATH) {
-    // A device's service token upgrades here; without exp the room sends it only "changed".
+    // A device's service token upgrades here; the room marks the socket as a host's and
+    // sends it rows frames.
     if (
       request.method !== "GET" ||
       request.headers.get("Upgrade")?.toLowerCase() !== "websocket" ||
@@ -3705,7 +3822,7 @@ export async function serveFactory(request, env, principal, ctx) {
       return notFound();
     // Only a paired or active host's token may take one of the room's shared slots.
     if (!(await boundHost(env, principal))) return reply("forbidden", 403);
-    return connectEvents(request, env);
+    return connectEvents(request, env, undefined, principal.client_id);
   }
   if (path.startsWith("/api/")) return api(request, env, path, principal, ctx);
   if (request.method !== "GET") return notFound();
