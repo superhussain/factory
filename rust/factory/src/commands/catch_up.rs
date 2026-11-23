@@ -392,16 +392,11 @@ fn copy_tree(src: &Path, dst: &Path) -> Result<(), String> {
     fs::set_permissions(dst, mode.permissions()).map_err(|e| os_error(&e, Some(dst)))
 }
 
-/// A new private folder under <home>/backups holding the installed skill, this host's timers and
-/// the home config.
-fn catch_up_backup(home: &Path, skill: &Path) -> Result<PathBuf, String> {
-    #[cfg(test)]
-    if let Some(f) = fake!(backup) {
-        return f();
-    }
+/// A new private (0700) folder `<home>/backups/<kind>-<stamp>-<hex>`.
+pub(crate) fn backup_folder(home: &Path, kind: &str) -> Result<PathBuf, String> {
     let stamp = format_stamp(unix_now()).replace(['-', ':'], "") + "-" + &random_hex(3);
     let backups = home.join("backups");
-    let folder = backups.join(format!("catch-up-{stamp}"));
+    let folder = backups.join(format!("{kind}-{stamp}"));
     fs::create_dir_all(&backups).map_err(|e| os_error(&e, Some(&backups)))?;
     fs::create_dir(&folder).map_err(|e| os_error(&e, Some(&folder)))?;
     #[cfg(unix)]
@@ -410,6 +405,17 @@ fn catch_up_backup(home: &Path, skill: &Path) -> Result<PathBuf, String> {
         fs::set_permissions(&folder, fs::Permissions::from_mode(0o700))
             .map_err(|e| os_error(&e, Some(&folder)))?;
     }
+    Ok(folder)
+}
+
+/// A new private folder under <home>/backups holding the installed skill, this host's timers and
+/// the home config.
+fn catch_up_backup(home: &Path, skill: &Path) -> Result<PathBuf, String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(backup) {
+        return f();
+    }
+    let folder = backup_folder(home, "catch-up")?;
     copy_tree(skill, &folder.join("skill").join("factory"))?;
     if scheduler() == "cron" {
         let (code, out) = setup_run(&["crontab", "-l"]);

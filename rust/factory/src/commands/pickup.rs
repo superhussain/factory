@@ -2736,7 +2736,17 @@ fn daemon_setup(io: &mut Io, home: &Path, action: ServiceAction, overridden: boo
     check_unit_paths(scheduler, &timer_values(home, &DAEMON))?;
     // The daemon runs pickup, so the pickup timer goes when it is installed and comes back when it
     // is removed: the host always has exactly one scheduler. Each change happens after the other
-    // scheduler is in place.
+    // scheduler is in place. A crontab is backed up before either change rewrites it.
+    if action != ServiceAction::Show && (scheduler == "cron" || pickup_scheduler() == "cron") {
+        let (code, text) = setup_run(&["crontab", "-l"], None);
+        if code == 0 {
+            let folder = crate::commands::catch_up::backup_folder(home, "daemon-setup")
+                .map_err(|e| fail(e, 1))?;
+            let path = folder.join("crontab.txt");
+            write_file(&path, &text)?;
+            outln!(io, "backup: {}", path.display());
+        }
+    }
     match action {
         ServiceAction::Install => {
             outln!(io, "{}", install_timer(home, scheduler, &DAEMON)?);
@@ -2747,13 +2757,13 @@ fn daemon_setup(io: &mut Io, home: &Path, action: ServiceAction, overridden: boo
             );
         }
         ServiceAction::Uninstall => {
+            outln!(io, "{}", install_timer(home, pickup_scheduler(), &PICKUP)?);
             outln!(io, "{}", uninstall_timer(home, scheduler, &DAEMON)?);
             if scheduler == "cron" || scheduler == "schtasks" {
                 if let Some(line) = stop_daemon(home) {
                     outln!(io, "{line}");
                 }
             }
-            outln!(io, "{}", install_timer(home, pickup_scheduler(), &PICKUP)?);
         }
         ServiceAction::Show => {}
     }
@@ -19074,10 +19084,22 @@ exit "$archive_code"
             let (code, out, _) = ds.run(Uninstall);
             assert_eq!(code, 0, "{out}");
             assert!(out.starts_with(&format!(
-                "removed launchd service: {}\ninstalled launchd timer: {}\n",
-                plist.display(),
-                timer.display()
+                "installed launchd timer: {}\nremoved launchd service: {}\n",
+                timer.display(),
+                plist.display()
             )));
+            let domain = format!("gui/{}", getuid());
+            let timer_target = format!("gui/{}/factory.pickup", getuid());
+            assert!(
+                ds.at(&[
+                    "launchctl",
+                    "bootstrap",
+                    &domain,
+                    &timer.display().to_string()
+                ]) < ds.at(&["launchctl", "bootout", &target]),
+                "the timer loads before the service goes"
+            );
+            assert!(ds.ran(&["launchctl", "print", &timer_target]));
             assert!(ds.ran(&["launchctl", "bootout", &target]));
             assert!(!plist.exists());
             assert!(
@@ -19088,7 +19110,10 @@ exit "$archive_code"
             assert!(!out.contains("log:"), "{out}");
             let (code, out, _) = ds.run(Uninstall);
             assert_eq!(code, 0);
-            assert!(out.starts_with("no launchd service factory.daemon to remove\n"));
+            assert!(
+                out.contains("\nno launchd service factory.daemon to remove\n"),
+                "{out}"
+            );
         }
 
         #[cfg(unix)]
@@ -19184,8 +19209,19 @@ exit "$archive_code"
                 "0 1 * * * true\n*/5 * * * * /opt/skill/runtime/factory --home /h pickup\n".into();
             let (code, out, err) = ds.run(Install);
             assert_eq!((code, err.as_str()), (0, ""), "{out}");
+            let saved = out
+                .strip_prefix("backup: ")
+                .and_then(|rest| rest.split('\n').next())
+                .map(PathBuf::from)
+                .expect(&out);
+            assert_eq!(
+                fs::read_to_string(&saved).unwrap(),
+                "0 1 * * * true\n*/5 * * * * /opt/skill/runtime/factory --home /h pickup\n",
+                "the crontab is saved before it is rewritten"
+            );
+            assert!(saved.starts_with(ds.fx.home.join("backups")));
             assert!(
-                out.starts_with("installed cron service: crontab\nremoved cron timer: crontab\n"),
+                out.contains("\ninstalled cron service: crontab\nremoved cron timer: crontab\n"),
                 "{out}"
             );
             let crontab = ds.sched.borrow().crontab.clone();
@@ -19209,7 +19245,7 @@ exit "$archive_code"
             let (code, out, _) = ds.run(Install);
             assert_eq!(code, 0);
             assert!(
-                out.starts_with("service current: crontab\nno cron timer to remove\n"),
+                out.contains("\nservice current: crontab\nno cron timer to remove\n"),
                 "{out}"
             );
             assert_eq!(ds.sched.borrow().crontab, crontab);
@@ -19219,8 +19255,8 @@ exit "$archive_code"
             let (code, out, _) = ds.run(Uninstall);
             assert_eq!(code, 0, "{out}");
             assert!(
-                out.starts_with(&format!(
-                    "removed cron service: crontab\nstopped the running daemon (pid {})\ninstalled cron timer: crontab\n",
+                out.contains(&format!(
+                    "\ninstalled cron timer: crontab\nremoved cron service: crontab\nstopped the running daemon (pid {})\n",
                     std::process::id()
                 )),
                 "{out}"
