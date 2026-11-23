@@ -142,7 +142,11 @@ test("another project's waiting jobs do not pause", { timeout: 120000 }, async (
       ...waiting("other"),
       ...IDEAS,
     ]);
-    await page.waitForSelector('.card[data-id="122-follow-up"] .chip.held');
+    await page.waitForFunction(
+      () =>
+        document.querySelector('.card[data-id="122-follow-up"] .chip.held')?.textContent ===
+        "Batch ready",
+    );
     assert.deepEqual(await pausedChips(page), {});
     assert.deepEqual(errors, []);
   });
