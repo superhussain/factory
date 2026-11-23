@@ -224,6 +224,10 @@ to 200 characters and the why 1 to 300. Both pass the untrusted-text checks and 
   Lesson: from 1712-export-csv, queued 2026-11-22
 ```
 
+`retro admit` queues a reply's `lesson_cards` item the same way, under the project of
+the `lessons` row its `job` names. It skips a fact already in that project's `notes.md`
+and every card while autonomy is paused.
+
 Nothing automatic starts a card. Each path checks the `Lesson: from` line in the
 line's context.
 
@@ -336,11 +340,13 @@ Only `retro admit`, `trial settle` and the Worker's resume route write `trials`.
 | reverted | `compare()` reads `b higher` on rounds or tokens; the champion is PUT back with summary `Revert trial <id>` | `trial <id> reverted to version <N>: rounds <reads>, tokens <reads>` |
 | kept | `compare()` compared the arms with no `b higher` read | `trial <id> kept: rounds <reads>, tokens <reads>` |
 | inconclusive | still not compared 28 days after `opened`; the edit stays | `trial <id> inconclusive after 28 days: kept the edit` |
-| revert-failed | the revert is refused 28 days after `opened`; the edit stays | `trial <id> revert failed after 28 days: kept the edit: <status> <text>` |
+| revert-failed | the revert is refused with 400, 403, 404 or 413 28 days after `opened`; the edit stays | `trial <id> revert failed after 28 days: kept the edit: <status> <text>` |
 | open | not compared yet | `trial <id> open: a <n> finished, b <n> finished` |
 
 A refused revert prints `trial <id> revert failed: <status> <text>` and leaves the trial
-open for the next settle until it is 28 days old. A `revert-failed` trial neither blocks
+open for the next settle until it is 28 days old. A 409 (paused autonomy or an invalid
+pipeline), 412 (a moved base) or 429 (the daily cap) leaves it open at any age, so the next
+settle tries again. A `revert-failed` trial neither blocks
 admit nor counts toward the pause. A revert counts toward the daily retro cap. The board keeps
 open records, every unresumed revert and the newest 20 other settled ones. Settle skips malformed records, including
 one whose `opened` is not a board timestamp, and drops non-dict entries from `trials`
