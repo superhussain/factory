@@ -133,3 +133,9 @@ class AutonomyPromoteTest(IsolatedTestCase):
         code, _, _, puts = self.run_promote("alpha", "visible", data=board(paused="yes", promoted=cooldown))
         self.assertEqual(code, 0)
         self.assertEqual(puts[0]["autonomy"]["promoted"], {**cooldown, "alpha/visible": visible})
+
+    def test_malformed_restored_map(self):
+        self.assert_refused(board(restored="bad"), "autonomy.restored is not a map; nothing was changed")
+        code, _, _, puts = self.run_promote("alpha", "visible", data=board(restored={"alpha/internal": "soon"}))
+        self.assertEqual(code, 0)
+        self.assertEqual(puts[0]["autonomy"]["restored"], {"alpha/internal": "soon", "alpha/visible": NOW})
