@@ -81,6 +81,8 @@ A handler keeps the Python function's name, except `where`, which is `where_cmd`
 - `serde_json` refuses `NaN` and `Infinity` in JSON input. Python accepts them. The Worker never writes them.
 - A lone surrogate escape (`\ud800` without its pair) in JSON input is dropped before parsing, since a Rust string cannot hold one. Python keeps it in the string, and its inbox output drops it too.
 - On Windows a job id ending in `.` is refused as a bad target, since Windows drops a trailing dot from a folder name. Python accepts it.
+- A regex search that passes 100 million backtracking steps counts as no match and prints one warning, where Python's `re` keeps going. A substitution that hits the backtrack limit exits 1 instead, so unredacted text is never written.
+- A response body over 64 MiB fails the request, where Python reads any size.
 - Unicode `\w` is `[\p{L}\p{N}_]`. That is close to `str.isalnum`, not identical, and the Unicode versions differ between the `regex` crate and the Python in use.
 - `parse_stamp` reads ASCII digits only, where `strptime` also takes other Unicode decimal digits.
 - `nfkc` folds one character at a time, so it skips composition across characters. A check that rejects folded text can only over-reject compared with full NFKC.
