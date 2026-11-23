@@ -2,7 +2,7 @@
 
 python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N]
 
-Each case side runs in its own temp root with its own home, stub folder and HTTP port, so cases run in a thread
+Each case side runs in its own temp root with its own home, stub folder and HTTP port, so cases run in a process
 pool. Results print in case order. --shard K/N keeps every Nth case starting at the Kth, for a CI matrix.
 """
 import argparse
@@ -224,8 +224,9 @@ def main(argv):
     cases = cases[int(shard[1]) - 1::int(shard[2])]
     bin_command = [os.path.abspath(binary)] if binary else PYTHON
     failed = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        for case, lines in zip(cases, pool.map(lambda case: run_case(case, bin_command), cases)):
+    # Processes, not threads: each case's Python-side work holds the GIL, so threads barely overlap.
+    with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs) as pool:
+        for case, lines in zip(cases, pool.map(run_case, cases, [bin_command] * len(cases), chunksize=4)):
             print("\n".join(lines) if lines else f"PASS {case['id']}", flush=True)
             failed += bool(lines)
     print(f"parity: {len(cases) - failed} passed, {failed} failed")

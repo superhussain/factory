@@ -212,10 +212,10 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
     "cargo check --locked --target x86_64-pc-windows-gnu",
   ]);
   assert.equal(parity.needs, "rust-build");
-  assert.deepEqual(parity.strategy.matrix.shard, [1, 2, 3, 4]);
+  assert.deepEqual(parity.strategy.matrix.shard, [1, 2, 3, 4, 5, 6]);
   assert.equal(parity.strategy["fail-fast"], false);
   assert.match(
     runs(parity)[0],
-    /python3 tests\/parity\/run\.py --bin rust\/target\/release\/factory --ids rust\/parity --shard \$\{\{ matrix\.shard \}\}\/4$/,
+    /python3 tests\/parity\/run\.py --bin rust\/target\/release\/factory --ids rust\/parity --shard \$\{\{ matrix\.shard \}\}\/6$/,
   );
 });

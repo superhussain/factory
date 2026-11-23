@@ -116,8 +116,8 @@ class PortabilityTest(IsolatedTestCase):
         self.assertIn("using: composite", setup)
         self.assertIn("actions/setup-python@", setup)
         self.assertIn("actions/setup-node@", setup)
-        self.assertEqual(workflow.count("runs-on: ubuntu-22.04"), 11)
-        self.assertEqual(workflow.count("runs-on:"), 11)
+        self.assertEqual(workflow.count("runs-on: ubuntu-22.04"), 10)
+        self.assertEqual(workflow.count("runs-on:"), 10)
         self.assertIn("python-version: '3.12'", setup)
         self.assertIn("node-version-file: .node-version", setup)
         pnpm_ref = "pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115"
