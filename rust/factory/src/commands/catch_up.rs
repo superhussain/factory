@@ -14,6 +14,7 @@ use serde_json::Value;
 
 use crate::cli::Call;
 use crate::commands::pickup;
+use crate::shared::build::{rust_binary, Host};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{read_text, resolve, temp_root};
@@ -56,6 +57,8 @@ struct Fakes {
     backup: Option<Rc<dyn Fn() -> Result<PathBuf, String>>>,
     user_home: Option<PathBuf>,
     run: Option<Rc<dyn Fn(&[String], Option<Duration>) -> Option<io::Result<Out>>>>,
+    build: Option<Rc<dyn Fn(&Path, &mut dyn Write) -> Result<PathBuf, String>>>,
+    install: Option<Rc<dyn Fn(&[String]) -> Out>>,
 }
 
 #[cfg(test)]
@@ -114,6 +117,24 @@ fn user_home() -> Res<PathBuf> {
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .ok_or_else(|| fail("Could not determine home directory.", 1))
+}
+
+/// The cached binary built from checkout, through the same cache and build folder `install` uses.
+fn build(checkout: &Path, err: &mut dyn Write) -> Result<PathBuf, String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(build) {
+        return f(checkout, err);
+    }
+    rust_binary(checkout, &Host::current()?, err)
+}
+
+/// The new binary's `install` run: argv is the binary, then its operands.
+fn install(argv: &[String]) -> Out {
+    #[cfg(test)]
+    if let Some(f) = fake!(install) {
+        return f(argv);
+    }
+    run(argv, None)
 }
 
 /// `subprocess.run(argv, capture_output=True, text=True, timeout=timeout)`. A child that cannot
@@ -567,22 +588,32 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                 None,
             );
             if r.code == 0 {
-                let mut argv = python();
-                argv.extend([
-                    "-B".to_string(),
-                    src.join("tools")
-                        .join("install.py")
-                        .to_string_lossy()
-                        .into_owned(),
-                    "--destination".to_string(),
-                    skill
-                        .parent()
-                        .unwrap_or(skill)
-                        .to_string_lossy()
-                        .into_owned(),
-                    "--replace".to_string(),
-                ]);
-                r = run(&argv, None);
+                // The installer comes from the fetched commit: build its binary, then run its install.
+                let mut said = Vec::new();
+                let built = build(&src, &mut said);
+                for line in String::from_utf8_lossy(&said).lines() {
+                    outln!(out, "skill: {}", line.trim_start_matches("install: "));
+                }
+                r = match built {
+                    Ok(binary) => install(&[
+                        binary.to_string_lossy().into_owned(),
+                        "install".into(),
+                        "--source".into(),
+                        src_text.clone(),
+                        "--destination".into(),
+                        skill
+                            .parent()
+                            .unwrap_or(skill)
+                            .to_string_lossy()
+                            .into_owned(),
+                        "--replace".into(),
+                    ]),
+                    Err(e) => Out {
+                        code: 2,
+                        stdout: String::new(),
+                        stderr: format!("install: {e}"),
+                    },
+                };
             }
             if src.exists() {
                 run(&git_argv(&repo, &["worktree", "remove", &src_text]), None);
@@ -739,6 +770,7 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::commands::install::install_skill;
     use crate::shared::fs::{temp_dir, TEMP_ROOT};
     use serde_json::json;
     use std::collections::VecDeque;
@@ -800,6 +832,14 @@ mod tests {
         b: String,
         gh_calls: Calls,
         gh_replies: Rc<RefCell<VecDeque<(i32, String)>>>,
+        /// The checkout of each build, and the argv of each install run.
+        builds: Calls,
+        installs: Calls,
+    }
+
+    /// The stand-in for a built binary's bytes.
+    fn stub(_: &Path, _: &mut dyn Write) -> Result<Vec<u8>, String> {
+        Ok(b"stub".to_vec())
     }
 
     impl Drop for T {
@@ -845,14 +885,15 @@ mod tests {
             );
             sh_git(&checkout, &["remote", "set-url", "origin", GITHUB_URL]);
             let skills = root.join("skills");
-            let installed = Command::new("python3")
-                .arg("-B")
-                .arg(src.join("tools/install.py"))
-                .arg("--destination")
-                .arg(&skills)
-                .output()
-                .unwrap();
-            assert!(installed.status.success());
+            install_skill(
+                &src,
+                &skills,
+                false,
+                &stub,
+                &mut Vec::new(),
+                &mut Vec::new(),
+            )
+            .unwrap();
             let skill_md = src.join("skills/factory/SKILL.md");
             let mut body = fs::read_to_string(&skill_md).unwrap();
             body.push_str("\nCommit B.\n");
@@ -874,8 +915,36 @@ mod tests {
             let gh_replies: Rc<RefCell<VecDeque<(i32, String)>>> = Rc::default();
             let (calls, replies) = (gh_calls.clone(), gh_replies.clone());
             let user = root.clone();
+            let (builds, installs): (Calls, Calls) = (Rc::default(), Rc::default());
+            let (built, ran) = (builds.clone(), installs.clone());
+            let binary = root.join("built/factory");
             FAKES.with(|f| {
                 *f.borrow_mut() = Fakes {
+                    build: Some(Rc::new(move |checkout, err| {
+                        built.borrow_mut().push(vec![text(checkout).to_string()]);
+                        let _ = writeln!(err, "install: Rust binary from cache 0123abcd");
+                        Ok(binary.clone())
+                    })),
+                    install: Some(Rc::new(move |argv| {
+                        ran.borrow_mut().push(argv.to_vec());
+                        let (mut out, mut err) = (Vec::new(), Vec::new());
+                        let (source, destination) = (Path::new(&argv[3]), Path::new(&argv[5]));
+                        let result =
+                            install_skill(source, destination, true, &stub, &mut out, &mut err);
+                        let mut stderr = String::from_utf8(err).unwrap();
+                        let code = match result {
+                            Ok(_) => 0,
+                            Err(e) => {
+                                stderr.push_str(&e.stderr);
+                                e.code
+                            }
+                        };
+                        Out {
+                            code,
+                            stdout: String::from_utf8(out).unwrap(),
+                            stderr,
+                        }
+                    })),
                     scheduler: Some("cron"),
                     timer_installed: Some(false),
                     timer_drift: Some(Some("synthetic drift".into())),
@@ -903,18 +972,13 @@ mod tests {
                 b,
                 gh_calls,
                 gh_replies,
+                builds,
+                installs,
             }
         }
 
         fn commit(&self, message: &str) -> String {
             commit(&self.src, message)
-        }
-
-        fn edit_installer(&self, old: &str, new: &str) {
-            let path = self.src.join("tools/install.py");
-            let body = fs::read_to_string(&path).unwrap();
-            assert!(body.contains(old));
-            fs::write(&path, body.replace(old, new)).unwrap();
         }
 
         fn call(&self) -> (i32, String, String) {
@@ -1050,6 +1114,7 @@ mod tests {
                 format!("checkout: fast-forwarded to {b7}"),
                 format!("skill: {a7} installed, {b7} on origin/main"),
                 format!("backup: {}", backup.display()),
+                "skill: Rust binary from cache 0123abcd".into(),
                 format!("skill: installed {b7} into {}", t.skill.display()),
                 "pickup timer: none on this host, left alone".into(),
                 format!("worker: deployed at {b7}"),
@@ -1153,23 +1218,18 @@ mod tests {
     }
 
     #[test]
-    fn runs_origin_installer() {
+    fn builds_and_runs_the_origin_binary() {
         let t = T::new("origin-installer");
-        let marker = t.root.join("marker");
-        t.edit_installer(
-            "    args = parser.parse_args(argv)\n",
-            &format!(
-                "    args = parser.parse_args(argv)\n    Path({}).write_text(__file__)\n",
-                repr(text(&marker))
-            ),
-        );
+        fs::write(t.src.join("notes.txt"), "Commit C.\n").unwrap();
         let c = t.commit("C");
         sh_git(&t.checkout, &["checkout", "-q", "--detach"]);
         let (code, out, _) = t.call();
         assert_eq!(code, 0, "{out}");
-        let ran = PathBuf::from(fs::read_to_string(&marker).unwrap());
-        assert!(ran.ends_with("src/tools/install.py"), "{}", ran.display());
-        let tmp = ran.parent().unwrap().parent().unwrap().parent().unwrap();
+        let built = t.builds.borrow().clone();
+        assert_eq!(built.len(), 1);
+        let src = PathBuf::from(&built[0][0]);
+        assert!(src.ends_with("src"), "{}", src.display());
+        let tmp = src.parent().unwrap();
         assert!(tmp
             .file_name()
             .unwrap()
@@ -1178,6 +1238,20 @@ mod tests {
             .starts_with("factory-catch-up-"));
         assert_eq!(tmp.parent().unwrap(), temp_root().unwrap());
         assert!(!tmp.exists());
+        assert_eq!(
+            *t.installs.borrow(),
+            [[
+                text(&t.root.join("built/factory")),
+                "install",
+                "--source",
+                text(&src),
+                "--destination",
+                text(t.skill.parent().unwrap()),
+                "--replace",
+            ]
+            .map(String::from)
+            .to_vec()]
+        );
         assert_eq!(t.installed(), c);
         assert_eq!(t.worktrees(), 1);
     }
@@ -1201,15 +1275,8 @@ mod tests {
                 "pickup timer: some pickup checks are missing; run factory.py pickup setup to see them",
             ]
         );
-        let runtime = |skill: &Path| {
-            let mut argv = python();
-            argv.push(text(&skill.join("runtime/factory.py")).to_string());
-            argv
-        };
-        assert_eq!(
-            *calls.borrow(),
-            [[runtime(&t.skill), tail.clone()].concat()]
-        );
+        let binary = vec![text(&t.skill.join("runtime/factory")).to_string()];
+        assert_eq!(*calls.borrow(), [[binary, tail.clone()].concat()]);
 
         t.drift(None);
         let (code, lines) = t.lines();
@@ -1229,25 +1296,23 @@ mod tests {
         assert_eq!((code, calls.borrow().len(), t.backups().len()), (0, 2, 2));
         assert_eq!(lines.last().unwrap(), "catch-up: done");
 
-        t.edit_installer(
-            r#"json.dumps({"commit": commit, "tree": tree.hexdigest()}"#,
-            r#"json.dumps({"commit": commit, "tree": tree.hexdigest(), "entry": ["bin/factory", "-q"]}"#,
-        );
-        t.commit("C");
-        assert_eq!(t.call().0, 0);
-        assert_eq!(
-            calls.borrow().last().unwrap(),
-            &[
-                vec![text(&t.skill.join("bin/factory")).to_string(), "-q".into()],
-                tail
-            ]
-            .concat()
-        );
-
         let folder = t.root.join("entries");
         fs::create_dir(&folder).unwrap();
-        let fallback = runtime(&folder);
+        let fallback = [
+            python(),
+            vec![text(&folder.join("runtime/factory.py")).to_string()],
+        ]
+        .concat();
         assert_eq!(catch_up_entry(&folder), fallback);
+        fs::write(
+            folder.join("bundle.json"),
+            r#"{"entry": ["bin/factory", "-q"]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            catch_up_entry(&folder),
+            [text(&folder.join("bin/factory")), "-q"].map(String::from)
+        );
         for entry in [
             r#"["/usr/bin/factory"]"#,
             r#"["../factory"]"#,
@@ -1492,9 +1557,10 @@ mod tests {
         t.timer(true);
         let (reply, reply_code) = default_timer_reply();
         let calls = t.timer_calls(reply, reply_code);
+        // An unexpected file makes the new binary's install refuse the source.
         fs::write(
-            t.src.join("tools/install.py"),
-            "import sys\nsys.exit('install.py: synthetic failure')\n",
+            t.src.join("skills/factory/agents/factory-ux.md"),
+            "unexpected role\n",
         )
         .unwrap();
         t.commit("C");
@@ -1502,7 +1568,8 @@ mod tests {
         assert_eq!((code, err.as_str()), (1, ""));
         let lines: Vec<&str> = out.lines().collect();
         assert!(
-            lines.contains(&"skill: install.py: synthetic failure"),
+            lines.iter().any(|l| l.starts_with("skill: install.py: ")
+                && l.ends_with("/src/skills/factory: cannot safely install factory")),
             "{out}"
         );
         assert_eq!(lines.last().unwrap(), &"catch-up: 1 step(s) failed");
@@ -1511,6 +1578,27 @@ mod tests {
         let backups = t.backups();
         assert_eq!(backups.len(), 1);
         assert!(backups[0].join("skill/factory/SKILL.md").is_file());
+        assert_eq!(t.installed(), t.a);
+        assert_eq!(t.worktrees(), 1);
+    }
+
+    #[test]
+    fn no_cargo_skips_install_and_timer() {
+        let t = T::new("no-cargo");
+        t.timer(true);
+        let (reply, reply_code) = default_timer_reply();
+        let calls = t.timer_calls(reply, reply_code);
+        FAKES.with(|f| {
+            f.borrow_mut().build = Some(Rc::new(|_, _| {
+                Err(crate::shared::build::NO_CARGO.to_string())
+            }))
+        });
+        let (code, out, _) = t.call();
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(code, 1);
+        assert!(lines.contains(&"skill: install: cargo not found; install rustup from https://rustup.rs, then run the install again"), "{out}");
+        assert!(lines.contains(&"pickup timer: skipped, skill install failed"));
+        assert!(t.installs.borrow().is_empty() && calls.borrow().is_empty());
         assert_eq!(t.installed(), t.a);
         assert_eq!(t.worktrees(), 1);
     }
