@@ -8,7 +8,7 @@ trap 'rm -f "$files"' EXIT
 # NUL-delimited output so paths with spaces or non-ASCII characters survive
 # without word-splitting or glob expansion; a genuine git failure fails the
 # hook instead of being swallowed.
-if ! git diff --cached --name-only -z --diff-filter=ACMR -- '*.js' '*.mjs' '*.cjs' '*.ts' ':(exclude)skills/' > "$files"; then
+if ! git diff --cached --name-only -z --diff-filter=ACMR -- '*.js' '*.mjs' '*.cjs' '*.ts' ':(exclude)skills/' ':(exclude)tests/fixtures/' ':(exclude)tests/parity/homes/' > "$files"; then
   echo "pre-commit: git diff --cached failed" >&2
   exit 1
 fi
