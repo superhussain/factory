@@ -543,7 +543,7 @@ fn mine(c: &Value, device: &str, session: &str) -> bool {
 
 /// The job's claim if another session holds it and checked in within the last minutes.
 fn blocking(job: &Value, device: &str, session: &str, minutes: u32) -> Res<Option<Value>> {
-    let Some(c) = job.get("claim").filter(|c| truthy(Some(c))) else {
+    let Some(c) = claim_of(job)? else {
         return Ok(None);
     };
     if mine(c, device, session) {
@@ -5572,6 +5572,12 @@ fn stuck_in(home: &Path, args: &[String]) -> Res<()> {
         let Some(server) = &server else {
             return Ok(false);
         };
+        if !link.is_object() {
+            return Err(fail(
+                format!("'{}' object has no attribute 'get'", py_type(link)),
+                1,
+            ));
+        }
         if get_str(link, "server") != Some(server.as_str()) {
             return Ok(false);
         }
