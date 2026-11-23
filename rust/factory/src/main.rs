@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+mod shared;
 use std::ffi::OsString;
 use std::io::Write;
 use std::{env, io, process};
