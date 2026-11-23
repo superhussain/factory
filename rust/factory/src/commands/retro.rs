@@ -880,9 +880,9 @@ fn push_outcome(status: u16, text: &str, hint: &str, env: &Path) -> Res<()> {
 type Get<'a> = dyn FnMut(&str, &[u16]) -> Res<Response> + 'a;
 
 /// `json.loads` for transcript and digest lines: an unpaired UTF-16 surrogate escape, which Python
-/// accepts and serde_json refuses, is read as U+FFFD.
+/// accepts, is read as U+FFFD here rather than dropped as the shared `loads` drops it.
 fn loads_lenient(text: &str) -> Result<Value, serde_json::Error> {
-    loads(text).or_else(|e| {
+    {
         let chars: Vec<char> = text.chars().collect();
         let escape = |i: usize| -> Option<u32> {
             if chars.get(i..i + 2)? != ['\\', 'u'] {
@@ -917,9 +917,9 @@ fn loads_lenient(text: &str) -> Result<Value, serde_json::Error> {
         if changed {
             loads(&out)
         } else {
-            Err(e)
+            loads(text)
         }
-    })
+    }
 }
 
 fn json_of(text: &str) -> Res<Value> {
