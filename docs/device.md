@@ -360,8 +360,12 @@ Flags name risky calls. They are heuristics that inform a reader and block nothi
 | `secret-file` | Bash, Read, Edit, Write, Grep `path` | `Read ~/app/.env` |
 | `denied` | any | the call's result is an error that holds a denial phrase |
 
-A `gh pr merge` in the main session carries no flag, since the orchestrator merges approved PRs there.
-`pr-merge` flags only a merge that runs. That means `gh pr merge`, or `gh api` with `PUT` on `pulls/<n>/merge`, as a command's first word or after `;`, `&`, `|`, `(`, `$(`, a backtick or a newline. A `VAR=value`, `sudo`, `env`, `command`, `exec`, `time`, `if`, `then`, `else`, `elif`, `do` or `!` prefix may come first. It skips `cat` and `tee` heredoc bodies the way `secret-file` does. It also skips text in single quotes, and text in double quotes that holds no `$(` or backtick, so a grep pattern or a commit message does not flag. A merge inside `bash -c` or `eval` does not flag. The Python runtime still matches the raw text.
+A `gh pr merge` in the main session carries no flag, since the orchestrator merges approved PRs there. `pr-merge` flags only a merge that runs:
+
+- It matches `gh pr merge`, or `gh api` with `PUT` on `pulls/<n>/merge`, as a command's first word or after `;`, `&`, `|`, `(`, `$(`, a backtick or a newline. A `VAR=value`, `sudo`, `env`, `command`, `exec`, `time`, `if`, `then`, `else`, `elif`, `do` or `!` prefix may come first.
+- It skips `cat` and `tee` heredoc bodies the way `secret-file` does. It also skips text in single quotes, and text in double quotes that holds no `$(` or backtick, so a grep pattern or a commit message does not flag.
+- A merge inside `bash -c` or `eval` does not flag. The Python runtime still matches the raw text.
+
 `secret-file` skips the body of a `cat` or `tee` heredoc with no pipe after it, so writing about `.env` does not flag. A heredoc fed to a shell or interpreter, and every other line, still flags. That includes output run through `eval`, `-c` or a combined flag such as `-lc`, `<(` or `>(`, a `$(cat <<EOF` used as the command itself, and every body line inside a `$(` that spans lines, a delimiter with quotes inside it such as `E"OF"`, and lines an unquoted heredoc expands with `$(` or a backtick. A body written to a file and run later, such as `cat > s.sh <<EOF` then `bash s.sh`, is beyond a per-call heuristic.
 
 Flags print in this order, joined by `,`; a call with none prints `-`. Flags
