@@ -1,0 +1,1174 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "claims/claim-first",
+      "argv": ["--home", "{home}", "claim", "{home}", "dark-mode", "sample"],
+      "home": "claims",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [404, ""],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0
+    },
+    {
+      "id": "claims/claim-above-floor",
+      "argv": ["--home", "{home}", "claim", "{home}", "dark-mode", "sample"],
+      "home": "claims",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"414-retry-sync\",\"project\":\"sample\",\"stage\":\"closed\"},{\"id\":\"415-add-export\",\"project\":\"sample\",\"stage\":\"merged\"}],\"archived\":{\"max_id\":416,\"fingerprints\":{}}}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_board_ids.py::ArchiveFloorTest.test_claim_starts_above_the_floor"
+    },
+    {
+      "id": "claims/claim-bad-slug",
+      "argv": ["--home", "{home}", "claim", "{home}", "Dark Mode", "sample"],
+      "home": "claims",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2
+    },
+    {
+      "id": "claims/claim-paseo-marker",
+      "argv": ["--home", "{home}", "claim", "{home}", "dark-mode", "sample"],
+      "home": "claims",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "sender",
+        "PASEO_AGENT_ID": "agent-batch"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::PaseoClaimHomeTest.test_claim_id_writes_marker_under_resolved_home"
+    },
+    {
+      "id": "claims/board-not-json",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "nope",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2
+    },
+    {
+      "id": "claims/board-not-object",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "[1]",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2
+    },
+    {
+      "id": "claims/refuses-move",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"move\": {\"to\": \"studio-mac\"}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_move_patch"
+    },
+    {
+      "id": "claims/refuses-steer",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"steer\": [{\"note\": \"Keep the header order.\", \"at\": \"2026-01-02T14:00:00Z\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_steer_patch"
+    },
+    {
+      "id": "claims/refuses-priority",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"priority\": {\"at\": \"2026-01-02T12:00:00Z\"}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_priority_patch"
+    },
+    {
+      "id": "claims/refuses-paused",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"paused\": {\"at\": \"2026-01-02T12:00:00Z\"}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_paused_patch"
+    },
+    {
+      "id": "claims/refuses-babysit",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"babysit\": {\"at\": \"2026-01-02T12:00:00Z\"}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_babysit_patch"
+    },
+    {
+      "id": "claims/refuses-resolve",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"resolve\": {\"action\": \"approve\", \"at\": \"x\"}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_resolve_patch"
+    },
+    {
+      "id": "claims/refuses-stacked",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stacked\": true}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_stacked_patch"
+    },
+    {
+      "id": "claims/refuses-close",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"close\": {\"reason\": \"x\", \"at\": \"2026-01-02T12:00:00Z\"}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_close_patch"
+    },
+    {
+      "id": "claims/refuses-handoff",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"handoff\": {\"state\": \"ready\"}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_board_cannot_forge_handoff"
+    },
+    {
+      "id": "claims/refuses-paseo-writer",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"paseo_writer\": {\"server\": \"srv-mac\", \"agent\": \"agent-batch\"}}",
+      "env": {
+        "FACTORY_SESSION": "sender",
+        "PASEO_AGENT_ID": "agent-batch"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::PaseoWriterTest.test_patch_cannot_set_paseo_writer"
+    },
+    {
+      "id": "claims/refuses-approved-note-tracer",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"spec approved in Tracer\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_every_spec_approval_note"
+    },
+    {
+      "id": "claims/refuses-approved-note-dashboard",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"spec approved on the dashboard\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_every_spec_approval_note"
+    },
+    {
+      "id": "claims/bad-not-before",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"not_before\": \"tomorrow\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_bad_not_before"
+    },
+    {
+      "id": "claims/self-dependency",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"refs\": [{\"id\": \"001-test\", \"kind\": \"depends-on\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_self_dependency"
+    },
+    {
+      "id": "claims/bad-refs-kind",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"refs\": [{\"id\": \"411-sample-lead\", \"kind\": \"javascript:\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_board_ids.py::BoardIdTest.test_refuses_a_bad_refs_kind"
+    },
+    {
+      "id": "claims/new-row-no-stage",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"412-fix-login\",\"project\":\"sample\",\"stage\":\"build\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_board_ids.py::BoardIdTest.test_refuses_a_new_row_without_stage"
+    },
+    {
+      "id": "claims/clears-stage",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": null}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_board_ids.py::BoardIdTest.test_refuses_clearing_stage"
+    },
+    {
+      "id": "claims/drops-batched-into",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"refs\": null}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"refs\":[{\"id\":\"411-sample-lead\",\"kind\":\"batched-into\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_board_ids.py::BoardIdTest.test_refuses_removing_a_batched_into_ref"
+    },
+    {
+      "id": "claims/adds-batched-into",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"refs\": [{\"id\": \"411-sample-lead\", \"kind\": \"batched-into\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_board_ids.py::BoardIdTest.test_refuses_adding_a_batched_into_ref"
+    },
+    {
+      "id": "claims/not-before-idea",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"not_before\": \"2026-11-17T09:00:00Z\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_sets_not_before_and_releases_own_claim"
+    },
+    {
+      "id": "claims/not-before-build",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"not_before\": \"2026-11-17T09:00:00Z\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_sets_not_before_and_releases_own_claim"
+    },
+    {
+      "id": "claims/not-before-merged",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"not_before\": \"2026-11-17T09:00:00Z\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"merged\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_sets_not_before_and_releases_own_claim"
+    },
+    {
+      "id": "claims/clears-not-before",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"not_before\": null}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"not_before\":\"2026-11-17T09:00:00Z\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_clears_not_before"
+    },
+    {
+      "id": "claims/stores-dependency",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"refs\": [{\"id\": \"201-sample-csv-api\", \"kind\": \"depends-on\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_stores_a_dependency"
+    },
+    {
+      "id": "claims/keeps-batched-into",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"refs\": [{\"id\": \"411-sample-lead\", \"kind\": \"batched-into\"}, {\"id\": \"400-sample-old\", \"kind\": \"follow-up-of\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"refs\":[{\"id\":\"411-sample-lead\",\"kind\":\"batched-into\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_board_ids.py::BoardIdTest.test_keeps_a_batched_into_ref_while_editing_refs"
+    },
+    {
+      "id": "claims/adds-new-id",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"closed\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"412-fix-login\",\"project\":\"sample\",\"stage\":\"build\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_board_ids.py::BoardIdTest.test_adds_a_well_formed_new_id"
+    },
+    {
+      "id": "claims/no-archived-field",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"closed\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"414-retry-sync\",\"project\":\"sample\",\"stage\":\"closed\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_board_ids.py::ArchiveFloorTest.test_board_patches_without_an_archived_field"
+    },
+    {
+      "id": "claims/existing-row-below-floor",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}],\"archived\":{\"max_id\":416,\"fingerprints\":{}}}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_board_ids.py::ArchiveFloorTest.test_board_skips_the_floor_for_an_existing_row"
+    },
+    {
+      "id": "claims/babysit-null",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"babysit\": null}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"babysit\":{\"at\":\"2026-01-02T12:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_clears_babysit_with_null"
+    },
+    {
+      "id": "claims/babysit-null-drops-press",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"babysit\": null}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"babysit\":{\"at\":\"2026-01-02T12:00:00Z\"},\"priority\":{\"at\":\"2026-01-02T12:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_babysit_null_drops_the_press_priority"
+    },
+    {
+      "id": "claims/babysit-null-keeps-earlier",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"babysit\": null}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"babysit\":{\"at\":\"2026-01-02T12:00:00Z\"},\"priority\":{\"at\":\"2026-01-01T12:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_babysit_null_keeps_an_earlier_priority"
+    },
+    {
+      "id": "claims/moved-fence",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"move\":{\"from\":\"parity\",\"session\":\"sender\",\"to\":\"studio-mac\",\"at\":\"2026-11-08T10:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_and_hold_fence_a_moved_session"
+    },
+    {
+      "id": "claims/second-move-fence",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"move\":{\"from\":\"parity\",\"session\":\"d4e5f6\",\"to\":\"cloud-box\",\"at\":\"2026-11-08T11:00:00Z\",\"earlier\":[{\"from\":\"parity\",\"session\":\"sender\",\"at\":\"2026-11-08T10:00:00Z\",\"stopped\":\"2026-11-08T10:30:00Z\"}]}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_a_second_move_keeps_earlier_sessions_fenced"
+    },
+    {
+      "id": "claims/move-spares-other",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "other"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"move\":{\"from\":\"parity\",\"session\":\"sender\",\"to\":\"studio-mac\",\"at\":\"2026-11-08T10:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_move_fence_spares_other_sessions_and_hold_take"
+    },
+    {
+      "id": "claims/closing-releases-claim",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"close\":{\"reason\":\"Duplicate\",\"at\":\"2026-01-02T12:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_releases_a_closing_claim"
+    },
+    {
+      "id": "claims/rounds-drop",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\", \"rounds\": [{\"security\": \"PASS\", \"ux\": \"PASS\", \"ui\": \"PASS\", \"code\": \"PASS\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::RoundsGuardTest.test_refuses_dropping_rounds"
+    },
+    {
+      "id": "claims/rounds-rewrite",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\", \"rounds\": [{\"security\": \"PASS\", \"ux\": \"PASS\", \"ui\": \"SKIPPED\", \"code\": \"CHANGES\"}, {\"security\": \"PASS\", \"ux\": \"SKIPPED\", \"ui\": \"SKIPPED\", \"code\": \"PASS\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::RoundsGuardTest.test_refuses_rewriting_a_round"
+    },
+    {
+      "id": "claims/rounds-verdicts",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\", \"rounds\": [{\"security\": \"PASS\", \"ux\": \"PASS\", \"ui\": \"SKIPPED\", \"code\": \"CHANGES\"}, {\"security\": \"PASS\", \"ux\": \"SKIPPED\", \"ui\": \"SKIPPED\", \"code\": \"CHANGES\"}, {\"security\": \"PASS\", \"ux\": \"PASS\", \"ui\": \"PASS\", \"code\": \"PASS\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::RoundsGuardTest.test_refuses_a_new_round_with_verdicts"
+    },
+    {
+      "id": "claims/rounds-not-list",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"rounds\": {\"1\": {\"security\": \"PASS\", \"ux\": \"PASS\", \"ui\": \"PASS\", \"code\": \"PASS\"}}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::RoundsGuardTest.test_refuses_rounds_that_are_not_a_list"
+    },
+    {
+      "id": "claims/rounds-pending-append",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"review\", \"round\": 3, \"rounds\": [{\"security\": \"PASS\", \"ux\": \"PASS\", \"ui\": \"SKIPPED\", \"code\": \"CHANGES\"}, {\"security\": \"PASS\", \"ux\": \"SKIPPED\", \"ui\": \"SKIPPED\", \"code\": \"CHANGES\"}, {\"code\": \"pending\", \"ui\": \"pending\", \"ux\": \"pending\", \"security\": \"pending\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_stage_guard.py::RoundsGuardTest.test_allows_pending_appends_resends_and_new_rows"
+    },
+    {
+      "id": "claims/noop-fresh-own",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::BoardNoopWriteTest.test_fresh_own_claim_no_op_skips_the_put"
+    },
+    {
+      "id": "claims/noop-stale-own",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::BoardNoopWriteTest.test_stale_own_claim_no_op_writes"
+    },
+    {
+      "id": "claims/noop-changed-note",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::BoardNoopWriteTest.test_changed_note_writes"
+    },
+    {
+      "id": "claims/noop-unclaimed",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::BoardNoopWriteTest.test_unclaimed_row"
+    },
+    {
+      "id": "claims/paseo-writer-unclaimed",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"upstream PR ready\"}",
+      "env": {
+        "FACTORY_SESSION": "sender",
+        "PASEO_AGENT_ID": "agent-batch"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"pr-open\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::PaseoWriterTest.test_unclaimed_write_sets_paseo_writer"
+    },
+    {
+      "id": "claims/paseo-owner-kept",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"upstream PR ready\"}",
+      "env": {
+        "FACTORY_SESSION": "sender",
+        "PASEO_AGENT_ID": "agent-batch"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"pr-open\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"paseo\":{\"server\":\"srv-mac\",\"agent\":\"agent-own\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::PaseoWriterTest.test_owner_link_is_kept"
+    },
+    {
+      "id": "claims/paseo-claimed",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"upstream PR ready\"}",
+      "env": {
+        "FACTORY_SESSION": "sender",
+        "PASEO_AGENT_ID": "agent-batch"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::PaseoWriterTest.test_claimed_write_sets_paseo"
+    },
+    {
+      "id": "claims/paseo-board-marker",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"checking\"}",
+      "env": {
+        "FACTORY_SESSION": "sender",
+        "PASEO_AGENT_ID": "agent-batch"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::PaseoClaimHomeTest.test_board_writes_marker_under_resolved_home"
+    },
+    {
+      "id": "claims/board-without-paseo",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"checking\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::PaseoClaimHomeTest.test_board_without_paseo_skips_the_home"
+    },
+    {
+      "id": "claims/held-by-other",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"studio-mac\",\"session\":\"other\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 6
+    },
+    {
+      "id": "claims/approve-not-passed",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":1,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2
+    },
+    {
+      "id": "claims/automerge-approved",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"automerge\": true}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0
+    },
+    {
+      "id": "claims/automerge-escalated",
+      "argv": ["--home", "{home}", "board", "{home}", "009-escalated"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"automerge\": true}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}},{\"id\":\"009-escalated\",\"project\":\"sample\",\"stage\":\"pr-open\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2
+    },
+    {
+      "id": "claims/tracer-gate-unsigned",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: spec-approval\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"tracer\":{\"scope\":\"approved\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0
+    },
+    {
+      "id": "claims/cas-412-retry",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          [412, ""],
+          [200, ""]
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "claims/put-500",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"note\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [500, "boom"]
+      },
+      "exit": 5
+    }
+  ]
+}
