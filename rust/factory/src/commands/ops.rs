@@ -365,7 +365,7 @@ fn workspace_project(cwd: &str, paths: &[(String, String)]) -> Option<String> {
 pub(crate) fn orphan_scan(home: &Path) -> Res<(Vec<Value>, Vec<String>)> {
     let board = read_board(home)?;
     let jobs = board_jobs(&board)?;
-    let paths = read_paths(home);
+    let paths = read_paths(home)?;
     let gh = which("gh");
     scan(home, jobs, &paths, gh.as_deref(), which("paseo").is_some())
 }

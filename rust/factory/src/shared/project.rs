@@ -253,12 +253,15 @@ pub fn pull_project(home: &Path, slug: &str) -> Res<bool> {
 }
 
 /// This device's checkout of each project, from paths.md.
-pub fn read_paths(home: &Path) -> Vec<(String, String)> {
+/// A read or decode error fails 1, as Python raises, so no caller rewrites paths.md from an empty list.
+pub fn read_paths(home: &Path) -> Res<Vec<(String, String)>> {
     let path = home.join("paths.md");
     if !path.exists() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    frontmatter(&path).map(|(meta, _)| meta).unwrap_or_default()
+    frontmatter(&path)
+        .map(|(meta, _)| meta)
+        .map_err(|e| fail(os_error(&e, Some(&path)), 1))
 }
 
 fn link_inside(link: &Path) -> crate::shared::exit::Exit {

@@ -2169,7 +2169,7 @@ pub fn next_item(_call: &Call) -> Res<()> {
 fn next_item_in(home: &Path) -> Res<()> {
     holder(home)?;
     let projects = registered(home)?;
-    let paths = read_paths(home);
+    let paths = read_paths(home)?;
     let mut skipped = BTreeSet::new();
     for _ in 0..20 {
         let r = api(home, "GET", "/api/backlog", None, &[200, 404], &[])?;
@@ -2402,7 +2402,7 @@ fn ideas_in(home: &Path, args: &[String]) -> Res<()> {
     let max_inflight = number("--max-inflight");
     let project = get("--project");
     let (device, session, minutes) = holder(home)?;
-    let paths = read_paths(home);
+    let paths = read_paths(home)?;
     if let Some(p) = project {
         if !fm_get(&paths, p).is_some_and(|r| Path::new(r).is_dir()) {
             return Err(fail(format!("unknown or unavailable project: {p}"), 2));
@@ -5466,7 +5466,7 @@ fn stuck_in(home: &Path, args: &[String]) -> Res<()> {
         eprintln!("factory.py: stuck resumes nothing; {}", halt_line(&halt));
         return Err(exit(3));
     }
-    let paths = read_paths(home);
+    let paths = read_paths(home)?;
     let path_of = |project: Option<&Value>| -> Option<String> {
         let project = project?.as_str()?;
         fm_get(&paths, project)

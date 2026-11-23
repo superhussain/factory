@@ -176,7 +176,7 @@ pub(crate) fn checkout_problem(
 
 /// This device's checkout of slug, from paths.md, failing 4 without one.
 fn checkout_of(home: &Path, slug: &str) -> Res<String> {
-    let paths = read_paths(home);
+    let paths = read_paths(home)?;
     match fm_get(&paths, slug).filter(|r| !r.is_empty()) {
         Some(repo) => Ok(repo.to_string()),
         None => Err(fail(

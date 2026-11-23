@@ -231,12 +231,12 @@ fn read_board(home: &Path) -> Res<Value> {
 }
 
 /// `read_paths` as a dict: a repeated slug keeps its first place and its last value.
-fn paths_of(home: &Path) -> Vec<(String, String)> {
+fn paths_of(home: &Path) -> Res<Vec<(String, String)>> {
     #[cfg(test)]
     if let Some(f) = fake!(read_paths) {
-        return dict(f(home));
+        return Ok(dict(f(home)));
     }
-    dict(read_paths(home))
+    Ok(dict(read_paths(home)?))
 }
 
 fn paseo_run(args: &[&str]) -> (i32, String) {
@@ -1350,7 +1350,7 @@ fn bundle_stamp() -> Option<Value> {
 /// When the first merge on origin's base that commit lacks landed, from the first checkout
 /// holding commit. None when commit is current or no checkout holds it.
 fn bundle_behind_since(home: &Path, commit: &str) -> Option<String> {
-    let mut paths = paths_of(home);
+    let mut paths = paths_of(home).ok()?;
     paths.sort();
     for (slug, repo) in paths {
         if !CHECKOUT_SLUG.is_full(&slug) || !is_dir(&repo) {
@@ -1426,7 +1426,7 @@ fn host_status(
         Err(_) => (Vec::new(), Vec::new()),
     };
     let stamp = now();
-    let mut checkouts: Vec<String> = paths_of(home)
+    let mut checkouts: Vec<String> = paths_of(home)?
         .into_iter()
         .filter(|(slug, path)| CHECKOUT_SLUG.is_full(slug) && is_dir(path))
         .map(|(slug, _)| slug)
@@ -1980,7 +1980,7 @@ fn setup_checks(home: &Path, device: &str, overridden: bool) -> Res<Vec<Check>> 
         ],
     ));
 
-    let paths = paths_of(home);
+    let paths = paths_of(home)?;
     let slugs: Vec<&(String, String)> = paths.iter().filter(|(_, p)| is_dir(p)).collect();
     let names: Vec<&str> = slugs.iter().map(|(s, _)| s.as_str()).collect();
     checks.push(check(
@@ -2385,7 +2385,7 @@ struct Orphan {
 fn orphan_scan(home: &Path) -> Res<(Vec<Orphan>, Vec<String>)> {
     let board = read_board(home)?;
     let jobs: &[Value] = board["jobs"].as_array().map_or(&[], Vec::as_slice);
-    let paths = paths_of(home);
+    let paths = paths_of(home)?;
     let mut orphans = Vec::new();
     let mut skipped = Vec::new();
     let mut add = |kind: &'static str, job_id: &str, name: Option<String>| {
@@ -2658,7 +2658,7 @@ fn outcomes_pickup_record(home: &Path) -> Res<()> {
     if !claim_today(&home.join(OUTCOMES_RECORD_FILE))? {
         return Ok(());
     }
-    let mut paths = paths_of(home);
+    let mut paths = paths_of(home)?;
     paths.sort();
     if paths
         .iter()
@@ -3019,9 +3019,7 @@ fn claim_ideas(
             };
             if pick.project.is_some_and(|p| p != project)
                 || pick.skip_ids.contains(&id)
-                || claims::blocking(Some(j), device, session, minutes)
-                    .unwrap_or_else(|_| j.get("claim").cloned())
-                    .is_some()
+                || claims::blocking(Some(j), device, session, minutes)?.is_some()
             {
                 continue;
             }
@@ -4163,7 +4161,7 @@ fn pickup_pass(
     if let Some(f) = fake!(pickup_pass) {
         return f(io, home);
     }
-    let paths = paths_of(home);
+    let paths = paths_of(home)?;
     let mut data = match data {
         Some(data) => data,
         None => read_board(home)?,
@@ -4291,49 +4289,51 @@ fn pickup_pass(
         }
     };
     let all = jobs_of(&data);
-    let base_skip = |j: &Value| -> Option<String> {
+    let base_skip = |j: &Value| -> Res<Option<String>> {
         let id = id_of(j);
         let Some(project) = get_str(j, "project").filter(|p| !p.is_empty()) else {
-            return Some(format!("skip {id}: no project"));
+            return Ok(Some(format!("skip {id}: no project")));
         };
         if !lookup(&paths, project).is_some_and(is_dir) {
-            return Some(format!("skip {id} {project}: no checkout on this host"));
+            return Ok(Some(format!(
+                "skip {id} {project}: no checkout on this host"
+            )));
         }
         if gated(j) {
-            return Some(format!("skip {id} {project}: waiting on a human"));
+            return Ok(Some(format!("skip {id} {project}: waiting on a human")));
         }
         if paused(j) {
-            return Some(format!("skip {id} {project}: paused"));
+            return Ok(Some(format!("skip {id} {project}: paused")));
         }
         if closing(j) {
-            return Some(format!("skip {id} {project}: closing"));
+            return Ok(Some(format!("skip {id} {project}: closing")));
         }
         if let Some(until) = waiting_until(j) {
-            return Some(format!("skip {id} {project}: not before {until}"));
+            return Ok(Some(format!("skip {id} {project}: not before {until}")));
         }
         if let Some(other) = waiting_on(j, all) {
-            return Some(format!("skip {id} {project}: waits on {other}"));
+            return Ok(Some(format!("skip {id} {project}: waits on {other}")));
         }
         if tracer_building(j) {
-            return Some(format!("skip {id} {project}: building in Tracer"));
+            return Ok(Some(format!("skip {id} {project}: building in Tracer")));
         }
-        if let Some(c) = claims::blocking(Some(j), device, "", minutes)
-            .unwrap_or_else(|_| j.get("claim").cloned())
-        {
-            return Some(format!("skip {id} {project}: {}", claimed_by(&c)));
+        if let Some(c) = claims::blocking(Some(j), device, "", minutes)? {
+            return Ok(Some(format!("skip {id} {project}: {}", claimed_by(&c))));
         }
         if let (Some(e), Some(until)) = (&experiment, &exp_limited) {
             if job_arm(Some(j)).as_deref() == Some("b") {
-                return Some(format!(
+                return Ok(Some(format!(
                     "skip {id} {project}: experiment {} limited until {until}",
                     e.name
-                ));
+                )));
             }
         }
-        None
+        Ok(None)
     };
-    let base: HashMap<String, Option<String>> =
-        jobs.iter().map(|j| (id_of(j), base_skip(j))).collect();
+    let base: HashMap<String, Option<String>> = jobs
+        .iter()
+        .map(|j| Ok((id_of(j), base_skip(j)?)))
+        .collect::<Res<_>>()?;
     let runnable = |j: &Value| base[&id_of(j)].is_none();
     let mut waiting: HashMap<Option<String>, i64> = HashMap::new();
     for j in all {
@@ -4728,7 +4728,7 @@ fn retro_pickup_catchup(io: &mut Io, home: &Path, dry: bool) {
         let Some(route) = pick_route(home)? else {
             return retro_catchup_wait(io, home, &local, "no available route", dry);
         };
-        let Some((slug, path)) = paths_of(home).into_iter().find(|(_, p)| is_dir(p)) else {
+        let Some((slug, path)) = paths_of(home)?.into_iter().find(|(_, p)| is_dir(p)) else {
             return retro_catchup_wait(io, home, &local, "no checkout in paths.md", dry);
         };
         let template = route_launcher(home, &route)?;
@@ -5770,9 +5770,7 @@ fn claim_for(
         if !rule(j)
             || gated(j)
             || !has_checkout(paths, get_str(j, "project"))
-            || claims::blocking(Some(j), device, "", minutes)
-                .unwrap_or_else(|_| j.get("claim").cloned())
-                .is_some()
+            || claims::blocking(Some(j), device, "", minutes)?.is_some()
         {
             return Ok((None, None));
         }
@@ -5969,9 +5967,7 @@ fn one_launch_skip(
     if pause_and_close && closing(j) {
         return Ok(Some(format!("{head}: closing")));
     }
-    if let Some(c) =
-        claims::blocking(Some(j), device, "", minutes).unwrap_or_else(|_| j.get("claim").cloned())
-    {
+    if let Some(c) = claims::blocking(Some(j), device, "", minutes)? {
         return Ok(Some(format!("{head}: {}", claimed_by(&c))));
     }
     if let Some(problem) = problem {
@@ -6393,9 +6389,7 @@ fn babysit_pass(
                     line = Some(format!("{head}: paused"));
                 } else if closing(j) {
                     line = Some(format!("{head}: closing"));
-                } else if let Some(c) = claims::blocking(Some(j), device, "", minutes)
-                    .unwrap_or_else(|_| j.get("claim").cloned())
-                {
+                } else if let Some(c) = claims::blocking(Some(j), device, "", minutes)? {
                     line = Some(format!("{head}: {}", claimed_by(&c)));
                 } else {
                     let (agent, state) = job_agent(j);
@@ -6972,9 +6966,7 @@ fn close_pass(
             errln!(io, "factory.py: pickup skips the close of {job_id}: its reason must be 1 to 200 characters, with no line breaks or control characters");
             continue;
         };
-        if let Some(c) = claims::blocking(Some(&j), device, "", minutes)
-            .unwrap_or_else(|_| j.get("claim").cloned())
-        {
+        if let Some(c) = claims::blocking(Some(&j), device, "", minutes)? {
             if dry {
                 outln!(io, "skip close {job_id} {project}: {}", claimed_by(&c));
             }
@@ -7024,9 +7016,7 @@ fn close_pass(
             if !closing(found)
                 || found["close"].get("at").cloned() != at
                 || get_str(found, "stage").is_some_and(|s| TERMINAL.contains(&s))
-                || claims::blocking(Some(found), device, "", minutes)
-                    .unwrap_or_else(|_| found.get("claim").cloned())
-                    .is_some()
+                || claims::blocking(Some(found), device, "", minutes)?.is_some()
             {
                 return Ok((None, false));
             }
@@ -7628,9 +7618,7 @@ fn pr_sync_pass(
             continue;
         };
         let (job_id, project) = (get_str(&j, "id").unwrap(), get_str(&j, "project").unwrap());
-        if let Some(c) = claims::blocking(Some(&j), device, "", minutes)
-            .unwrap_or_else(|_| j.get("claim").cloned())
-        {
+        if let Some(c) = claims::blocking(Some(&j), device, "", minutes)? {
             if dry {
                 outln!(io, "skip sync {job_id} {project}: {}", claimed_by(&c));
             }
@@ -7745,9 +7733,7 @@ fn auto_babysit_pass(
             continue;
         }
         let head = format!("skip auto-babysit {job_id} {project}");
-        if let Some(c) = claims::blocking(Some(&j), device, "", minutes)
-            .unwrap_or_else(|_| j.get("claim").cloned())
-        {
+        if let Some(c) = claims::blocking(Some(&j), device, "", minutes)? {
             if dry {
                 outln!(io, "{head}: {}", claimed_by(&c));
             }
@@ -15344,7 +15330,7 @@ exit "$archive_code"
         fn pass(fx: &Fx, dry: bool) -> (i32, String, String) {
             let (mut out, mut err) = (Vec::new(), Vec::new());
             let mut data = fx.state.borrow().board.clone();
-            let paths = paths_of(&fx.home);
+            let paths = paths_of(&fx.home).unwrap();
             let result = {
                 let mut io = Io {
                     out: &mut out,
@@ -16838,7 +16824,7 @@ exit "$archive_code"
                 out: &mut out,
                 err: &mut err,
             };
-            let paths = paths_of(&fx.home);
+            let paths = paths_of(&fx.home).unwrap();
             let e = auto_babysit_pass(
                 &mut io,
                 &fx.home,

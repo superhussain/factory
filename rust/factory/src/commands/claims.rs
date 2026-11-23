@@ -1680,6 +1680,26 @@ fn scan_array(c: &[char], idx: usize) -> Scan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blocking_fails_closed_on_a_malformed_claim() {
+        for job in [
+            json!({"claim": "x"}),
+            json!({"claim": [1]}),
+            json!({"claim": {"device": "d", "session": "o", "seen": 5}}),
+            json!({"claim": {"device": "d", "session": "o"}}),
+        ] {
+            assert_eq!(
+                blocking(Some(&job), "d", "s", 120).unwrap_err().code,
+                1,
+                "{job}"
+            );
+        }
+        assert_eq!(
+            blocking(Some(&json!({"claim": {}})), "d", "s", 120).unwrap(),
+            None
+        );
+    }
     use crate::shared::fs::temp_dir;
     use crate::shared::http::tests::{home_for, serve};
     use std::sync::Mutex;

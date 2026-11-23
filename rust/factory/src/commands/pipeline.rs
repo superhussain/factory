@@ -4236,60 +4236,64 @@ fn batch_problem(
     device: &str,
     session: &str,
     minutes: u32,
-) -> Option<String> {
+) -> Res<Option<String>> {
     let jobs = data["jobs"].as_array().cloned().unwrap_or_default();
     if str_of(j, "project") != Some(slug) {
-        return Some("another project".into());
+        return Ok(Some("another project".into()));
     }
     if str_of(j, "stage") != Some(IDEA) {
-        return Some("not an idea".into());
+        return Ok(Some("not an idea".into()));
     }
     if gated(j) {
-        return Some("waits on a human".into());
+        return Ok(Some("waits on a human".into()));
     }
     if paused(j) {
-        return Some("paused".into());
+        return Ok(Some("paused".into()));
     }
     if closing(j) {
-        return Some("closing".into());
+        return Ok(Some("closing".into()));
     }
     if let Some(t) = waiting_until(j) {
-        return Some(format!("not before {t}"));
+        return Ok(Some(format!("not before {t}")));
     }
     if let Some(id) = waiting_on(j, &jobs) {
-        return Some(format!("waits on {}", py_str(Some(&id))));
+        return Ok(Some(format!("waits on {}", py_str(Some(&id)))));
     }
     if truthy(j.get("idea_images")) {
-        return Some("has pasted images".into());
+        return Ok(Some("has pasted images".into()));
     }
     if truthy(j.get("idea_files")) {
-        return Some("has attached files".into());
+        return Ok(Some("has attached files".into()));
     }
     if j.get("tracer").is_some() {
-        return Some("follows Tracer".into());
+        return Ok(Some("follows Tracer".into()));
     }
     let backlog = j.get("backlog").filter(|b| truthy(Some(*b)));
     if backlog.and_then(|b| b.get("decision")) == Some(&json!("rework")) {
-        return Some("marked for rework".into());
+        return Ok(Some("marked for rework".into()));
     }
+    // A claim or stamp Python cannot read counts as held, so the batch fails closed without a write.
     if let Some(held) = claims::blocking(Some(j), device, session, minutes)
         .unwrap_or_else(|_| j.get("claim").cloned())
     {
-        return Some(format!(
+        return Ok(Some(format!(
             "held by {} session {}",
             py_str(held.get("device")),
             py_str(held.get("session"))
-        ));
+        )));
     }
     if let Some(lead) = lead_value(j).filter(|l| truthy(Some(l))) {
-        return Some(format!("already batched into {}", py_str(Some(&lead))));
+        return Ok(Some(format!(
+            "already batched into {}",
+            py_str(Some(&lead))
+        )));
     }
     if let Some(id) = str_of(j, "id") {
         if !riders_of(data, id).is_empty() {
-            return Some("leads a batch".into());
+            return Ok(Some("leads a batch".into()));
         }
     }
-    None
+    Ok(None)
 }
 
 fn job_by<'a>(data: &'a Value, id: &str) -> Option<&'a Value> {
@@ -4487,7 +4491,7 @@ fn batch(home: &Path, slug: &str, lead_id: &str, ids: &[String], o: &mut Out) ->
                         4,
                     ));
                 };
-                if let Some(problem) = batch_problem(&data, j, slug, &device, &session, minutes) {
+                if let Some(problem) = batch_problem(&data, j, slug, &device, &session, minutes)? {
                     return Err(fail(
                         audit_clean(&format!(
                             "cannot batch {idea_id}: {problem}. Nothing was written."
@@ -4533,16 +4537,14 @@ fn batch(home: &Path, slug: &str, lead_id: &str, ids: &[String], o: &mut Out) ->
                         "note": format!("batched into {lead_id}"), "refs": refs}),
             );
         }
-        let mut candidates: Vec<Value> = data["jobs"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|j| {
-                str_of(j, "id").is_some_and(|id| id != lead_id && JOB_ID.is_full(id))
-                    && batch_problem(&data, j, slug, &device, &session, minutes).is_none()
-            })
-            .map(entry)
-            .collect();
+        let mut candidates: Vec<Value> = Vec::new();
+        for j in data["jobs"].as_array().into_iter().flatten() {
+            if str_of(j, "id").is_some_and(|id| id != lead_id && JOB_ID.is_full(id))
+                && batch_problem(&data, j, slug, &device, &session, minutes)?.is_none()
+            {
+                candidates.push(entry(j));
+            }
+        }
         let mut waiting: Vec<String> = Vec::new();
         for (k, v) in &lines {
             if line_picks.contains(k) {
@@ -8410,7 +8412,9 @@ mod tests {
             ];
             for (j, reason) in cases {
                 assert_eq!(
-                    batch_problem(&data, &j, "sample", "test", "tag", 120).as_deref(),
+                    batch_problem(&data, &j, "sample", "test", "tag", 120)
+                        .unwrap()
+                        .as_deref(),
                     Some(reason)
                 );
             }
@@ -8421,7 +8425,9 @@ mod tests {
             ));
             let lead = idea("050-sample-lead", json!({}));
             assert_eq!(
-                batch_problem(&data, &lead, "sample", "test", "tag", 120).as_deref(),
+                batch_problem(&data, &lead, "sample", "test", "tag", 120)
+                    .unwrap()
+                    .as_deref(),
                 Some("leads a batch")
             );
             assert_eq!(
@@ -8432,7 +8438,8 @@ mod tests {
                     "test",
                     "tag",
                     120
-                ),
+                )
+                .unwrap(),
                 None
             );
         }

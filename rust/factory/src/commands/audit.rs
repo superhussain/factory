@@ -1372,7 +1372,7 @@ pub(crate) fn outcomes(record: bool, slug: Option<&str>, out: &mut String) -> Re
             }
         }
     }
-    let (paths, device) = (read_paths(&home), retro_host()?);
+    let (paths, device) = (read_paths(&home)?, retro_host()?);
     let mut results = Results::new();
     let mut slugs: Vec<String> = jobs.iter().filter_map(|j| project(j)).collect();
     slugs.sort();
@@ -1784,7 +1784,7 @@ fn bench_arm(folder: &str, cases: &[Value]) -> Res<Value> {
 /// Each case's job folder, project and checkout, failing on the first case that cannot run. The
 /// merge commits come from GitHub, which the checks slice reads.
 fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<Vec<ReplayRow>> {
-    let (paths, device) = (read_paths(home), device_name(home));
+    let (paths, device) = (read_paths(home)?, device_name(home));
     let mut rows = Vec::new();
     let mut prs: Vec<(String, Vec<u64>)> = Vec::new();
     for c in cases {
