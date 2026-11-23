@@ -452,7 +452,7 @@ pub fn api(
     Ok(response)
 }
 
-fn jitter() -> Duration {
+pub(crate) fn jitter() -> Duration {
     let mut h = RandomState::new().build_hasher();
     h.write_u32(std::process::id());
     Duration::from_millis(50 + h.finish() % 451)

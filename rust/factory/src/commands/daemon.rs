@@ -1,7 +1,8 @@
 //! `factory daemon`: one socket on the Worker's `/events/host` route, and the host's only pickup
 //! scheduler where it is installed. A pass runs per burst of board or backlog writes, when a local
 //! factory agent stops running, right after a pass that launched a job, and after 5 minutes with
-//! no pass.
+//! no pass. It also keeps the board mirror (`mirror.rs`) current from the socket's rows frames and
+//! serves it to this host's commands.
 
 use std::collections::hash_map::RandomState;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -13,6 +14,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tungstenite::client::IntoClientRequest;
@@ -21,6 +23,7 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{HandshakeError, Message, WebSocket};
 
 use crate::cli::Call;
+use crate::commands::mirror::{self, Mirror};
 use crate::shared::conf::read_conf;
 use crate::shared::exit::{fail, Res};
 use crate::shared::home::factory_home;
@@ -59,12 +62,17 @@ const LIVE: Timing = Timing {
     fallback: Duration::from_secs(300),
 };
 
-/// What the reader thread reports. `Ignored` carries a frame's length, never its body.
+/// What the reader thread reports. `Ignored` carries a frame's length, never its body, and `Note`
+/// a mirror log line.
 enum Event {
     Changed(String),
     Ignored(usize),
+    Note(String),
     Closed(String),
 }
+
+/// How long after a failed board fetch the reader tries again.
+const REFETCH: Duration = Duration::from_secs(10);
 
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 
@@ -146,6 +154,14 @@ fn run(home: &Path) -> Res<()> {
     catch_stop_signals();
     let exe = std::env::current_exe().map_err(|e| fail(os_error(&e, None), 1))?;
     let url = host_url(&origin);
+    let board = Mirror::new(&home);
+    // Without the endpoint, commands read the Worker as before.
+    if let Err(e) = mirror::listen(board.clone()) {
+        log_line(
+            &home,
+            &format!("mirror endpoint failed: {}", os_error(&e, None)),
+        );
+    }
     println!(
         "factory daemon: watching {url}; log {}",
         home.join("logs").join("daemon").display()
@@ -156,6 +172,7 @@ fn run(home: &Path) -> Res<()> {
         &headers,
         &LIVE,
         &home.join(".env"),
+        Some(board),
         signal_stop,
         &|msg| {
             log_line(&home, msg);
@@ -182,6 +199,7 @@ fn run(home: &Path) -> Res<()> {
             }
         },
     );
+    mirror::unlisten(&home);
     Ok(())
 }
 
@@ -354,11 +372,33 @@ fn connect(
     Ok(socket)
 }
 
-/// The key of a `{"type":"changed","key":K}` frame.
-fn changed_key(text: &str) -> Option<String> {
+/// A frame the daemon acts on: `{"type":"changed","key":K}`, or a board rows frame.
+enum Frame {
+    Changed(String),
+    Rows(serde_json::Value),
+}
+
+fn frame(text: &str) -> Option<Frame> {
     let frame: serde_json::Value = serde_json::from_str(text).ok()?;
-    (frame.get("type")?.as_str()? == "changed").then_some(())?;
-    Some(frame.get("key")?.as_str()?.to_string())
+    match frame.get("type")?.as_str()? {
+        "changed" => Some(Frame::Changed(frame.get("key")?.as_str()?.to_string())),
+        "rows" => Some(Frame::Rows(frame)),
+        _ => None,
+    }
+}
+
+/// Refetches the mirror and reports the result as a log line. Returns when to try again, if it
+/// failed.
+fn refetch(board: &Mirror, tx: &Sender<Event>) -> Option<Instant> {
+    let (note, retry) = match board.fetch() {
+        Ok(jobs) => (format!("mirror: fetched the board ({jobs} jobs)"), None),
+        Err(e) => (
+            format!("mirror: fetch failed: {e}"),
+            Some(Instant::now() + REFETCH),
+        ),
+    };
+    let _ = tx.send(Event::Note(note));
+    retry
 }
 
 /// The read timeout: short enough that silence is noticed within a fifth of `ping_every`.
@@ -368,16 +408,35 @@ fn tick(t: &Timing) -> Duration {
 
 /// Reads frames until the socket closes. It sends `ping` after `ping_every` with no frame or
 /// ping, and always sends `Closed` before it stops. Once `stop` reports a signal it sends the
-/// Worker a close frame and stops.
-fn read_loop(mut socket: Socket, t: &Timing, stop: Stop, tx: Sender<Event>) {
+/// Worker a close frame and stops. With a mirror, it fetches the board first, applies each rows
+/// frame, refetches on a gap or a board `changed` frame, and marks the mirror down as it stops.
+fn read_loop(
+    mut socket: Socket,
+    t: &Timing,
+    stop: Stop,
+    tx: Sender<Event>,
+    board: Option<Arc<Mirror>>,
+) {
+    let mut retry = board.as_ref().and_then(|b| {
+        b.connected();
+        refetch(b, &tx)
+    });
     let mut last = Instant::now();
     let mut pinged = last;
     loop {
         if stop().is_some() {
             let _ = socket.close(None);
             let _ = socket.flush();
+            if let Some(b) = &board {
+                b.closed();
+            }
             let _ = tx.send(Event::Closed("stopped".to_string()));
             return;
+        }
+        if let (Some(b), Some(at)) = (&board, retry) {
+            if Instant::now() >= at {
+                retry = refetch(b, &tx);
+            }
         }
         let event = match socket.read() {
             Ok(Message::Close(frame)) => Event::Closed(format!(
@@ -389,9 +448,22 @@ fn read_loop(mut socket: Socket, t: &Timing, stop: Stop, tx: Sender<Event>) {
                 match &message {
                     Message::Ping(_) | Message::Pong(_) => continue,
                     Message::Text(text) if text.as_str() == "pong" => continue,
-                    Message::Text(text) => match changed_key(text.as_str()) {
-                        Some(key) => Event::Changed(key),
-                        None => Event::Ignored(message.len()),
+                    Message::Text(text) => match (frame(text.as_str()), &board) {
+                        (Some(Frame::Changed(key)), Some(b)) if key == "board.json" => {
+                            retry = refetch(b, &tx);
+                            Event::Changed(key)
+                        }
+                        (Some(Frame::Changed(key)), _) => Event::Changed(key),
+                        // A rows frame is a board write too, so it starts a pass.
+                        (Some(Frame::Rows(rows)), b) => {
+                            if let Some(b) = b {
+                                if !b.apply(&rows) {
+                                    retry = refetch(b, &tx);
+                                }
+                            }
+                            Event::Changed("board.json".to_string())
+                        }
+                        (None, _) => Event::Ignored(message.len()),
                     },
                     _ => Event::Ignored(message.len()),
                 }
@@ -417,6 +489,11 @@ fn read_loop(mut socket: Socket, t: &Timing, stop: Stop, tx: Sender<Event>) {
             Err(e) => Event::Closed(e.to_string()),
         };
         let closed = matches!(event, Event::Closed(_));
+        if closed {
+            if let Some(b) = &board {
+                b.closed();
+            }
+        }
         if tx.send(event).is_err() || closed {
             return;
         }
@@ -437,6 +514,7 @@ fn serve(
     headers: &[(String, String)],
     t: &Timing,
     env_file: &Path,
+    board: Option<Arc<Mirror>>,
     stop: Stop,
     log: &dyn Fn(&str),
     agents: &dyn Fn() -> Option<Vec<String>>,
@@ -482,7 +560,8 @@ fn serve(
         let opened = Instant::now();
         let (tx, rx) = mpsc::channel();
         let timing = *t;
-        std::thread::spawn(move || read_loop(socket, &timing, stop, tx));
+        let reader_board = board.clone();
+        std::thread::spawn(move || read_loop(socket, &timing, stop, tx, reader_board));
         let mut pending = Some((opened, "connect".to_string()));
         let reason = loop {
             if let Some(signal) = stop() {
@@ -521,6 +600,7 @@ fn serve(
                     pending.get_or_insert_with(|| (Instant::now(), format!("changed {key}")));
                 }
                 Ok(Event::Ignored(n)) => log(&format!("frame ignored ({n} bytes)")),
+                Ok(Event::Note(note)) => log(&note),
                 // The reader closed for a stop signal; the check above logs it.
                 Ok(Event::Closed(_)) if stop().is_some() => {}
                 Ok(Event::Closed(reason)) => break reason,
@@ -837,6 +917,7 @@ mod tests {
     const BOARD: &str = r#"{"type":"changed","key":"board.json"}"#;
     const BACKLOG: &str = r#"{"type":"changed","key":"backlog.md"}"#;
     const ROWS: &str = r#"{"type":"rows","rows":"synthetic-row-body"}"#;
+    const OTHER: &str = r#"{"type":"note","body":"synthetic-row-body"}"#;
 
     fn home(name: &str, origin: &str) -> std::path::PathBuf {
         crate::shared::http::tests::home_for(&format!("daemon-{name}"), origin)
@@ -927,6 +1008,7 @@ mod tests {
             &headers,
             t,
             &home.join(".env"),
+            None,
             no_stop,
             &|msg| log_line(home, msg),
             agents,
@@ -1163,21 +1245,91 @@ mod tests {
         );
     }
 
+    /// A rows frame is a board write, so it starts a pass like a changed frame; an unknown frame
+    /// is logged by length only.
     #[test]
-    fn rows_frame_runs_no_pass() {
+    fn rows_frame_runs_a_pass() {
         let (origin, _) = fake(None, |mut socket| {
             sleep(Duration::from_millis(100));
-            send(&mut socket, ROWS);
+            send(&mut socket, OTHER);
             answer_pings(&mut socket, Duration::from_millis(400));
-            send(&mut socket, BOARD);
+            send(&mut socket, ROWS);
             sleep(Duration::from_secs(1));
         });
         let home = home("rows", &origin);
         assert_eq!(run(&home, &origin, 2), ["connect", "changed board.json"]);
         let log = log_text(&home);
-        let ignored = format!(" frame ignored ({} bytes)\n", ROWS.len());
+        let ignored = format!(" frame ignored ({} bytes)\n", OTHER.len());
         assert!(log.contains(&ignored), "{log}");
         assert!(!log.contains("synthetic-row-body"));
+    }
+
+    /// The reader fetches the board at connect, applies a rows frame that follows it, and
+    /// refetches once for a frame that doesn't. The log names job counts, never rows.
+    #[test]
+    fn mirror_follows_frames_and_refetches_on_a_gap() {
+        use crate::shared::http::tests::serve as worker;
+        let first = r#"{"updated":"","jobs":[{"id":"1999-synthetic-build","stage":"build"}]}"#;
+        let later = r#"{"updated":"","jobs":[{"id":"1999-synthetic-build","stage":"merged"},{"id":"2001-add-csv-export","stage":"idea"},{"id":"2002-z"}]}"#;
+        let (api_origin, gets) = worker(vec![
+            (200, first, vec![("ETag", "\"e1\"")]),
+            (200, later, vec![("ETag", "\"e9\"")]),
+        ]);
+        let (origin, _) = fake(None, |mut socket| {
+            sleep(Duration::from_millis(100));
+            send(
+                &mut socket,
+                r#"{"type":"rows","etag":"\"e2\"","prev":"\"e1\"","rows":[{"id":"2001-add-csv-export","stage":"idea"}],"removed":[]}"#,
+            );
+            answer_pings(&mut socket, Duration::from_millis(300));
+            send(
+                &mut socket,
+                r#"{"type":"rows","etag":"\"e5\"","prev":"\"e4\"","rows":[],"removed":[]}"#,
+            );
+            answer_pings(&mut socket, Duration::from_secs(1));
+        });
+        let home = home("mirror", &api_origin);
+        let board = Mirror::new(&home);
+        let mut seen = Vec::new();
+        serve(
+            &host_url(&origin),
+            &access_headers(&home, &origin).unwrap(),
+            &TEST,
+            &home.join(".env"),
+            Some(board.clone()),
+            no_stop,
+            &|msg| log_line(&home, msg),
+            &|| None,
+            &mut |reason| {
+                seen.push(reason.to_string());
+                if seen.len() == 3 {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(false)
+                }
+            },
+        );
+        assert_eq!(
+            seen,
+            ["connect", "changed board.json", "changed board.json"]
+        );
+        assert_eq!(
+            gets.lock().unwrap().len(),
+            2,
+            "one fetch at connect, one for the gap"
+        );
+        let log = log_text(&home);
+        assert!(
+            log.contains(" mirror: fetched the board (1 jobs)\n"),
+            "{log}"
+        );
+        assert!(
+            log.contains(" mirror: fetched the board (3 jobs)\n"),
+            "{log}"
+        );
+        assert!(!log.contains("add-csv-export"), "{log}");
+        let snap = std::fs::read_to_string(mirror::snapshot_path(&home)).unwrap();
+        assert!(snap.starts_with(r#"{"etag":"\"e9\"""#), "{snap}");
     }
 
     #[test]
@@ -1311,7 +1463,7 @@ mod tests {
     fn log_never_holds_the_secret() {
         let (origin, _) = fake(Some(403), |mut socket| {
             sleep(Duration::from_millis(100));
-            send(&mut socket, r#"{"type":"rows","rows":"x"}"#);
+            send(&mut socket, r#"{"type":"note","rows":"x"}"#);
             send(&mut socket, BOARD);
             sleep(Duration::from_millis(300));
             let _ = socket.close(None);
@@ -1376,7 +1528,7 @@ mod tests {
         let socket = connect(&host_url(&origin), &[], &t, Path::new(".env")).unwrap();
         let (tx, rx) = mpsc::channel();
         let start = Instant::now();
-        std::thread::spawn(move || read_loop(socket, &t, no_stop, tx));
+        std::thread::spawn(move || read_loop(socket, &t, no_stop, tx, None));
         let Ok(Event::Closed(reason)) = rx.recv() else {
             panic!("expected Closed")
         };
