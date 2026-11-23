@@ -622,7 +622,8 @@ fn worktree_pids(wt: &str, _proc_root: &Path, _lsof: Option<&Path>) -> Vec<u32> 
 /// PIDs whose cwd is inside wt, from proc_root, else from lsof.
 #[cfg(not(windows))]
 fn worktree_pids(wt: &str, proc_root: &Path, lsof: Option<&Path>) -> Vec<u32> {
-    let inside = |path: &str| contained(Path::new(wt), Path::new(path));
+    let sep = format!("{wt}{}", std::path::MAIN_SEPARATOR);
+    let inside = |path: &str| path == wt || path.starts_with(&sep);
     let mut found = Vec::new();
     if proc_root.is_dir() {
         for entry in fs::read_dir(proc_root).into_iter().flatten().flatten() {
@@ -1221,6 +1222,20 @@ pub fn cleanup(call: &Call) -> Res<()> {
 mod tests {
     use super::*;
     use crate::shared::fs::temp_dir;
+
+    #[cfg(unix)]
+    #[test]
+    fn root_worktree_matches_only_cwd_root() {
+        let proc_root = temp_dir("pids-root");
+        for (pid, cwd) in [("11", "/"), ("12", "/home/u/proj"), ("13", "/tmp")] {
+            fs::create_dir(proc_root.join(pid)).unwrap();
+            std::os::unix::fs::symlink(cwd, proc_root.join(pid).join("cwd")).unwrap();
+        }
+        assert_eq!(worktree_pids("/", &proc_root, None), [11]);
+        let mut under = worktree_pids("/home", &proc_root, None);
+        under.sort();
+        assert_eq!(under, [12]);
+    }
 
     const JOB: &str = "812-dark-mode";
 
