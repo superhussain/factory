@@ -558,6 +558,7 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
         let mut ok = backup.is_some();
         if ok && !current {
             let tmp = temp_root()?.join(format!("factory-catch-up-{}", random_hex(4)));
+            #[cfg_attr(not(unix), allow(unused_mut))]
             let mut builder = fs::DirBuilder::new();
             #[cfg(unix)]
             std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
