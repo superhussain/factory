@@ -179,6 +179,7 @@ const SUGGEST_KINDS: &[&str] = &[
     "tooling",
 ];
 const TRIAGE_BATCH_LIMIT: usize = 8;
+const TRIAGE_SWEEP_LIMIT: usize = 20;
 
 /// `confirm(expected, prompt, what)`: a person at a terminal types expected, or the command fails 2.
 type Confirm<'a> = dyn FnMut(&str, &str, &str) -> Res<()> + 'a;
@@ -1218,6 +1219,292 @@ fn backlog_triage(home: &Path, item: &str, context: Option<&str>) -> Res<(Option
         return Ok((None, false));
     }
     Ok((Some(verdict), true))
+}
+
+/// True when the project's effective pipeline turns backlog triage on.
+fn triage_enabled(home: &Path, slug: &str) -> Res<bool> {
+    let r = api(
+        home,
+        "GET",
+        &format!("/api/pipeline/effective/{slug}"),
+        None,
+        &[200, 404, 409],
+        &[],
+    )?;
+    if r.status != 200 {
+        return Ok(false);
+    }
+    let Ok(view) = loads(&r.text()?) else {
+        return Ok(false);
+    };
+    Ok(view
+        .get("triage")
+        .filter(|t| t.is_object())
+        .and_then(|t| t.get("enabled"))
+        == Some(&Value::Bool(true)))
+}
+
+/// True when a backlog context has a `## Question:` row, so it goes to the single route.
+fn asks_questions(context: &str) -> bool {
+    context
+        .split("\r\n")
+        .flat_map(|l| l.split(['\r', '\n']))
+        .any(|row| row.starts_with("## Question:"))
+}
+
+type Rated = (Option<Value>, bool);
+
+/// (results, stopped) for up to TRIAGE_BATCH_LIMIT (item, context) lines of one project. results
+/// holds (verdict, final) per entry, as backlog_triage does, or is None on a 400 or 404, so the
+/// caller posts each line alone. A whole failure, off or a malformed reply sets stopped.
+fn backlog_triage_batch(
+    home: &Path,
+    entries: &[(&str, Option<&str>)],
+) -> Res<(Option<Vec<Rated>>, bool)> {
+    let items: Vec<Value> = entries
+        .iter()
+        .map(|(item, context)| {
+            let mut entry = json!({ "item": item });
+            if let Some(c) = context {
+                entry["context"] = Value::from(*c);
+            }
+            entry
+        })
+        .collect();
+    let body = dumps(&json!({ "items": items }), NO_ASCII);
+    let r = api(
+        home,
+        "POST",
+        "/api/backlog/triage/batch",
+        Some(body.as_bytes()),
+        &[200, 400, 404, 409, 502, 503],
+        JSON_HEADER,
+    );
+    let (status, text) = match r {
+        Ok(r) => (Ok(r.status), r.text().unwrap_or_default()),
+        Err(e) => {
+            let why = collapse(&e.stderr).replacen("factory.py: ", "", 1);
+            let why = if why.is_empty() {
+                "unknown error".to_string()
+            } else {
+                why
+            };
+            (Err(why), String::new())
+        }
+    };
+    if status == Ok(400) || status == Ok(404) {
+        return Ok((None, false));
+    }
+    let waiting = vec![(None, false); entries.len()];
+    let reply = if status == Ok(200) {
+        loads(&text).ok()
+    } else {
+        None
+    };
+    if reply == Some(json!({"decision": "off"})) {
+        return Ok((Some(waiting), true));
+    }
+    let verdicts = reply
+        .as_ref()
+        .and_then(|r| r.get("verdicts"))
+        .and_then(Value::as_array)
+        .filter(|v| v.len() == entries.len());
+    let Some(verdicts) = verdicts else {
+        let why = match &status {
+            Ok(200) => "malformed reply".to_string(),
+            Ok(code) => code.to_string(),
+            Err(why) => why.clone(),
+        };
+        eprintln!(
+            "factory.py: backlog triage failed ({why}); {} items wait in the backlog for review",
+            entries.len()
+        );
+        return Ok((Some(waiting), true));
+    };
+    let mut results = Vec::new();
+    for ((item, _), entry) in entries.iter().zip(verdicts) {
+        if let Some(verdict) = triage_reply(entry.clone()).filter(|v| v["decision"] != "off") {
+            results.push((Some(verdict), true));
+            continue;
+        }
+        let error = get_str(entry, "error").is_some();
+        let status = if error {
+            whole(entry.get("status"))
+        } else {
+            None
+        };
+        let why = status.map_or("malformed reply".to_string(), |s| s.to_string());
+        eprintln!("factory.py: backlog triage failed for {item} ({why}); the item waits in the backlog for review");
+        results.push((None, status == Some(400)));
+    }
+    Ok((Some(results), false))
+}
+
+type Line = (String, String, String, String);
+
+/// The context of a backlog line as the triage calls send it: None when it has none.
+fn context_of(line: &Line) -> Option<&str> {
+    Some(line.3.as_str()).filter(|c| !c.is_empty())
+}
+
+/// Report a line's verdict and record a final one, unless a queued line went on the board.
+fn settle(
+    home: &Path,
+    triaged: &mut Vec<String>,
+    line: &Line,
+    item: &str,
+    verdict: Option<Value>,
+    last: bool,
+) -> Res<()> {
+    let (raw, slug, feature, _) = line;
+    let left = match &verdict {
+        Some(v) => report_verdict(home, slug, feature, item, v, context_of(line))?,
+        None => false,
+    };
+    if last
+        && verdict
+            .as_ref()
+            .is_none_or(|v| v["decision"] != "queue" || left)
+    {
+        triaged.push(raw.clone());
+    }
+    Ok(())
+}
+
+/// Rate one line alone; true when a retryable failure ends the sweep.
+fn single(home: &Path, triaged: &mut Vec<String>, line: &Line, item: &str) -> Res<bool> {
+    let (verdict, last) = backlog_triage(home, item, context_of(line))?;
+    let stop = verdict.is_none() && !last;
+    settle(home, triaged, line, item, verdict, last)?;
+    Ok(stop)
+}
+
+/// Rate up to TRIAGE_SWEEP_LIMIT unchecked backlog lines this host has no final verdict for, in
+/// projects with triage on. One verdicts read first records the lines another host already held.
+/// Plain lines go TRIAGE_BATCH_LIMIT per batch call per project, then question lines post alone.
+/// Queued lines become ideas. The first retryable failure ends the sweep. A Worker error still
+/// saves the verdicts recorded so far.
+pub(crate) fn backlog_triage_pass(home: &Path) -> Res<()> {
+    let r = api(home, "GET", "/api/backlog", None, &[200, 404], &[])?;
+    let text = if r.status == 200 {
+        r.text()?
+    } else {
+        String::new()
+    };
+    let lines = unchecked_lines(&text);
+    let cached = read_triaged(home);
+    let mut triaged: Vec<String> = cached
+        .iter()
+        .filter(|l| lines.iter().any(|line| line.0 == **l))
+        .cloned()
+        .collect();
+    let todo: Vec<&Line> = lines.iter().filter(|l| !triaged.contains(&l.0)).collect();
+    let swept = triage_sweep(home, &todo, &mut triaged);
+    if triaged != cached {
+        save_triaged(home, &triaged)?;
+    }
+    swept
+}
+
+fn triage_sweep(home: &Path, todo: &[&Line], triaged: &mut Vec<String>) -> Res<()> {
+    let projects = if todo.is_empty() {
+        BTreeSet::new()
+    } else {
+        registered(home)?
+    };
+    let mut enabled: Vec<(&str, bool)> = Vec::new();
+    let mut picked: Vec<&Line> = Vec::new();
+    for &line in todo {
+        if picked.len() == TRIAGE_SWEEP_LIMIT {
+            break;
+        }
+        let (raw, slug, _, context) = line;
+        if triaged.contains(raw)
+            || !projects.contains(slug)
+            || picked.iter().any(|p| p.0 == *raw)
+            || RETRO_MARK.search(context).is_some()
+            || DEPENDS_ON.search(context).is_some()
+            || LESSON_MARK.search(context).is_some()
+        {
+            continue;
+        }
+        let on = match enabled.iter().find(|(s, _)| s == slug) {
+            Some(&(_, on)) => on,
+            None => {
+                let on = triage_enabled(home, slug)?;
+                enabled.push((slug, on));
+                on
+            }
+        };
+        if on {
+            picked.push(line);
+        }
+    }
+    let items: Vec<String> = picked
+        .iter()
+        .map(|(_, slug, feature, _)| format!("{slug}: {}", rstrip(feature)))
+        .collect();
+    let mut rate: Vec<(&Line, &str)> = Vec::new();
+    for ((line, item), stored) in picked
+        .iter()
+        .zip(&items)
+        .zip(stored_verdicts(home, &items)?)
+    {
+        if stored.is_object() && stored["decision"] == "hold" {
+            triaged.push(line.0.clone());
+        } else {
+            rate.push((line, item));
+        }
+    }
+    let plain: Vec<(&Line, &str)> = rate
+        .iter()
+        .copied()
+        .filter(|(line, _)| !asks_questions(&line.3))
+        .collect();
+    let mut slugs: Vec<&str> = Vec::new();
+    for (line, _) in &plain {
+        if !slugs.contains(&line.1.as_str()) {
+            slugs.push(&line.1);
+        }
+    }
+    for slug in slugs {
+        let same: Vec<(&Line, &str)> = plain
+            .iter()
+            .copied()
+            .filter(|(line, _)| line.1 == slug)
+            .collect();
+        for chunk in same.chunks(TRIAGE_BATCH_LIMIT) {
+            let entries: Vec<(&str, Option<&str>)> = chunk
+                .iter()
+                .map(|(line, item)| (*item, context_of(line)))
+                .collect();
+            let (results, mut stopped) = backlog_triage_batch(home, &entries)?;
+            match results {
+                None => {
+                    for (line, item) in chunk {
+                        if single(home, triaged, line, item)? {
+                            stopped = true;
+                            break;
+                        }
+                    }
+                }
+                Some(results) => {
+                    for ((line, item), (verdict, last)) in chunk.iter().zip(results) {
+                        settle(home, triaged, line, item, verdict, last)?;
+                    }
+                }
+            }
+            if stopped {
+                return Ok(());
+            }
+        }
+    }
+    for (line, item) in rate {
+        if asks_questions(&line.3) && single(home, triaged, line, item)? {
+            return Ok(());
+        }
+    }
+    Ok(())
 }
 
 /// head, the backlog context block, then tail, in at most IDEA_LIMIT UTF-16 units.
@@ -6633,5 +6920,715 @@ mod tests {
             "(link: x.test)"
         );
         assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    }
+}
+
+#[cfg(test)]
+mod backlog_triage_pass_test {
+    //! Python's BacklogTriagePassTests and BacklogTriageBatchTests against a scripted Worker. The
+    //! Worker answers requests in order, and this process caches /projects.json and pipeline views
+    //! per origin, so a second sweep on one server reads neither again. Output goes to the process
+    //! streams, so these tests check what was sent and what the cache holds.
+    use super::*;
+    use crate::shared::http::tests::{home_for, serve, Seen};
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    type Reply = (u16, &'static str, Vec<(&'static str, &'static str)>);
+
+    const PDF: &str = "- [ ] sample: Add PDF export to reports";
+    const RENAME: &str = "- [ ] sample: Rename report filters (rework-of 006-filter-names)";
+    const PDF_ITEM: &str = "sample: Add PDF export to reports";
+    const RENAME_ITEM: &str = "sample: Rename report filters (rework-of 006-filter-names)";
+    const EXAMPLE: &str = "# Backlog\n- [ ] sample: Add PDF export to reports\n- [ ] sample: Rename report filters (rework-of 006-filter-names)\n  Recommend: approve\n  Clearer names.\n\n";
+    const RENAME_CONTEXT: &str = "Recommend: approve\nClearer names.";
+    const CHECKED_PDF: &str = "- [x] sample: Add PDF export to reports (009-add-pdf-export)";
+    const DROP: &str = "- [ ] sample: Drop the legacy CSV header";
+    const ASK: &str = "- [ ] sample: Add CSV export to the report page";
+    const DROP_ITEM: &str = "sample: Drop the legacy CSV header";
+    const ASK_ITEM: &str = "sample: Add CSV export to the report page";
+    const ASK_CONTEXT: &str =
+        "Recommend: approve\n## Question: Delimiter\nPick: one\n- Comma\n- Tab";
+    const BOARD: &str = r#"{"updated": "", "jobs": [{"id": "008-old-job", "stage": "done"}]}"#;
+    const PROJECTS: &str = r#"[{"slug": "sample"}, {"slug": "beta"}]"#;
+    const ON: &str = r#"{"triage": {"enabled": true, "threshold": 80}}"#;
+
+    fn sweep_text() -> String {
+        format!("{EXAMPLE}{DROP}\n  Recommend: deny\n{ASK}\n  Recommend: approve\n  ## Question: Delimiter\n  Pick: one\n  - Comma\n  - Tab\n")
+    }
+
+    fn queue() -> Value {
+        json!({"decision": "queue", "confidence": 86, "threshold": 80,
+               "reason": "Rated by clef-flash against the project rules.", "model": "@cf/cloudflare/clef-flash"})
+    }
+
+    fn hold() -> Value {
+        json!({"decision": "hold", "confidence": 62, "threshold": 80,
+               "reason": "Rated by clef-flash against the project rules.", "model": "@cf/cloudflare/clef-flash"})
+    }
+
+    fn deny() -> Value {
+        json!({"decision": "hold", "confidence": null, "threshold": 80,
+               "reason": "its author recommends deny", "model": null})
+    }
+
+    fn asks() -> Value {
+        let mut v = deny();
+        v["reason"] = json!("it asks questions a person must answer");
+        v
+    }
+
+    fn reply(status: u16, body: impl Into<String>) -> Reply {
+        let body: &'static str = Box::leak(body.into().into_boxed_str());
+        (status, body, vec![("ETag", "\"e\"")])
+    }
+
+    fn json_reply(v: Value) -> Reply {
+        reply(200, v.to_string())
+    }
+
+    fn verdicts(list: Vec<Value>) -> Reply {
+        json_reply(json!({ "verdicts": list }))
+    }
+
+    fn nulls(n: usize) -> Reply {
+        verdicts(vec![Value::Null; n])
+    }
+
+    /// The four requests a queued line makes: the board write, then the backlog check-off.
+    fn queued(board: &str, backlog: &str) -> Vec<Reply> {
+        vec![
+            reply(200, board),
+            reply(200, ""),
+            reply(200, backlog),
+            reply(200, ""),
+        ]
+    }
+
+    /// The opening requests of a sweep that picks sample lines: backlog, projects, the view and
+    /// one verdicts read.
+    fn opening(backlog: &str, read: Reply) -> Vec<Reply> {
+        vec![
+            reply(200, backlog),
+            reply(200, PROJECTS),
+            reply(200, ON),
+            read,
+        ]
+    }
+
+    struct Worker {
+        home: PathBuf,
+        seen: Arc<Mutex<Vec<Seen>>>,
+    }
+
+    impl Worker {
+        fn new(name: &str, replies: Vec<Reply>) -> Worker {
+            let (origin, seen) = serve(replies);
+            Worker {
+                home: home_for(&format!("triage-{name}"), &origin),
+                seen,
+            }
+        }
+
+        fn sweep(&self) -> Res<()> {
+            backlog_triage_pass(&self.home)
+        }
+
+        fn requests(&self) -> Vec<String> {
+            let seen = self.seen.lock().unwrap();
+            seen.iter()
+                .map(|s| format!("{} {}", s.method, s.path))
+                .collect()
+        }
+
+        fn bodies(&self, method: &str, path: &str) -> Vec<Value> {
+            let seen = self.seen.lock().unwrap();
+            seen.iter()
+                .filter(|s| s.method == method && s.path == path)
+                .map(|s| loads(std::str::from_utf8(&s.body).unwrap()).unwrap())
+                .collect()
+        }
+
+        fn texts(&self, method: &str, path: &str) -> Vec<String> {
+            let seen = self.seen.lock().unwrap();
+            seen.iter()
+                .filter(|s| s.method == method && s.path == path)
+                .map(|s| String::from_utf8(s.body.clone()).unwrap())
+                .collect()
+        }
+
+        fn posts(&self) -> Vec<Value> {
+            self.bodies("POST", "/api/backlog/triage")
+        }
+
+        fn items(&self) -> Vec<String> {
+            self.posts()
+                .iter()
+                .map(|p| p["item"].as_str().unwrap().to_string())
+                .collect()
+        }
+
+        fn batches(&self) -> Vec<Value> {
+            self.bodies("POST", "/api/backlog/triage/batch")
+                .into_iter()
+                .map(|b| b["items"].clone())
+                .collect()
+        }
+
+        fn reads(&self) -> Vec<Value> {
+            self.bodies("POST", "/api/backlog/triage/verdicts")
+                .into_iter()
+                .map(|b| b["items"].clone())
+                .collect()
+        }
+
+        fn views(&self) -> Vec<String> {
+            self.requests()
+                .into_iter()
+                .filter_map(|r| r.strip_prefix("GET ").map(String::from))
+                .filter(|p| p.starts_with("/api/pipeline/effective/"))
+                .collect()
+        }
+
+        fn board_jobs(&self) -> Vec<Value> {
+            let puts = self.bodies("PUT", "/api/board");
+            puts.last().unwrap()["jobs"].as_array().unwrap().clone()
+        }
+
+        fn cached(&self) -> Option<Vec<String>> {
+            let text = read_text(&self.home.join("backlog-triage.json")).ok()?;
+            let data = loads(&text).unwrap();
+            Some(
+                data["lines"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|l| l.as_str().unwrap().to_string())
+                    .collect(),
+            )
+        }
+    }
+
+    fn strings(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn ideas(n: usize) -> String {
+        (0..n)
+            .map(|i| format!("- [ ] sample: Idea number {i}\n"))
+            .collect()
+    }
+
+    // ---- BacklogTriagePassTests: triage queues PDF lines and holds the rest.
+
+    #[test]
+    fn test_queues_the_pdf_line_and_holds_the_rework_line_with_its_context() {
+        let mut replies = opening(EXAMPLE, nulls(2));
+        replies.push(reply(404, ""));
+        replies.push(json_reply(queue()));
+        replies.extend(queued(BOARD, EXAMPLE));
+        replies.push(json_reply(hold()));
+        let w = Worker::new("queues", replies);
+        w.sweep().unwrap();
+        assert_eq!(
+            w.posts(),
+            [
+                json!({"item": PDF_ITEM}),
+                json!({"item": RENAME_ITEM, "context": RENAME_CONTEXT})
+            ]
+        );
+        assert_eq!(w.board_jobs().last().unwrap()["id"], "009-add-pdf-export");
+        let backlog = w.texts("PUT", "/api/backlog");
+        assert_eq!(backlog[0].split('\n').nth(1), Some(CHECKED_PDF));
+        assert_eq!(w.cached(), Some(strings(&[RENAME])));
+        assert_eq!(w.views(), ["/api/pipeline/effective/sample"]);
+    }
+
+    #[test]
+    fn test_a_queued_sweep_line_carries_its_context() {
+        let after = r#"{"updated": "", "jobs": [{"id": "008-old-job", "stage": "done"}, {"id": "009-add-pdf-export", "stage": "idea"}]}"#;
+        let mut replies = opening(EXAMPLE, nulls(2));
+        replies.push(reply(404, ""));
+        replies.push(json_reply(queue()));
+        replies.extend(queued(BOARD, EXAMPLE));
+        replies.push(json_reply(queue()));
+        replies.extend(queued(after, EXAMPLE));
+        let w = Worker::new("carries", replies);
+        w.sweep().unwrap();
+        let ideas: Vec<String> = w
+            .bodies("PUT", "/api/board")
+            .iter()
+            .map(|b| {
+                let idea = b["jobs"].as_array().unwrap().last().unwrap()["idea"].clone();
+                idea.as_str()
+                    .unwrap()
+                    .split("\n\nQueued by")
+                    .next()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            ideas,
+            [
+                "Add PDF export to reports",
+                "Rename report filters\n\nContext from the backlog:\nRecommend: approve\nClearer names."
+            ]
+        );
+    }
+
+    #[test]
+    fn test_skips_retro_lines() {
+        let retro = "- [ ] sample: Guard the ls alias";
+        let backlog = format!("# Backlog\n{retro}\n  Recommend: approve\n\n  Reasons.\n\n  Retro: run r1, fingerprint 0123456789abcdef, created 2026-11-12T05:40:00Z\n{PDF}\n");
+        let mut replies = opening(&backlog, nulls(1));
+        replies.push(reply(404, ""));
+        replies.push(json_reply(queue()));
+        replies.extend(queued(BOARD, &backlog));
+        let w = Worker::new("retro", replies);
+        w.sweep().unwrap();
+        assert_eq!(w.reads(), [json!([PDF_ITEM])]);
+        assert_eq!(w.posts(), [json!({"item": PDF_ITEM})]);
+        assert_eq!(w.cached(), None);
+        assert!(w.texts("PUT", "/api/backlog")[0].contains(&format!("{retro}\n")));
+    }
+
+    #[test]
+    fn test_skips_lines_that_depend_on_another_item() {
+        let store = "- [ ] sample: Store imported recipes (sub-job-of 041-recipe-import)";
+        let backlog = format!("# Backlog\n{store}\n  Recommend: approve\n  Depends on: sample: Parse recipe URLs (sub-job-of 041-recipe-import)\n{PDF}\n");
+        let mut replies = opening(&backlog, nulls(1));
+        replies.push(reply(404, ""));
+        replies.push(json_reply(queue()));
+        replies.extend(queued(BOARD, &backlog));
+        let w = Worker::new("depends", replies);
+        w.sweep().unwrap();
+        assert_eq!(w.reads(), [json!([PDF_ITEM])]);
+        assert_eq!(w.posts(), [json!({"item": PDF_ITEM})]);
+        assert_eq!(w.cached(), None);
+        assert!(w.texts("PUT", "/api/backlog")[0].contains(&format!("{store}\n")));
+    }
+
+    #[test]
+    fn test_one_verdict_read_per_sweep() {
+        let after = EXAMPLE.replace(PDF, CHECKED_PDF);
+        let mut replies = opening(EXAMPLE, nulls(2));
+        replies.push(reply(404, ""));
+        replies.push(json_reply(queue()));
+        replies.extend(queued(BOARD, EXAMPLE));
+        replies.push(json_reply(hold()));
+        replies.push(reply(200, after));
+        let w = Worker::new("one-read", replies);
+        w.sweep().unwrap();
+        assert_eq!(
+            w.requests()[..5],
+            strings(&[
+                "GET /api/backlog",
+                "GET /projects.json",
+                "GET /api/pipeline/effective/sample",
+                "POST /api/backlog/triage/verdicts",
+                "POST /api/backlog/triage/batch"
+            ])
+        );
+        assert_eq!(w.reads(), [json!([PDF_ITEM, RENAME_ITEM])]);
+        assert_eq!(w.posts().len(), 2);
+        w.sweep().unwrap();
+        assert_eq!(w.reads().len(), 1);
+        assert_eq!(w.requests().last().unwrap(), "GET /api/backlog");
+    }
+
+    #[test]
+    fn test_a_hold_another_host_stored_is_cached_without_a_post() {
+        let mut replies = opening(EXAMPLE, verdicts(vec![Value::Null, hold()]));
+        replies.push(reply(404, ""));
+        replies.push(json_reply(queue()));
+        replies.extend(queued(BOARD, EXAMPLE));
+        let w = Worker::new("stored-hold", replies);
+        w.sweep().unwrap();
+        assert_eq!(w.items(), [PDF_ITEM]);
+        assert_eq!(w.cached(), Some(strings(&[RENAME])));
+    }
+
+    #[test]
+    fn test_a_line_the_verdict_read_rejects_does_not_stall_the_sweep() {
+        let long = format!("sample: {}", "x".repeat(2000));
+        let backlog = format!("{EXAMPLE}- [ ] {long}\n");
+        let mut replies = opening(
+            &backlog,
+            reply(400, "items[2]: must be one line of at most 2000 characters"),
+        );
+        replies.push(reply(404, ""));
+        replies.push(json_reply(hold()));
+        replies.push(json_reply(hold()));
+        replies.push(reply(400, "item: bad"));
+        let w = Worker::new("read-rejects", replies);
+        w.sweep().unwrap();
+        assert_eq!(w.posts().len(), 3);
+        assert_eq!(
+            w.cached(),
+            Some(vec![
+                PDF.to_string(),
+                RENAME.to_string(),
+                format!("- [ ] {long}")
+            ])
+        );
+    }
+
+    #[test]
+    fn test_an_older_worker_404_on_the_verdict_read_rates_every_line() {
+        let mut replies = opening(EXAMPLE, reply(404, ""));
+        replies.push(reply(404, ""));
+        replies.push(json_reply(queue()));
+        replies.extend(queued(BOARD, EXAMPLE));
+        replies.push(json_reply(hold()));
+        let w = Worker::new("older-404", replies);
+        w.sweep().unwrap();
+        assert_eq!(w.posts().len(), 2);
+    }
+
+    #[test]
+    fn test_a_line_with_trailing_spaces_posts_the_stripped_item() {
+        let backlog = format!("# Backlog\n{PDF}   \n");
+        let mut replies = opening(&backlog, nulls(1));
+        replies.push(reply(404, ""));
+        replies.push(json_reply(hold()));
+        let w = Worker::new("trailing", replies);
+        w.sweep().unwrap();
+        assert_eq!(w.posts(), [json!({"item": PDF_ITEM})]);
+        assert_eq!(w.cached(), Some(vec![format!("{PDF}   ")]));
+    }
+
+    #[test]
+    fn test_a_worker_error_while_picking_lines_sends_nothing() {
+        let backlog = format!("{EXAMPLE}- [ ] beta: Add dark mode\n");
+        let replies = vec![
+            reply(200, backlog),
+            reply(200, PROJECTS),
+            reply(200, ON),
+            reply(500, "boom"),
+        ];
+        let w = Worker::new("picking-error", replies);
+        assert_eq!(w.sweep().unwrap_err().code, 5);
+        assert!(w.reads().is_empty());
+        assert!(w.posts().is_empty());
+        assert_eq!(w.cached(), None);
+    }
+
+    #[test]
+    fn test_a_row_left_on_the_board_is_not_queued_twice() {
+        let mut replies = opening(EXAMPLE, nulls(2));
+        replies.push(reply(404, ""));
+        replies.push(json_reply(queue()));
+        replies.push(reply(200, BOARD));
+        replies.push(reply(200, ""));
+        // The backlog check-off and the row drop both fail, so the row stays on the board.
+        replies.push(reply(500, "down"));
+        replies.push(reply(500, "down"));
+        replies.push(json_reply(hold()));
+        replies.push(reply(200, EXAMPLE));
+        let w = Worker::new("row-left", replies);
+        w.sweep().unwrap();
+        assert_eq!(w.cached(), Some(strings(&[PDF, RENAME])));
+        let posts = w.posts().len();
+        w.sweep().unwrap();
+        assert_eq!(w.posts().len(), posts);
+        assert_eq!(w.bodies("PUT", "/api/board").len(), 1);
+        let ids: Vec<Value> = w.board_jobs().iter().map(|j| j["id"].clone()).collect();
+        assert_eq!(ids, [json!("008-old-job"), json!("009-add-pdf-export")]);
+    }
+
+    #[test]
+    fn test_a_second_run_sends_nothing_and_the_cache_drops_gone_lines() {
+        let after = EXAMPLE.replace(PDF, CHECKED_PDF);
+        let mut replies = opening(EXAMPLE, nulls(2));
+        replies.push(reply(404, ""));
+        replies.push(json_reply(queue()));
+        replies.extend(queued(BOARD, EXAMPLE));
+        replies.push(json_reply(hold()));
+        replies.push(reply(200, after.clone()));
+        let gone = [
+            Some(after.replace("- [ ] sample: Rename", "- [x] sample: Rename")),
+            Some("# Backlog\n".to_string()),
+            None,
+        ];
+        for backlog in &gone {
+            replies.push(match backlog {
+                Some(text) => reply(200, text.clone()),
+                None => reply(404, ""),
+            });
+        }
+        let w = Worker::new("second-run", replies);
+        w.sweep().unwrap();
+        let posts = w.posts().len();
+        // A compact record: save_triaged would rewrite it indented.
+        let compact = format!("{{\"version\": 1, \"lines\": [\"{RENAME}\"]}}");
+        std::fs::write(w.home.join("backlog-triage.json"), &compact).unwrap();
+        w.sweep().unwrap();
+        assert_eq!(
+            read_text(&w.home.join("backlog-triage.json")).unwrap(),
+            compact
+        );
+        assert_eq!(w.posts().len(), posts);
+        for backlog in gone {
+            save_triaged(&w.home, &strings(&[RENAME])).unwrap();
+            w.sweep().unwrap();
+            assert_eq!(w.cached(), Some(Vec::new()), "{backlog:?}");
+            assert_eq!(w.posts().len(), posts);
+        }
+    }
+
+    #[test]
+    fn test_skipped_lines_are_never_sent_and_a_run_sends_at_most_twenty() {
+        let views = [
+            (200, r#"{"triage": {"enabled": false, "threshold": 80}}"#),
+            (200, "{}"),
+            (200, r#"{"triage": true}"#),
+            (200, "not json"),
+            (404, ""),
+            (409, ""),
+        ];
+        for (n, (status, view)) in views.into_iter().enumerate() {
+            let backlog = format!("# Backlog\n- [ ] beta: Off project\n- [ ] ghost: Unknown project\n- [ ] not a backlog line\n- [ ] beta: Off again\n{}", ideas(22));
+            let mut replies = vec![
+                reply(200, backlog),
+                reply(200, PROJECTS),
+                reply(status, view),
+                reply(200, ON),
+                nulls(20),
+            ];
+            for n in [8, 8, 4] {
+                replies.push(reply(404, ""));
+                replies.extend((0..n).map(|_| json_reply(hold())));
+            }
+            let w = Worker::new(&format!("at-most-twenty-{n}"), replies);
+            w.sweep().unwrap();
+            let want: Vec<String> = (0..20)
+                .map(|i| format!("sample: Idea number {i}"))
+                .collect();
+            assert_eq!(w.items(), want, "{view}");
+            assert_eq!(
+                w.views(),
+                [
+                    "/api/pipeline/effective/beta",
+                    "/api/pipeline/effective/sample"
+                ]
+            );
+            let lines: Vec<String> = (0..20)
+                .map(|i| format!("- [ ] sample: Idea number {i}"))
+                .collect();
+            assert_eq!(w.cached(), Some(lines));
+        }
+    }
+
+    /// The network failure case is the 500 one here: both reach backlog_triage's failed-call branch.
+    #[test]
+    fn test_server_and_network_failures_retry_and_a_400_is_cached() {
+        let cases = [
+            (502, "the triage model failed", false),
+            (503, "backlog triage needs the Workers AI binding", false),
+            (500, "timed out", false),
+            (
+                409,
+                "stored pipeline configuration no longer validates",
+                false,
+            ),
+            (400, "item: bad", true),
+        ];
+        for (status, text, cached) in cases {
+            let mut replies = opening(EXAMPLE, nulls(2));
+            replies.push(reply(404, ""));
+            replies.push(reply(status, text));
+            if cached {
+                replies.push(reply(status, text));
+                replies.push(reply(200, EXAMPLE));
+            } else {
+                replies.push(reply(200, EXAMPLE));
+                replies.push(nulls(2));
+                replies.push(reply(404, ""));
+                replies.push(reply(status, text));
+            }
+            let w = Worker::new(&format!("failures-{status}"), replies);
+            let mut before = 0;
+            for run in 0..2 {
+                w.sweep().unwrap();
+                let posts = w.posts().len() - before;
+                before += posts;
+                let want = match (cached, run) {
+                    (true, 0) => 2,
+                    (true, _) => 0,
+                    _ => 1,
+                };
+                assert_eq!(posts, want, "{status} run {run}");
+                let lines = if cached {
+                    strings(&[PDF, RENAME])
+                } else {
+                    Vec::new()
+                };
+                assert_eq!(w.cached().unwrap_or_default(), lines, "{status}");
+            }
+            assert!(w.texts("PUT", "/api/backlog").is_empty());
+        }
+    }
+
+    // ---- BacklogTriageBatchTests: triage holds every line, and the report-page line asks.
+
+    fn batch_opening(read: Reply) -> Vec<Reply> {
+        opening(&sweep_text(), read)
+    }
+
+    #[test]
+    fn test_the_sweep_batches_plain_lines_and_posts_question_lines_alone() {
+        let mut replies = batch_opening(nulls(4));
+        replies.push(verdicts(vec![queue(), hold(), deny()]));
+        replies.extend(queued(BOARD, &sweep_text()));
+        replies.push(json_reply(asks()));
+        let w = Worker::new("batches", replies);
+        w.sweep().unwrap();
+        assert_eq!(
+            w.batches(),
+            [
+                json!([{"item": PDF_ITEM}, {"item": RENAME_ITEM, "context": RENAME_CONTEXT},
+                    {"item": DROP_ITEM, "context": "Recommend: deny"}])
+            ]
+        );
+        assert_eq!(
+            w.posts(),
+            [json!({"item": ASK_ITEM, "context": ASK_CONTEXT})]
+        );
+        assert_eq!(w.cached(), Some(strings(&[RENAME, DROP, ASK])));
+        assert_eq!(w.board_jobs().last().unwrap()["id"], "009-add-pdf-export");
+        assert_eq!(w.views(), ["/api/pipeline/effective/sample"]);
+    }
+
+    #[test]
+    fn test_a_sweep_sends_at_most_eight_lines_per_batch_and_one_project_each() {
+        let mut replies = opening(&format!("# Backlog\n{}", ideas(22)), nulls(20));
+        for n in [8, 8, 4] {
+            replies.push(verdicts(vec![hold(); n]));
+        }
+        let w = Worker::new("eight", replies);
+        w.sweep().unwrap();
+        let sizes: Vec<usize> = w
+            .batches()
+            .iter()
+            .map(|b| b.as_array().unwrap().len())
+            .collect();
+        assert_eq!(sizes, [8, 8, 4]);
+        assert!(w.posts().is_empty());
+        let lines: Vec<String> = (0..20)
+            .map(|i| format!("- [ ] sample: Idea number {i}"))
+            .collect();
+        assert_eq!(w.cached(), Some(lines));
+
+        let backlog: String = (0..10)
+            .map(|n| {
+                if n < 3 {
+                    format!("- [ ] sample: Idea number {n}\n- [ ] beta: Dark mode {n}\n")
+                } else {
+                    format!("- [ ] sample: Idea number {n}\n")
+                }
+            })
+            .collect();
+        let mut replies = opening(&format!("# Backlog\n{backlog}"), reply(200, ON));
+        replies.push(nulls(13));
+        for n in [8, 2, 3] {
+            replies.push(verdicts(vec![hold(); n]));
+        }
+        let w = Worker::new("one-project-each", replies);
+        w.sweep().unwrap();
+        let projects: Vec<Vec<String>> = w
+            .batches()
+            .iter()
+            .map(|b| {
+                b.as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|e| {
+                        e["item"]
+                            .as_str()
+                            .unwrap()
+                            .split(':')
+                            .next()
+                            .unwrap()
+                            .to_string()
+                    })
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            projects,
+            [vec!["sample"; 8], vec!["sample"; 2], vec!["beta"; 3]]
+        );
+        assert_eq!(
+            w.batches()[2],
+            json!([{"item": "beta: Dark mode 0"}, {"item": "beta: Dark mode 1"}, {"item": "beta: Dark mode 2"}])
+        );
+    }
+
+    #[test]
+    fn test_one_unusable_answer_holds_only_that_line() {
+        let unusable = json!({"error": "the triage model gave an unusable reply", "status": 502});
+        let too_long = json!({"error": "context: over 6000 characters", "status": 400});
+        let mut replies = batch_opening(nulls(4));
+        replies.push(verdicts(vec![queue(), unusable, too_long]));
+        replies.extend(queued(BOARD, &sweep_text()));
+        replies.push(json_reply(asks()));
+        let after = sweep_text().replace(PDF, CHECKED_PDF);
+        replies.push(reply(200, after));
+        replies.push(nulls(1));
+        let mut bad = hold();
+        bad["confidence"] = json!("62");
+        replies.push(verdicts(vec![bad]));
+        let w = Worker::new("unusable", replies);
+        w.sweep().unwrap();
+        assert_eq!(w.batches().len(), 1);
+        assert_eq!(w.items(), [ASK_ITEM]);
+        assert_eq!(w.cached(), Some(strings(&[DROP, ASK])));
+
+        w.sweep().unwrap();
+        assert_eq!(w.batches().len(), 2);
+        assert_eq!(w.items(), [ASK_ITEM]);
+        assert_eq!(w.cached(), Some(strings(&[DROP, ASK])));
+    }
+
+    /// Python's timed-out batch case is the 500 one here: both reach the failed-call branch.
+    #[test]
+    fn test_batch_failures_end_the_sweep_or_fall_back() {
+        let stops = [
+            reply(409, "stored pipeline configuration no longer validates"),
+            reply(502, "the triage model failed"),
+            reply(503, "backlog triage needs the Workers AI binding"),
+            reply(500, "boom"),
+            reply(200, "not json"),
+            verdicts(vec![queue()]),
+            json_reply(json!({"decision": "off"})),
+        ];
+        for (n, batch) in stops.into_iter().enumerate() {
+            let mut replies = batch_opening(nulls(4));
+            replies.push(batch);
+            let w = Worker::new(&format!("batch-stop-{n}"), replies);
+            w.sweep().unwrap();
+            assert_eq!(w.batches().len(), 1);
+            assert!(w.posts().is_empty());
+            assert_eq!(w.cached(), None);
+            assert!(w.texts("PUT", "/api/backlog").is_empty());
+        }
+
+        for (n, batch) in [
+            reply(404, ""),
+            reply(400, "items: must be a list of 1 to 8 entries"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut replies = batch_opening(nulls(4));
+            replies.push(batch);
+            replies.extend([hold(), hold(), hold(), asks()].map(json_reply));
+            let w = Worker::new(&format!("batch-fallback-{n}"), replies);
+            w.sweep().unwrap();
+            assert_eq!(w.batches().len(), 1);
+            assert_eq!(w.items(), [PDF_ITEM, RENAME_ITEM, DROP_ITEM, ASK_ITEM]);
+            assert_eq!(w.cached(), Some(strings(&[PDF, RENAME, DROP, ASK])));
+        }
     }
 }
