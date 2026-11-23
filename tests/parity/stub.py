@@ -6,13 +6,15 @@ $FACTORY_STUB_DIR/<tool>.json whose argv equals ARGS, or exits 127.
 """
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 
 
 def launcher(bin_dir, tool):
     path = Path(bin_dir) / tool
-    path.write_text(f"#!/bin/sh\nexec '{sys.executable}' -I '{Path(__file__).resolve()}' {tool} \"$@\"\n")
+    command = " ".join(shlex.quote(part) for part in (sys.executable, "-I", str(Path(__file__).resolve()), tool))
+    path.write_text(f"#!/bin/sh\nexec {command} \"$@\"\n")
     path.chmod(0o755)
 
 
