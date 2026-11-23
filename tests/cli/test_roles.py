@@ -287,10 +287,17 @@ class RolesTest(IsolatedTestCase):
                       "stale: <host>, latest digest <latest>"):
             self.assertIn(value, command)
         self.assertNotIn("suggest approve", command)
-        self.assertIn("\nNever run an autonomy command or `trial resume`, or decide a backlog line; "
-                      "a person decides each line.\n", command)
+        self.assertIn("\nNever run an autonomy command or decide a backlog line; a person decides each line. "
+                      "Run `trial resume <slug> <reason>` only when a person asks, with their words as the reason.\n",
+                      command)
         self.assertIn("| `/factory retro [--days N]` | [retro](references/commands/retro.md) |",
                       (SKILL / "SKILL.md").read_text(encoding="utf-8"))
+
+    def test_agents_never_lift_autonomy(self):
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("- No agent runs `autonomy resume`, `autonomy allow`, `autonomy restore` or `autonomy promote`,\n",
+                      skill)
+        self.assertIn("`script -qc`", skill)
 
     def test_retro_schedule(self):
         schedule = (SKILL / "schedules/retro.md").read_text(encoding="utf-8")
@@ -308,6 +315,7 @@ class RolesTest(IsolatedTestCase):
             lines = [line for line in schedule.splitlines() if never in line]
             self.assertEqual(len(lines), 1)
             self.assertTrue(lines[0].startswith("Never "))
+            self.assertNotIn("when a person asks", lines[0])
 
     def test_retro_push_launchd_times(self):
         schedules = (SKILL / "references/schedules.md").read_text(encoding="utf-8")
