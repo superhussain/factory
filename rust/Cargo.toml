@@ -13,5 +13,5 @@ strip = true
 [profile.host]
 inherits = "release"
 lto = false
-codegen-units = 16
+codegen-units = 256
 incremental = true
