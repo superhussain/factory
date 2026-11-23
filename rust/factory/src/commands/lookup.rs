@@ -145,7 +145,8 @@ pub fn job(call: &Call) -> Res<()> {
             if r.status == 404 {
                 return Err(fail(format!("no job {job_id} on the board or in the archive. Nothing was written."), 4));
             }
-            loads(&r.text()?).map_err(json_error)?["jobs"][0].clone()
+            let archive = loads(&r.text()?).map_err(json_error)?;
+            archive["jobs"].get(0).cloned().ok_or_else(|| fail(format!("the archive answered with no job for {job_id}"), 1))?
         }
     };
     println!("{}", dumps(&found, INDENT2));
