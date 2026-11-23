@@ -311,11 +311,14 @@ class RolesTest(IsolatedTestCase):
         self.assertEqual(positions, sorted(positions))
         for banned in ("pause", "resume", "allow", "deny", "self"):
             self.assertIsNone(re.search(rf"autonomy {banned}\b", schedule), banned)
-        for never in ("suggest approve", "trial resume"):
+        for never in ("suggest approve",):
             lines = [line for line in schedule.splitlines() if never in line]
             self.assertEqual(len(lines), 1)
             self.assertTrue(lines[0].startswith("Never "))
             self.assertNotIn("when a person asks", lines[0])
+        self.assertEqual([line for line in schedule.splitlines() if re.search(r"trial\w*\W+resume", line, re.I)],
+                         ["Never run `suggest approve` or `trial resume <slug> <reason>`, decide a backlog line, "
+                          "or run any `autonomy` command but `status`."])
 
     def test_retro_push_launchd_times(self):
         schedules = (SKILL / "references/schedules.md").read_text(encoding="utf-8")
