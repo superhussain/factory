@@ -1701,57 +1701,6 @@ class MoveFenceTest(IsolatedTestCase):
                               f"cannot set the note '{note}'. Nothing was written.", err.getvalue())
                 self.assertEqual(self.store["/api/board"], before)
 
-    def test_board_refuses_spec_approval(self):
-        before = self.store["/api/board"]
-        err = io.StringIO()
-        body = json.dumps({"spec_approval": {"decider": "person", "via": "command", "at": "2026-11-23T15:00:00Z"}})
-        with patch.object(factory.sys, "stdin", io.StringIO(body)), \
-                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
-            factory.board(self.home, "001-test")
-        self.assertEqual(raised.exception.code, 2)
-        self.assertIn("only factory.py and the dashboard set spec_approval. Nothing was written.", err.getvalue())
-        self.assertEqual(self.store["/api/board"], before)
-
-    def test_approve_spec_patch_records_command(self):
-        self.save(dict(self.job, stage="needs-human", note="gate: spec-approval", needs="Approve the spec"))
-        body = '{"stage": "build", "needs": null, "note": "spec approved"}'
-        with patch.object(factory.sys, "stdin", io.StringIO(body)):
-            factory.board(self.home, "001-test")
-        saved = self.saved()
-        self.assertEqual(saved["spec_approval"], {"decider": "person", "via": "command", "at": saved["updated"]})
-
-    def test_spec_approved_patch_off_the_gate_records_nothing(self):
-        self.save(dict(self.job, stage="needs-human", note="gate: tracer-scope"))
-        with patch.object(factory.sys, "stdin", io.StringIO('{"stage": "build", "note": "spec approved"}')):
-            factory.board(self.home, "001-test")
-        self.assertEqual(self.saved()["note"], "spec approved")
-        self.assertNotIn("spec_approval", self.saved())
-
-    def test_job_infers_spec_approval(self):
-        for note, via in (("spec approved on the dashboard", "dashboard"),
-                          ("building after dashboard approval", "dashboard"),
-                          ("spec approved in Tracer", "tracer"), ("building after Tracer approval", "tracer"),
-                          ("spec approved", "command")):
-            with self.subTest(note=note):
-                self.save(dict(self.job, note=note))
-                self.output.seek(0)
-                self.output.truncate()
-                factory.job("001-test")
-                self.assertEqual(json.loads(self.output.getvalue())["spec_approval"],
-                                 {"decider": "person", "via": via, "inferred": True})
-                self.assertNotIn("spec_approval", self.saved())
-        stored = {"decider": "person", "via": "dashboard", "at": "2026-11-23T15:00:00Z"}
-        self.save(dict(self.job, note="building after Tracer approval", spec_approval=stored))
-        self.output.seek(0)
-        self.output.truncate()
-        factory.job("001-test")
-        self.assertEqual(json.loads(self.output.getvalue())["spec_approval"], stored)
-        self.save(dict(self.job, note="x"))
-        self.output.seek(0)
-        self.output.truncate()
-        factory.job("001-test")
-        self.assertNotIn("spec_approval", json.loads(self.output.getvalue()))
-
     def test_board_refuses_a_bad_not_before(self):
         before = self.store["/api/board"]
         for value in ("tomorrow", "2026-11-17 09:00", 5):

@@ -1059,8 +1059,6 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
         fail("only factory.py repeats sets repeated. Nothing was written.", 2)
     if "handled" in patch:
         fail("only factory.py pr-handled sets handled. Nothing was written.", 2)
-    if "spec_approval" in patch:
-        fail("only factory.py and the dashboard set spec_approval. Nothing was written.", 2)
     if patch.get("note") in SPEC_APPROVED_NOTES:
         fail(f"only a person approves a spec, on the dashboard or in Tracer, so factory.py board cannot set the "
              f"note '{patch['note']}'. Nothing was written.", 2)
@@ -1145,12 +1143,7 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
         babysit, priority = (found or {}).get("babysit"), (found or {}).get("priority")
         pressed = ("babysit" in patch and patch["babysit"] is None and isinstance(babysit, dict)
                    and isinstance(priority, dict) and priority.get("at") == babysit.get("at"))
-        approving = (found is not None and found.get("stage") == "needs-human"
-                     and found.get("note") == "gate: spec-approval" and patch.get("stage") == "build"
-                     and patch.get("note") == COMMAND_APPROVED_NOTE)
         job = patch_job(data, job_id, patch)
-        if approving:
-            job["spec_approval"] = spec_approval_record("command", job["updated"])
         if pressed:
             job.pop("priority", None)
         if patch.get("stage") in RELEASE:
@@ -1170,7 +1163,6 @@ def board_write(factory, job_id, patch, show=True, verdict=None, rewrite_round=N
             if job["tracer"].get("receipt"):
                 job.update(stage="build", note=TRACER_APPROVED_NOTE)
                 job.pop("needs", None)
-                job["spec_approval"] = spec_approval_record("tracer", job["updated"])
                 sent.append(job_id)
             else:
                 feature = job["tracer"].get("feature") or tracer_ids(job)[1]
@@ -9710,18 +9702,6 @@ def approved_start(j):
     return j.get("stage") == "build" and j.get("note") in SPEC_APPROVED_NOTES
 
 
-def spec_approval_record(via, at):
-    """The spec_approval value a person's approval writes beside its note."""
-    return {"decider": "person", "via": via, "at": at}
-
-
-def inferred_spec_approval(j):
-    """The spec_approval a row without one implies from its approval note, else None. The note gives no time."""
-    if "spec_approval" in j or j.get("note") not in SPEC_APPROVAL_VIA:
-        return None
-    return {"decider": "person", "via": SPEC_APPROVAL_VIA[j["note"]], "inferred": True}
-
-
 def tracer_gate_passed(job, patch):
     """True when a patch holds a job at the spec-approval gate after a person already approved its scope in Tracer."""
     return patch.get("stage") == "needs-human" \
@@ -10874,9 +10854,6 @@ def job(job_id):
         if status == 404:
             fail(f"no job {job_id} on the board or in the archive. Nothing was written.", 4)
         found = json.loads(text)["jobs"][0]
-    inferred = inferred_spec_approval(found)
-    if inferred:
-        found["spec_approval"] = inferred
     print(json.dumps(found, indent=2))
 
 
@@ -11877,10 +11854,6 @@ TRACER_GATE_NOTE = "gate: tracer-scope"
 TRACER_APPROVED_NOTE = "spec approved in Tracer"
 DASHBOARD_APPROVED_NOTE = "spec approved on the dashboard"
 SPEC_APPROVED_NOTES = (TRACER_APPROVED_NOTE, DASHBOARD_APPROVED_NOTE)
-COMMAND_APPROVED_NOTE = "spec approved"
-SPEC_APPROVAL_VIA = {DASHBOARD_APPROVED_NOTE: "dashboard", "building after dashboard approval": "dashboard",
-                     TRACER_APPROVED_NOTE: "tracer", "building after Tracer approval": "tracer",
-                     COMMAND_APPROVED_NOTE: "command"}
 TRACER_STARTING = "The companion is starting this build"
 TRACER_DECLINED_NEEDS = ("Tracer scope for {feature} was declined: run /factory approve-spec {id} to build anyway, "
                          "or close the job")
@@ -12307,7 +12280,6 @@ def tracer_record(home, job, base, feature_id, scope=None, receipt=None):
                 found["stage"] = "build"
                 found["note"] = TRACER_APPROVED_NOTE
                 found.pop("needs", None)
-                found["spec_approval"] = spec_approval_record("tracer", stamp)
                 sent.append(job["id"])
             else:
                 found["note"] = "gate: spec-approval"

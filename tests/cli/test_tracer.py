@@ -489,7 +489,6 @@ class GatherTest(TracerCase):
             self.assertEqual((job["stage"], job["note"], job["tracer"]["scope"], job["tracer"]["receipt"]),
                              ("build", "spec approved in Tracer", "approved", RECEIPT()))
             self.assertNotIn("needs", job)
-            self.assertEqual(job["spec_approval"], {"decider": "person", "via": "tracer", "at": "2026-01-02T00:00:01Z"})
             self.assertEqual((job["updated"], self.board["updated"]), ("2026-01-02T00:00:01Z",) * 2)
             calls = len(fake.requests)
             factory.tracer_follow_pass(self.home)
@@ -505,7 +504,6 @@ class GatherTest(TracerCase):
             self.assertEqual((job["stage"], job["note"], job["needs"], job["tracer"]["scope"]),
                              ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS, "approved"))
             self.assertNotIn("receipt", job["tracer"])
-            self.assertNotIn("spec_approval", job)
 
     def test_receipt_for_another_feature_is_dropped(self):
         with FakeTracer() as fake:
@@ -565,7 +563,6 @@ class GatherTest(TracerCase):
                     self.assertEqual(json.loads(out)["stage"], "build")
                     job = self.board["jobs"][0]
                     self.assertEqual((job["stage"], job["note"]), ("build", "spec approved in Tracer"))
-                    self.assertEqual(job["spec_approval"]["via"], "tracer")
                     self.assertNotIn("needs", job)
                     self.assertNotIn("claim", job)
 
@@ -604,7 +601,6 @@ class GatherTest(TracerCase):
             self.assertEqual((job["stage"], job["note"], job["needs"], job["tracer"]["scope"]),
                              ("needs-human", "gate: spec-approval", UNSIGNED_NEEDS, "approved"))
             self.assertNotIn("receipt", job["tracer"])
-            self.assertNotIn("spec_approval", job)
 
     def test_gate_patch_with_refused_receipt_holds(self):
         with FakeTracer() as fake:
