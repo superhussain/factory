@@ -287,8 +287,22 @@ pub(crate) fn blocking(
     session: &str,
     minutes: u32,
 ) -> Res<Option<Value>> {
-    let c = job.and_then(|j| j.get("claim"));
-    let Some(c) = c.filter(|c| truthy(Some(*c)) && !mine(c, device, session)) else {
+    let c = job
+        .and_then(|j| j.get("claim"))
+        .filter(|c| truthy(Some(*c)));
+    if let Some(c) = c.filter(|c| !c.is_object()) {
+        let kind = if c.is_array() {
+            "list"
+        } else if c.is_string() {
+            "str"
+        } else if c.is_boolean() {
+            "bool"
+        } else {
+            "int"
+        };
+        return Err(fail(format!("'{kind}' object has no attribute 'get'"), 1));
+    }
+    let Some(c) = c.filter(|c| !mine(c, device, session)) else {
         return Ok(None);
     };
     Ok((seen_age(c)? < f64::from(minutes) * 60.0).then(|| c.clone()))

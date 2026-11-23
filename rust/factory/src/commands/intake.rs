@@ -221,6 +221,32 @@ fn py_opt(v: Option<&Value>) -> String {
     v.map_or_else(|| "None".into(), py_str)
 }
 
+/// Python's type name for a parsed JSON value, as its error messages print it.
+fn py_type(v: &Value) -> &'static str {
+    match v {
+        Value::Null => "NoneType",
+        Value::Bool(_) => "bool",
+        Value::Number(n) if n.to_string().contains(['.', 'e', 'E']) => "float",
+        Value::Number(_) => "int",
+        Value::String(_) => "str",
+        Value::Array(_) => "list",
+        Value::Object(_) => "dict",
+    }
+}
+
+/// A job's claim when it is truthy, which must then be an object. Python's `c.get` raises on any
+/// other truthy value, so that fails 1 before anything is written.
+fn claim_of(j: &Value) -> Res<Option<&Value>> {
+    match j.get("claim").filter(|c| truthy(Some(*c))) {
+        None => Ok(None),
+        Some(c) if c.is_object() => Ok(Some(c)),
+        Some(c) => Err(fail(
+            format!("'{}' object has no attribute 'get'", py_type(c)),
+            1,
+        )),
+    }
+}
+
 fn parse(text: &str) -> Res<Value> {
     loads(text).map_err(|e| fail(format!("the Worker sent JSON that does not parse: {e}"), 1))
 }
@@ -480,8 +506,8 @@ fn release_claim(home: &Path, job_id: &str, device: &str, session: &str) -> Res<
                 6,
             ));
         }
-        let claim = job.get("claim");
-        if !truthy(claim) || !mine(claim.unwrap(), device, session) {
+        let claim = claim_of(job)?;
+        if !claim.is_some_and(|c| mine(c, device, session)) {
             return Err(fail(format!("{job_id} has no claim from this session"), 6));
         }
         patch_job(&mut data, job_id, &json!({"claim": null}));
@@ -2252,31 +2278,30 @@ fn approved_start(j: &Value) -> bool {
 
 /// Fresh in-flight jobs on the board, of one project or of all. A job waiting on a human, handed
 /// to a babysit session, or parked by not_before never counts.
-fn inflight_count(data: &Value, project: Option<&str>, minutes: u32) -> usize {
+fn inflight_count(data: &Value, project: Option<&str>, minutes: u32) -> Res<usize> {
     let cutoff = unix_now() - i64::from(minutes) * 60;
-    jobs_of(data)
-        .iter()
-        .filter(|j| {
-            if project.is_some_and(|p| get_str(j, "project") != Some(p)) {
-                return false;
-            }
-            if gated(j) || lead_of(j).is_some() || babysitting(j) || waiting_until(j).is_some() {
-                return false;
-            }
-            let stamp = if get_str(j, "stage") == Some(IDEA) || approved_start(j) {
-                j.get("claim")
-                    .filter(|c| truthy(Some(*c)))
-                    .and_then(|c| c.get("seen"))
-            } else if has_str(IN_FLIGHT, j.get("stage"))
-                || get_str(j, "stage") == Some("pr-open") && !escalated(j)
-            {
-                j.get("updated")
-            } else {
-                return false;
-            };
-            stamp_of(stamp).is_some_and(|seen| seen > cutoff)
-        })
-        .count()
+    let mut count = 0;
+    for j in jobs_of(data) {
+        if project.is_some_and(|p| get_str(j, "project") != Some(p)) {
+            continue;
+        }
+        if gated(j) || lead_of(j).is_some() || babysitting(j) || waiting_until(j).is_some() {
+            continue;
+        }
+        let stamp = if get_str(j, "stage") == Some(IDEA) || approved_start(j) {
+            claim_of(j)?.and_then(|c| c.get("seen"))
+        } else if has_str(IN_FLIGHT, j.get("stage"))
+            || get_str(j, "stage") == Some("pr-open") && !escalated(j)
+        {
+            j.get("updated")
+        } else {
+            continue;
+        };
+        if stamp_of(stamp).is_some_and(|seen| seen > cutoff) {
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 /// Claim up to limit of the oldest runnable ideas in one board write, and return their
@@ -2293,7 +2318,7 @@ fn claim_ideas(
         let mut data = load_board(text)?;
         let budget = match max_inflight {
             None => limit,
-            Some(max) => limit.min(max.saturating_sub(inflight_count(&data, project, minutes))),
+            Some(max) => limit.min(max.saturating_sub(inflight_count(&data, project, minutes)?)),
         };
         let mut order: Vec<Value> = jobs_of(&data).to_vec();
         order.sort_by_key(|j| !prioritized(j));
@@ -5382,9 +5407,23 @@ fn stop_verdict(home: &Path, job: &Value, state: &Value) -> Res<(bool, String, b
     Ok((false, "waits on its ask".into(), false))
 }
 
-/// A stamp that may be missing or not a string, as `bool(stamp) and stamp < cutoff` reads it.
-fn stamp_text(v: Option<&Value>) -> Option<String> {
-    v.filter(|v| truthy(Some(*v))).map(py_str)
+/// `minutes > 0 and bool(stamp) and stamp < cutoff`. A truthy stamp that is not a string fails 1,
+/// as Python's comparison raises.
+fn stale_stamp(minutes: u32, cutoff: &str, stamp: Option<&Value>) -> Res<bool> {
+    if minutes == 0 || !truthy(stamp) {
+        return Ok(false);
+    }
+    let stamp = stamp.unwrap();
+    match stamp.as_str() {
+        Some(s) => Ok(s < cutoff),
+        None => Err(fail(
+            format!(
+                "'<' not supported between instances of '{}' and 'str'",
+                py_type(stamp)
+            ),
+            1,
+        )),
+    }
 }
 
 /// `a or b` for two values that may be missing.
@@ -5397,8 +5436,11 @@ fn or_value<'a>(a: Option<&'a Value>, b: Option<&'a Value>) -> Option<&'a Value>
 }
 
 /// The time a job last checked in: its claim's seen, else its updated stamp.
-fn last_seen(j: &Value) -> Option<&Value> {
-    or_value(j.get("claim").and_then(|c| c.get("seen")), j.get("updated"))
+fn last_seen(j: &Value) -> Res<Option<&Value>> {
+    Ok(or_value(
+        claim_of(j)?.and_then(|c| c.get("seen")),
+        j.get("updated"),
+    ))
 }
 
 pub fn stuck(call: &Call) -> Res<()> {
@@ -5434,25 +5476,31 @@ fn stuck_in(home: &Path, args: &[String]) -> Res<()> {
     let server = paseo_server();
     let cutoff = format_stamp(unix_now() - i64::from(minutes) * 60);
     let statuses: std::cell::OnceCell<Option<Vec<(Value, Value)>>> = Default::default();
-    let stale = |stamp: Option<String>| minutes > 0 && stamp.is_some_and(|s| s < cutoff);
-    let dead = |job: &Value| {
+    let stale = |stamp: Option<&Value>| stale_stamp(minutes, &cutoff, stamp);
+    let dead = |job: &Value| -> Res<bool> {
         let empty = json!({});
         let link = or_value(job.get("paseo"), Some(&empty)).unwrap();
         let Some(server) = &server else {
-            return false;
+            return Ok(false);
         };
+        if !link.is_object() {
+            return Err(fail(
+                format!("'{}' object has no attribute 'get'", py_type(link)),
+                1,
+            ));
+        }
         if get_str(link, "server") != Some(server.as_str()) {
-            return false;
+            return Ok(false);
         }
         let Some(agents) = statuses.get_or_init(paseo_statuses) else {
-            return false;
+            return Ok(false);
         };
         let agent = link.get("agent").cloned().unwrap_or(Value::Null);
-        agents
+        Ok(agents
             .iter()
             .rev()
             .find(|(id, _)| *id == agent)
-            .map_or(true, |(_, status)| status == "closed")
+            .map_or(true, |(_, status)| status == "closed"))
     };
     let held = |job: &Value| {
         paused(job)
@@ -5463,38 +5511,38 @@ fn stuck_in(home: &Path, args: &[String]) -> Res<()> {
                 .get("move")
                 .is_some_and(|m| m.is_object() && m.get("claimed").is_none())
     };
-    let is_stuck = |job: &Value| {
+    let is_stuck = |job: &Value| -> Res<bool> {
         if held(job) || get_str(job, "needs").is_some_and(|n| !strip(n).is_empty()) {
-            return false;
+            return Ok(false);
         }
-        let c = job.get("claim");
         if has_str(IN_FLIGHT, job.get("stage")) {
-            let stamp = if truthy(c) {
-                c.unwrap().get("seen")
-            } else {
-                job.get("updated")
+            let stamp = match claim_of(job)? {
+                Some(c) => c.get("seen"),
+                None => job.get("updated"),
             };
-            return stale(stamp_text(stamp));
+            return stale(stamp);
         }
         if get_str(job, "stage") == Some("pr-open")
             && job.get("automerge") == Some(&Value::Bool(true))
             && job.get("escalated") != Some(&Value::Bool(true))
         {
-            return stale(stamp_text(job.get("updated"))) || dead(job);
+            return Ok(stale(job.get("updated"))? || dead(job)?);
         }
-        false
+        Ok(false)
     };
     let well_formed = |job: &Value| {
         get_str(job, "id").is_some_and(|id| JOB_ID.is_full(id) && !id.contains(".."))
             && path_of(job.get("project")).is_some()
     };
-    let stopped = |job: &Value| {
-        let c = job.get("claim");
-        has_str(IN_FLIGHT, job.get("stage"))
-            && well_formed(job)
-            && !held(job)
-            && (!truthy(c) || c.unwrap().get("device").and_then(Value::as_str) == Some(&device))
-            && dead(job)
+    let stopped = |job: &Value| -> Res<bool> {
+        if !has_str(IN_FLIGHT, job.get("stage")) || !well_formed(job) || held(job) {
+            return Ok(false);
+        }
+        let mine = match claim_of(job)? {
+            None => true,
+            Some(c) => c.get("device").and_then(Value::as_str) == Some(&device),
+        };
+        Ok(mine && dead(job)?)
     };
     let mut resume: Vec<(String, (Value, bool, Value))> = Vec::new();
     let mut old = serde_json::Map::new();
@@ -5512,7 +5560,13 @@ fn stuck_in(home: &Path, args: &[String]) -> Res<()> {
             })
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        for job in jobs.iter().filter(|j| stopped(j)) {
+        let mut halted = Vec::new();
+        for job in jobs {
+            if stopped(job)? {
+                halted.push(job);
+            }
+        }
+        for job in halted {
             let id = py_str(&job["id"]);
             let state = stop_state(home, job)?;
             let key = stop_key(&state);
@@ -5543,12 +5597,16 @@ fn stuck_in(home: &Path, args: &[String]) -> Res<()> {
     let (picked, guarded) = cas(home, "/api/board", |text| {
         let mut data = load_board(text)?;
         let jobs = jobs_of(&data).to_vec();
-        let is_stub = |j: &Value| {
-            j.is_object() && j.get("stage").is_none() && stale(stamp_text(last_seen(j)))
-        };
-        let stubs: Vec<Value> = jobs.iter().filter(|j| is_stub(j)).cloned().collect();
+        let (mut stubs, mut kept) = (Vec::new(), Vec::new());
+        for j in &jobs {
+            if j.is_object() && j.get("stage").is_none() && stale(last_seen(j)?)? {
+                stubs.push(j.clone());
+            } else {
+                kept.push(j.clone());
+            }
+        }
         if !stubs.is_empty() {
-            data["jobs"] = Value::Array(jobs.iter().filter(|j| !is_stub(j)).cloned().collect());
+            data["jobs"] = Value::Array(kept);
             data["updated"] = Value::from(now());
         }
         let dropped: Vec<String> = stubs
@@ -5557,24 +5615,35 @@ fn stuck_in(home: &Path, args: &[String]) -> Res<()> {
                 format!(
                     "dropped stub {}: no stage, last seen {}",
                     s.get("id").map_or("None".into(), py_repr),
-                    py_opt(last_seen(s))
+                    py_opt(last_seen(s).unwrap())
                 )
             })
             .collect();
-        let mut found: Vec<Value> = jobs_of(&data)
-            .iter()
-            .filter(|j| {
-                well_formed(j)
-                    && (is_stuck(j)
-                        || resumed(get_str(j, "id").unwrap()).is_some_and(|(stage, _, needs)| {
-                            stopped(j)
-                                && j.get("stage") == Some(stage)
-                                && j.get("needs").unwrap_or(&Value::Null) == needs
-                        }))
-            })
-            .cloned()
-            .collect();
-        found.sort_by_key(|j| or_value(last_seen(j), None).map_or(String::new(), py_str));
+        let mut found: Vec<Value> = Vec::new();
+        for j in jobs_of(&data) {
+            if !well_formed(j) {
+                continue;
+            }
+            let pick = is_stuck(j)?
+                || match resumed(get_str(j, "id").unwrap()) {
+                    Some((stage, _, needs)) => {
+                        stopped(j)?
+                            && j.get("stage") == Some(stage)
+                            && j.get("needs").unwrap_or(&Value::Null) == needs
+                    }
+                    None => false,
+                };
+            if pick {
+                found.push(j.clone());
+            }
+        }
+        let mut keyed = Vec::new();
+        for j in found {
+            let key = or_value(last_seen(&j)?, None).map_or(String::new(), py_str);
+            keyed.push((key, j));
+        }
+        keyed.sort_by(|a, b| a.0.cmp(&b.0));
+        let found: Vec<Value> = keyed.into_iter().map(|(_, j)| j).collect();
         let (mut picked, mut guarded) = (Vec::new(), Vec::new());
         for job in found {
             if picked.len() == limit {
@@ -5760,6 +5829,106 @@ mod tests {
         let (found, skipped, _) = first(text, &[]);
         assert!(found.is_none());
         assert!(skipped.contains("- [ ] sample: Lesson: Run the tests first"));
+    }
+
+    /// Runs f against a Worker that serves board on every read, and returns the exit code and the PUT count.
+    fn malformed(
+        name: &str,
+        halt: bool,
+        board: Value,
+        f: impl FnOnce(&Path) -> Res<()>,
+    ) -> (i32, usize) {
+        let text = dumps(&board, DEFAULT);
+        let mut replies = vec![ok(&text), ok(&text), ok(&text)];
+        if halt {
+            replies.insert(0, (404, "", vec![]));
+        }
+        let (origin, seen) = serve(replies);
+        let home = home_for(name, &origin);
+        std::fs::write(home.join("paths.md"), "---\nsample: /tmp\n---\n").unwrap();
+        let code = f(&home).map_or_else(|e| e.code, |_| 0);
+        let count = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.method == "PUT")
+            .count();
+        (code, count)
+    }
+
+    fn stuck_on(name: &str, jobs: Value) -> (i32, usize) {
+        malformed(name, true, json!({"updated": "", "jobs": jobs}), |home| {
+            stuck_in(home, &[])
+        })
+    }
+
+    fn ideas_on(name: &str, jobs: Value) -> (i32, usize) {
+        malformed(name, false, json!({"updated": "", "jobs": jobs}), |home| {
+            ideas_in(home, &args(&["--max-inflight", "1"]))
+        })
+    }
+
+    #[test]
+    fn malformed_stamps_and_claims_stop_stuck_before_a_write() {
+        let base = json!({"id": "001-test", "project": "sample", "stage": "build", "round": 1});
+        let with = |extra: Value| with(base.clone(), &extra);
+        for (name, jobs) in [
+            (
+                "stuck-seen-1",
+                json!([with(
+                    json!({"claim": {"device": "other", "session": "s", "seen": 1}})
+                )]),
+            ),
+            ("stuck-updated-1", json!([with(json!({"updated": 1}))])),
+            (
+                "stuck-claim-string",
+                json!([with(
+                    json!({"claim": "x", "updated": "2020-01-01T00:00:00Z"})
+                )]),
+            ),
+            (
+                "stuck-stub-claim",
+                json!([{"id": "002-stub", "claim": "x", "updated": "2020-01-01T00:00:00Z"}]),
+            ),
+        ] {
+            assert_eq!(stuck_on(name, jobs), (1, 0), "{name}");
+        }
+    }
+
+    #[test]
+    fn malformed_claims_stop_ideas_before_a_write() {
+        let next = json!({"id": "006-b", "project": "sample", "stage": "idea"});
+        for (name, held) in [
+            (
+                "ideas-paused-true",
+                json!({"id": "005-a", "project": "sample", "stage": "idea", "paused": true, "claim": "x"}),
+            ),
+            (
+                "ideas-approved-list",
+                json!({"id": "005-a", "project": "sample", "stage": "build", "note": "spec approved on the dashboard", "claim": [1]}),
+            ),
+            (
+                "ideas-paused-idea",
+                json!({"id": "005-a", "project": "sample", "stage": "idea", "paused": {"at": "2026-01-01T00:00:00Z"}, "claim": "x"}),
+            ),
+            (
+                "ideas-other-held",
+                json!({"id": "010-other", "stage": "idea", "project": "other", "claim": "held"}),
+            ),
+        ] {
+            assert_eq!(ideas_on(name, json!([held, next])), (1, 0), "{name}");
+        }
+        let build = json!({"id": "005-a", "project": "sample", "stage": "build", "note": "NOTE", "claim": [1]});
+        assert_eq!(ideas_on("ideas-build-list", json!([build, next])), (0, 1));
+    }
+
+    #[test]
+    fn a_string_claim_fails_unclaim_with_exit_1() {
+        let board = json!({"updated": "", "jobs": [{"id": "006-b", "project": "sample", "stage": "idea", "claim": "x"}]});
+        let got = malformed("unclaim-string", false, board, |home| {
+            release_claim(home, "006-b", "parity", "sender")
+        });
+        assert_eq!(got, (1, 0));
     }
 
     #[test]
