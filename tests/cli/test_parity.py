@@ -53,11 +53,19 @@ class StubTest(unittest.TestCase):
             calls = [json.loads(line) for line in (stub_dir / "gh.calls.jsonl").read_text().splitlines()]
             self.assertEqual(calls, [{"argv": ["pr", "view"]}, {"argv": ["pr", "view"]}, {"argv": ["api", "y"]}])
 
+    def test_launcher_quotes_a_tool_name_with_shell_characters(self):
+        with tempfile.TemporaryDirectory() as temp:
+            stub_dir = Path(temp)
+            stub.launcher(stub_dir, "it's $x")
+            result = subprocess.run([str(stub_dir / "it's $x"), "y"], env=dict(os.environ, FACTORY_STUB_DIR=temp),
+                                    capture_output=True, text=True, timeout=60)
+            self.assertEqual((result.returncode, result.stderr), (127, "stub: no recorded response for it's $x y\n"))
+
 
 @unittest.skipIf(os.name == "nt", "the parity runner refuses Windows in phase 0")
 class RunnerTest(unittest.TestCase):
     def test_python_against_python_passes_every_case(self):
-        with patch.object(run, "factory_command", return_value=run.PYTHON):
+        with patch.object(run, "FACTORY_BIN", ""):
             code, out, err = run_main([])
         self.assertEqual((code, err), (0, ""), out)
         self.assertEqual(out.splitlines()[-1], "parity: 72 passed, 0 failed")
@@ -80,6 +88,15 @@ class RunnerTest(unittest.TestCase):
             ids.write_text("# comment\nmain/no-args\nnope/*\n")
             self.assertEqual(run_main(["--ids", str(ids)]), (2, "", "parity: no case matches nope/*\n"))
         self.assertEqual(run_main(["--case", "nope"]), (2, "", "parity: no case matches nope\n"))
+
+    def test_missing_ids_file_or_bin_exits_2(self):
+        with tempfile.TemporaryDirectory() as temp:
+            missing = str(Path(temp, "missing"))
+            self.assertEqual(run_main(["--ids", missing]), (2, "", f"parity: no such file {missing}\n"))
+            self.assertEqual(run_main(["--bin", missing]), (2, "", f"parity: not executable {missing}\n"))
+            self.assertEqual(run_main(["--bin", temp]), (2, "", f"parity: not executable {temp}\n"))
+            with patch.object(run, "FACTORY_BIN", missing):
+                self.assertEqual(run_main([]), (2, "", f"parity: not executable {missing}\n"))
 
     def test_cases_cover_cli_v1(self):
         ids = [case["id"] for case in run.load_cases()]
@@ -142,7 +159,7 @@ class RunnerTest(unittest.TestCase):
             Path(temp, "main.txt").write_text("# comment\nmain/no-args\n")
             Path(temp, "doctor.txt").write_text("doctor/extra\n")
             self.assertEqual(run.read_ids(temp), ["doctor/extra", "main/no-args"])
-            with patch.object(run, "factory_command", return_value=run.PYTHON):
+            with patch.object(run, "FACTORY_BIN", ""):
                 code, out, err = run_main(["--ids", temp])
             self.assertEqual((code, out.splitlines()[-1], err), (0, "parity: 2 passed, 0 failed", ""))
             Path(temp, "board.txt").write_text("main/no-args\n")

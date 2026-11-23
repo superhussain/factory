@@ -19,7 +19,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1] / "tests" / "cli"))
-from support import ROOT, SKILL, factory_command, http_fixture, isolated_env, snapshot
+from support import FACTORY_BIN, ROOT, SKILL, http_fixture, isolated_env, snapshot
 import stub
 
 PYTHON = [sys.executable, "-B", str(SKILL / "runtime/factory.py")]
@@ -166,6 +166,13 @@ def main(argv):
     if os.name == "nt":
         print("parity: POSIX hosts only in phase 0", file=sys.stderr)
         return 2
+    if args.ids and not Path(args.ids).exists():
+        print(f"parity: no such file {args.ids}", file=sys.stderr)
+        return 2
+    binary = args.bin or FACTORY_BIN
+    if binary and not (os.path.isfile(binary) and os.access(binary, os.X_OK)):
+        print(f"parity: not executable {binary}", file=sys.stderr)
+        return 2
     try:
         cases = load_cases()
         patterns = list(args.case) + (read_ids(args.ids) if args.ids else [])
@@ -178,7 +185,7 @@ def main(argv):
             return 2
     if patterns:
         cases = [case for case in cases if any(fnmatch.fnmatchcase(case["id"], p) for p in patterns)]
-    bin_command = [os.path.abspath(args.bin)] if args.bin else factory_command()
+    bin_command = [os.path.abspath(binary)] if binary else PYTHON
     failed = 0
     for case in cases:
         lines = run_case(case, bin_command)
