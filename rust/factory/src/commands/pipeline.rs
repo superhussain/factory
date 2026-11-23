@@ -1531,7 +1531,7 @@ fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
                 let text = String::from_utf8_lossy(&put.body);
                 let why =
                     strip(&format!("{} {}", put.status, printable_line(&text, 200))).to_string();
-                if expired {
+                if expired && TRIAL_LASTING_REFUSALS.contains(&put.status) {
                     update.insert("status".into(), json!("revert-failed"));
                     update.insert("settled".into(), json!(now()));
                     writeln!(
@@ -3430,6 +3430,8 @@ pub fn pre_review_cmd(call: &Call) -> Res<()> {
 const GROUNDING_USAGE: &str = "usage: grounding <project-slug>/<job-id> <round>";
 const GROUNDING_NEAR: i64 = 10;
 const GROUNDING_BOARD_MAX: usize = 20;
+/// Worker refusals that will not change on retry, so an expired trial settles revert-failed.
+const TRIAL_LASTING_REFUSALS: [u16; 4] = [400, 403, 404, 413];
 const PRE_REVIEW_TAIL: usize = 40;
 #[cfg_attr(not(test), allow(dead_code))]
 const GROUNDING_ROWS_MAX: usize = 100;
