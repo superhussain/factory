@@ -221,6 +221,15 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   #retros-page { max-width: 1040px; }
   .retros-runs-heading { font-size: 15px; margin: 24px 0 12px; }
   #spend { margin-top: 20px; }
+  #spend { container: spend / inline-size; }
+  /* A narrow section stacks each week into labeled lines instead of clipping the last column. */
+  @container spend (max-width: 640px) {
+    #spend thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    #spend .reference-table, #spend tbody, #spend tr, #spend .reference-table td { display: block; }
+    #spend tr { border-bottom: 1px solid var(--line); padding: 8px 0; }
+    #spend .reference-table td { padding: 2px 0; border-bottom: 0; white-space: normal; overflow-wrap: anywhere; }
+    #spend td::before { content: attr(data-label) ": "; color: var(--muted); }
+  }
   #audit-flags td a { color: var(--accent); }
   #audit-flags td a { white-space: nowrap; }
   #audit-flags td:nth-child(5) a { display: block; }
@@ -3894,6 +3903,7 @@ async function loadSpend() {
   renderSpend();
 }
 
+const SPEND_HEADERS = ['Week of (UTC)', 'Merged PRs', 'Tokens', 'Tokens per merged PR', 'Reverted'];
 function renderSpend() {
   const rows = spend ?? [];
   $('spend-status').textContent = spendFailed ? 'Could not load cost per merged PR. Reload to try again.'
@@ -3916,17 +3926,21 @@ function renderSpend() {
     wrap.setAttribute('role', 'region');
     wrap.setAttribute('aria-label', 'Cost per merged PR for ' + slug);
     table.className = 'reference-table';
-    head.append(...['Week of (UTC)', 'Merged PRs', 'Tokens', 'Tokens per merged PR', 'Reverted'].map((t) => cell('th', t)));
+    head.append(...SPEND_HEADERS.map((t) => cell('th', t)));
     table.createTHead().append(head);
     body.append(...rows.filter((row) => row.project === slug).map((row) => {
       const tr = document.createElement('tr');
-      tr.append(
-        cell('td', row.week),
-        cell('td', num(row.merged_prs)),
-        cell('td', num(row.tokens)),
-        cell('td', row.tokens_per_pr === null ? 'none merged' : num(row.tokens_per_pr)),
-        cell('td', row.judged ? row.reverted + ' of ' + row.judged + ' (' + Math.round(row.reverted * 100 / row.judged) + '%)' : 'none judged'),
-      );
+      tr.append(...[
+        row.week,
+        num(row.merged_prs),
+        num(row.tokens),
+        row.tokens_per_pr === null ? 'none merged' : num(row.tokens_per_pr),
+        row.judged ? row.reverted + ' of ' + row.judged + ' (' + Math.round(row.reverted * 100 / row.judged) + '%)' : 'none judged',
+      ].map((text, i) => {
+        const td = cell('td', text);
+        td.dataset.label = SPEND_HEADERS[i];
+        return td;
+      }));
       return tr;
     }));
     table.append(body);
