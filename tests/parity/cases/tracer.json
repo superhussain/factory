@@ -1,0 +1,299 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "tracer/bad-sub",
+      "argv": ["--home", "{home}", "tracer", "nope"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::CommandTest.test_sync_targets"
+    },
+    {
+      "id": "tracer/bad-target",
+      "argv": ["--home", "{home}", "tracer", "sync", "bad slug/x"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::CommandTest.test_sync_targets"
+    },
+    {
+      "id": "tracer/bad-target-dots",
+      "argv": ["--home", "{home}", "tracer", "sync", "sample/a..b"],
+      "home": "minimal",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::CommandTest.test_sync_targets"
+    },
+    {
+      "id": "tracer/off",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": false}}"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::OffTest.test_off_follow_pass_and_sync"
+    },
+    {
+      "id": "tracer/off-project",
+      "argv": ["--home", "{home}", "tracer", "sync", "sample"],
+      "home": "tracer-missing-token",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": false}}"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::OffTest.test_off_follow_pass_and_sync"
+    },
+    {
+      "id": "tracer/off-job",
+      "argv": ["--home", "{home}", "tracer", "sync", "sample/001-sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": false}}"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::OffTest.test_off_follow_pass_and_sync"
+    },
+    {
+      "id": "tracer/off-unset",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1}"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::OffTest.test_unset_setting_is_off"
+    },
+    {
+      "id": "tracer/off-missing",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": null,
+      "stubs": {},
+      "routes": {},
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::OffTest.test_unset_setting_is_off"
+    },
+    {
+      "id": "tracer/pipeline-malformed",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{"]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_tracer.py::OffTest.test_unset_setting_is_off"
+    },
+    {
+      "id": "tracer/pipeline-500",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [500, "boom"]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_tracer.py::OffTest.test_unset_setting_is_off"
+    },
+    {
+      "id": "tracer/no-config",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"],
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-11-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-sample\", \"project\": \"sample\", \"stage\": \"spec\", \"jira\": \"PLAN-1234\", \"title\": \"Sample feature\"}]}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::CommandTest.test_empty_bulk_sync_prints_one_line"
+    },
+    {
+      "id": "tracer/empty-projects",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-empty",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"],
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-11-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-sample\", \"project\": \"sample\", \"stage\": \"spec\", \"jira\": \"PLAN-1234\", \"title\": \"Sample feature\"}]}"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::CommandTest.test_empty_bulk_sync_prints_one_line"
+    },
+    {
+      "id": "tracer/not-listed",
+      "argv": ["--home", "{home}", "tracer", "sync", "sample"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::CommandTest.test_sync_targets"
+    },
+    {
+      "id": "tracer/not-listed-job",
+      "argv": ["--home", "{home}", "tracer", "sync", "other/005-other"],
+      "home": "tracer-empty",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::CommandTest.test_sync_targets"
+    },
+    {
+      "id": "tracer/config-not-json",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-not-json",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-dir",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-dir",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-version-2",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-version-2",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-extra-key",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-extra-key",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-bad-slug",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-bad-slug",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-unknown-key",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-unknown-key",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-no-service",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-no-service",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-http-url",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-http-url",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-user-url",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-user-url",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-query-url",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-query-url",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-port-zero",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-port-zero",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-relative-token",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-relative-token",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    },
+    {
+      "id": "tracer/config-missing-token",
+      "argv": ["--home", "{home}", "tracer", "sync"],
+      "home": "tracer-missing-token",
+      "stubs": {},
+      "routes": {
+        "GET /api/pipeline/global": [200, "{\"schema\": 1, \"tracer\": {\"enabled\": true}}"]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::ConfigTest.test_config_validation"
+    }
+  ]
+}
