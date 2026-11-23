@@ -38,7 +38,7 @@ const ROWS = [
   },
 ];
 const LOADED =
-  "Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory.py outcomes record has judged.";
+  "Last 8 weeks, grouped by the UTC Monday each job finished. Tokens are input, output and cache write from every merged or closed job, divided by distinct merged PRs. Jobs still running are not counted. Reverted counts PRs that factory outcomes record has judged.";
 const HINT =
   " Set weekly_tokens in a project file to see this week's share of it and get a nudge at 50, 80 and 100 percent.";
 const EXPECTED = [{ project: "sample", weekly_tokens: 1000000, tokens: 800000, percent: 80 }];
@@ -175,3 +175,61 @@ test(
     });
   },
 );
+
+test("the cost per merged PR table stacks at phone width", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    const context = await browser.createBrowserContext();
+    try {
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      await page.setRequestInterception(true);
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname !== "/api/spend") return request.continue();
+        return request.respond({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            schema: "factory.spend/1",
+            weeks: 8,
+            rows: ROWS,
+            week: "2026-11-16",
+            expected: EXPECTED,
+          }),
+        });
+      });
+      const layout = async (width) => {
+        await page.setViewport({ width, height: 900, deviceScaleFactor: 1 });
+        await page.goto(origin + "/#/retros", { waitUntil: "domcontentloaded" });
+        await page.waitForSelector("#spend-tables table");
+        return page.evaluate(() => {
+          const head = document.querySelector("#spend thead").getBoundingClientRect();
+          const cells = [...document.querySelectorAll("#spend tbody td")];
+          return {
+            fits: [...document.querySelectorAll("#spend .reference-scroll")].every(
+              (wrap) => wrap.scrollWidth <= wrap.clientWidth,
+            ),
+            headClipped: head.width <= 1 && head.height <= 1,
+            display: [...new Set(cells.map((td) => getComputedStyle(td).display))],
+            labels: [...document.querySelector("#spend tbody tr").cells].map(
+              (td) => td.dataset.label,
+            ),
+          };
+        });
+      };
+      assert.deepEqual(await layout(390), {
+        fits: true,
+        headClipped: true,
+        display: ["block"],
+        labels: HEADERS,
+      });
+      const wide = await layout(1440);
+      assert.equal(wide.headClipped, false);
+      assert.deepEqual(wide.display, ["table-cell"]);
+      assert.deepEqual(errors, [], "no page errors");
+    } finally {
+      await context.close();
+    }
+  });
+});

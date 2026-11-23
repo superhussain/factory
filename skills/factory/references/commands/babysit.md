@@ -1,7 +1,7 @@
 # `/factory babysit <job-id> --session <tag>`
 
 Takes a `pr-open` job whose PR a person handed over with the dashboard's Babysit PR
-button, and works the PR as the project's Babysit stage notes ask. `factory.py pickup`
+button, and works the PR as the project's Babysit stage notes ask. `factory pickup`
 spawns it with the tag it claimed the job under, so pass `--session <tag>` to `hold` and
 every `board` call.
 
@@ -15,7 +15,7 @@ and stop.
 
 ## Step zero
 
-Run step zero for an existing job: `factory.py job <id>` for its `project`, then
+Run step zero for an existing job: `factory job <id>` for its `project`, then
 `where <project>`, `hold <project>/<id>` and `worktree <project>/<id>`. If `hold`
 exits 6, stop. If the job is not at `pr-open` or has no `babysit`, report that and
 stop. While `babysit` is set, every `hold` prints `babysit requested`, the holds in the
@@ -73,14 +73,14 @@ the lower one wins.
 
 ## Loop
 
-Run `python3 "$RUNTIME" pr-state "$SLUG/<id>"`. It prints one JSON line,
+Run `"$RUNTIME" pr-state "$SLUG/<id>"`. It prints one JSON line,
 `{"pr","state","review","bots","checks","queued","conflict","stacked","base","next","ci_log","threads","merge_queue","items","capped","rearm","behind"}`. Exit 4 (bad `pr`) or 5
 (gh failed): patch `{"needs": "<the stderr line>", "babysit": null, "claim": null}`, report
 that line and stop. Otherwise act on `next`, then read again.
 
-When `rearm` is not empty, run `python3 "$RUNTIME" pr-handled "$SLUG/<id>" --session <tag> --rearm <each sig>` before acting on `next`.
+When `rearm` is not empty, run `"$RUNTIME" pr-handled "$SLUG/<id>" --session <tag> --rearm <each sig>` before acting on `next`.
 
-After a push, reply or rerun on a `fix-reviews`, `rebase` or `fix-ci` reading, run `python3 "$RUNTIME" pr-handled "$SLUG/<id>" --session <tag> <each sig in items>` once before the next read.
+After a push, reply or rerun on a `fix-reviews`, `rebase` or `fix-ci` reading, run `"$RUNTIME" pr-handled "$SLUG/<id>" --session <tag> <each sig in items>` once before the next read.
 
 When the job's pr is in the project's archive repo, not $REPO, babysit only reads it. Pass -R <archive> wherever this file says -R "$REPO". On an archive PR, never push, comment, reply to or resolve a thread, rerun a check, merge or queue, whatever the notes say. Act only on `merged`, `closed`, `wait` and `wait-base`. On any other reading, patch `{"needs": "PR #<n> is in the archive repo and reads <next>: babysit only reads archive PRs, so handle it on GitHub", "babysit": null, "claim": null}` and stop. Never run `pr-queue` or `checks` on it: both exit 4 for an archive PR.
 
@@ -99,7 +99,7 @@ patch, or a hand-back. After a merge or queue command, read again. A queued PR r
 | `wait` | required checks pending, no checks yet within 120 seconds of the head commit, or an approved PR is queued | run `watch "$SLUG/<id>" --pr`, then act on its pr reading | run `watch "$SLUG/<id>" --pr`, then act on its pr reading |
 | `wait-base` | `stacked` is true: the PR targets another PR's branch, not `$BASE`, and nothing else is left | run `watch "$SLUG/<id>" --pr`, then act on its pr reading | hand back |
 | `update` | `behind` is above 0: the head lacks that many commits of `base` and nothing above is left. `behind` is `null` unless the PR would otherwise merge with no merge queue | run `gh pr update-branch <n> -R "$REPO"` once, then read again. If it fails, patch `{"needs": "PR #<n> is <behind> commits behind <base> and gh pr update-branch failed: <its first stderr line>. Merge <base> into the branch on GitHub, then press Babysit PR again", "babysit": null, "claim": null}` and stop | hand back |
-| `merge` | otherwise | when `merge_queue` is true, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below. Otherwise `gh pr merge <n> -R "$REPO" --merge --delete-branch`; if that fails, `gh pr merge <n> -R "$REPO" --auto --merge` once; if that fails too, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below | when `merge_queue` is true, `python3 "$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below. Otherwise hand back |
+| `merge` | otherwise | when `merge_queue` is true, `"$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below. Otherwise `gh pr merge <n> -R "$REPO" --merge --delete-branch`; if that fails, `gh pr merge <n> -R "$REPO" --auto --merge` once; if that fails too, `"$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below | when `merge_queue` is true, `"$RUNTIME" pr-queue "$SLUG/<id>"` once, then act on its result as below. Otherwise hand back |
 
 - Push only to `origin HEAD:factory/<id>`, with the push command above and no force flags: never
   `--force`, `--force-with-lease`, `-f`, a `+` refspec, another remote or another

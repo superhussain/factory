@@ -130,16 +130,15 @@ export function spendNudges(expected, week, state) {
   return { events, state: next };
 }
 
-/** The spend events at Date `at`, storing NUDGE_KEY only when there are some. */
+/** The spend events at Date `at` and the state to record once they are delivered. */
 export async function spendNudgePass(env, budgets, at) {
   const expected = spendExpected(await readSpendRows(env, at), budgets, at);
-  const { events, state } = spendNudges(
-    expected,
-    weekOf(at),
-    (await readJson(env, NUDGE_KEY))?.data,
-  );
-  if (events.length) await env.BUCKET.put(NUDGE_KEY, JSON.stringify(state));
-  return events;
+  return spendNudges(expected, weekOf(at), (await readJson(env, NUDGE_KEY))?.data);
+}
+
+/** Stores the spend nudge state after a delivered push. */
+export async function recordSpendNudges(env, state) {
+  await env.BUCKET.put(NUDGE_KEY, JSON.stringify(state));
 }
 
 /** GET /api/spend. */

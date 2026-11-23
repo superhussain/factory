@@ -109,8 +109,15 @@ fn catch_stop_signals() {
     }
 }
 
-pub fn daemon(_call: &Call) -> Res<()> {
-    run(&factory_home()?)
+pub fn daemon(call: &Call) -> Res<()> {
+    match call.args.first().map(String::as_str) {
+        None => run(&factory_home()?),
+        Some("setup") => crate::commands::pickup::daemon_setup_cmd(&call.args[1..]),
+        Some(_) => Err(fail(
+            "usage: daemon | daemon setup [--install | --uninstall]",
+            2,
+        )),
+    }
 }
 
 /// The daemon for home. Returns Ok once a stop signal has closed the socket and any pickup child
@@ -119,7 +126,11 @@ fn run(home: &Path) -> Res<()> {
     let home = home.to_path_buf();
     let origin = api_url(&home)?;
     let headers = access_headers(&home, &origin)?;
-    let _lock = take_lock(&home)?;
+    // Another copy already serves this home; a service or cron line that starts a second one
+    // gets a quiet exit 0.
+    let Some(_lock) = take_lock(&home)? else {
+        return Ok(());
+    };
     catch_stop_signals();
     let exe = std::env::current_exe().map_err(|e| fail(os_error(&e, None), 1))?;
     let url = host_url(&origin);
@@ -136,14 +147,20 @@ fn run(home: &Path) -> Res<()> {
         signal_stop,
         &|msg| {
             log_line(&home, msg);
-            // A person watching the terminal sees why the socket never opens.
-            if terminal && msg.starts_with("connect failed: ") {
+            // A person watching the terminal sees why the socket never opens. Under a service,
+            // stderr is <home>/logs/daemon.log, so every line goes there too.
+            if !terminal {
+                eprintln!("{} {msg}", now());
+            } else if msg.starts_with("connect failed: ") {
                 eprintln!("factory daemon: {msg}");
             }
         },
         &mut |_| {
             let (code, stopped) = run_pickup(&exe, &home, signal_stop);
             log_line(&home, &format!("pickup exited {code}"));
+            if !terminal {
+                eprintln!("{} pickup exited {code}", now());
+            }
             if stopped {
                 ControlFlow::Break(())
             } else {
@@ -521,8 +538,13 @@ fn run_pickup(exe: &Path, home: &Path, stop: Stop) -> (i32, bool) {
     }
 }
 
-fn take_lock(home: &Path) -> Res<File> {
-    let dir = home.join("logs").join("daemon");
+fn lock_dir(home: &Path) -> std::path::PathBuf {
+    home.join("logs").join("daemon")
+}
+
+/// The daemon lock, with this process's pid written beside it, or None when another copy holds it.
+pub(crate) fn take_lock(home: &Path) -> Res<Option<File>> {
+    let dir = lock_dir(home);
     let path = dir.join("daemon.lock");
     let file = std::fs::create_dir_all(&dir)
         .and_then(|_| {
@@ -534,13 +556,61 @@ fn take_lock(home: &Path) -> Res<File> {
         })
         .map_err(|e| fail(os_error(&e, Some(&path)), 1))?;
     match file.try_lock() {
-        Ok(()) => Ok(file),
-        Err(TryLockError::WouldBlock) => Err(fail(
-            format!("another factory daemon is running for {}", home.display()),
-            3,
-        )),
+        Ok(()) => {
+            let pid = dir.join("daemon.pid");
+            std::fs::write(&pid, format!("{}\n", std::process::id()))
+                .map_err(|e| fail(os_error(&e, Some(&pid)), 1))?;
+            Ok(Some(file))
+        }
+        Err(TryLockError::WouldBlock) => Ok(None),
         Err(TryLockError::Error(e)) => Err(fail(os_error(&e, Some(&path)), 1)),
     }
+}
+
+/// Whether a daemon holds the lock for home; None when that cannot be checked.
+pub(crate) fn running(home: &Path) -> Option<bool> {
+    let file = match OpenOptions::new()
+        .write(true)
+        .open(lock_dir(home).join("daemon.lock"))
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Some(false),
+        Err(_) => return None,
+    };
+    match file.try_lock() {
+        Ok(()) => Some(false),
+        Err(TryLockError::WouldBlock) => Some(true),
+        Err(TryLockError::Error(_)) => None,
+    }
+}
+
+/// The pid the daemon wrote beside its lock, when it is a real process id: 1 to i32::MAX. kill
+/// reads 0 as this process group and a value past i32::MAX as a negative group or every process,
+/// so anything else in the file is no pid.
+pub(crate) fn pid(home: &Path) -> Option<u32> {
+    let n: i64 = std::fs::read_to_string(lock_dir(home).join("daemon.pid"))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    (1..=i64::from(i32::MAX)).contains(&n).then_some(n as u32)
+}
+
+/// The pid of the daemon that holds the lock: None when no daemon holds it, an error when one
+/// does but its pid file holds no valid pid.
+pub(crate) fn locked_pid(home: &Path) -> Result<Option<u32>, String> {
+    if running(home) != Some(true) {
+        return Ok(None);
+    }
+    pid(home)
+        .map(Some)
+        .ok_or_else(|| "a daemon runs, but its pid file holds no valid pid".to_string())
+}
+
+/// The file that ends the Windows restart loop: the `.cmd` exits instead of starting the daemon
+/// again while it exists.
+pub(crate) fn stop_marker(home: &Path) -> std::path::PathBuf {
+    lock_dir(home).join("stop")
 }
 
 #[cfg(test)]
@@ -694,7 +764,7 @@ mod tests {
         assert!(!log.contains("pickup pass"), "{log}");
         sleep(Duration::from_millis(200));
         assert!(closed.load(Ordering::SeqCst));
-        take_lock(&home).unwrap();
+        take_lock(&home).unwrap().unwrap();
     }
 
     /// Runs `serve` against origin until `passes` passes have started, and returns their reasons.
@@ -849,18 +919,57 @@ mod tests {
     }
 
     #[test]
-    fn second_daemon_exits_3() {
+    fn lock_reports_running_and_pid() {
         let home = temp_dir("daemon-lock");
-        let _first = take_lock(&home).unwrap();
-        let e = take_lock(&home).unwrap_err();
-        assert_eq!(e.code, 3);
-        assert_eq!(
-            e.stderr,
-            format!(
-                "factory.py: another factory daemon is running for {}\n",
-                home.display()
-            )
-        );
+        assert_eq!(running(&home), Some(false));
+        let _first = take_lock(&home).unwrap().unwrap();
+        assert!(take_lock(&home).unwrap().is_none());
+        assert_eq!(running(&home), Some(true));
+        assert_eq!(pid(&home), Some(std::process::id()));
+    }
+
+    #[test]
+    fn pid_rejects_values_kill_would_misread() {
+        let home = temp_dir("daemon-pid");
+        let file = lock_dir(&home).join("daemon.pid");
+        std::fs::create_dir_all(lock_dir(&home)).unwrap();
+        for (text, want) in [
+            ("0\n", None),
+            ("-1\n", None),
+            ("2147483648\n", None),
+            ("4294967295\n", None),
+            ("99999999999999999999\n", None),
+            ("12ab\n", None),
+            ("", None),
+            ("2147483647\n", Some(i32::MAX as u32)),
+            ("4242\n", Some(4242)),
+        ] {
+            std::fs::write(&file, text).unwrap();
+            assert_eq!(pid(&home), want, "{text:?}");
+        }
+        assert_eq!(locked_pid(&home), Ok(None), "no lock, no pid to signal");
+        let _lock = take_lock(&home).unwrap().unwrap();
+        std::fs::write(&file, "0\n").unwrap();
+        assert!(locked_pid(&home).is_err());
+    }
+
+    /// A second daemon for the same home, as a service restart or the cron line starts, returns
+    /// Ok (exit 0) before it connects, prints or logs anything.
+    #[test]
+    fn second_daemon_exits_0_quietly() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let home = home("lock-held", &origin);
+        let _first = take_lock(&home).unwrap().unwrap();
+        assert!(super::run(&home).is_ok());
+        listener.set_nonblocking(true).unwrap();
+        assert!(listener.accept().is_err(), "the second daemon connected");
+        let logs: Vec<_> = std::fs::read_dir(lock_dir(&home))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n.to_string_lossy().ends_with(".log"))
+            .collect();
+        assert!(logs.is_empty(), "{logs:?}");
     }
 
     #[cfg(unix)]

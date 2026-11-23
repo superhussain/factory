@@ -4,7 +4,7 @@ A backlog card opens a decision page in the drawer that shows the full item.
 Approve adds an `idea` job that pickup starts. Deny adds a `closed` job with the note
 `denied from the backlog`. Both carry a `capture_id`.
 Rework needs notes. It adds an `idea` job with the note `rework requested from the backlog`.
-Its pickup rewrites the line through `factory.py backlog rework`, and the new line comes
+Its pickup rewrites the line through `factory backlog rework`, and the new line comes
 back to Backlog with `(rework-of <id>)`. The decision page lists each earlier wording and
 its notes by following those links.
 When the item has context, the page shows the reasons, a Recommended badge and the agent's extra questions. Approve and Deny need every question answered. Answers go to `backlog.answers`, and on Approve also to the idea.
@@ -43,7 +43,7 @@ rider, paused or closing. After a confirm it moves the job to `build`, sets the 
 `{decider: "person", via: "dashboard", at}` and stamps `updated`, in one board write.
 A row that changed meanwhile is checked again and never forced. Pickup then launches
 `/factory recover <id>`, which starts the builder, as [pickup](pickup.md) describes. The
-Worker refuses that note from a device token, and `factory.py board` refuses both approval
+Worker refuses that note from a device token, and `factory board` refuses both approval
 notes, so only a signed-in person sets it.
 
 ## Rework and Approve as is
@@ -57,7 +57,7 @@ at}`, and sets the note `rework requested on the dashboard` or `approval request
 dashboard`, in one board write. A row that changed meanwhile is never forced. The card
 stays in needs you until pickup launches `/factory rework <id> --session <tag>` or
 `/factory approve <id> --session <tag>`, as [pickup](pickup.md) describes. The Worker
-refuses `resolve` from a device token, and `factory.py board` refuses any `resolve` but
+refuses `resolve` from a device token, and `factory board` refuses any `resolve` but
 null, so only a signed-in person sets it.
 
 ## Steering notes
@@ -67,12 +67,12 @@ The job actions menu and the card menu show Add steering note on a job at `spec`
 asks for a note of 1 to 2000 characters and appends `{note, at}` to `steer`, stamping `updated`,
 in one board write. It changes no other field. A row that changed meanwhile is never forced, and a
 press that repeats the last note adds nothing. The job keeps running. The next builder dispatch
-gets every note from `factory.py prompt ... build`, wrapped in an operator-preferences envelope
+gets every note from `factory prompt ... build`, wrapped in an operator-preferences envelope
 with a `steer:` source, and records each under `### Steering notes` in build.md. The drawer lists
 the notes under `Steering notes: <n>`. Each line says `Sent to the builder <time>.` once a `build`
 row in `agents` starts at or after it, `Waiting for the builder's next round.` while the job is
 still at spec, build or review, and `Not sent: no builder round ran after it.` otherwise. The
-Worker refuses `steer` changes from a device token, and `factory.py board` refuses a `steer`
+Worker refuses `steer` changes from a device token, and `factory board` refuses a `steer`
 patch, so only a signed-in person adds a note.
 
 ## Stage-change deep links

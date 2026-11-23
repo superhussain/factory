@@ -1,7 +1,7 @@
 # `/factory catch-up`
 
 Brings this host up to date with the factory repository's main. Run
-`python3 <installed-skill>/runtime/factory.py catch-up` (`py -3` on Windows) and
+`<installed-skill>/runtime/factory catch-up` (`factory.exe` on Windows) and
 report each line it prints.
 
 One run fetches the factory checkout's origin, backs up the installed skill, this

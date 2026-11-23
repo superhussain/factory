@@ -74,11 +74,11 @@ function setup(row = ROW, { seed = true, key = publicKey } = {}) {
   const env = { BUCKET: bucket, BoardEvents, FACTORY_TRACER_RECEIPT_KEY: key };
   const ctx = { waitUntil: () => {} };
   const etag = () => bucket.objects.get("board.json").httpEtag;
-  const put = (next) =>
+  const putRows = (rows) =>
     serveFactory(
       new Request("http://local/api/board", {
         method: "PUT",
-        body: JSON.stringify({ updated: "2026-11-20T09:00:00Z", jobs: [next] }),
+        body: JSON.stringify({ updated: "2026-11-20T09:00:00Z", jobs: rows }),
         headers: { "If-Match": etag() },
         duplex: "half",
       }),
@@ -86,6 +86,7 @@ function setup(row = ROW, { seed = true, key = publicKey } = {}) {
       device,
       ctx,
     );
+  const put = (next) => putRows([next]);
   const create = (next) =>
     serveFactory(
       new Request("http://local/api/board", {
@@ -109,7 +110,7 @@ function setup(row = ROW, { seed = true, key = publicKey } = {}) {
       principal,
       ctx,
     );
-  return { bucket, etag, put, create, patch };
+  return { bucket, etag, put, putRows, create, patch };
 }
 
 async function refused(s, write, copy) {
@@ -361,6 +362,32 @@ test("a person's PATCH cannot drop a stored steer", async () => {
 test("a device PUT without steer passes when none is stored", async () => {
   const response = await setup(STEER_ROW).put({ ...STEER_ROW, claim: { device: "host-a" } });
   assert.equal(response.status, 200);
+});
+
+const removeRefusal =
+  'a board write from a device cannot remove "114-steer-export" while it is open and holds steering notes: close or merge the job first. Nothing was written.';
+
+test("a device PUT cannot remove an open row with stored steer", async () => {
+  const s = setup(steered([NOTE]));
+  await refused(s, () => s.putRows([]), removeRefusal);
+});
+
+test("a device PATCH cannot remove an open row with stored steer", async () => {
+  const s = setup(steered([NOTE]));
+  await refused(s, () => s.patch(null, device), removeRefusal);
+});
+
+test("a person's PATCH removes an open row with stored steer", async () => {
+  assert.equal((await setup(steered([NOTE])).patch(null, person)).status, 200);
+});
+
+test("a device PUT removes a merged row with stored steer", async () => {
+  const s = setup(steered([NOTE], { ...STEER_ROW, stage: "merged" }));
+  assert.equal((await s.putRows([])).status, 200);
+});
+
+test("a device PUT removes an open row without steer", async () => {
+  assert.equal((await setup(STEER_ROW).putRows([])).status, 200);
 });
 
 test("a person's PATCH cannot add an 11th note", async () => {

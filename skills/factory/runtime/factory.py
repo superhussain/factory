@@ -5724,8 +5724,8 @@ def catch_up_repo(home):
     fail("no factory checkout in paths.md; run factory.py init <factory checkout>", 1)
 
 
-def catch_up_entry(skill):
-    """The argv prefix that runs an installed bundle: its bundle.json entry when valid, else its runtime."""
+def bundle_entry(skill):
+    """The installed bundle's bundle.json entry as an argv prefix under skill, or None when missing or invalid."""
     try:
         entry = json.loads(Path(skill, "bundle.json").read_text(encoding="utf-8")).get("entry")
     except (OSError, ValueError, AttributeError):
@@ -5733,7 +5733,19 @@ def catch_up_entry(skill):
     if isinstance(entry, list) and entry and all(isinstance(a, str) for a in entry) and entry[0] \
             and not os.path.isabs(entry[0]) and ".." not in Path(entry[0]).parts:
         return [str(Path(skill, entry[0])), *entry[1:]]
-    return [sys.executable, str(Path(skill, "runtime", "factory.py"))]
+    return None
+
+
+def catch_up_entry(skill):
+    """The argv prefix that runs an installed bundle: its bundle.json entry when valid, else its runtime."""
+    return bundle_entry(skill) or [sys.executable, str(Path(skill, "runtime", "factory.py"))]
+
+
+def runtime_path():
+    """What where and prompts name as the runtime: the bundle's binary when bundle.json has an entry,
+    else this factory.py."""
+    entry = bundle_entry(Path(HERE).parent)
+    return entry[0] if entry else str(Path(HERE, "factory.py"))
 
 
 def catch_up_backup(home, skill):
@@ -7979,7 +7991,7 @@ def prompt_cmd(target, role, *flags):
              f"Project documents: {documents}",
              f"Visuals reference: {skill / 'references' / 'visuals.md'}",
              f"Walkthrough template: {skill / 'references' / 'walkthrough.html'}",
-             f"Runtime: {skill / 'runtime' / 'factory.py'}",
+             f"Runtime: {runtime_path()}",
              f"Temp folder: {temp}"]
     round_folder = folder / f"round-{options['--round']}" if "--round" in options else None
     if role == "spec":
@@ -10081,7 +10093,7 @@ def where(slug=None):
         fail(f"{home / 'paths.md'} has no entry for {slug}: run /factory init in this device's checkout of it")
     print(json.dumps({
         "factory": str(home),
-        "runtime": str(Path(HERE, "factory.py")),
+        "runtime": runtime_path(),
         "project_file": str(project_file),
         "repo_path": meta["path"],
         "repo": meta.get("repo", ""),

@@ -1,14 +1,14 @@
 # Optional explorer schedule prompt
 
 Before enabling or refreshing this stored prompt, the user materializes
-`<installed-skill>`, `<python-launcher>`, `<project-slug>` and this host's
+`<installed-skill>`, `<project-slug>` and this host's
 `routes.md`. Stop before exploring if any placeholder remains unresolved. This is a
 prompt template, not an executable or an automatically enabled schedule.
 
 1. Pick a route. Run:
 
 ```text
-<python-launcher> <installed-skill>/runtime/factory.py routes pick
+<installed-skill>/runtime/factory routes pick
 ```
 
 On any nonzero exit, name the exit code and first stderr line, then stop. On exit 0,
@@ -18,7 +18,7 @@ If `runtime` is not `claude`, reply `no claude route: runtime <runtime>`, with t
 2. Snapshot. Run:
 
 ```text
-<python-launcher> <installed-skill>/runtime/factory.py explore <project-slug>
+<installed-skill>/runtime/factory explore <project-slug>
 ```
 
 On exit 3, reply `explorer off` with the first stderr line and stop. On any other
@@ -32,7 +32,7 @@ the printed `checkout`, `project`, `run` and `commit`.
 run:
 
 ```text
-<python-launcher> <installed-skill>/runtime/factory.py suggest admit <out>
+<installed-skill>/runtime/factory suggest admit <out>
 ```
 
 Report its JSON, or its exit code and first stderr line.
@@ -40,7 +40,7 @@ Report its JSON, or its exit code and first stderr line.
 5. Clean up. Once step 2 succeeded, always run:
 
 ```text
-<python-launcher> <installed-skill>/runtime/factory.py explore <project-slug> done <run>
+<installed-skill>/runtime/factory explore <project-slug> done <run>
 ```
 
 Do no factory work yourself. Read no other files and run no other commands except

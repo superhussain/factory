@@ -1,14 +1,14 @@
 # Optional resume schedule prompt
 
 Before enabling or refreshing this stored prompt, the user materializes
-`<installed-skill>`, `<python-launcher>` and an available configured dispatch
+`<installed-skill>` and an available configured dispatch
 route. Stop before claiming if any placeholder or route remains unresolved.
 This is a prompt template, not an executable or an automatically enabled schedule.
 
 Run exactly one command:
 
 ```text
-<python-launcher> <installed-skill>/runtime/factory.py stuck --limit 2
+<installed-skill>/runtime/factory stuck --limit 2
 ```
 
 Whatever the exit, append every stderr line beginning `needs-human` to the reply.

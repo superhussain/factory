@@ -1,6 +1,6 @@
 # Automatic pickup
 
-`factory.py pickup` is a model-free command that a host timer runs every 5
+`factory pickup` is a model-free command that a host timer runs every 5
 minutes. It claims runnable ideas for the projects whose pipeline lists this
 host and starts one session per idea through `launchers.json`.
 
@@ -11,7 +11,7 @@ Paste this prompt into a coding agent running on the host, such as Paseo, Claude
 ```text
 Set up automatic factory pickup on this host. You are a coding agent on the machine that should pick up ideas. Work through these steps in order.
 
-1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory.py, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: python3 SKILL/runtime/factory.py pickup setup
+1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: SKILL/runtime/factory pickup setup On Windows the binary is SKILL\runtime\factory.exe; use that spelling in every command below.
    If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with python3 tools/install.py --destination <skills folder> --replace from a clone of the factory repo, then start again.
 2. It prints 7 numbered checks, each ok or missing, with a fix under each missing one. Fix checks 1 to 6 in order. After each fix, run pickup setup again.
    - home: run the doctor line it prints. If the factory home or its credentials are missing, stop and tell me. Never print or copy values from the .env file.
@@ -20,15 +20,15 @@ Set up automatic factory pickup on this host. You are a coding agent on the mach
    - routes: write routes.md from providers and models that exist on this host. Find them first, for example with paseo provider ls and paseo provider models <provider>, opencode models, or the model aliases claude --help lists. Never copy route, provider or model names from another person's setup.
    - launchers: write launchers.json with one launcher per route, copied from the matching example in SKILL/references/pickup.md. Keep every argument the example shows, including its permission mode. Never add --dangerously-skip-permissions or any flag that approves every action.
    - pipeline: pickup must be on for the project and list this host exactly as pickup setup prints it. That is a dashboard setting under Settings, Pipeline, or Settings, Projects, then the project. If you cannot change it yourself, tell me exactly what to click and type, and wait until I say it is done.
-3. Run python3 SKILL/runtime/factory.py pickup --dry-run and show me what it would launch.
-4. Check 7 is the timer. Show me the command python3 SKILL/runtime/factory.py pickup setup --install and say that it writes and loads a 5 minute timer for this host. Run it only after I answer yes. Otherwise I run it myself.
-5. Run pickup setup again until it prints 7 of 7 ok. Then tell me which python the timer runs and any note it printed.
+3. Run SKILL/runtime/factory pickup --dry-run and show me what it would launch.
+4. Check 7 is the timer. Show me the command SKILL/runtime/factory pickup setup --install and say that it writes and loads a 5 minute timer for this host. Run it only after I answer yes. Otherwise I run it myself.
+5. Run pickup setup again until it prints 7 of 7 ok. Then tell me which program the timer runs and any note it printed.
 
 A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.
 ```
 
 When the installed skill is older than this setup, run
-`python3 <installed-skill>/runtime/factory.py catch-up`, or install with
+`<installed-skill>/runtime/factory catch-up`, or install with
 `tools/install.py` if no skill exists yet. Catch-up backs up the skill, timer and
 home config, installs origin's skill and rewrites the pickup timer through it.
 
@@ -38,12 +38,12 @@ Run this on each host. It checks every piece pickup needs, in order, and prints
 the exact fix for each missing one with this host's own paths:
 
 ```
-python3 <installed-skill>/runtime/factory.py pickup setup
+<installed-skill>/runtime/factory pickup setup
 ```
 
 | # | Check | What it reads |
 | --- | --- | --- |
-| 1 | `home` | `factory.py doctor`: config, credentials, projects and board |
+| 1 | `home` | `factory doctor`: config, credentials, projects and board |
 | 2 | `device` | `device:` in `config.md`; without it the host name is the hostname |
 | 3 | `checkout` | `paths.md`, a checkout that exists on this host |
 | 4 | `routes` | `routes.md` |
@@ -56,7 +56,7 @@ It writes no factory file. Then install the 5 minute timer for this host's
 scheduler. Running it again changes nothing:
 
 ```
-python3 <installed-skill>/runtime/factory.py pickup setup --install
+<installed-skill>/runtime/factory pickup setup --install
 ```
 
 | Scheduler | File | Load | Already installed when |
@@ -65,8 +65,8 @@ python3 <installed-skill>/runtime/factory.py pickup setup --install
 | cron | user crontab | `crontab -` | the exact line is present, and no other pickup line |
 | schtasks | `~/.config/factory-pickup.cmd` | `schtasks /Create ... /F` | always re-created (`/F`) |
 
-The timer runs `factory.py --home <home> pickup` with `/usr/bin/python3` when that python runs the runtime, else with the python that ran `--install`. The second line of the output names the timer python and why. When a timer already exists but runs a different python or skill path than `--install` would write, check 7 stays ok and prints a `note:` line. On cron, `--install` replaces any old line that runs
-`factory.py pickup` and keeps every other line. The timer `PATH` holds the launcher folders, the timer python's folder, gh's folder when `gh` is on the installing shell's `PATH`, and the system folders. On launchd, a plist whose `PATH` differs from what `--install` would write gets the same `note:` line.
+The timer runs the installed `factory` binary directly with `--home <home> pickup`, no interpreter. The second line of the output names the timer program. When a timer already exists but runs a different program or skill path than `--install` would write, check 7 stays ok and prints a `note:` line. On cron, `--install` replaces any old line that runs
+`factory pickup` and keeps every other line. The timer `PATH` holds the launcher folders, gh's folder when `gh` is on the installing shell's `PATH`, and the system folders. On launchd, a plist whose `PATH` differs from what `--install` would write gets the same `note:` line.
 
 A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.
 
@@ -93,7 +93,7 @@ Each run, in order:
   launches the first in board order and skips the rest with `batches behind <id>`.
   That session's `batch` step picks them up, since `batch` marks them
   `"hold": true`. When the effective pipeline carries `hold` (`min_ideas` 1 to 20,
-  `max_wait_hours` 1 to 168), it replaces 5 and 12. `factory.py ideas` does not
+  `max_wait_hours` 1 to 168), it replaces 5 and 12. `factory ideas` does not
   hold. A dry run prints a project's pickup off, host or pipeline skip line for
   its held ideas instead of the batch line. Set them in the dashboard under
   Settings, Pipeline, Batch follow-ups. The board shows the same state on each
@@ -127,21 +127,21 @@ Each run, in order:
 - Earned autonomy hold: right after the PR sync, sets `automerge` false, `needs`
   and the note `earned autonomy hold: a person reviews and merges` on each
   automerging, non-escalated `pr-open` job whose project and class have a merged
-  job reverted since the last `factory.py autonomy restore` or
+  job reverted since the last `factory autonomy restore` or
   `autonomy promote <slug> <class>`. It
   prints `held <id> <project> PR #<n> for a person`, or on a dry run
   `would hold <id> <project> PR #<n> for a person`. See docs/autonomy.md,
   Earned autonomy hold.
 - Deny notes: before ideas, launches at most one `/factory deny-notes <id>` session
   for a `closed` job denied from the backlog whose `backlog.notes` are unread (no
-  `backlog.notes_read`). The session gets the notes from `factory.py deny-notes <id>`
+  `backlog.notes_read`). The session gets the notes from `factory deny-notes <id>`
   inside a `backlog-notes` envelope, queues the follow-ups they ask for with
   `backlog add`, then runs `deny-notes <id> done`. Notes that fail admission are
   skipped. This launch does not count against `--limit` or the in-flight cap.
 - Resolve: right after deny notes, launches at most one `/factory rework <id> --session <tag>`
   or `/factory approve <id> --session <tag>` session for a `needs-human` job whose
   `resolve` the dashboard's Rework or Approve as is set. It claims the job and changes
-  nothing else. The note never enters argv; the session reads it with `factory.py job`
+  nothing else. The note never enters argv; the session reads it with `factory job`
   and clears `resolve` with null. It skips a job that waits on a human, is paused,
   closing or held by a live claim, or whose `resolve` is malformed. A dry run prints
   `would launch resolve ...` and `skip resolve <id> <project>: <reason>`. A failed
@@ -221,7 +221,7 @@ Each run, in order:
   running. Jobs waiting on a human never count. `--max-inflight N` lowers it
   further. A host with no record caps each project at `--max-inflight`
   (default 1), as before.
-- On a host paired with `factory.py host pair`, sends the host's status to
+- On a host paired with `factory host pair`, sends the host's status to
   the Worker after every run but `--dry-run`, failed runs included. It carries the OS,
   scheduler, run time, bundle stamp, doctor result, routes and checkout names.
   It is silent, calls no model, and never changes the run's output or exit code.
@@ -242,10 +242,10 @@ Each run, in order:
   `tokens.<device>` and prints `recorded <device> tokens on <job-id>`.
 - Runs the read-only orphan scan on its first run of each local date that
   `<home>/orphan-scan.json` does not record, and prints one line such as
-  `orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory.py orphans to list them`.
+  `orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory orphans to list them`.
   The date is recorded before the scan, so a stopped scan prints one warning and
   waits for the next local date. `pickup --dry-run` skips it. Run
-  `factory.py orphans` for the full list; nothing is removed.
+  `factory orphans` for the full list; nothing is removed.
 - Runs `outcomes record <slug>` on its first run of each local date that
   `<home>/outcomes-record.json` does not record, for each project whose
   `paths.md` checkout folder exists, and prints one line such as
@@ -321,7 +321,7 @@ shared project lists both.
 - Dry run prints ` arm <a|b> model <model>` on each `would launch` line when the
   line is set or the job carries a record; without the line the output is
   unchanged.
-- `factory.py experiment report <name>` reads the board and the local job folders
+- `factory experiment report <name>` reads the board and the local job folders
   and prints per-arm metrics as JSON: job and stage counts, escalations, mean
   review rounds over jobs past review, CHANGES verdicts, stuck resumes, 7-day
   follow-ups split into `rework_of` (rework-of refs, the defect-fix signal) and
@@ -380,31 +380,30 @@ A standing instruction from the user, the person you are working for. It is abou
 
 `pickup setup --install` writes and loads this timer for you. The blocks below are what it writes.
 
-Run `factory.py pickup --dry-run` first: it prints what it would launch and
+Run `factory pickup --dry-run` first: it prints what it would launch and
 changes nothing. Then install one timer per host.
 
 - cron (Linux, WSL):
 
   ```
-  */5 * * * * PATH=<launcher bin dir>:/usr/bin:/bin python3 <installed-skill>/runtime/factory.py pickup >> <home>/logs/pickup.log 2>&1
+  */5 * * * * PATH=<launcher bin dir>:/usr/bin:/bin <installed-skill>/runtime/factory --home <home> pickup >> <home>/logs/pickup.log 2>&1
   ```
 
   WSL without systemd needs `service cron start`, plus the `/etc/wsl.conf`
   `[boot]` line.
 
 - launchd (macOS), `~/Library/LaunchAgents/factory.pickup.plist` with
-  `ProgramArguments` `/usr/bin/python3`, `<installed-skill>/runtime/factory.py`,
+  `ProgramArguments` `<installed-skill>/runtime/factory`, `--home`, `<home>`,
   `pickup`; `EnvironmentVariables` `PATH`; `StartInterval` 300;
   `StandardOutPath` and `StandardErrorPath` `<home>/logs/pickup.log`. Load with
   `launchctl bootstrap gui/$(id -u) <plist>`.
 
 - Task Scheduler (Windows): wrapper `%USERPROFILE%\.config\factory-pickup.cmd`
   that sets `PATH` and runs
-  `py -3 <installed-skill>\runtime\factory.py pickup >> <home>\logs\pickup.log 2>&1`,
+  `<installed-skill>\runtime\factory.exe --home <home> pickup >> "<home>\logs\pickup.log" 2>&1`,
   then
   `schtasks /Create /TN factory-pickup /SC MINUTE /MO 5 /TR "%USERPROFILE%\.config\factory-pickup.cmd" /F`.
-  Python there has no zone data, so `py -3 -m pip install --user tzdata` lets
-  reset times parse; without it limits default to 60 minutes.
+  On Windows the binary reads no time zone data, so usage limits default to 60 minutes.
 
 ## Stalled-session takeover
 
@@ -427,9 +426,9 @@ changes nothing. Then install one timer per host.
 - `stalls.json` is device config written by hand and never synced:
   `{"version": 1, "adapter": ["<program>", "<arg>", ...], "takeover_minutes": 30}`.
   Deleting the file turns takeover off. A failed takeover launch leaves a claim that
-  `factory.py stuck` recovers after `claim_stale_minutes`.
+  `factory stuck` recovers after `claim_stale_minutes`.
 - The adapter is an argv command with `list` and `archive <session>` verbs and JSON output;
-  a stdlib Paseo adapter ships in the bundle:
+  a Paseo adapter ships in the bundle (a Python script, so this adapter still needs Python 3):
   `{"version": 1, "adapter": ["python3", "<installed-skill>/runtime/paseo_stalls.py"], "takeover_minutes": 30}`.
   It reports only idle, unarchived Claude limit stalls and re-checks a session before
   archiving it, so a session a human or the sweep has woken is kept.
@@ -441,7 +440,7 @@ changes nothing. Then install one timer per host.
 
 ## Moving a job to another host
 
-- The dashboard's move button replaces a job's `claim` and `paseo` with `move = {from, session, to, at}`. Only the dashboard, `pickup` and `factory.py control <job-id> move <host>|rerun --chat-file <file>` write `move`; `control` adds the chat record `via`, `quote` and `by`.
+- The dashboard's move button replaces a job's `claim` and `paseo` with `move = {from, session, to, at}`. Only the dashboard, `pickup` and `factory control <job-id> move <host>|rerun --chat-file <file>` write `move`; `control` adds the chat record `via`, `quote` and `by`.
 - A second move keeps each earlier holder in `move.earlier`. Those sessions stay fenced, and each earlier host's `pickup` still stops its worktree.
 - The old session is fenced: its next `board` or `hold` exits 6 with `<id> was moved to <host>`. `hold <project>/<id> take` still claims the job.
 - The old host's `pickup` stops the job's worktree processes first on every run, then sets `move.stopped`.
@@ -460,7 +459,7 @@ changes nothing. Then install one timer per host.
 - To archive a kept session, run the `adapter` argv from `stalls.json` followed by `archive <agent> --force` on the host that printed the hint. With the Paseo adapter that is `python3 <installed-skill>/runtime/paseo_stalls.py archive <agent> --force`. It accepts only ids that match `[0-9a-fA-F][0-9a-fA-F-]{7,63}`, checks the session with `paseo inspect` first, and does nothing if it is already archived. If `paseo inspect` fails or prints bad JSON, it archives anyway.
 - The adapter argv only archives kept sessions. A "skipped archive" id fails the adapter's id check, so run the printed `paseo archive --force <agent>` command instead. That command calls Paseo directly, with no id check and no already-archived check. `--force` archives the session even while it is working, so check first that its work is saved or no longer needed.
 - The target host's `pickup` claims the job once, sets `move.claimed` and launches `/factory recover`. The usual gates apply: pickup on, host listed, not gated, the cap and a route.
-- `factory.py stuck` leaves a move with no `claimed` to its target.
+- `factory stuck` leaves a move with no `claimed` to its target.
 
 ## Rerunning a stage
 
@@ -468,7 +467,7 @@ changes nothing. Then install one timer per host.
 - That host's `pickup` claims the rerun only after its own stop is recorded. While a stop from this host is still queued, the job waits.
 - When the stop succeeds, the same run claims the job, sets `move.claimed` and launches `/factory recover`, which restarts the current stage in a fresh session. Pickup prints `stopped <id> <project>: rerun on <host>` before `launched ...`. If the stop fails, nothing is claimed and the next run retries both.
 - The dashboard refuses a rerun when the host does not run pickup for the project, since nothing would restart the job. Use Move to another host instead.
-- `factory.py control <job-id> rerun --chat-file <file>` writes the same self-move from a person's chat message, with the same checks.
+- `factory control <job-id> rerun --chat-file <file>` writes the same self-move from a person's chat message, with the same checks.
 
 ## Prioritizing a job
 
@@ -478,12 +477,12 @@ changes nothing. Then install one timer per host.
 - The dashboard shows a prioritized job at the top of its column in idea, spec, build, review and approve.
 - When the job's session on this host was claimed before `priority.at` and its Paseo agent is not closed, `pickup` sends the agent one fixed nudge with `paseo send --no-wait`, then sets `priority.nudged`. A failed send is printed on stderr and retried next run.
 - An agent waiting at a permission dialog gets no nudge. `pickup` reads `PendingPermissions` from `paseo inspect <agent> --json` and prints `skip nudge <id> <project>: agent <agent> waits at a permission dialog`, dry run or not. Any answer but an empty list counts as unknown and prints `skip nudge <id> <project>: agent <agent> permission state unknown`.
-- Only the dashboard, `pickup` and `factory.py control` write `priority`. `board` refuses a `priority` patch with exit 2.
+- Only the dashboard, `pickup` and `factory control` write `priority`. `board` refuses a `priority` patch with exit 2.
 
 ## Stopping the whole factory
 
 - The dashboard's Stop factory form in Settings > Hosts sets the global stop flag, and the banner's Resume factory clears it. Only a signed-in person can clear it.
-- An agent that sees an incident needing every host stopped runs `factory.py halt set --reason <text>`. `factory.py halt status` prints the record.
+- An agent that sees an incident needing every host stopped runs `factory halt set --reason <text>`. `factory halt status` prints the record.
 - While the flag is set, `pickup` prints `factory.py: pickup launches nothing; factory stopped by ...` on stderr and runs no pass: no launch, takeover, triage or Tracer pass. Its dry run prints `skip all: ...`.
 - `stuck` exits 3, so the resume schedule resumes nothing.
 - Sessions already running keep running. A stop blocks new starts only.
@@ -497,7 +496,7 @@ changes nothing. Then install one timer per host.
 - After 20 quiet minutes, `pickup` sends the agent one fixed nudge with `paseo send --no-wait` and prints `nudged idle <id> <project>: agent <agent>`. `--dry-run` prints `would nudge idle ...` and writes nothing. A failed send prints `factory.py: pickup could not nudge idle <id>: paseo send failed` on stderr and retries next run.
 - The idle nudge skips an agent waiting at a permission dialog, as the priority nudge does, and prints `skip idle nudge <id> <project>: agent <agent> waits at a permission dialog` or `... permission state unknown`. The entry gets no `nudged`, so the job never moves to `needs-human` while it waits.
 - When the agent waits at a permission dialog, `pickup` sets the job's note once per wait to `permission: agent <agent> has waited at a permission dialog for 20 minutes; answer it in Paseo` and prints `surfaced <id> <project>: <note>`. The write needs the same stage and a claim by this host. It sets no `needs`, moves no stage and sends nothing. The entry records `surfaced`, so later runs write nothing until the quiet signature changes. `--dry-run` prints `would surface <id> <project>: <note>`. A `permission state unknown` answer writes no note.
-- The nudge reads: "Factory job <id> shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory.py hold for the job with your --session tag, then keep waiting."
+- The nudge reads: "Factory job <id> shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory hold for the job with your --session tag, then keep waiting."
 - After 20 more quiet minutes, `pickup` moves the job to `needs-human`, releases the claim and prints `needs-human <id> <project>: idle: no progress 20 minutes after a nudge to agent <agent>`. A board change since the read wins, so a fresh `hold` keeps the job.
 - `--dry-run` prints `would move needs-human <id> <project>: <note>` for that move and writes neither the board nor `idle-watch.json`.
 - When paseo does not answer, `pickup` prints `factory.py: pickup skips idle checks: paseo did not answer` on stderr.
@@ -560,7 +559,7 @@ Numbers use `,` thousands separators. The last three lines go to stderr. A real 
 - Right after the move stops, `pickup` runs `paseo stop` on a paused job's linked agent when it runs on this host's server, the claim is absent or this host's, and the agent is not `closed` or missing. It records `paused.session_stop.<host> = {agent, at}`, prints `stopped session <agent> of <id> <project>: the job is paused` and keeps the claim, so Resume lets `stuck` or the idle nudge restart the work. A pause after a Resume stops the session again.
 - The job panel shows each recorded stop, paused or closing, as `Pickup stopped session <agent> on <host> <time> because the job was paused.` or `... closed.`
 - `pickup` never stops the agent running it, a batched rider's agent or another harness's session. A failed stop prints `factory.py: pickup could not stop agent <agent> of <id>: paseo stop failed` on stderr and records nothing, so the next run retries. `--dry-run` prints `would stop session <agent> of <id> <project>: <why>` and writes nothing. When paseo does not answer, it prints `factory.py: pickup skips session stops: paseo did not answer` on stderr.
-- Only the dashboard and `factory.py control` write `paused`. `board` refuses a `paused` patch with exit 2.
+- Only the dashboard and `factory control` write `paused`. `board` refuses a `paused` patch with exit 2.
 
 ## Closing a job
 
@@ -570,7 +569,7 @@ Numbers use `,` thousands separators. The last three lines go to stderr. A real 
 - When the closed job has a stacked rider with an open PR, the close pass closes the rider's open PR with a disclosed comment after the board write, and rewrites every such rider's note in a single board write after the last PR closes.
 - Before the close pass, `pickup` stops this host's linked Paseo agent of a closing job, as it does for a paused one, and records `close.session_stop.<host> = {agent, at}`. The same write releases this host's claim, so the close pass closes the job in that run. It prints `stopped session <agent> of <id> <project>: the job is closing`. A job closed in the last 24 hours, on any host, gets the same stop with `the job is closed`.
 - A session on a closing job is refused at its next `board` or `hold` call with exit 6. `board` first releases that session's own claim, so the next pickup can close the job.
-- Only the dashboard, `pickup` and `factory.py control` write `close`. `board` refuses a `close` patch with exit 2.
+- Only the dashboard, `pickup` and `factory control` write `close`. `board` refuses a `close` patch with exit 2.
 - The next pickup run on a host that still holds a closed job's worktree or `factory/<id>` branch runs `cleanup` on it when the project's pickup is on and lists that host, once per host, and records `close.cleanup.<host> = {at, left}`. It does the same for a `merged` job with `github.merged`, which the PR sync sets, and records `github.cleanup.<host> = {at, left}`. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit and no worktree has it checked out. It deletes that branch with `git update-ref -d` guarded by the branch's current commit, never `git branch -D`. For a `merged` job it also deletes a branch whose tip `github.head` contains, guarded by the branch's current commit. The kept branch's `left` entry ends with `and origin could not be reached`, `and origin has no such branch` or `and origin is at a different commit`. Its dry run prints `would clean up <id> <project>`. The close pass's `decision.md` names each host the board records as holding the job, from `claim` and every `move` holder, that the project's pickup is off for or does not list, and says which of the two it is. When it cannot read the pickup hosts, it names every recorded holder and says why it could not read them.
 
 ## Syncing PR state
@@ -589,7 +588,7 @@ Numbers use `,` thousands separators. The last three lines go to stderr. A real 
 
 ## Prebuilt dependencies
 
-`factory.py worktree` installs the folders a device-local `<home>/prebuild.json`
+`factory worktree` installs the folders a device-local `<home>/prebuild.json`
 lists for the project, so agents never run `pnpm install` themselves. The host owns
 the file, and nothing syncs it:
 

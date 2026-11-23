@@ -131,12 +131,45 @@ pub fn skill_root() -> Res<PathBuf> {
         .to_path_buf())
 }
 
-/// The `factory.py` beside this binary: what `where` and prompts name as the runtime, since every
-/// doc runs `python3 <runtime>`, and the launcher in that file hands off to this binary.
-pub fn runtime_py() -> Res<PathBuf> {
+/// The installed bundle's bundle.json entry as an argv prefix under skill, or None when it is
+/// missing or invalid: a nonempty list of strings whose first is a relative path without `..`.
+pub fn bundle_entry(skill: &Path) -> Option<Vec<String>> {
+    let entry = super::fs::read_text(&skill.join("bundle.json"))
+        .ok()
+        .and_then(|t| pyjson::loads(&t).ok())
+        .and_then(|v| v.get("entry").cloned());
+    let args: Vec<String> = entry
+        .as_ref()
+        .and_then(serde_json::Value::as_array)?
+        .iter()
+        .map(|v| v.as_str().map(String::from))
+        .collect::<Option<_>>()?;
+    let first = Path::new(args.first().filter(|a| !a.is_empty())?);
+    if first.is_absolute()
+        || first.has_root()
+        || first
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+    {
+        return None;
+    }
+    let program: PathBuf = skill.join(first).components().collect();
+    Some(
+        std::iter::once(program.to_string_lossy().into_owned())
+            .chain(args[1..].iter().cloned())
+            .collect(),
+    )
+}
+
+/// What `where` and prompts name as the runtime: the bundle's binary when the skill's bundle.json
+/// has an entry, else the `factory.py` beside this binary.
+pub fn runtime_path() -> Res<PathBuf> {
     let exe = std::env::current_exe()
         .and_then(|p| resolve(&p))
         .map_err(|e| fail(os_error(&e, None), 1))?;
+    if let Some(entry) = exe.parent().and_then(Path::parent).and_then(bundle_entry) {
+        return Ok(PathBuf::from(&entry[0]));
+    }
     Ok(exe.with_file_name("factory.py"))
 }
 
@@ -298,17 +331,52 @@ pub fn holder(home: &Path) -> Res<(String, String, u32)> {
 mod tests {
     use super::*;
     use crate::shared::fs::temp_dir;
-    use serde_json::Value;
+    use serde_json::{json, Value};
 
     fn err(r: Res<PathBuf>) -> String {
         r.unwrap_err().stderr
     }
 
     #[test]
+    fn bundle_entry_accepts_only_a_relative_path_inside_the_skill() {
+        let skill =
+            std::env::temp_dir().join(format!("factory-bundle-entry-{}", std::process::id()));
+        fs::create_dir_all(&skill).unwrap();
+        let write = |entry: Value| {
+            fs::write(
+                skill.join("bundle.json"),
+                json!({"commit": "c", "entry": entry}).to_string(),
+            )
+            .unwrap()
+        };
+        assert_eq!(bundle_entry(&skill), None);
+        for bad in [
+            json!(["../factory"]),
+            json!(["/usr/bin/factory"]),
+            json!([]),
+            json!([""]),
+            json!([1]),
+            json!(null),
+        ] {
+            write(bad.clone());
+            assert_eq!(bundle_entry(&skill), None, "{bad}");
+        }
+        write(json!(["runtime/factory", "-q"]));
+        assert_eq!(
+            bundle_entry(&skill),
+            Some(vec![
+                skill.join("runtime/factory").to_string_lossy().into_owned(),
+                "-q".into()
+            ])
+        );
+        fs::remove_dir_all(&skill).unwrap();
+    }
+
+    #[test]
     fn runtime_is_the_factory_py_beside_the_binary() {
         let exe = resolve(&std::env::current_exe().unwrap()).unwrap();
         assert_eq!(
-            runtime_py().unwrap(),
+            runtime_path().unwrap(),
             exe.parent().unwrap().join("factory.py")
         );
     }
