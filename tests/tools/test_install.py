@@ -1,4 +1,5 @@
 import contextlib
+import errno
 import hashlib
 import importlib.util
 import io
@@ -13,7 +14,8 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "cli"))
 from support import ROOT, SKILL, IsolatedTestCase, snapshot
@@ -443,6 +445,45 @@ class InstallTest(IsolatedTestCase):
         (stored / "factory").write_bytes(b"tampered")
         self.assertEqual(rust("6", "4")[0], b"6")
         self.assertEqual(runs(), 6)
+        self.assertEqual(sorted(path.name for path in stored.iterdir()), ["factory", "factory.sha256"])
+        self.assertEqual(len(list(bins.iterdir())), 3)
+        # Rust flags and the user's cargo config are part of the key too.
+        os.environ["RUSTFLAGS"] = "-C target-cpu=native"
+        self.assertEqual(rust("7", "4")[0], b"7")
+        del os.environ["RUSTFLAGS"]
+        self.assertEqual(rust("8", "4")[0], b"6")
+        os.environ["CARGO_HOME"] = str(self.root / "cargo-home")
+        (self.root / "cargo-home").mkdir()
+        (self.root / "cargo-home/config.toml").write_text("[build]\nrustflags = ['-Copt-level=1']\n")
+        self.assertEqual(rust("9", "4")[0], b"9")
+        self.assertEqual(runs(), 8)
+
+    def test_windows_lock_retries_only_while_busy_and_gives_up(self):
+        busy = OSError(errno.EDEADLOCK, "busy")
+        def hold(effects, clock=(0, 0, 0)):
+            msvcrt = SimpleNamespace(LK_LOCK=1, locking=Mock(side_effect=effects))
+            with patch.dict(sys.modules, msvcrt=msvcrt), patch.object(self.installer.os, "name", "nt"), \
+                    patch.object(self.installer.time, "monotonic", side_effect=clock), open(self.root / "lock", "a") as lock:
+                try:
+                    self.installer.hold(lock)
+                finally:
+                    calls.append(msvcrt.locking.call_count)
+        calls = []
+        hold([busy, None])
+        with self.assertRaises(OSError):
+            hold([OSError(errno.EBADF, "bad"), None])
+        with self.assertRaises(OSError):
+            hold([busy, busy, None], clock=(0, 1, self.installer.LOCK_WAIT))
+        self.assertEqual(calls, [2, 1, 2])
+
+    def test_missing_localappdata_keeps_the_python_runtime(self):
+        del os.environ["FACTORY_RUNTIME"]
+        source = self.checkout(None)
+        os.environ.pop("LOCALAPPDATA", None)
+        with patch.object(self.installer.shutil, "which", return_value="/no/cargo"), \
+                patch.object(self.installer.os, "name", "nt"), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertIsNone(self.installer.rust_binary(source.parents[1]))
+        self.assertEqual(err.getvalue(), "install: Rust build failed, keeping the Python runtime (LOCALAPPDATA is not set)\n")
 
     def test_sync_rewrites_only_changed_files_and_drops_vanished_ones(self):
         root = self.root / "src"

@@ -1,6 +1,7 @@
 """Copy the self-contained factory skill. Python 3.8+, stdlib only."""
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -32,6 +33,7 @@ BINARY = "runtime/factory.exe" if os.name == "nt" else "runtime/factory"
 LOCK = ".build.lock"
 PROFILE = "host"
 KEEP = 3  # binaries kept in the cache, newest first
+LOCK_WAIT = 1800  # seconds a Windows install waits for another one's build
 # A literal include_str! or include_bytes! path, relative to the .rs file that holds it.
 EMBED = re.compile(r'include_(?:str|bytes)!\(\s*"([^"]+)"\s*\)')
 
@@ -57,12 +59,14 @@ def rust_binary(checkout):
     if cargo is None:
         print("install: cargo not found, keeping the Python runtime", file=sys.stderr)
         return None
-    cache = (Path(os.environ["LOCALAPPDATA"], "huss-skills", "factory") if os.name == "nt"
-             else Path.home() / ".cache" / "huss-skills" / "factory")
-    # A per-user target folder keeps dependencies compiled across catch-up's fresh source worktrees.
-    target = Path(os.environ.get("CARGO_TARGET_DIR") or cache / "cargo-target")
-    name = Path(BINARY).name
     try:
+        if os.name == "nt" and not os.environ.get("LOCALAPPDATA"):
+            raise OSError("LOCALAPPDATA is not set")
+        name = Path(BINARY).name
+        cache = (Path(os.environ["LOCALAPPDATA"], "huss-skills", "factory") if os.name == "nt"
+                 else Path.home() / ".cache" / "huss-skills" / "factory")
+        # A per-user target folder keeps dependencies compiled across catch-up's fresh source worktrees.
+        target = Path(os.environ.get("CARGO_TARGET_DIR") or cache / "cargo-target")
         files = build_inputs(checkout)
         key = hashlib.sha256()
         for rel in sorted(files):
@@ -70,6 +74,13 @@ def rust_binary(checkout):
         # rustc -vV prints the pinned toolchain's version and its host target triple; cwd picks the pin.
         rustc = Path(cargo).with_name("rustc.exe" if os.name == "nt" else "rustc")
         key.update(run([str(rustc), "-vV"], checkout / "rust").encode() + b"\0" + PROFILE.encode())
+        # Flags and the user's cargo config change the binary without changing any synced file.
+        for flag in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS"):
+            key.update(b"\0" + flag.encode() + b"=" + os.environ.get(flag, "").encode())
+        cargo_home = Path(os.environ.get("CARGO_HOME") or Path.home() / ".cargo")
+        for config in ("config.toml", "config"):
+            if (cargo_home / config).is_file():
+                key.update(b"\0" + config.encode() + b"\0" + (cargo_home / config).read_bytes())
         key = key.hexdigest()
         stored = private_dir(cache / "bin") / key
         if (stored / name).is_file() and (stored / (name + ".sha256")).is_file():
@@ -89,10 +100,12 @@ def rust_binary(checkout):
                 src / "rust", dict(os.environ, CARGO_TARGET_DIR=str(target)))
             binary = (target / PROFILE / name).read_bytes()
             stored.mkdir(exist_ok=True)
-            (stored / name).write_bytes(binary)
-            (stored / (name + ".sha256")).write_text(hashlib.sha256(binary).hexdigest() + "\n")
+            # The sha256 goes last, so a reader never matches a half-written binary.
+            write_atomic(stored / name, binary)
+            write_atomic(stored / (name + ".sha256"), (hashlib.sha256(binary).hexdigest() + "\n").encode())
             os.utime(stored)
-            for old in sorted(stored.parent.iterdir(), key=lambda path: path.stat().st_mtime_ns, reverse=True)[KEEP:]:
+            others = [path for path in stored.parent.iterdir() if path != stored]
+            for old in sorted(others, key=lambda path: path.stat().st_mtime_ns, reverse=True)[KEEP - 1:]:
                 shutil.rmtree(old)
         print("install: Rust binary built in " + str(round(time.monotonic() - start)) + " s", file=sys.stderr)
         return binary
@@ -142,14 +155,27 @@ def hold(lock):
     """Block until this process holds lock, an open file; closing it releases the lock."""
     if os.name == "nt":
         import msvcrt
+        deadline = time.monotonic() + LOCK_WAIT
         while True:
             try:
                 msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
                 return
-            except OSError:
-                pass  # LK_LOCK gives up after 10 s; a build takes longer.
+            except OSError as e:
+                # LK_LOCK gives up after 10 s while another install builds; anything else is a real error.
+                if e.errno not in (errno.EDEADLOCK, errno.EACCES) or time.monotonic() >= deadline:
+                    raise
     import fcntl
     fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+
+
+def write_atomic(path, data):
+    """Write data beside path, flush it to disk, then rename it over path."""
+    temp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+    with open(temp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(temp, path)
 
 
 def sync(files, root):
