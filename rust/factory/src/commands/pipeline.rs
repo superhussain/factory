@@ -9,7 +9,7 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::cli::{not_ported, Call};
-use crate::shared::board::{dump_board, escalated, load_board, patch_job, read_board};
+use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{
     tag_lookalike, BABYSIT_SENTENCE, JOB_ID, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS,
@@ -27,7 +27,7 @@ use crate::shared::py::{
     universal_newlines,
 };
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2, NO_ASCII};
-use crate::shared::pyre::{Flags, Pattern};
+use crate::shared::pyre::{translate, Flags, Pattern};
 use crate::shared::time::{format_stamp, now, parse_stamp, unix_now};
 use crate::shared::unicode::nfkc;
 
@@ -2102,6 +2102,727 @@ pub fn repeats_cmd(call: &Call) -> Res<()> {
     flushed(|o| repeats(&home, &slug, &job_id, &round_text, o))
 }
 
+// ---- review-floor and review-plan ----
+
+const VISIBLE_GLOBS: &[&str] = &[
+    "*.html",
+    "*.htm",
+    "*.css",
+    "*.scss",
+    "*.sass",
+    "*.less",
+    "*.svg",
+    "*.png",
+    "*.jpg",
+    "*.jpeg",
+    "*.gif",
+    "*.webp",
+    "*.ico",
+    "*.vue",
+    "*.svelte",
+    "*.jsx",
+    "*.tsx",
+    "*.astro",
+    "*.hbs",
+    "*.njk",
+    "*.ejs",
+    "*.erb",
+    "*.j2",
+    "*.jinja",
+    "*templates/*",
+    "*components/*",
+    "web/*",
+    "public/*",
+    "static/*",
+    "assets/*",
+];
+const PROTECTED_PATHS: &[&str] = &[
+    ".github/*",
+    "*/.github/*",
+    "*.gitlab-ci*",
+    "*.circleci/*",
+    "*buildkite*",
+    "*jenkinsfile*",
+    ".factory/*",
+    ".husky/*",
+    "*.pre-commit-config.yaml",
+    "*lefthook*",
+    "*conftest.py",
+    "*pytest.ini",
+    "*tox.ini",
+    "*jest.config*",
+    "*vitest.config*",
+    "*playwright.config*",
+    "package.json",
+    "*/package.json",
+    "*.gitleaks.toml",
+    "mise.toml",
+    "*/mise.toml",
+    "*.mise.toml",
+    "*.oxfmtrc*",
+    "nx.json",
+    "tools/verify.py",
+    "tests/cli/support.py",
+    "tests/support/*",
+    "tools/secret-scan.py",
+    "pnpm-workspace.yaml",
+    "*/pnpm-workspace.yaml",
+    "*.npmrc",
+];
+static VISUAL_CRITERION: Pattern = Pattern::new(
+    "screenshot|captur|before and after|before/after|visual evidence",
+    Flags::I,
+);
+static VISIBLE_CHANGE: Pattern = Pattern::new(r"^## Visible change[ \t]*$", Flags::M);
+static FULL_REVIEW: Pattern = Pattern::new(r"^## Full review[ \t]*$", Flags::M);
+static TIER_LINE: Pattern = Pattern::new(
+    r"^Tier:\s*(low|medium|high)\s*$",
+    Flags {
+        multiline: true,
+        ignore_case: true,
+        ..Flags::NONE
+    },
+);
+static BACKTICK: Pattern = Pattern::new(r"`([^`\n]+)`", Flags::NONE);
+static SECTION_END: Pattern = Pattern::new(r"^##\s", Flags::NONE);
+static PROJECT_REPO: Pattern = Pattern::new(r"\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z", Flags::ASCII);
+static BASE_NAME: Pattern = Pattern::new(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}", Flags::NONE);
+const SKIPPABLE_REVIEWERS: [&str; 2] = ["ux", "ui"];
+const REVIEW_PLAN_USAGE: &str = "usage: review-plan <project-slug>/<job-id> <round>";
+const REVIEW_FLOOR_USAGE: &str = "usage: review-floor <project-slug>/<job-id>";
+const REVIEW_FLOOR_FILE: &str = "review-floor.json";
+
+fn tier_rank(tier: &str) -> u8 {
+    match tier {
+        "low" => 0,
+        "medium" => 1,
+        _ => 2,
+    }
+}
+
+/// The lines under the first ## heading named name, up to the next ## heading, or None.
+fn markdown_section(text: &str, name: &str) -> Option<String> {
+    let lines = splitlines(text, false);
+    let src = format!(r"^##\s+(?:\d+\.\s*)?{}\b", fancy_regex::escape(name));
+    let heading = fancy_regex::Regex::new(&translate(&src, Flags::I)).unwrap();
+    let start = lines
+        .iter()
+        .position(|l| heading.is_match(l).unwrap_or(false))?;
+    let end = (start + 1..lines.len())
+        .find(|&i| SECTION_END.match_start(lines[i]).is_some())
+        .unwrap_or(lines.len());
+    Some(lines[start + 1..end].join("\n"))
+}
+
+/// A file's strict UTF-8 text, or a failure naming it.
+fn read_file(path: &Path) -> Res<String> {
+    read_text(path).map_err(|e| fail(os_error(&e, Some(path)), 1))
+}
+
+/// VISIBLE_GLOBS plus every backtick span in the project file's ## UI section.
+fn visible_globs(project_file: &Path) -> Res<Vec<String>> {
+    let section = markdown_section(&read_file(project_file)?, "UI").unwrap_or_default();
+    let mut globs: Vec<String> = VISIBLE_GLOBS.iter().map(|g| g.to_string()).collect();
+    globs.extend(
+        BACKTICK
+            .find_iter(&section)
+            .map(|m| m.as_str().trim_matches('`').to_string()),
+    );
+    Ok(globs)
+}
+
+/// The sorted paths that match a PROTECTED_PATHS glob, compared lowercased.
+fn touched_protected(paths: &[String]) -> Vec<String> {
+    let mut hit: Vec<String> = paths
+        .iter()
+        .filter(|p| {
+            let lower = p.to_lowercase();
+            PROTECTED_PATHS.iter().any(|g| fnmatch(&lower, g))
+        })
+        .cloned()
+        .collect();
+    hit.sort();
+    hit
+}
+
+/// (visible, reason): whether a round changes something a person sees, and the first rule that decided it.
+fn plan_reason(
+    spec_text: &str,
+    decision_text: &str,
+    changed: &[String],
+    globs: &[String],
+) -> (bool, String) {
+    let Some(criteria) = markdown_section(spec_text, "Acceptance criteria") else {
+        return (true, "spec.md has no Acceptance criteria section".into());
+    };
+    if VISUAL_CRITERION.search(&criteria).is_some() {
+        return (
+            true,
+            "spec.md has a visual-evidence acceptance criterion".into(),
+        );
+    }
+    if VISIBLE_CHANGE.search(decision_text).is_some() {
+        return (true, "decision.md names a visible change".into());
+    }
+    for path in changed {
+        if let Some(glob) = globs.iter().find(|g| fnmatch(path, g)) {
+            return (true, format!("{path} matches {glob}"));
+        }
+    }
+    (
+        false,
+        format!(
+            "spec.md has no visual-evidence criterion and none of the {} changed files matches a visible-file glob",
+            changed.len()
+        ),
+    )
+}
+
+/// The spec's Review tier line value, lowercased, or None.
+fn spec_tier(spec_text: &str) -> Option<String> {
+    let section = markdown_section(spec_text, "Review tier").unwrap_or_default();
+    TIER_LINE
+        .search(&section)
+        .map(|m| m.get(1).unwrap().as_str().to_lowercase())
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Floor {
+    tier: Option<String>,
+    full_review: bool,
+    unreadable: bool,
+}
+
+/// The recorded floor, None for a missing file, or a high floor marked unreadable for a bad one.
+fn read_review_floor(path: &Path) -> Option<Floor> {
+    if !path.is_file() {
+        return None;
+    }
+    let floor = read_text(path).ok().and_then(|t| loads(&t).ok());
+    let map = floor.as_ref().and_then(Value::as_object);
+    let tier = map.and_then(|m| m.get("tier")).unwrap_or(&Value::Null);
+    let tier_ok = tier.is_null()
+        || tier
+            .as_str()
+            .is_some_and(|t| ["low", "medium", "high"].contains(&t));
+    let full = map
+        .and_then(|m| m.get("full_review"))
+        .and_then(Value::as_bool);
+    match (map, full) {
+        (Some(_), Some(full)) if tier_ok => Some(Floor {
+            tier: tier.as_str().map(String::from),
+            full_review: full,
+            unreadable: false,
+        }),
+        _ => Some(Floor {
+            tier: Some("high".into()),
+            full_review: false,
+            unreadable: true,
+        }),
+    }
+}
+
+/// The floor raised by the current spec tier and decision.md's Full review heading. It never lowers.
+fn merge_review_floor(floor: Option<Floor>, spec_text: &str, decision_text: &str) -> Floor {
+    let floor = floor.unwrap_or(Floor {
+        tier: None,
+        full_review: false,
+        unreadable: false,
+    });
+    let tiers: Vec<String> = [floor.tier.clone(), spec_tier(spec_text)]
+        .into_iter()
+        .flatten()
+        .collect();
+    let mut tier: Option<String> = None;
+    for t in tiers {
+        if tier
+            .as_ref()
+            .is_none_or(|best| tier_rank(&t) > tier_rank(best))
+        {
+            tier = Some(t);
+        }
+    }
+    Floor {
+        tier,
+        full_review: floor.full_review || FULL_REVIEW.search(decision_text).is_some(),
+        unreadable: floor.unreadable,
+    }
+}
+
+/// (tier, reason): the spec's Review tier line, raised to high by the first floor that applies.
+fn review_tier(
+    spec_text: &str,
+    decision_text: &str,
+    protected: Option<&[String]>,
+    floor: &Floor,
+) -> (String, String) {
+    let high = |r: &str| ("high".to_string(), r.to_string());
+    if FULL_REVIEW.search(decision_text).is_some() {
+        return high("decision.md asks for a full review");
+    }
+    if floor.full_review {
+        return high("review-floor.json records a full review");
+    }
+    let Some(protected) = protected else {
+        return high("the protected paths could not be read");
+    };
+    if !protected.is_empty() {
+        return high("the branch touches protected paths");
+    }
+    let Some(tier) = spec_tier(spec_text) else {
+        return high("spec.md has no Review tier line");
+    };
+    if let Some(recorded) = floor
+        .tier
+        .as_ref()
+        .filter(|f| tier_rank(f) > tier_rank(&tier))
+    {
+        if floor.unreadable {
+            return (
+                recorded.clone(),
+                "review-floor.json could not be read".into(),
+            );
+        }
+        return (
+            recorded.clone(),
+            format!("review-floor.json records {recorded}, above spec.md's {tier}"),
+        );
+    }
+    let reason = format!("spec.md rates the job {tier}");
+    (tier, reason)
+}
+
+/// git in wt, as a captured result, or None when git cannot run.
+fn git_run(
+    wt: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+    timeout: Option<u64>,
+) -> Option<crate::shared::proc::Out> {
+    let wt = wt.to_string_lossy();
+    let argv: Vec<&str> = ["git", "-C", &wt]
+        .into_iter()
+        .chain(args.iter().copied())
+        .collect();
+    capture(
+        &argv,
+        None,
+        env,
+        timeout.map(std::time::Duration::from_secs),
+    )
+    .ok()
+}
+
+/// None once origin/<base> in wt matches <base> at the project file's repo, or why it cannot be trusted.
+fn fetch_base(wt: &Path, base: &str, repo: &str) -> Option<String> {
+    if base.starts_with("factory/") {
+        return Some(format!("base {base} is a factory branch"));
+    }
+    if !BASE_NAME.is_full(base) || base.contains("..") {
+        return Some(format!("base {base} is not a safe branch name"));
+    }
+    if !PROJECT_REPO.is_full(repo) || repo.contains("..") {
+        return Some(format!(
+            "project file repo {} is not owner/name",
+            repr(repo)
+        ));
+    }
+    let mut scopes = vec!["--local"];
+    let ext = git_run(
+        wt,
+        &["config", "--bool", "extensions.worktreeConfig"],
+        &[],
+        None,
+    );
+    if ext.is_some_and(|o| strip(&o.stdout) == "true") {
+        scopes.push("--worktree");
+    }
+    for scope in scopes {
+        let cfg = git_run(
+            wt,
+            &[
+                "config",
+                scope,
+                "--includes",
+                "--get-regexp",
+                r"^(url|http)\.",
+            ],
+            &[],
+            None,
+        );
+        match cfg.map(|o| o.code) {
+            Some(0) => return Some("the worktree's git config sets url or http keys".into()),
+            Some(1) => {}
+            _ => return Some("could not read the worktree's git config".into()),
+        }
+    }
+    let refspec = format!("+refs/heads/{base}:refs/remotes/origin/{base}");
+    let url = project_fetch_url(repo);
+    let r = git_run(
+        wt,
+        &["fetch", "-q", &url, &refspec],
+        &[("GIT_TERMINAL_PROMPT", "0")],
+        Some(120),
+    );
+    match r {
+        Some(o) if o.code == 0 => None,
+        _ => Some(format!("could not fetch origin {base}")),
+    }
+}
+
+/// Run git in wt with replace refs and grafts off, so the worktree cannot swap the base's objects.
+fn base_read(wt: &Path, args: &[&str]) -> Option<crate::shared::proc::Out> {
+    let graft = if cfg!(windows) { "nul" } else { "/dev/null" };
+    let argv: Vec<&str> = ["-c", "core.useReplaceRefs=false"]
+        .into_iter()
+        .chain(args.iter().copied())
+        .collect();
+    git_run(
+        wt,
+        &argv,
+        &[("GIT_NO_REPLACE_OBJECTS", "1"), ("GIT_GRAFT_FILE", graft)],
+        None,
+    )
+}
+
+fn nul_paths(out: &str) -> Vec<String> {
+    out.split('\0')
+        .filter(|p| !p.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// The paths the worktree's branch changes since it left origin/<base>, or None on any git failure.
+fn changed_files(wt: &Path, base: &str) -> Option<Vec<String>> {
+    let mb = base_read(
+        wt,
+        &["merge-base", &format!("refs/remotes/origin/{base}"), "HEAD"],
+    )
+    .filter(|o| o.code == 0)?;
+    let diff = base_read(
+        wt,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--name-only",
+            "--no-renames",
+            "-z",
+            strip(&mb.stdout),
+            "HEAD",
+        ],
+    )
+    .filter(|o| o.code == 0)?;
+    Some(nul_paths(&diff.stdout))
+}
+
+/// The paths changed from an earlier round's head to HEAD, or None when that head is not an ancestor.
+fn round_changed_files(wt: &Path, head: &str) -> Option<Vec<String>> {
+    if git_run(
+        wt,
+        &["merge-base", "--is-ancestor", head, "HEAD"],
+        &[],
+        None,
+    )?
+    .code
+        != 0
+    {
+        return None;
+    }
+    let diff = git_run(
+        wt,
+        &[
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--name-only",
+            "--no-renames",
+            "-z",
+            head,
+            "HEAD",
+        ],
+        &[],
+        None,
+    )
+    .filter(|o| o.code == 0)?;
+    Some(nul_paths(&diff.stdout))
+}
+
+/// (K, head) from the newest round-K/review-plan.json with K below n, or None.
+fn previous_head(folder: &Path, n: usize) -> Option<(usize, String)> {
+    for k in (1..n).rev() {
+        let path = folder.join(format!("round-{k}")).join("review-plan.json");
+        if path.is_file()
+            && !is_link(&path).unwrap_or(true)
+            && !is_link(path.parent()?).unwrap_or(true)
+        {
+            return plan_head(&path).map(|head| (k, head));
+        }
+    }
+    None
+}
+
+fn floor_record(floor: &Floor) -> String {
+    dumps(
+        &json!({"tier": floor.tier, "full_review": floor.full_review}),
+        DEFAULT,
+    )
+}
+
+fn write_file(path: &Path, text: &str) -> Res<()> {
+    write_atomic(path, text.as_bytes()).map_err(|e| fail(os_error(&e, Some(path)), 1))
+}
+
+fn refuse_links(nodes: &[&Path]) -> Res<()> {
+    for node in nodes {
+        if is_link(node).map_err(|e| fail(os_error(&e, Some(node)), 1))? {
+            return Err(fail(
+                format!(
+                    "{} is a symlink or junction; nothing was written",
+                    node.display()
+                ),
+                6,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn on_board(data: &Value, job_id: &str) -> bool {
+    data["jobs"]
+        .as_array()
+        .is_some_and(|jobs| jobs.iter().any(|j| str_of(j, "id") == Some(job_id)))
+}
+
+fn review_plan(home: &Path, slug: &str, job_id: &str, round_text: &str, o: &mut Out) -> Res<()> {
+    let data = read_board(home)?;
+    if !on_board(&data, job_id) {
+        return Err(fail(
+            format!("no job {job_id} on the board. Nothing was written."),
+            4,
+        ));
+    }
+    let project_file = project_files(home, slug)?.0;
+    let meta = frontmatter(&project_file)
+        .map_err(|e| fail(os_error(&e, Some(&project_file)), 1))?
+        .0;
+    let base = fm_get(&meta, "base")
+        .filter(|b| !b.is_empty())
+        .unwrap_or("main")
+        .to_string();
+    let repo = fm_get(&meta, "repo").unwrap_or("").to_string();
+    let stacked = data["jobs"].as_array().into_iter().flatten().find(|j| {
+        lead_of(j).as_deref() == Some(job_id) && j.get("stacked") == Some(&Value::Bool(true))
+    });
+    let wt_id = stacked.and_then(|j| str_of(j, "id")).unwrap_or(job_id);
+    let wt = home.join("worktrees").join(slug).join(wt_id);
+    let folder = home.join("jobs").join(slug).join(job_id);
+    let round_folder = folder.join(format!("round-{round_text}"));
+    let targets: Vec<PathBuf> = SKIPPABLE_REVIEWERS
+        .iter()
+        .map(|n| round_folder.join(format!("review-{n}.md")))
+        .collect();
+    let plan_file = round_folder.join("review-plan.json");
+    let floor_file = folder.join(REVIEW_FLOOR_FILE);
+    refuse_links(&[
+        &folder,
+        &round_folder,
+        &targets[0],
+        &targets[1],
+        &plan_file,
+        &floor_file,
+    ])?;
+    if !folder.join("spec.md").is_file() {
+        return Err(fail(
+            format!("{} is missing", folder.join("spec.md").display()),
+            4,
+        ));
+    }
+    let review_routes = read_review_routes(home)?;
+    let spec_text = read_file(&folder.join("spec.md"))?;
+    let decision = folder.join("decision.md");
+    let decision_text = if decision.is_file() {
+        read_file(&decision)?
+    } else {
+        String::new()
+    };
+    let n: usize = round_text.parse().unwrap();
+    let head = if wt.is_dir() {
+        git_run(&wt, &["rev-parse", "HEAD"], &[], None)
+            .filter(|o| o.code == 0)
+            .map(|o| strip(&o.stdout).to_string())
+            .filter(|h| !h.is_empty())
+    } else {
+        None
+    };
+    let prev = if head.is_some() {
+        previous_head(&folder, n)
+    } else {
+        None
+    };
+    let last = folder.join(format!("round-{}", n - 1));
+    let passed = prev.is_some()
+        && SKIPPABLE_REVIEWERS.iter().all(|name| {
+            let path = last.join(format!("review-{name}.md"));
+            path.is_file()
+                && read_text(&path).is_ok_and(|t| {
+                    t.starts_with("VERDICT: PASS") || t.starts_with("VERDICT: SKIPPED")
+                })
+        });
+    let fixed = if passed {
+        round_changed_files(&wt, &prev.as_ref().unwrap().1)
+    } else {
+        None
+    };
+    let globs = visible_globs(&project_file)?;
+    let branch = if wt.is_dir() && fetch_base(&wt, &base, &repo).is_none() {
+        changed_files(&wt, &base)
+    } else {
+        None
+    };
+    let protected = branch.as_deref().map(touched_protected);
+    let (visible, reason) = if let Some(fixed) = &fixed {
+        let hit = fixed
+            .iter()
+            .find_map(|p| globs.iter().find(|g| fnmatch(p, g)).map(|g| (p, g)));
+        if VISIBLE_CHANGE.search(&decision_text).is_some() {
+            (true, "decision.md names a visible change".to_string())
+        } else if let Some((p, g)) = hit {
+            (true, format!("{p} matches {g}"))
+        } else {
+            (
+                false,
+                format!(
+                    "none of the {} files changed since round {} matches a visible-file glob, and round {} ux and ui did not ask for changes",
+                    fixed.len(),
+                    prev.as_ref().unwrap().0,
+                    n - 1
+                ),
+            )
+        }
+    } else if let Some(branch) = &branch {
+        plan_reason(&spec_text, &decision_text, branch, &globs)
+    } else {
+        (
+            true,
+            format!("the diff against origin/{base} could not be read"),
+        )
+    };
+    if !visible {
+        for path in &targets {
+            if path.exists() {
+                return Err(fail(
+                    format!("{} already exists; nothing was written", path.display()),
+                    6,
+                ));
+            }
+        }
+    }
+    let floor = merge_review_floor(read_review_floor(&floor_file), &spec_text, &decision_text);
+    let (tier, tier_reason) = review_tier(&spec_text, &decision_text, protected.as_deref(), &floor);
+    let run: Vec<&str> = if visible {
+        TRACER_REVIEWERS.to_vec()
+    } else {
+        vec!["security", "code"]
+    };
+    let mut routes = Map::new();
+    for r in &run {
+        let route = if tier == "high" {
+            Value::Null
+        } else {
+            let key = if tier == "medium" || *r == "security" {
+                "medium"
+            } else {
+                "low"
+            };
+            review_routes[key].clone()
+        };
+        routes.insert(r.to_string(), route);
+    }
+    if let Some(head) = &head {
+        if !round_folder.is_dir() {
+            std::fs::create_dir(&round_folder)
+                .map_err(|e| fail(os_error(&e, Some(&round_folder)), 1))?;
+        }
+        let plan = json!({"round": n, "head": head, "protected": protected, "tier": tier, "routes": routes});
+        write_file(&plan_file, &(dumps(&plan, DEFAULT) + "\n"))?;
+        write_file(&floor_file, &(floor_record(&floor) + "\n"))?;
+    }
+    if !visible {
+        for path in &targets {
+            write_file(
+                path,
+                &format!(
+                    "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: {reason}.\n"
+                ),
+            )?;
+        }
+    }
+    let skipped: Vec<&str> = if visible {
+        vec![]
+    } else {
+        SKIPPABLE_REVIEWERS.to_vec()
+    };
+    let out = json!({"round": n, "run": run, "skipped": skipped, "reason": reason, "protected": protected,
+                     "tier": tier, "tier_reason": tier_reason, "routes": routes});
+    writeln!(o.out, "{}", dumps(&out, DEFAULT)).unwrap();
+    Ok(())
+}
+
+/// review-plan's check of its round operand.
+fn plan_round(round_text: &str) -> Res<()> {
+    if !ROUND.is_full(round_text) {
+        return Err(fail(
+            format!("round must be a positive integer. {REVIEW_PLAN_USAGE}"),
+            2,
+        ));
+    }
+    Ok(())
+}
+
+/// Write SKIPPED ux and ui reviews for a round that changes nothing a person sees, and print one JSON plan.
+pub fn review_plan_cmd(call: &Call) -> Res<()> {
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    plan_round(&call.args[1])?;
+    flushed(|o| review_plan(&home, &slug, &job_id, &call.args[1], o))
+}
+
+fn review_floor(home: &Path, slug: &str, job_id: &str, o: &mut Out) -> Res<()> {
+    if !on_board(&read_board(home)?, job_id) {
+        return Err(fail(
+            format!("no job {job_id} on the board. Nothing was written. {REVIEW_FLOOR_USAGE}"),
+            4,
+        ));
+    }
+    let folder = home.join("jobs").join(slug).join(job_id);
+    let floor_file = folder.join(REVIEW_FLOOR_FILE);
+    refuse_links(&[&folder, &floor_file])?;
+    if !folder.join("spec.md").is_file() {
+        return Err(fail(
+            format!("{} is missing", folder.join("spec.md").display()),
+            4,
+        ));
+    }
+    let decision = folder.join("decision.md");
+    let decision_text = if decision.is_file() {
+        read_file(&decision)?
+    } else {
+        String::new()
+    };
+    let spec_text = read_file(&folder.join("spec.md"))?;
+    let floor = merge_review_floor(read_review_floor(&floor_file), &spec_text, &decision_text);
+    let record = floor_record(&floor);
+    write_file(&floor_file, &(record.clone() + "\n"))?;
+    writeln!(o.out, "{record}").unwrap();
+    Ok(())
+}
+
+/// Raise review-floor.json to the spec's current tier and decision.md's Full review heading, and print it.
+pub fn review_floor_cmd(call: &Call) -> Res<()> {
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    flushed(|o| review_floor(&home, &slug, &job_id, o))
+}
+
 // ---- not ported yet ----
 
 pub fn verdict_cmd(_call: &Call) -> Res<()> {
@@ -2110,14 +2831,6 @@ pub fn verdict_cmd(_call: &Call) -> Res<()> {
 
 pub fn lesson_cmd(_call: &Call) -> Res<()> {
     Err(not_ported("lesson"))
-}
-
-pub fn review_plan_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("review-plan"))
-}
-
-pub fn review_floor_cmd(_call: &Call) -> Res<()> {
-    Err(not_ported("review-floor"))
 }
 
 pub fn pre_review_cmd(_call: &Call) -> Res<()> {
@@ -2879,6 +3592,751 @@ mod tests {
         fn own_churn_survives_base_merges() {
             let (home, _) = build("churn-own", None, true);
             assert_eq!(check(&home, "4"), churned("churn", churn(), json!([])));
+        }
+    }
+
+    mod review_plan {
+        use super::super::*;
+        use crate::shared::fs::temp_dir;
+        use crate::shared::http::tests::serve;
+        use std::fs;
+
+        const JOB: &str = "001-sample-job";
+        const SPEC: &str = "# Spec: sample\n\n## Acceptance criteria\n\n| # | Criterion |\n| 1 | The docs read well |\n";
+        const FULL: &str = "CHANGES\n\n## Full review\n\nAuth changed.\n";
+        const ROUTES: &str = "---\nprimary: provider-a model-big medium\nreview-low: provider-a model-small low\nreview-medium: provider-a model-mid medium\n---\n";
+        const BOARD: &str = r#"{"updated": "", "jobs": [{"id": "001-sample-job", "project": "sample", "title": "Sample job", "stage": "review"}]}"#;
+
+        fn low() -> String {
+            format!("{SPEC}\n## Review tier\n\nTier: low\n\n- Docs only.\n")
+        }
+
+        fn medium() -> String {
+            low().replace("Tier: low", "Tier: medium")
+        }
+
+        fn small() -> Value {
+            json!({"name": "review-low", "provider": "provider-a", "model": "model-small", "effort": "low"})
+        }
+
+        fn mid() -> Value {
+            json!({"name": "review-medium", "provider": "provider-a", "model": "model-mid", "effort": "medium"})
+        }
+
+        fn nulls() -> Value {
+            json!({"security": null, "code": null})
+        }
+
+        fn all() -> Value {
+            json!(["security", "ux", "ui", "code"])
+        }
+
+        pub(in super::super) struct Fix {
+            pub home: PathBuf,
+            pub folder: PathBuf,
+            pub wt: PathBuf,
+            pub project: PathBuf,
+        }
+
+        impl Fix {
+            pub fn new(name: &str) -> Fix {
+                let home = temp_dir(name);
+                fs::create_dir(home.join("projects")).unwrap();
+                let project = home.join("projects/sample.md");
+                fs::write(
+                    &project,
+                    "---\nrepo: example/sample\nbase: main\n---\n# Sample\n",
+                )
+                .unwrap();
+                let folder = home.join("jobs/sample").join(JOB);
+                fs::create_dir_all(&folder).unwrap();
+                fs::write(folder.join("spec.md"), SPEC).unwrap();
+                let wt = home.join("worktrees/sample").join(JOB);
+                FETCH_URL.with(|u| {
+                    *u.borrow_mut() = Some(home.join("origin.git").display().to_string())
+                });
+                Fix {
+                    home,
+                    folder,
+                    wt,
+                    project,
+                }
+            }
+
+            pub fn git(&self, args: &[&str]) -> String {
+                super::git_in(&self.wt, args)
+            }
+
+            pub fn worktree(&self, files: &[&str]) {
+                fs::create_dir_all(&self.wt).unwrap();
+                self.git(&["init", "-q"]);
+                fs::write(self.wt.join("README.md"), "base\n").unwrap();
+                self.git(&["add", "-A"]);
+                self.git(&["commit", "-q", "-m", "base"]);
+                let origin = self.home.join("origin.git");
+                super::git_in(
+                    &self.home,
+                    &["init", "-q", "--bare", &origin.display().to_string()],
+                );
+                self.git(&["remote", "add", "origin", &origin.display().to_string()]);
+                self.git(&["push", "-q", "origin", "HEAD:refs/heads/main"]);
+                self.commit(files);
+            }
+
+            pub fn commit(&self, files: &[&str]) {
+                for rel in files {
+                    let path = self.wt.join(rel);
+                    fs::create_dir_all(path.parent().unwrap()).unwrap();
+                    fs::write(path, "change\n").unwrap();
+                }
+                self.git(&["add", "-A"]);
+                self.git(&["commit", "-q", "-m", "change"]);
+            }
+
+            pub fn head(&self) -> String {
+                self.git(&["rev-parse", "HEAD"])
+            }
+
+            fn serve(&self) {
+                let (origin, _) = serve(vec![(200, BOARD, vec![])]);
+                fs::write(
+                    self.home.join("config.md"),
+                    format!("---\napi_url: {origin}\n---\n"),
+                )
+                .unwrap();
+            }
+
+            fn plan(&self, round: &str) -> (Res<()>, Out) {
+                self.serve();
+                let mut o = Out::default();
+                let r = review_plan(&self.home, "sample", JOB, round, &mut o);
+                (r, o)
+            }
+
+            fn floor_cmd(&self) -> (Res<()>, Out) {
+                self.serve();
+                let mut o = Out::default();
+                let r = review_floor(&self.home, "sample", JOB, &mut o);
+                (r, o)
+            }
+
+            fn review(&self, round: &str, name: &str) -> PathBuf {
+                self.folder.join(format!("round-{round}/review-{name}.md"))
+            }
+
+            fn skipped(&self, round: &str) -> Value {
+                let (r, o) = self.plan(round);
+                r.unwrap();
+                assert_eq!(o.err, "");
+                let plan = loads(&o.out).unwrap();
+                assert_eq!(plan["round"], json!(round.parse::<u64>().unwrap()));
+                assert_eq!(
+                    (&plan["run"], &plan["skipped"]),
+                    (&json!(["security", "code"]), &json!(["ux", "ui"]))
+                );
+                for name in ["ux", "ui"] {
+                    let text = fs::read_to_string(self.review(round, name)).unwrap();
+                    assert!(text.starts_with(
+                        "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: "
+                    ));
+                }
+                plan
+            }
+
+            fn runs_all(&self, round: &str) -> Value {
+                let (r, o) = self.plan(round);
+                r.unwrap();
+                assert_eq!(o.err, "");
+                let plan = loads(&o.out).unwrap();
+                assert_eq!((&plan["run"], &plan["skipped"]), (&all(), &json!([])));
+                for name in ["ux", "ui"] {
+                    assert!(!self.review(round, name).exists());
+                }
+                plan
+            }
+
+            fn recorded(&self, round: &str) -> Value {
+                loads(
+                    &fs::read_to_string(
+                        self.folder.join(format!("round-{round}/review-plan.json")),
+                    )
+                    .unwrap(),
+                )
+                .unwrap()
+            }
+
+            fn nothing_written(&self, round: &str, r: Res<()>, o: &Out, code: i32) -> String {
+                assert_eq!(o.out, "");
+                let (got, err) = super::failed(r);
+                assert_eq!(got, code, "{err}");
+                for name in ["ux", "ui"] {
+                    assert!(!self.review(round, name).exists());
+                }
+                err
+            }
+
+            fn fix_round(&self, ux: &str) {
+                self.worktree(&["web/dashboard.html"]);
+                self.runs_all("1");
+                assert_eq!(
+                    self.recorded("1"),
+                    json!({"round": 1, "head": self.head(), "protected": [], "tier": "high",
+                           "routes": {"security": null, "ux": null, "ui": null, "code": null}})
+                );
+                fs::write(self.review("1", "ux"), ux).unwrap();
+                fs::write(self.review("1", "ui"), "VERDICT: PASS\n").unwrap();
+            }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn docs_only_skips() {
+            let f = Fix::new("plan-docs");
+            f.worktree(&["docs/trust.md"]);
+            assert!(f.skipped("1")["reason"]
+                .as_str()
+                .unwrap()
+                .contains("none of the 1 changed files"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn runtime_only_skips() {
+            let f = Fix::new("plan-runtime");
+            f.worktree(&["skills/factory/runtime/x.py"]);
+            f.skipped("1");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn dashboard_runs_all() {
+            let f = Fix::new("plan-dashboard");
+            f.worktree(&["web/dashboard.html"]);
+            assert_eq!(
+                f.runs_all("1")["reason"],
+                "web/dashboard.html matches *.html"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn visual_criterion_runs_all() {
+            let f = Fix::new("plan-visual");
+            fs::write(
+                f.folder.join("spec.md"),
+                format!("{SPEC}| 2 | Capture before and after screenshots |\n"),
+            )
+            .unwrap();
+            f.worktree(&["docs/trust.md"]);
+            assert_eq!(
+                f.runs_all("1")["reason"],
+                "spec.md has a visual-evidence acceptance criterion"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn project_ui_glob_runs_all() {
+            let f = Fix::new("plan-ui-glob");
+            let text = fs::read_to_string(&f.project).unwrap();
+            fs::write(
+                &f.project,
+                text + "\n## UI\n\nScreens under `docs/screens/*` count.\n",
+            )
+            .unwrap();
+            f.worktree(&["docs/screens/a.md"]);
+            assert_eq!(
+                f.runs_all("1")["reason"],
+                "docs/screens/a.md matches docs/screens/*"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn visible_change_decision_runs_all() {
+            let f = Fix::new("plan-visible-decision");
+            fs::write(
+                f.folder.join("decision.md"),
+                "CHANGES\n\n## Visible change\n\nThe CLI prints new copy.\n",
+            )
+            .unwrap();
+            f.worktree(&["docs/trust.md"]);
+            assert_eq!(
+                f.runs_all("1")["reason"],
+                "decision.md names a visible change"
+            );
+        }
+
+        #[test]
+        fn missing_worktree_runs_all() {
+            let f = Fix::new("plan-no-worktree");
+            let plan = f.runs_all("1");
+            assert!(plan["reason"]
+                .as_str()
+                .unwrap()
+                .contains("could not be read"));
+            assert!(plan["protected"].is_null());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn protected_paths_reported() {
+            let f = Fix::new("plan-protected");
+            f.worktree(&[
+                "skills/factory/runtime/factory.py",
+                ".github/workflows/ci.yml",
+                "docs/trust.md",
+            ]);
+            assert_eq!(
+                f.skipped("1")["protected"],
+                json!([".github/workflows/ci.yml"])
+            );
+            assert_eq!(
+                f.recorded("1"),
+                json!({"round": 1, "head": f.head(), "protected": [".github/workflows/ci.yml"], "tier": "high", "routes": nulls()})
+            );
+        }
+
+        #[test]
+        fn repo_check_config_is_protected() {
+            let paths: Vec<String> = [
+                "tools/assets.mjs",
+                "package.json",
+                "paseo-plugin/package.json",
+                ".gitleaks.toml",
+                "mise.toml",
+                ".oxfmtrc.json",
+                "nx.json",
+                "tools/verify.py",
+                "tests/cli/support.py",
+                "tests/support/browser-server.mjs",
+                "docs/trust.md",
+                "pnpm-lock.yaml",
+                "tools/secret-scan.py",
+                "pnpm-workspace.yaml",
+                "paseo-plugin/pnpm-workspace.yaml",
+                ".npmrc",
+                "paseo-plugin/.npmrc",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+            assert_eq!(
+                touched_protected(&paths),
+                [
+                    ".gitleaks.toml",
+                    ".npmrc",
+                    ".oxfmtrc.json",
+                    "mise.toml",
+                    "nx.json",
+                    "package.json",
+                    "paseo-plugin/.npmrc",
+                    "paseo-plugin/package.json",
+                    "paseo-plugin/pnpm-workspace.yaml",
+                    "pnpm-workspace.yaml",
+                    "tests/cli/support.py",
+                    "tests/support/browser-server.mjs",
+                    "tools/secret-scan.py",
+                    "tools/verify.py",
+                ]
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn later_round_adds_visible_file() {
+            let f = Fix::new("plan-later");
+            f.worktree(&["docs/trust.md"]);
+            f.skipped("1");
+            f.commit(&["web/a.css"]);
+            assert_eq!(f.runs_all("2")["reason"], "web/a.css matches *.css");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn existing_file_exits_6() {
+            let f = Fix::new("plan-existing");
+            f.worktree(&["docs/trust.md"]);
+            fs::create_dir(f.folder.join("round-1")).unwrap();
+            fs::write(f.review("1", "ui"), "VERDICT: PASS\n").unwrap();
+            let (r, o) = f.plan("1");
+            assert_eq!(o.out, "");
+            let (code, err) = super::failed(r);
+            assert_eq!(code, 6);
+            assert!(err.contains("already exists; nothing was written"));
+            assert!(!f.review("1", "ux").exists());
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn bad_round_exits_2() {
+            let f = Fix::new("plan-bad-round");
+            f.worktree(&["docs/trust.md"]);
+            for round in ["0", "x", "-1"] {
+                let (code, err) = super::failed(plan_round(round));
+                assert_eq!(code, 2);
+                assert_eq!(
+                    err,
+                    format!("factory.py: round must be a positive integer. {REVIEW_PLAN_USAGE}\n")
+                );
+                for name in ["ux", "ui"] {
+                    assert!(!f.review(round, name).exists());
+                }
+            }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn linked_round_folder_exits_6() {
+            let f = Fix::new("plan-linked-round");
+            f.worktree(&["docs/trust.md"]);
+            let real = f.home.join("elsewhere");
+            fs::create_dir(&real).unwrap();
+            std::os::unix::fs::symlink(&real, f.folder.join("round-1")).unwrap();
+            let (r, o) = f.plan("1");
+            let err = f.nothing_written("1", r, &o, 6);
+            assert!(err.contains("symlink or junction"));
+            assert_eq!(fs::read_dir(&real).unwrap().count(), 0);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn missing_spec_exits_4() {
+            let f = Fix::new("plan-missing-spec");
+            f.worktree(&["docs/trust.md"]);
+            fs::remove_file(f.folder.join("spec.md")).unwrap();
+            let (r, o) = f.plan("1");
+            assert!(f
+                .nothing_written("1", r, &o, 4)
+                .contains("spec.md is missing"));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn fix_round_reads_its_own_diff() {
+            let f = Fix::new("plan-fix-own");
+            f.fix_round("VERDICT: PASS\n");
+            f.commit(&["tests/cli/test_export.py"]);
+            assert_eq!(
+                f.skipped("2")["reason"],
+                "none of the 1 files changed since round 1 matches a visible-file glob, and round 1 ux and ui did not ask for changes"
+            );
+            assert_eq!(
+                f.recorded("2"),
+                json!({"round": 2, "head": f.head(), "protected": [], "tier": "high", "routes": nulls()})
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn fix_round_after_ux_changes_runs_all() {
+            let f = Fix::new("plan-fix-ux");
+            f.fix_round("VERDICT: CHANGES\n");
+            f.commit(&["tests/cli/test_export.py"]);
+            assert_eq!(
+                f.runs_all("2")["reason"],
+                "web/dashboard.html matches *.html"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn fix_round_without_plan_file_runs_all() {
+            let f = Fix::new("plan-fix-no-plan");
+            f.fix_round("VERDICT: PASS\n");
+            fs::remove_file(f.folder.join("round-1/review-plan.json")).unwrap();
+            f.commit(&["tests/cli/test_export.py"]);
+            assert_eq!(
+                f.runs_all("2")["reason"],
+                "web/dashboard.html matches *.html"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn fix_round_after_rewrite_runs_all() {
+            let f = Fix::new("plan-fix-rewrite");
+            f.fix_round("VERDICT: PASS\n");
+            f.git(&["commit", "-q", "--amend", "-m", "rewritten"]);
+            f.commit(&["tests/cli/test_export.py"]);
+            assert_eq!(
+                f.runs_all("2")["reason"],
+                "web/dashboard.html matches *.html"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn fix_round_visible_change_decision_runs_all() {
+            let f = Fix::new("plan-fix-visible");
+            f.fix_round("VERDICT: PASS\n");
+            fs::write(
+                f.folder.join("decision.md"),
+                "CHANGES\n\n## Visible change\n\nThe CLI prints new copy.\n",
+            )
+            .unwrap();
+            f.commit(&["tests/cli/test_export.py"]);
+            assert_eq!(
+                f.runs_all("2")["reason"],
+                "decision.md names a visible change"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn low_tier_routes_reviewers() {
+            let f = Fix::new("plan-low-tier");
+            fs::write(f.folder.join("spec.md"), low()).unwrap();
+            fs::write(f.home.join("routes.md"), ROUTES).unwrap();
+            f.worktree(&["docs/trust.md"]);
+            let plan = f.skipped("1");
+            assert_eq!(
+                (&plan["tier"], &plan["tier_reason"]),
+                (&json!("low"), &json!("spec.md rates the job low"))
+            );
+            assert_eq!(plan["routes"], json!({"security": mid(), "code": small()}));
+            assert_eq!(
+                f.recorded("1"),
+                json!({"round": 1, "head": f.head(), "protected": [], "tier": "low",
+                       "routes": {"security": mid(), "code": small()}})
+            );
+            fs::write(
+                f.folder.join("spec.md"),
+                low().replace("Tier: low", "tier: MEDIUM"),
+            )
+            .unwrap();
+            let plan = f.skipped("2");
+            assert_eq!(
+                (&plan["tier"], &plan["routes"]),
+                (&json!("medium"), &json!({"security": mid(), "code": mid()}))
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn floors_force_high() {
+            let cases: [(&str, String, Option<&str>, &[&str]); 4] = [
+                (
+                    "decision.md asks for a full review",
+                    low(),
+                    Some(FULL),
+                    &["docs/trust.md"],
+                ),
+                (
+                    "the protected paths could not be read",
+                    low(),
+                    None,
+                    &["docs/trust.md"],
+                ),
+                (
+                    "the branch touches protected paths",
+                    low(),
+                    None,
+                    &[".github/workflows/ci.yml"],
+                ),
+                (
+                    "spec.md has no Review tier line",
+                    format!("{SPEC}\nTier: low\n"),
+                    None,
+                    &["docs/trust.md"],
+                ),
+            ];
+            for (i, (reason, spec, decision, files)) in cases.into_iter().enumerate() {
+                let f = Fix::new(&format!("plan-floors-{i}"));
+                fs::write(f.home.join("routes.md"), ROUTES).unwrap();
+                fs::write(f.folder.join("spec.md"), spec).unwrap();
+                if let Some(decision) = decision {
+                    fs::write(f.folder.join("decision.md"), decision).unwrap();
+                }
+                f.worktree(files);
+                if reason == "the protected paths could not be read" {
+                    FETCH_URL.with(|u| {
+                        *u.borrow_mut() = Some(f.home.join("gone.git").display().to_string())
+                    });
+                }
+                let (r, o) = f.plan("1");
+                r.unwrap();
+                assert_eq!(o.err, "");
+                let plan = loads(&o.out).unwrap();
+                assert_eq!(
+                    (&plan["tier"], plan["tier_reason"].as_str().unwrap()),
+                    (&json!("high"), reason)
+                );
+                let nulls: Map<String, Value> = plan["run"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|r| (r.as_str().unwrap().to_string(), Value::Null))
+                    .collect();
+                assert_eq!(plan["routes"], Value::Object(nulls.clone()));
+                let recorded = f.recorded("1");
+                assert_eq!(
+                    (&recorded["tier"], &recorded["routes"]),
+                    (&json!("high"), &Value::Object(nulls))
+                );
+            }
+        }
+
+        #[test]
+        fn review_floor_never_lowers() {
+            let f = Fix::new("plan-floor-never-lowers");
+            fs::write(f.folder.join("decision.md"), FULL).unwrap();
+            let recorded = json!({"tier": "medium", "full_review": true});
+            for spec in [medium(), low()] {
+                fs::write(f.folder.join("spec.md"), &spec).unwrap();
+                if spec == low() {
+                    fs::remove_file(f.folder.join("decision.md")).unwrap();
+                }
+                let (r, o) = f.floor_cmd();
+                r.unwrap();
+                assert_eq!(loads(&o.out).unwrap(), recorded);
+                assert_eq!(
+                    loads(&fs::read_to_string(f.folder.join("review-floor.json")).unwrap())
+                        .unwrap(),
+                    recorded
+                );
+            }
+            fs::write(
+                f.folder.join("spec.md"),
+                low().replace("Tier: low", "Tier: high"),
+            )
+            .unwrap();
+            let (r, o) = f.floor_cmd();
+            r.unwrap();
+            assert_eq!(
+                loads(&o.out).unwrap(),
+                json!({"tier": "high", "full_review": true})
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn floor_keeps_recorded_tier() {
+            let f = Fix::new("plan-floor-tier");
+            fs::write(f.folder.join("spec.md"), medium()).unwrap();
+            let (r, o) = f.floor_cmd();
+            r.unwrap();
+            assert_eq!(o.out, "{\"tier\": \"medium\", \"full_review\": false}\n");
+            f.worktree(&["docs/trust.md"]);
+            assert_eq!(f.skipped("1")["tier"], "medium");
+            fs::write(f.folder.join("spec.md"), low()).unwrap();
+            f.commit(&["docs/a.md"]);
+            let plan = f.skipped("2");
+            assert_eq!(
+                (&plan["tier"], &plan["tier_reason"]),
+                (
+                    &json!("medium"),
+                    &json!("review-floor.json records medium, above spec.md's low")
+                )
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn floor_keeps_full_review() {
+            let f = Fix::new("plan-floor-full");
+            fs::write(f.folder.join("spec.md"), medium()).unwrap();
+            fs::write(f.folder.join("decision.md"), FULL).unwrap();
+            f.worktree(&["docs/trust.md"]);
+            assert_eq!(
+                f.skipped("1")["tier_reason"],
+                "decision.md asks for a full review"
+            );
+            assert_eq!(
+                loads(&fs::read_to_string(f.folder.join("review-floor.json")).unwrap()).unwrap(),
+                json!({"tier": "medium", "full_review": true})
+            );
+            fs::remove_file(f.folder.join("decision.md")).unwrap();
+            f.commit(&["docs/a.md"]);
+            let plan = f.skipped("2");
+            assert_eq!(
+                (&plan["tier"], &plan["tier_reason"]),
+                (
+                    &json!("high"),
+                    &json!("review-floor.json records a full review")
+                )
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn floor_bad_or_linked() {
+            let f = Fix::new("plan-floor-bad");
+            fs::write(f.folder.join("spec.md"), low()).unwrap();
+            f.worktree(&["docs/trust.md"]);
+            let floor = f.folder.join("review-floor.json");
+            let bads = [
+                "not json",
+                r#"{"tier": "huge", "full_review": false}"#,
+                r#"{"tier": [], "full_review": false}"#,
+                r#"{"tier": {}, "full_review": false}"#,
+                r#"{"tier": "low"}"#,
+                "[]",
+            ];
+            let high = json!({"tier": "high", "full_review": false});
+            for (n, bad) in bads.iter().enumerate() {
+                fs::write(&floor, bad).unwrap();
+                let (r, o) = f.floor_cmd();
+                r.unwrap();
+                assert_eq!(loads(&o.out).unwrap(), high);
+                assert_eq!(loads(&fs::read_to_string(&floor).unwrap()).unwrap(), high);
+                fs::write(&floor, bad).unwrap();
+                let (r, o) = f.plan(&(n + 1).to_string());
+                r.unwrap();
+                assert_eq!(o.err, "");
+                let plan = loads(&o.out).unwrap();
+                assert_eq!(
+                    (&plan["tier"], &plan["tier_reason"]),
+                    (
+                        &json!("high"),
+                        &json!("review-floor.json could not be read")
+                    ),
+                    "{bad}"
+                );
+                assert_eq!(loads(&fs::read_to_string(&floor).unwrap()).unwrap(), high);
+            }
+            fs::remove_file(&floor).unwrap();
+            let real = f.home.join("elsewhere.json");
+            fs::write(&real, "{\"tier\": \"low\", \"full_review\": false}\n").unwrap();
+            std::os::unix::fs::symlink(&real, &floor).unwrap();
+            for (r, o) in [f.floor_cmd(), f.plan(&(bads.len() + 1).to_string())] {
+                assert_eq!(o.out, "");
+                let (code, err) = super::failed(r);
+                assert_eq!(code, 6);
+                assert!(err.contains("symlink or junction; nothing was written"));
+            }
+            assert_eq!(
+                fs::read_to_string(&real).unwrap(),
+                "{\"tier\": \"low\", \"full_review\": false}\n"
+            );
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn no_routes_file_gives_null_routes() {
+            let f = Fix::new("plan-no-routes");
+            fs::write(f.folder.join("spec.md"), low()).unwrap();
+            f.worktree(&["docs/trust.md"]);
+            let plan = f.skipped("1");
+            assert_eq!((&plan["tier"], &plan["routes"]), (&json!("low"), &nulls()));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn bad_review_route_exits_2() {
+            let f = Fix::new("plan-bad-route");
+            fs::write(f.folder.join("spec.md"), low()).unwrap();
+            fs::write(
+                f.home.join("routes.md"),
+                ROUTES.replace("model-small low", "model-small fast"),
+            )
+            .unwrap();
+            f.worktree(&["docs/trust.md"]);
+            let (r, o) = f.plan("1");
+            assert!(f
+                .nothing_written("1", r, &o, 2)
+                .contains("bad review route review-low"));
+            assert!(!f.folder.join("round-1").exists());
         }
     }
 }
