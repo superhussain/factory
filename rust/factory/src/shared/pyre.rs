@@ -194,10 +194,10 @@ impl Pattern {
             .collect()
     }
 
-    /// Exit 1 so a redaction never writes text a pattern could not finish reading.
+    /// Exit 1 so a redaction, refusal or audit flag never passes text a pattern could not finish reading.
     fn stop(&self) -> ! {
         let msg = format!(
-            "factory.py: pattern {} hit the regex backtrack limit; stopping so unredacted text is never written",
+            "factory.py: pattern {} hit the regex backtrack limit; stopping rather than pass text it could not finish reading; shorten or split the text",
             repr(self.src)
         );
         #[cfg(test)]
