@@ -733,6 +733,25 @@
       "from": "tests/cli/test_factory.py::FactoryTest.test_board_cannot_forge_handoff"
     },
     {
+      "id": "claims/refuses-agents",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"agents\": []}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_agents.py::AgentRecordTest.test_board_refuses_agents"
+    },
+    {
       "id": "claims/refuses-paseo-writer",
       "argv": ["--home", "{home}", "board", "{home}", "001-test"],
       "home": "claims",
