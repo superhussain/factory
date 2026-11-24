@@ -3,6 +3,8 @@
 use super::pyre::{Flags, Pattern};
 
 pub static SLUG: Pattern = Pattern::new(r"[\w-]+", Flags::NONE);
+/// A project slug: ASCII, the set the Worker's routes and trialMalformed accept.
+pub static PROJECT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Flags::NONE);
 pub static BACKLOG_LINE: Pattern = Pattern::new(r"^- \[ \] ([\w-]+): (\S.*)$", Flags::NONE);
 pub static JOB_ID: Pattern = Pattern::new(r"\w[\w.-]*", Flags::ASCII);
 pub static BACKLOG_PICK: Pattern = Pattern::new("backlog:[0-9a-f]{12}", Flags::NONE);
