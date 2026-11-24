@@ -234,7 +234,7 @@ fn build(checkout: &Path, err: &mut dyn Write) -> Result<PathBuf, String> {
     if let Some(f) = fake!(build) {
         return f(checkout, err);
     }
-    rust_binary(checkout, &Host::current()?, err)
+    rust_binary(checkout, &Host::current()?, err).map(|(path, _)| path)
 }
 
 /// The new binary's `install` run: argv is the binary, then its operands.

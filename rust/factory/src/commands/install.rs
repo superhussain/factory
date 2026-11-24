@@ -532,8 +532,7 @@ pub fn install(call: &Call) -> Res<()> {
     let (checkout, destination, replace) = parse(&call.args).ok_or_else(|| Exit::raw(2, USAGE))?;
     let host = Host::current().map_err(|e| Exit::raw(2, format!("install: {e}\n")))?;
     let build = |checkout: &Path, err: &mut dyn Write| {
-        let path = rust_binary(checkout, &host, err)?;
-        fs::read(&path).map_err(|e| crate::shared::py::os_error(&e, Some(&path)))
+        rust_binary(checkout, &host, err).map(|(_, bytes)| bytes)
     };
     install_skill(
         &checkout,
@@ -1025,8 +1024,7 @@ mod tests {
         );
         let machine = host(&t.root, &[], Some(cargo));
         let build = |checkout: &Path, err: &mut dyn Write| {
-            let path = rust_binary(checkout, &machine, err)?;
-            Ok(fs::read(path).unwrap())
+            rust_binary(checkout, &machine, err).map(|(_, bytes)| bytes)
         };
         let (mut out, mut err) = (Vec::new(), Vec::new());
         install_skill(
