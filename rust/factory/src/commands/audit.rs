@@ -390,7 +390,8 @@ fn audit_target_raw(name: &str, inp: &Map<String, Value>) -> String {
 }
 
 /// command with the body lines of cat and tee heredocs blanked, unless Bash runs or expands them.
-fn audit_strip_data_heredocs(command: &str) -> String {
+/// Err holds why the runs-output check could not finish, since a body blanked wrongly would hide its flags.
+fn audit_strip_data_heredocs(command: &str) -> Result<String, String> {
     let mut out: Vec<&str> = Vec::new();
     let mut pending: Vec<(String, bool, bool)> = Vec::new();
     let mut depth: i64 = 0;
@@ -422,12 +423,12 @@ fn audit_strip_data_heredocs(command: &str) -> String {
             let first = segment.split(is_space).find(|w| !w.is_empty());
             let data = matches!(first, Some("cat" | "tee"))
                 && after.chars().next().is_none_or(is_space)
-                && AUDIT_RUNS_OUTPUT.search(before).is_none()
+                && AUDIT_RUNS_OUTPUT.search_or_err(before)?.is_none()
                 && !(after.contains('|') || after.contains(">("));
             pending.push((group(&c, 3).to_string(), data, !group(&c, 2).is_empty()));
         }
     }
-    out.join("\n")
+    Ok(out.join("\n"))
 }
 
 /// command with quoted text blanked, unless a double-quoted span runs $( or a backtick; a quoted word with no space or separator loses only its quotes.
@@ -490,7 +491,10 @@ fn audit_flags(
             }
         }
     }
-    let stripped = (name == "Bash").then(|| audit_strip_data_heredocs(raw));
+    let stripped = match name {
+        "Bash" => Some(audit_strip_data_heredocs(raw)?),
+        _ => None,
+    };
     if !main {
         if let Some(s) = &stripped {
             if AUDIT_PR_MERGE
@@ -2692,6 +2696,11 @@ mod tests {
         stops_at_limit(flag_pattern("no-verify"), "git commit --no-verify", true);
     }
 
+    #[test]
+    fn runs_output_check_stops_at_the_backtrack_limit() {
+        stops_at_limit(&AUDIT_RUNS_OUTPUT, "cat <<EOF\ngit push --force\nEOF", true);
+    }
+
     /// sudo has no lookaround, so it runs on the linear engine and never reaches the limit.
     #[test]
     fn sudo_flag_never_reaches_the_backtrack_limit() {
@@ -3165,7 +3174,7 @@ mod tests {
             "($a/".repeat(30_000),
         ] {
             let start = std::time::Instant::now();
-            let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text));
+            let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text).unwrap());
             assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
             assert!(start.elapsed().as_secs_f64() < 1.0);
         }
