@@ -7466,7 +7466,7 @@ function syncDetail() {
   renderDrawerStatus(j);
   const pending = pendingTab();
   if (stamp(j) !== openStamp ||
-      (pending && candidates(j).includes(pending))) openJob(openId);
+      (pending && candidates(j).some((name) => name.replace(ROUND_FILE, '$2.md') === pending))) openJob(openId);
 }
 
 window.addEventListener('hashchange', (e) => {
