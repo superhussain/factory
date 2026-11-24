@@ -1467,7 +1467,7 @@ fn pr_status(
     }
 }
 
-/// Why pr-merge will not merge head: no head checks passed is on the board, or it is another head.
+/// Why pr-merge refuses head: the board records no head that checks passed, or a different one.
 fn unchecked_detail(number: &str, head: &str, checked: Option<&str>) -> String {
     match checked {
         None => {
