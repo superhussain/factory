@@ -4,8 +4,8 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use crate::commands::{
-    audit, catch_up, checks, claims, daemon, install, intake, lookup, ops, pickup, pipeline,
-    prompt, retro, setup, sync, tracer, wait, worktree,
+    audit, bootstrap, catch_up, checks, claims, daemon, install, intake, lookup, ops, pickup,
+    pipeline, prompt, retro, screenshots, setup, sync, tracer, wait, worktree,
 };
 use crate::shared::consts::{MAX_RIDERS, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
@@ -101,6 +101,9 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
 const EXTRA: &[(&str, Handler, usize, usize)] = &[
     ("daemon", daemon::daemon, 0, 2),
     ("install", install::install, 4, 5),
+    ("stalls", pickup::stalls_cmd, 0, usize::MAX),
+    ("pr-screenshots", screenshots::pr_screenshots, 0, usize::MAX),
+    ("bootstrap", bootstrap::bootstrap, 0, usize::MAX),
 ];
 
 pub const USAGE: &str = include_str!("usage.txt");
@@ -249,6 +252,29 @@ mod tests {
         assert!(handler_for("daemon", 2).is_some());
         assert!(handler_for("daemon", 3).is_none());
         assert!(!USAGE.contains("daemon"));
+    }
+
+    #[test]
+    fn binary_only_commands_print_their_own_usage() {
+        let stderr = |list: &[&str]| run(args(list)).unwrap_err().stderr;
+        for list in [
+            &["stalls"][..],
+            &["stalls", "archive", "a1b2c3d4e5", "--force", "x"],
+        ] {
+            assert_eq!(
+                stderr(list),
+                "usage: factory stalls list | archive <id> [--force]\n"
+            );
+        }
+        for list in [
+            &["bootstrap"][..],
+            &["bootstrap", "plan", "--answers", "a", "b"],
+        ] {
+            assert_eq!(
+                stderr(list),
+                "usage: factory bootstrap <up|down|plan --answers <file>>\n"
+            );
+        }
     }
 
     #[test]

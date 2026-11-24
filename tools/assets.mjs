@@ -258,7 +258,7 @@ export async function inspectBundle(outDir, reported = "") {
 
 export async function verifyAssets() {
   const path = new URL(".build/assets.json", root);
-  if (!existsSync(path)) throw new Error("Run python3 tools/deploy.py dry-run first.");
+  if (!existsSync(path)) throw new Error("Run node tools/deploy.mjs dry-run first.");
   const document = JSON.parse(await readFile(path, "utf8"));
   for (const asset of document.assets) {
     const bytes = await readFile(new URL(asset.path, root));

@@ -22,16 +22,17 @@ use crate::shared::home::factory_home;
 use crate::shared::proc::{capture, git, origin_git, Out};
 use crate::shared::project::{project_files, read_paths};
 use crate::shared::py::{os_error, repr, splitlines, strip};
-use crate::shared::pyjson::loads;
+use crate::shared::pyjson::{dumps, loads, DEFAULT};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::pyval::{py_str, truthy};
 use crate::shared::time::{format_stamp, unix_now};
 
-const CATCH_UP_HOME_FILES: [&str; 5] = [
+const CATCH_UP_HOME_FILES: [&str; 6] = [
     "config.md",
     "paths.md",
     "routes.md",
     "launchers.json",
+    "stalls.json",
     ".env",
 ];
 static CHECKOUT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Flags::NONE);
@@ -471,6 +472,212 @@ fn catch_up_backup(home: &Path, skill: &Path) -> Result<PathBuf, String> {
     Ok(folder)
 }
 
+// ---- timers and the stall adapter that still run the Python runtime
+
+/// An interpreter, with its flags, then a path to runtime/factory.py, as a crontab, .cmd or
+/// systemd line spells it.
+static LINE_PY: Pattern = Pattern::new(
+    r#"(?:(?:"(?:[^"\n]*[/\\])?|'(?:[^'\n]*[/\\])?|(?<![^\s'"=])(?:[^\s'"]*[/\\])?)(?:python[0-9.]*|py)(?:\.exe)?["']?(?:\s+-[A-Za-z0-9]+)*\s+)?(?:"[^"\n]*[/\\]runtime[/\\]factory\.py"|'[^'\n]*[/\\]runtime[/\\]factory\.py'|[^\s'"]*[/\\]runtime[/\\]factory\.py(?![\w.]))"#,
+    Flags::NONE,
+);
+/// The same in a launchd plist's ProgramArguments.
+static PLIST_PY: Pattern = Pattern::new(
+    r"(?:<string>(?:[^<]*[/\\])?(?:python[0-9.]*|py)(?:\.exe)?</string>\s*(?:<string>-[A-Za-z0-9]+</string>\s*)*)?<string>[^<]*[/\\]runtime[/\\]factory\.py</string>",
+    Flags::NONE,
+);
+static SH_SAFE: Pattern = Pattern::new(r"[A-Za-z0-9_./:\\-]+", Flags::NONE);
+
+/// text with every Python run of runtime/factory.py replaced by binary. kind is "sh" for a
+/// crontab, "cmd" for a Task Scheduler wrapper, "systemd" for a unit and "plist" for launchd.
+fn to_binary(text: &str, kind: &str, binary: &str) -> String {
+    if kind == "plist" {
+        let escaped = binary
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+        return PLIST_PY.replace_all(text, |_| format!("<string>{escaped}</string>"));
+    }
+    let shown = if SH_SAFE.is_full(binary) {
+        binary.to_string()
+    } else if kind == "sh" {
+        format!("'{}'", binary.replace('\'', r"'\''"))
+    } else {
+        format!("\"{binary}\"")
+    };
+    // cmd expands %name%, cron turns % into a newline even inside quotes, and systemd expands
+    // %-specifiers and $VARIABLES, so they stay literal.
+    let shown = match kind {
+        "sh" => shown.replace('%', "\\%"),
+        "cmd" => shown.replace('%', "%%"),
+        "systemd" => shown.replace('%', "%%").replace('$', "$$"),
+        _ => shown,
+    };
+    LINE_PY.replace_all(text, |_| shown.clone())
+}
+
+/// stalls.json text with an adapter that runs runtime/paseo_stalls.py moved to `binary stalls`,
+/// or None when it runs something else.
+fn stalls_to_binary(text: &str, binary: &str) -> Option<String> {
+    let mut doc = loads(text).ok()?;
+    let adapter = doc.get("adapter")?.as_array()?;
+    let at = adapter.iter().position(|a| {
+        a.as_str().is_some_and(|a| {
+            a.ends_with("/runtime/paseo_stalls.py") || a.ends_with("\\runtime\\paseo_stalls.py")
+        })
+    })?;
+    let rest: Vec<Value> = adapter[at + 1..].to_vec();
+    let mut moved = vec![Value::from(binary), Value::from("stalls")];
+    moved.extend(rest);
+    doc["adapter"] = Value::Array(moved);
+    Some(dumps(&doc, DEFAULT) + "\n")
+}
+
+/// One timer or the stall adapter to rewrite: its file, or None for the crontab, and its new text.
+struct Legacy {
+    file: Option<PathBuf>,
+    text: String,
+}
+
+/// Every factory timer and the stall adapter that still name the Python runtime, with the text
+/// that runs binary instead.
+fn legacy_scan(home: &Path, scheduler: &str, binary: &str) -> Res<Vec<Legacy>> {
+    let mut found = Vec::new();
+    // A test that fakes no user home must never read or rewrite this host's own timers.
+    #[cfg(test)]
+    if fake!(user_home).is_none() {
+        return Ok(found);
+    }
+    if scheduler == "cron" {
+        let (code, text) = setup_run(&["crontab", "-l"]);
+        let new = to_binary(&text, "sh", binary);
+        if code == 0 && new != text {
+            found.push(Legacy {
+                file: None,
+                text: new,
+            });
+        }
+    }
+    let user = user_home()?;
+    let sources = [
+        (
+            user.join("Library").join("LaunchAgents"),
+            "factory.",
+            ".plist",
+            "plist",
+        ),
+        (user.join(".config"), "factory-", ".cmd", "cmd"),
+        (
+            user.join(".config").join("systemd").join("user"),
+            "factory-",
+            ".service",
+            "systemd",
+        ),
+    ];
+    for (folder, prefix, suffix, kind) in sources {
+        let mut files: Vec<PathBuf> = fs::read_dir(&folder)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| {
+                        let n = e.file_name().to_string_lossy().into_owned();
+                        n.starts_with(prefix) && n.ends_with(suffix)
+                    })
+                    .map(|e| e.path())
+                    .collect()
+            })
+            .unwrap_or_default();
+        files.sort();
+        for file in files {
+            let Ok(text) = fs::read_to_string(&file) else {
+                continue;
+            };
+            let new = to_binary(&text, kind, binary);
+            if new != text {
+                found.push(Legacy {
+                    file: Some(file),
+                    text: new,
+                });
+            }
+        }
+    }
+    let stalls = home.join("stalls.json");
+    if let Some(new) = read_text(&stalls)
+        .ok()
+        .and_then(|t| stalls_to_binary(&t, binary))
+    {
+        found.push(Legacy {
+            file: Some(stalls),
+            text: new,
+        });
+    }
+    Ok(found)
+}
+
+/// Write each rewritten timer and reload its scheduler: one line per item, and the failures.
+fn legacy_apply(out: &mut dyn Write, found: &[Legacy]) -> usize {
+    let mut failed = 0;
+    for item in found {
+        let Some(file) = &item.file else {
+            let (code, text) = setup_run_input(&["crontab", "-"], &item.text);
+            if code == 0 {
+                outln!(out, "timers: crontab now runs the binary");
+            } else {
+                failed += 1;
+                outln!(out, "timers: crontab: {}", strip(&text));
+            }
+            continue;
+        };
+        if let Err(e) = fs::write(file, &item.text) {
+            failed += 1;
+            outln!(out, "timers: {}", os_error(&e, Some(file)));
+            continue;
+        }
+        let name = file.file_name().unwrap_or_default().to_string_lossy();
+        let reload = if let Some(label) = name.strip_suffix(".plist") {
+            let target = format!("gui/{}/{label}", pickup::getuid());
+            if setup_run(&["launchctl", "print", &target]).0 == 0 {
+                setup_run(&["launchctl", "bootout", &target]);
+                let shown = file.to_string_lossy();
+                setup_run(&[
+                    "launchctl",
+                    "bootstrap",
+                    &format!("gui/{}", pickup::getuid()),
+                    &shown,
+                ])
+            } else {
+                (0, String::new())
+            }
+        } else if name.ends_with(".service") {
+            setup_run(&["systemctl", "--user", "daemon-reload"])
+        } else {
+            (0, String::new())
+        };
+        if reload.0 == 0 {
+            outln!(out, "timers: {} now runs the binary", file.display());
+        } else {
+            failed += 1;
+            outln!(
+                out,
+                "timers: {} rewritten, but reload failed: {}",
+                file.display(),
+                strip(&reload.1)
+            );
+        }
+    }
+    failed
+}
+
+/// (returncode, output) of a scheduler command fed input on stdin.
+fn setup_run_input(argv: &[&str], input: &str) -> (i32, String) {
+    #[cfg(test)]
+    if let Some(f) = fake!(setup_run) {
+        let mut with_input = argv.to_vec();
+        with_input.push(input);
+        return f(&with_input);
+    }
+    pickup::setup_run(argv, Some(input))
+}
+
 /// (returncode, output) of gh on the GitHub repository owner/name slug.
 fn catch_up_gh(slug: &str, args: &[&str]) -> (i32, String) {
     #[cfg(test)]
@@ -597,9 +804,21 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
     let installed = stamp.as_ref().map(|s| py_str(s.get("commit")));
     let current = installed.as_deref() == Some(head.as_str());
     let scheduler = scheduler();
-    // One crontab read serves both checks, so a host without a daemon reads it as before.
-    let (timer, daemon) =
-        pickup::with_crontab_memo(|| (timer_installed(scheduler), daemon_service()));
+    // Timers and the stall adapter that still run the Python runtime move to the binary beside it.
+    let binary = here.join(if cfg!(windows) {
+        "factory.exe"
+    } else {
+        "factory"
+    });
+    // One crontab read serves every check, so a host without a daemon reads it as before.
+    let (timer, daemon, legacy) = pickup::with_crontab_memo(|| {
+        (
+            timer_installed(scheduler),
+            daemon_service(),
+            legacy_scan(home, scheduler, &binary.to_string_lossy()),
+        )
+    });
+    let legacy = legacy?;
     // The daemon service runs pickup, so a pickup timer beside it is a leftover to remove, after
     // the backup. Catch-up never installs the daemon itself.
     let leftover = timer && daemon.is_some();
@@ -612,7 +831,7 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
         let have = installed.map_or_else(|| "unknown".to_string(), |c| short(&c));
         outln!(out, "skill: {have} installed, {h7} on origin/{base}");
     }
-    if current && !stale && !daemon_stale {
+    if current && !stale && !daemon_stale && legacy.is_empty() {
         if timer {
             outln!(out, "pickup timer: current");
         } else {
@@ -705,6 +924,15 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                     &r.stderr
                 };
                 outln!(out, "skill: {}", strip(text));
+            }
+        }
+        // Before the pickup and daemon steps, so they act on the rewritten timers and a removed
+        // or reinstalled timer is never written back from this earlier snapshot.
+        if !legacy.is_empty() {
+            if ok {
+                failed += legacy_apply(out, &legacy);
+            } else {
+                outln!(out, "timers: skipped, skill install failed");
             }
         }
         if backup.is_some() && !ok && timer {
@@ -1856,6 +2084,68 @@ mod tests {
     }
 
     #[test]
+    fn daemon_host_removes_the_pickup_line_after_the_python_rewrite() {
+        let t = T::new("legacy-daemon-host");
+        t.timer(true);
+        t.drift(None);
+        t.daemon(Some("cron"), false);
+        t.service_calls(0, "", false);
+        let pickup = "*/5 * * * * /old/runtime/factory pickup";
+        let crontab = Rc::new(RefCell::new(format!(
+            "30 8 * * * python3 /old/runtime/factory.py retro push\n{pickup}\n"
+        )));
+        let (tab, removed) = (crontab.clone(), crontab.clone());
+        FAKES.with(|f| {
+            let mut f = f.borrow_mut();
+            f.scheduler = Some("cron");
+            f.setup_run = Some(Rc::new(move |argv| match argv {
+                ["crontab", "-l"] => (0, tab.borrow().clone()),
+                ["crontab", "-", text] => {
+                    *tab.borrow_mut() = text.to_string();
+                    (0, String::new())
+                }
+                _ => (0, String::new()),
+            }));
+            f.remove_timer = Some(Rc::new(move |_| {
+                let kept: String = removed
+                    .borrow()
+                    .lines()
+                    .filter(|l| !l.ends_with(" pickup"))
+                    .map(|l| format!("{l}\n"))
+                    .collect();
+                *removed.borrow_mut() = kept;
+                Ok(())
+            }));
+        });
+        let stalls = r#"{"version": 1, "adapter": ["python3", "/old/runtime/paseo_stalls.py"]}"#;
+        fs::write(t.home.join("stalls.json"), stalls).unwrap();
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        let binary = t.skill.join("runtime").join("factory");
+        let backup = t.backups().pop().unwrap();
+        assert_eq!(
+            fs::read_to_string(backup.join("home").join("stalls.json")).unwrap(),
+            stalls,
+            "the stall adapter is backed up before its rewrite"
+        );
+        assert!(fs::read_to_string(t.home.join("stalls.json"))
+            .unwrap()
+            .contains("\"stalls\"]"));
+        assert_eq!(
+            *crontab.borrow(),
+            format!("30 8 * * * {} retro push\n", binary.display()),
+            "the retro line runs the binary and the removed pickup line stays removed"
+        );
+        let timers = lines
+            .iter()
+            .position(|l| l == "timers: crontab now runs the binary");
+        let replaced = lines
+            .iter()
+            .position(|l| l == "pickup timer: replaced by the daemon");
+        assert!(timers.is_some() && timers < replaced, "{lines:?}");
+    }
+
+    #[test]
     fn timer_skipped_without_timer() {
         let t = T::new("no-timer");
         let (reply, reply_code) = default_timer_reply();
@@ -2128,5 +2418,213 @@ mod tests {
         assert_eq!(lines.last().unwrap(), &"catch-up: 1 step(s) failed");
         assert!(calls.borrow().is_empty());
         assert_eq!(t.installed(), t.a);
+    }
+
+    #[test]
+    fn python_timers_move_to_the_binary() {
+        let bin = "/opt/skill/runtime/factory";
+        let cases = [
+            (
+                "30 8 * * * /usr/bin/python3 /opt/skill/runtime/factory.py retro push >> /h/logs/retro-push.log 2>&1\n",
+                "30 8 * * * /opt/skill/runtime/factory retro push >> /h/logs/retro-push.log 2>&1\n",
+            ),
+            (
+                "*/5 * * * * PATH=/usr/bin python3 -B '/home/u/my skills/runtime/factory.py' --home /h pickup\n",
+                "*/5 * * * * PATH=/usr/bin /opt/skill/runtime/factory --home /h pickup\n",
+            ),
+            (
+                "0 1 * * * /old/runtime/factory.py pickup\n0 2 * * * happy /x/runtime/factory.pyc\n",
+                "0 1 * * * /opt/skill/runtime/factory pickup\n0 2 * * * happy /x/runtime/factory.pyc\n",
+            ),
+        ];
+        for (old, new) in cases {
+            assert_eq!(to_binary(old, "sh", bin), new);
+        }
+        assert_eq!(
+            to_binary(
+                "0 1 * * * python3 /old/runtime/factory.py pickup\n",
+                "sh",
+                "/my dir/factory"
+            ),
+            "0 1 * * * '/my dir/factory' pickup\n"
+        );
+        assert_eq!(
+            to_binary(
+                "@echo off\r\n\"C:\\Program Files\\Python\\python.exe\" C:\\s\\runtime\\factory.py retro push >> C:\\h\\logs\\retro-push.log 2>&1\r\n",
+                "cmd",
+                "C:\\Users\\u\\skills\\factory\\runtime\\factory.exe"
+            ),
+            "@echo off\r\nC:\\Users\\u\\skills\\factory\\runtime\\factory.exe retro push >> C:\\h\\logs\\retro-push.log 2>&1\r\n"
+        );
+        assert_eq!(
+            to_binary(
+                "ExecStart=py -3 /s/runtime/factory.py retro push\n",
+                "systemd",
+                "/b/factory"
+            ),
+            "ExecStart=/b/factory retro push\n"
+        );
+        assert_eq!(
+            to_binary(
+                "ExecStart=python3 /s/runtime/factory.py retro push\n",
+                "systemd",
+                "/home/u/100%$HOME/factory"
+            ),
+            "ExecStart=\"/home/u/100%%$$HOME/factory\" retro push\n"
+        );
+        assert_eq!(
+            to_binary(
+                "py -3 C:\\s\\runtime\\factory.py retro push\r\n",
+                "cmd",
+                "C:\\Users\\u\\100%PATH%\\factory.exe"
+            ),
+            "\"C:\\Users\\u\\100%%PATH%%\\factory.exe\" retro push\r\n"
+        );
+        assert_eq!(
+            to_binary(
+                "30 8 * * * python3 /s/runtime/factory.py retro push\n",
+                "sh",
+                "/home/u/$x/factory"
+            ),
+            "30 8 * * * '/home/u/$x/factory' retro push\n"
+        );
+        assert_eq!(
+            to_binary(
+                "30 8 * * * python3 /s/runtime/factory.py retro push\n",
+                "sh",
+                "/home/u/100%/factory"
+            ),
+            "30 8 * * * '/home/u/100\\%/factory' retro push\n"
+        );
+        assert_eq!(
+            to_binary(
+                "<array>\n\t\t<string>/usr/bin/python3</string>\n\t\t<string>/s/runtime/factory.py</string>\n\t\t<string>retro</string>\n",
+                "plist",
+                "/b/factory"
+            ),
+            "<array>\n\t\t<string>/b/factory</string>\n\t\t<string>retro</string>\n"
+        );
+        let current = "30 8 * * * /opt/skill/runtime/factory retro push\n";
+        assert_eq!(to_binary(current, "sh", bin), current);
+        assert_eq!(
+            stalls_to_binary(
+                r#"{"version": 1, "adapter": ["python3", "/s/runtime/paseo_stalls.py"], "takeover_minutes": 30}"#,
+                bin
+            )
+            .as_deref(),
+            Some("{\"version\": 1, \"adapter\": [\"/opt/skill/runtime/factory\", \"stalls\"], \"takeover_minutes\": 30}\n")
+        );
+        assert_eq!(
+            stalls_to_binary(
+                r#"{"version": 1, "adapter": ["/opt/skill/runtime/factory", "stalls"]}"#,
+                bin
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn catch_up_rewrites_every_python_timer_and_reloads_it() {
+        let user = temp_dir("catch-up-legacy-user");
+        let home = temp_dir("catch-up-legacy-home");
+        let agents = user.join("Library").join("LaunchAgents");
+        let systemd = user.join(".config").join("systemd").join("user");
+        fs::create_dir_all(&agents).unwrap();
+        fs::create_dir_all(&systemd).unwrap();
+        let plist = agents.join("factory.retro-push.plist");
+        fs::write(&plist, "<array><string>python3</string><string>/s/runtime/factory.py</string><string>retro</string></array>").unwrap();
+        let other = agents.join("factory.pickup.plist");
+        fs::write(
+            &other,
+            "<array><string>/b/factory</string><string>pickup</string></array>",
+        )
+        .unwrap();
+        let cmd = user.join(".config").join("factory-retro-push.cmd");
+        fs::write(&cmd, "py -3 C:\\s\\runtime\\factory.py retro push\r\n").unwrap();
+        let unit = systemd.join("factory-retro-push.service");
+        fs::write(
+            &unit,
+            "ExecStart=python3 /s/runtime/factory.py retro push\n",
+        )
+        .unwrap();
+        fs::write(
+            home.join("stalls.json"),
+            r#"{"version": 1, "adapter": ["python3", "/s/runtime/paseo_stalls.py"]}"#,
+        )
+        .unwrap();
+        let calls: Calls = Rc::default();
+        let seen = calls.clone();
+        FAKES.with(|f| {
+            *f.borrow_mut() = Fakes {
+                user_home: Some(user.clone()),
+                setup_run: Some(Rc::new(move |argv| {
+                    seen.borrow_mut()
+                        .push(argv.iter().map(|a| a.to_string()).collect());
+                    match argv {
+                        ["crontab", "-l"] => (
+                            0,
+                            "30 8 * * * python3 /s/runtime/factory.py retro push\n0 1 * * * true\n"
+                                .into(),
+                        ),
+                        _ => (0, String::new()),
+                    }
+                })),
+                ..Fakes::default()
+            }
+        });
+        let found = legacy_scan(&home, "cron", "/b/factory").unwrap();
+        assert_eq!(found.len(), 5);
+        let mut out = Vec::new();
+        assert_eq!(legacy_apply(&mut out, &found), 0);
+        let out = String::from_utf8(out).unwrap();
+        assert!(
+            out.starts_with("timers: crontab now runs the binary\n"),
+            "{out}"
+        );
+        assert_eq!(
+            fs::read_to_string(&plist).unwrap(),
+            "<array><string>/b/factory</string><string>retro</string></array>"
+        );
+        assert_eq!(
+            fs::read_to_string(&other).unwrap(),
+            "<array><string>/b/factory</string><string>pickup</string></array>"
+        );
+        assert_eq!(
+            fs::read_to_string(&cmd).unwrap(),
+            "/b/factory retro push\r\n"
+        );
+        assert_eq!(
+            fs::read_to_string(&unit).unwrap(),
+            "ExecStart=/b/factory retro push\n"
+        );
+        assert_eq!(
+            fs::read_to_string(home.join("stalls.json")).unwrap(),
+            "{\"version\": 1, \"adapter\": [\"/b/factory\", \"stalls\"]}\n"
+        );
+        let calls = calls.borrow().clone();
+        assert!(calls.contains(&vec![
+            "crontab".to_string(),
+            "-".into(),
+            "30 8 * * * /b/factory retro push\n0 1 * * * true\n".into()
+        ]));
+        let uid = pickup::getuid();
+        assert!(calls.contains(&vec![
+            "launchctl".to_string(),
+            "bootout".into(),
+            format!("gui/{uid}/factory.retro-push")
+        ]));
+        assert!(calls.contains(&vec![
+            "systemctl".to_string(),
+            "--user".into(),
+            "daemon-reload".into()
+        ]));
+        assert_eq!(
+            legacy_scan(&home, "cron", "/b/factory")
+                .map(|f| f.len())
+                .ok(),
+            Some(1),
+            "only the faked crontab still names factory.py"
+        );
+        FAKES.with(|f| *f.borrow_mut() = Fakes::default());
     }
 }

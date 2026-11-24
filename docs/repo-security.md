@@ -61,7 +61,7 @@ When you review a Dependabot PR that bumps an action, check that the new SHA is 
 
 ## Pipeline stage notes
 
-This repository is public, so the `factory` project pipeline adds a review note and a build note. Agents read them inside the operator-preferences envelope described in [trust.md](trust.md). `tests/worker/public-repo-notes.test.mjs` checks that both notes pass `validatePipeline`. `tools/stage-notes-check.py` compares the live notes with this file.
+This repository is public, so the `factory` project pipeline adds a review note and a build note. Agents read them inside the operator-preferences envelope described in [trust.md](trust.md). `tests/worker/public-repo-notes.test.mjs` checks that both notes pass `validatePipeline`. `tools/stage-notes-check.mjs` compares the live notes with this file.
 
 ### Review stage note
 
@@ -97,7 +97,7 @@ Only a signed-in person saves pipeline settings (F11); retro admit may edit only
 5. On a device, from the root of a checkout of this repository at current `main`, run this command. `<installed-skill>` is the `factory` folder that `tools/install.sh` created, see [device.md](device.md). It prints `review: matches` and `build: matches`. A `differs` or `missing` line means the live note is out of date, so repeat steps 1 to 4. A `no note in docs/repo-security.md` line means this checkout lost its note block, so restore that file from current `main`. If `factory` prints an error first, fix that error and run the command again. Do not re-paste the notes for it. If the `stdin is not a factory pipeline view` line prints with no error before it, the command before the pipe is wrong. Copy the command as shown and change only `<installed-skill>`.
 
 ```sh
-<installed-skill>/runtime/factory pipeline factory | python3 tools/stage-notes-check.py
+<installed-skill>/runtime/factory pipeline factory | node tools/stage-notes-check.mjs
 ```
 
 To change a note, edit it here in a pull request first, then repeat these steps.

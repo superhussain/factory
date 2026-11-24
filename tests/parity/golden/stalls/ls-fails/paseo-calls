@@ -1,0 +1,1 @@
+{"argv": ["--home", "/nonexistent/paseo-home", "ls", "-g", "--json"]}

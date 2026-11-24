@@ -759,8 +759,5 @@ schedules. Installation, initialization and adoption never weaken security polic
 
 The `CI` workflow runs parallel Ubuntu 22.04 jobs on pull requests. Its `rust-test` job runs the
 binary's unit tests, `rust-check` type-checks the `aarch64-apple-darwin` and `x86_64-pc-windows-gnu`
-targets, and `parity` compares the built binary with the golden files. The `tools/*.py` scripts
-support Python 3.8+. `tests/tools/test_paseo_stalls.py` skips its two zone cases where `zoneinfo`
-cannot resolve `UTC` (Python 3.8, or no zone data); `test_missing_zoneinfo_leaves_stalls_out`
-covers that path on every host.
+targets, and `parity` compares the built binary with the golden files.
 Do not skip a case when running on its owning platform.
