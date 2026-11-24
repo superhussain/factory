@@ -80,10 +80,10 @@ To roll back dependencies, return to the previous reviewed checkout, remove
 ## 5. Dry-run, then operator-gated deploy
 
 ```sh
-python3 tools/deploy.py check --profile deploy/profile.json
-python3 tools/deploy.py render --profile deploy/profile.json
-python3 tools/deploy.py dry-run --profile deploy/profile.json
-python3 tools/deploy.py deploy --profile deploy/profile.json
+node tools/deploy.mjs check --profile deploy/profile.json
+node tools/deploy.mjs render --profile deploy/profile.json
+node tools/deploy.mjs dry-run --profile deploy/profile.json
+node tools/deploy.mjs deploy --profile deploy/profile.json
 ```
 
 `dry-run` never contacts production storage. The real `deploy` is the

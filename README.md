@@ -60,9 +60,9 @@ mise exec -- pnpm exec nx run-many -t cli install verify
 All deployment input lives in the ignored `deploy/profile.json`. Copy the schema from `tests/fixtures/deployment-valid.json` (synthetic values that validate syntactically but belong to nobody) and fill in your own account, Worker name, R2 bucket, HTTPS origin, Access issuer and audience. Every schema key is required: `image_origins` (`[]`) and `agent_links` (`{}`) are the values that disable those integrations. Optional `jira_origin`, such as `https://your-site.atlassian.net`, turns Jira keys in job files into links to `<jira_origin>/browse/<KEY>`; leave it out to keep keys as text.
 
 ```sh
-python3 tools/deploy.py check --profile deploy/profile.json
-python3 tools/deploy.py render --profile deploy/profile.json
-python3 tools/deploy.py dry-run --profile deploy/profile.json
+node tools/deploy.mjs check --profile deploy/profile.json
+node tools/deploy.mjs render --profile deploy/profile.json
+node tools/deploy.mjs dry-run --profile deploy/profile.json
 ```
 
 `check` validates only; `render` writes the fixed Wrangler config and a nonsecret connection descriptor under `.build/`; `dry-run` never contacts production storage. `deploy/profile.json` is ignored and must never be committed.

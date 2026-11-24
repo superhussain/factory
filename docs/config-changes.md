@@ -32,7 +32,7 @@ you open a new shell, set `stamp` to the value you noted.
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p deploy/backups
 cp -p deploy/profile.json "deploy/backups/profile.$stamp.json"
-python3 tools/deploy.py render --profile deploy/profile.json
+node tools/deploy.mjs render --profile deploy/profile.json
 cp -p .build/wrangler.production.json "deploy/backups/wrangler.$stamp.json"
 cp -p .build/connection.json "deploy/backups/connection.$stamp.json"
 ```
@@ -57,9 +57,9 @@ Never copy device files between hosts.
 ```sh
 cp -p deploy/profile.json deploy/profile.candidate.json
 # edit deploy/profile.candidate.json
-python3 tools/deploy.py check --profile deploy/profile.candidate.json
+node tools/deploy.mjs check --profile deploy/profile.candidate.json
 git diff --no-index -- deploy/profile.json deploy/profile.candidate.json
-python3 tools/deploy.py render --profile deploy/profile.candidate.json
+node tools/deploy.mjs render --profile deploy/profile.candidate.json
 cp -p .build/wrangler.production.json "deploy/backups/wrangler.candidate.$stamp.json"
 git diff --no-index -- "deploy/backups/wrangler.$stamp.json" .build/wrangler.production.json
 git diff --no-index -- "deploy/backups/connection.$stamp.json" .build/connection.json
@@ -78,8 +78,8 @@ settings do not depend on them:
 
 ```sh
 python3 -c "import json, sys; p = json.load(open(sys.argv[1])); p.update(image_origins=[], agent_links={}); json.dump(p, open(sys.argv[2], 'w'), indent=2)" deploy/profile.candidate.json deploy/profile.disabled.json
-python3 tools/deploy.py check --profile deploy/profile.disabled.json
-python3 tools/deploy.py render --profile deploy/profile.disabled.json
+node tools/deploy.mjs check --profile deploy/profile.disabled.json
+node tools/deploy.mjs render --profile deploy/profile.disabled.json
 git diff --no-index -- "deploy/backups/wrangler.candidate.$stamp.json" .build/wrangler.production.json
 ```
 
@@ -92,12 +92,12 @@ values and bind no port:
 ```sh
 mise exec -- node tools/assets.mjs --offline
 mise exec -- node --test tests/worker/entry-auth.test.mjs
-mise exec -- python3 -m unittest discover -s tests/tools -p test_deploy.py
-python3 tools/deploy.py dry-run --profile deploy/profile.candidate.json
+mise exec -- node --test tests/tools/deploy.test.mjs
+node tools/deploy.mjs dry-run --profile deploy/profile.candidate.json
 ```
 
 `entry-auth.test.mjs` renders the dashboard page with image origins configured,
-agent links configured, and both omitted. `test_deploy.py` renders profiles with
+agent links configured, and both omitted. `tests/tools/deploy.test.mjs` renders profiles with
 image publication configured and with both integrations disabled. `dry-run`
 bundles the candidate and never contacts production storage.
 
@@ -123,8 +123,8 @@ This runbook stops here. Applying is your own gated step.
 
 ```sh
 cp -p "deploy/backups/profile.$stamp.json" deploy/profile.json
-python3 tools/deploy.py check --profile deploy/profile.json
-python3 tools/deploy.py render --profile deploy/profile.json
+node tools/deploy.mjs check --profile deploy/profile.json
+node tools/deploy.mjs render --profile deploy/profile.json
 git diff --no-index --exit-code -- "deploy/backups/wrangler.$stamp.json" .build/wrangler.production.json
 ```
 

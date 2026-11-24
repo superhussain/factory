@@ -43,10 +43,58 @@ HINTS = {
              "Set CLOUDFLARE_API_TOKEN to skip this prompt.",
 }
 
-_spec = importlib.util.spec_from_file_location("factory_deploy", Path(__file__).resolve().parent / "deploy.py")
-deploy = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(deploy)
-ProfileError = deploy.ProfileError
+ACCOUNT_ID = re.compile(r"^[0-9a-f]{32}$")
+DNS = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]*$")
+CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+class ProfileError(ValueError):
+    pass
+
+
+def https_origin(value, name):
+    """tools/deploy.mjs's httpsOrigin: the host of a canonical https origin, else ProfileError."""
+    if not value.strip():
+        raise ProfileError(name + " must be nonempty")
+    if CONTROLS.search(value):
+        raise ProfileError(name + " must not contain control characters")
+    if "REPLACE_ME" in value or "${" in value or re.search(r"<[a-z][a-z0-9-]*>", value):
+        raise ProfileError(name + " contains an unresolved placeholder")
+    match = re.match(r"^https://([^/?#]+)$", value)
+    if not match:
+        raise ProfileError(name + " must be a canonical https origin without path, query or fragment")
+    host = match.group(1)
+    if "@" in host:
+        raise ProfileError(name + " must not contain credentials")
+    if ":" in host:
+        raise ProfileError(name + " must not contain an explicit port")
+    if host.startswith("xn--") or "*" in host:
+        raise ProfileError(name + " must not be a wildcard or punycode-ata origin")
+    if not DNS.match(host):
+        raise ProfileError(name + " needs a valid DNS hostname")
+    return host
+
+
+def embed_origins(value):
+    """tools/deploy.mjs's embedOrigins check."""
+    if not isinstance(value, list) or any(not isinstance(v, str) for v in value):
+        raise ProfileError("embed_origins must be a list of origin strings")
+    if len(set(value)) != len(value):
+        raise ProfileError("embed_origins must not contain duplicates")
+    for origin in value:
+        if origin == "paseo://app":
+            continue
+        if not origin.startswith("https://"):
+            raise ProfileError("embed_origins entry must be a canonical https origin or paseo://app")
+        https_origin(origin, "embed_origins entry")
+    return list(value)
+
+
+def write_atomic(path, document):
+    path = Path(path)
+    temporary = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")
+    temporary.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
 
 
 class CloudflareError(Exception):
@@ -67,13 +115,13 @@ def validate_answers(data):
         raise ProfileError("answers need exactly the keys " + ", ".join(keys))
     if data["version"] != 1 or isinstance(data["version"], bool):
         raise ProfileError("version must be the number 1")
-    if not isinstance(data["account_id"], str) or not deploy.ACCOUNT_ID.match(data["account_id"]):
+    if not isinstance(data["account_id"], str) or not ACCOUNT_ID.match(data["account_id"]):
         raise bad("account_id", "account_id must be 32 hexadecimal characters")
     for key in ("zone", "hostname"):
         if not isinstance(data[key], str):
             raise bad(key, key + " must be a string")
         try:
-            deploy.https_origin("https://" + data[key], key)
+            https_origin("https://" + data[key], key)
         except ProfileError as error:
             raise bad(key, str(error))
     if not data["hostname"].endswith("." + data["zone"]):
@@ -340,7 +388,7 @@ def ensure_app(api, account, hostname, n, policy_ids, same_site=None):
 
 def write_if_changed(path, document):
     if not path.exists() or json.loads(path.read_text(encoding="utf-8")) != document:
-        deploy.write_atomic(path, document)
+        write_atomic(path, document)
 
 
 def existing_profile(root, answers):
@@ -371,7 +419,7 @@ def up(answers, api, run, root):
     origin = "https://" + hostname
     n = names(answers, device_label())
     existing = existing_profile(root, answers)
-    embed = deploy.embed_origins(existing["embed_origins"]) if existing and "embed_origins" in existing else []
+    embed = embed_origins(existing["embed_origins"]) if existing and "embed_origins" in existing else []
     same_site = "none" if embed else None
     api("GET", "accounts/{}".format(account))
     if not api_list(api, "zones?name={}&account.id={}".format(answers["zone"], account)):
@@ -389,9 +437,9 @@ def up(answers, api, run, root):
     audience = ensure_app(api, account, hostname, n, [people] + [pid for _, pid in devices], same_site)
     profile = write_profile(root, answers, n, existing, issuer, audience)
     print("profile " + str(profile))
-    result = run([sys.executable, str(root / "tools" / "deploy.py"), "deploy", "--profile", str(profile)])
+    result = run(["node", str(root / "tools" / "deploy.mjs"), "deploy", "--profile", str(profile)])
     if result.returncode != 0:
-        raise CloudflareError("tools/deploy.py deploy failed; fix the cause above, then rerun up")
+        raise CloudflareError("tools/deploy.mjs deploy failed; fix the cause above, then rerun up")
     print("Factory is live at " + origin)
     print("Next: open it in a browser and sign in as one of " + ", ".join(answers["emails"]) + ".")
     print("Then follow docs/getting-started.md to install the skill, add a project and start a first job.")

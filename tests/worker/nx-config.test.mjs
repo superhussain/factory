@@ -79,7 +79,7 @@ const INPUTS = {
   local: [
     "default",
     "shared",
-    "!{workspaceRoot}/tools/deploy.py",
+    "!{workspaceRoot}/tools/deploy.mjs",
     "{workspaceRoot}/tests/support/**/*",
     "{workspaceRoot}/tests/fixtures/project-documents.md",
     "{workspaceRoot}/tests/fixtures/project-document-notes.md",
@@ -93,7 +93,7 @@ const INPUTS = {
   browser: [
     "default",
     "shared",
-    "!{workspaceRoot}/tools/deploy.py",
+    "!{workspaceRoot}/tools/deploy.mjs",
     "{workspaceRoot}/tests/browser/**/*",
     "{workspaceRoot}/tests/fixtures/browser-cases.json",
     "{workspaceRoot}/tests/fixtures/inbox-count.json",

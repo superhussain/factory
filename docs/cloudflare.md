@@ -51,7 +51,7 @@ hostname. It writes the service token's client ID and secret to the factory
 home `.env` (mode 0600) as soon as the token exists. If that write fails, `up`
 deletes the new token and stops, so no token is left that nobody holds. It
 then writes `deploy/profile.json` with the Access issuer and audience and
-deploys through `tools/deploy.py deploy`. Run
+deploys through `tools/deploy.mjs deploy`. Run
 `python3 tools/bootstrap.py plan --answers deploy/bootstrap.json` to print the
 names without contacting Cloudflare.
 
@@ -162,7 +162,7 @@ with those integrations disabled.
 Optional `jira_origin`, such as `https://your-site.atlassian.net`, turns Jira keys in job files into links to `<jira_origin>/browse/<KEY>`; leave it out to keep keys as text.
 Optional `embed_origins`, a list of HTTPS origins, plus the Paseo desktop origin `paseo://app`, such as `["https://app.paseo.sh", "paseo://app"]`, lets those sites frame the dashboard for the Paseo plugin ([integrations.md](integrations.md#paseo-plugin)). It becomes the dashboard's `frame-ancestors`; without it only the dashboard itself may frame the board.
 Optional `tracer_receipt_key`, the base64 Ed25519 public key Tracer signs scope approvals with, lets a device move a Tracer-approved job to `build`; without it a person approves each spec.
-`python3 tools/deploy.py check --profile deploy/profile.json` validates the file
+`node tools/deploy.mjs check --profile deploy/profile.json` validates the file
 without writes; `tests/fixtures/deployment-valid.json` shows the shape with
 synthetic values.
 
@@ -227,10 +227,10 @@ header-only Service Auth. Never suggest disabling strict mode as a fix.
 From the checkout, with your private profile:
 
 ```sh
-python3 tools/deploy.py check --profile deploy/profile.json
-python3 tools/deploy.py render --profile deploy/profile.json
-python3 tools/deploy.py dry-run --profile deploy/profile.json
-python3 tools/deploy.py deploy --profile deploy/profile.json
+node tools/deploy.mjs check --profile deploy/profile.json
+node tools/deploy.mjs render --profile deploy/profile.json
+node tools/deploy.mjs dry-run --profile deploy/profile.json
+node tools/deploy.mjs deploy --profile deploy/profile.json
 ```
 
 `render` writes `.build/wrangler.production.json` and the connection descriptor
@@ -335,14 +335,14 @@ pushed `main` commit automatically: each run first reconciles against
 its own pushed SHA — so a stale, reordered or rerun run can never lose the
 latest reviewed head even when GitHub's single pending slot displaces the
 head's own queued run. It then validates the deployment inputs, installs with
-a cached frozen install, and runs an uncached `python3 tools/deploy.py deploy
+a cached frozen install, and runs an uncached `node tools/deploy.mjs deploy
 --profile deploy/profile.json`. The profile is materialized at runtime from one
 repository variable into the ignored, temporary `deploy/profile.json` in the
 workflow's checkout (never committed); the token comes from one secret and
 exists only in step environment variables.
 
 DNS effects: the rendered config attaches your origin's hostname as a Cloudflare
-custom domain (`tools/deploy.py` renders `custom_domain: true`), so a deploy can
+custom domain (`tools/deploy.mjs` renders `custom_domain: true`), so a deploy can
 make Cloudflare create or update the DNS record for that hostname. That is the
 boundary: reconciling the already-configured custom domain is in scope; the
 workflow never creates other or new DNS records or zones and performs no other
@@ -379,7 +379,7 @@ One-time operator setup, after you complete steps 1–6 for the instance:
    JSON exactly as `deploy/profile.json` (same schema as section 2):
    `gh variable set FACTORY_DEPLOY_PROFILE -R <owner>/<repo> < deploy/profile.json`.
    It is nonsecret instance configuration, validated at runtime by
-   `python3 tools/deploy.py check`; keep real values out of the repository.
+   `node tools/deploy.mjs check`; keep real values out of the repository.
 
 Until the environment, the secret and the variable are provisioned, the
 workflow fails fast on a missing secret or variable with a diagnostic naming the
@@ -408,7 +408,7 @@ GitHub Actions first:
    `deploy/profile.json` locally (the same JSON as `FACTORY_DEPLOY_PROFILE`),
    run `pnpm install --frozen-lockfile`, and authenticate Wrangler locally with
    `CLOUDFLARE_API_TOKEN` in the environment.
-3. Deploy: `python3 tools/deploy.py deploy --profile deploy/profile.json`, then
+3. Deploy: `node tools/deploy.mjs deploy --profile deploy/profile.json`, then
    verify as above (Deploy step equivalent: the CLI's own output, the
    authenticated `curl -fsS` check, and domain attachment).
 4. Re-enable the workflow (`gh workflow enable deploy-main`). The rollback holds

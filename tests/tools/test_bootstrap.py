@@ -367,7 +367,7 @@ class FreshUpTest(Instance):
                                     "init", "--connection", init[-1]])
         self.assertEqual(self.run.connection, {"version": 1, "api_url": "https://factory.example.test"})
         self.assertNotEqual(Path(init_kwargs["cwd"]), self.root)
-        self.assertEqual(deploy[1:], [str(self.root / "tools" / "deploy.py"), "deploy", "--profile",
+        self.assertEqual(deploy[1:], [str(self.root / "tools" / "deploy.mjs"), "deploy", "--profile",
                                       str(self.root / "deploy" / "profile.json")])
         first_write = next(i for i, (method, _, _) in enumerate(self.fake.calls) if method != "GET")
         self.assertEqual(self.fake.calls[first_write][1], "accounts/" + ACCOUNT + "/r2/buckets")

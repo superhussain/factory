@@ -579,7 +579,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   replay exits 5 and says to deploy the current Worker.
 - **Floors.** A queued idea still goes through the spec, the reviews F2 requires, the
   approver, merge rules and any `spec-approval` gate.
-- **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
+- **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.mjs render` adds.
   Workers AI usage bills against the account. Without the binding the route answers 503,
   and lines wait. In a 36-call live run, a call sent a median of 292 input tokens, which costs about
   $0.000011, or about 1 neuron. The free tier of 10,000 neurons a day covers about 9,900
