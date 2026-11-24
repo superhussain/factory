@@ -7336,6 +7336,39 @@ mod backlog_triage_pass_test {
         );
     }
 
+    /// Ported from tests/cli/test_board_ids.py ArchiveFloorTest.test_backlog_triage_queues_above_the_floor:
+    /// triage never hands out an id the archive already used.
+    #[test]
+    fn test_backlog_triage_queues_above_the_archive_floor() {
+        let board = r#"{"updated": "", "jobs": [{"id": "414-retry-sync", "project": "sample", "stage": "closed"}, {"id": "415-add-export", "project": "sample", "stage": "merged"}], "archived": {"max_id": 416, "fingerprints": {}}}"#;
+        let (origin, seen) = serve(queued(
+            board,
+            "- [ ] sample: Add thing
+",
+        ));
+        let home = home_for("triage-above-floor", &origin);
+        let verdict = json!({"model": "m", "confidence": 90, "threshold": 80, "reason": "Small."});
+        assert!(!queue_backlog_item(&home, "sample", "Add thing", &verdict, None).unwrap());
+        let seen = seen.lock().unwrap();
+        let body = |n: usize| String::from_utf8(seen[n].body.clone()).unwrap();
+        assert_eq!(
+            (seen[1].method.as_str(), seen[1].path.as_str()),
+            ("PUT", "/api/board")
+        );
+        let ids: Vec<String> = loads(&body(1)).unwrap()["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|j| py_str(&j["id"]))
+            .collect();
+        assert_eq!(ids.last().map(String::as_str), Some("417-add-thing"));
+        assert_eq!(
+            (seen[3].method.as_str(), seen[3].path.as_str()),
+            ("PUT", "/api/backlog")
+        );
+        assert!(body(3).contains("(417-add-thing)"), "{}", body(3));
+    }
+
     #[test]
     fn test_skips_retro_lines() {
         let retro = "- [ ] sample: Guard the ls alias";
