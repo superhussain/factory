@@ -143,10 +143,14 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS board_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)",
 ];
 
-/** The room's side of the store. storage is the Durable Object's ctx.storage. */
+/**
+ * The room's side of the store. storage is the Durable Object's ctx.storage; waitUntil keeps a
+ * read's R2 copy running after the read answers.
+ */
 export class BoardRows {
-  constructor(storage, env) {
+  constructor(storage, env, waitUntil = (promise) => promise.catch(() => {})) {
     this.storage = storage;
+    this.waitUntil = waitUntil;
     // SQLite rows read and written, summed from each cursor, which the Free plan caps per day.
     this.work = { rowsRead: 0, rowsWritten: 0 };
     this.sql = {
@@ -631,8 +635,14 @@ export class BoardRows {
         return { etag: state.etag, body: object.body };
       }
     }
-    debug(this.memo.etag === state.etag ? "the memo" : "the pages");
-    return { etag: state.etag, body: this.blob(state) };
+    const built = this.memo.etag !== state.etag;
+    debug(built ? "the pages" : "the memo");
+    const body = this.blob(state);
+    // The first read that builds a version copies those bytes to R2 at once, the alarm's copy
+    // early, so later reads stream R2's and the alarm finds nothing to do. The read does not
+    // wait on the put; a put that fails or loses its condition leaves the alarm to retry.
+    if (built && this.hasDirty(state)) this.waitUntil(this.flush());
+    return { etag: state.etag, body };
   }
 
   async read() {

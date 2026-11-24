@@ -79,7 +79,6 @@ test("a PATCH puts no board.json; the alarm copies the board to R2", async () =>
     jobs: [BUILD, SPEC, IDEA],
     autonomy: { mode: "auto" },
   };
-  assert.equal(await (await s.send("/board.json")).text(), JSON.stringify(expected));
   assert.equal(boardPuts(s.bucket), 0);
   assert.equal(s.r2().httpEtag, SEED);
   assert.deepEqual(JSON.parse(s.notified[0]), {
@@ -94,14 +93,17 @@ test("a PATCH puts no board.json; the alarm copies the board to R2", async () =>
   await s.room.runAlarm();
   assert.equal(s.r2().bytes.toString(), JSON.stringify(expected));
   // The copy changes R2's version, not the board's.
-  assert.equal((await s.send("/board.json")).headers.get("ETag"), etag);
+  const read = await s.send("/board.json");
+  assert.equal(read.headers.get("ETag"), etag);
+  assert.equal(await read.text(), JSON.stringify(expected));
   assert.equal(s.room.object.board().hasDirty(), false);
 });
 
-test("after a copy lands, a read in a room evicted since streams R2's bytes", async (t) => {
+test("the first read after a write copies what it built; later reads stream R2's bytes", async (t) => {
   const s = setup();
   s.env.BOARD_DEBUG = "1";
   const log = t.mock.method(console, "log", () => {});
+  // Each read runs in a room evicted since the last request, as in production.
   const read = async () => {
     s.room.restart();
     const response = await s.send("/board.json");
@@ -111,10 +113,16 @@ test("after a copy lands, a read in a room evicted since streams R2's bytes", as
   const etag = ok.headers.get("ETag");
   const built = await read();
   assert.equal(built.etag, etag);
-  await s.room.runAlarm();
+  await s.room.settle();
+  assert.equal(boardPuts(s.bucket), 1, "one copy, put from the bytes the read built");
+  assert.equal(s.r2().bytes.toString(), built.text);
+  assert.equal(s.room.object.board().state().verbatim, true);
+  assert.equal(s.room.object.board().hasDirty(), false);
   const copied = await read();
   assert.deepEqual(copied, built);
-  assert.equal(s.room.object.board().state().verbatim, true);
+  await s.room.settle();
+  await s.room.runAlarm();
+  assert.equal(boardPuts(s.bucket), 1, "neither the second read nor the alarm copies again");
   assert.deepEqual(
     log.mock.calls.map((c) => c.arguments[0]),
     [`board store: read the pages for ${etag}`, `board store: read R2's bytes for ${etag}`],
@@ -123,6 +131,30 @@ test("after a copy lands, a read in a room evicted since streams R2's bytes", as
   await s.patch({ rows: [{ id: IDEA.id, expect: IDEA, row: { ...IDEA, title: "CSV 2" } }] });
   assert.equal(s.room.object.board().state().verbatim, false);
   assert.equal(JSON.parse((await read()).text).jobs[2].title, "CSV 2");
+});
+
+test("a write during a read's copy leaves the board off R2's bytes until the next copy", async () => {
+  const s = setup();
+  const ok = await s.patch({ rows: [{ id: IDEA.id, expect: null, row: IDEA }] });
+  const put = s.bucket.put.bind(s.bucket);
+  const renamed = { ...IDEA, title: "CSV 2" };
+  s.bucket.put = async (...args) => {
+    s.bucket.put = put;
+    const again = await s.patch({ rows: [{ id: IDEA.id, expect: IDEA, row: renamed }] });
+    assert.equal(again.status, 200);
+    return put(...args);
+  };
+  const first = await s.send("/board.json");
+  assert.equal(first.headers.get("ETag"), ok.headers.get("ETag"));
+  await s.room.settle();
+  assert.deepEqual(JSON.parse(s.r2().bytes).jobs, [BUILD, SPEC, IDEA]);
+  const board = s.room.object.board();
+  assert.equal(board.state().verbatim, false);
+  assert.equal(board.hasDirty(), true);
+  assert.deepEqual((await (await s.send("/board.json")).json()).jobs, [BUILD, SPEC, renamed]);
+  await s.room.settle();
+  assert.deepEqual(JSON.parse(s.r2().bytes).jobs, [BUILD, SPEC, renamed]);
+  assert.equal(board.state().verbatim, true);
 });
 
 test("a PATCH during a copy stays unflushed until the next alarm", async () => {
@@ -373,8 +405,8 @@ test("a copy that lands before the room records it is the room's own after a res
   assert.deepEqual(JSON.parse(s.r2().bytes).jobs, [first, SPEC]);
   assert.deepEqual((await (await s.send("/board.json")).json()).jobs, [second, SPEC]);
   assert.equal(warn.mock.calls.length, 0, "the room's own copy is no outside write to merge");
-  assert.equal(s.room.object.board().hasDirty(), true);
-  await s.room.runAlarm();
+  // That read built the board, so it copies it.
+  await s.room.settle();
   assert.deepEqual(JSON.parse(s.r2().bytes).jobs, [second, SPEC]);
   assert.equal(s.room.object.board().hasDirty(), false);
 });

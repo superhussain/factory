@@ -65,6 +65,11 @@ export class BenchRoom extends BenchBase {
     this.store = undefined;
     return true;
   }
+  // Waits for a read's R2 copy, which runs after the read answers.
+  async boardSettle() {
+    await this.board().inflight;
+    return true;
+  }
   boardWork() {
     return { ...this.board().work };
   }
@@ -116,6 +121,7 @@ export default {
     if (url.pathname === "/bench/work") return Response.json(await room(env).boardWork());
     if (url.pathname === "/bench/flush") return Response.json(await room(env).boardFlushTimed());
     if (url.pathname === "/bench/text") return Response.json(await room(env).boardTextTimed());
+    if (url.pathname === "/bench/settle") return Response.json(await room(env).boardSettle());
     if (url.pathname === "/bench/evict") return Response.json(await room(env).boardEvict());
     return serveFactory(request, { ...env, config }, principal, ctx);
   },
@@ -297,15 +303,26 @@ export async function roomWork(rows, script) {
       }),
     );
     claimed.claim = { device: "mac-a" };
-    await measure("GET /board.json, new version", get);
+    // The first GET of a new version builds it and copies those bytes to R2 after it answers.
+    const getCopied = async () => {
+      await get();
+      await json("/bench/settle");
+    };
+    await measure("GET /board.json, new version, with its copy", getCopied);
     await measure("GET /board.json, same version", get);
     // Production evicts the hibernating room between GETs a minute apart, memo and all.
+    await touch(1);
     await json("/bench/evict");
-    await measure("GET /board.json after a PATCH, room evicted", get);
-    let copy;
-    await measure("R2 copy (alarm)", async () => (copy = await json("/bench/flush")));
+    await measure("GET /board.json after a PATCH, room evicted, with its copy", getCopied);
     await json("/bench/evict");
     await measure("GET /board.json after the copy, room evicted", get);
+    // The alarm copies a version no read has built, so it builds it.
+    await touch(1);
+    await json("/bench/evict");
+    let copy;
+    await measure("R2 copy (alarm), building the board", async () => {
+      copy = await json("/bench/flush");
+    });
     const text = await json("/bench/text");
     const etag = async () => (await mf.dispatchFetch(ORIGIN + "/board.json")).headers.get("ETag");
     const doc = JSON.parse(await get());
@@ -388,21 +405,29 @@ export async function benchMiniflare(rows, runs, script) {
     };
     const cached = await perRequest(runs, get);
     out["workerd CPU: GET /board.json, same version"] = cached.cpu;
-    // A GET after each PATCH reads a new version, which the room builds once.
+    // A GET after each PATCH reads a new version, which the room builds once. Since job 2280
+    // that GET also copies the version to R2 after it answers; settle waits for the copy.
+    const settle = async () => (await mf.dispatchFetch(`${origin}/bench/settle`)).arrayBuffer();
     const both = await perRequest(runs, async () => {
       await patchRows(1)();
       await get();
+      await settle();
     });
-    out["workerd CPU: GET /board.json after a PATCH"] = both.cpu - out["workerd CPU: PATCH 1 row"];
+    out["workerd CPU: GET /board.json after a PATCH, with its copy"] =
+      both.cpu - out["workerd CPU: PATCH 1 row"];
     // Production evicts the hibernating room between GETs a minute apart, so its memo is gone.
     const evict = async () => (await mf.dispatchFetch(`${origin}/bench/evict`)).arrayBuffer();
     const evicted = async () => {
       await evict();
       await get();
     };
-    out["workerd CPU: GET /board.json after eviction, rows uncopied"] = (
-      await perRequest(runs, evicted)
-    ).cpu;
+    const fresh = await perRequest(runs, async () => {
+      await patchRows(1)();
+      await evicted();
+      await settle();
+    });
+    out["workerd CPU: GET /board.json after a PATCH and eviction, with its copy"] =
+      fresh.cpu - out["workerd CPU: PATCH 1 row"];
     await (await mf.dispatchFetch(`${origin}/bench/flush`)).arrayBuffer();
     out["workerd CPU: GET /board.json after eviction, rows copied"] = (
       await perRequest(runs, evicted)

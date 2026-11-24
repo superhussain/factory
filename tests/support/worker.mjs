@@ -143,7 +143,17 @@ export function memoryRoom(
     },
   };
   globalThis.WebSocketRequestResponsePair ??= class {};
-  const ctx = { storage, setWebSocketAutoResponse() {}, getWebSockets: () => [] };
+  // Work a request hands to waitUntil, such as a read's R2 copy, which settle() awaits.
+  const pending = [];
+  const ctx = {
+    storage,
+    setWebSocketAutoResponse() {},
+    getWebSockets: () => [],
+    waitUntil(promise) {
+      promise.catch(() => {});
+      pending.push(promise);
+    },
+  };
   let object = new BoardEvents(ctx, env);
   const calls = [];
   const rpc =
@@ -179,6 +189,7 @@ export function memoryRoom(
     work,
     stub,
     alarm: () => alarm,
+    settle: () => Promise.all(pending.splice(0)),
     async runAlarm() {
       alarm = null;
       await object.alarm();

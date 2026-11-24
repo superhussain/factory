@@ -89,7 +89,9 @@ export class BoardEvents extends DurableObject {
 
   // The board store's RPC methods, which boardStore(env) calls.
   board() {
-    return (this.store ??= new BoardRows(this.ctx.storage, this.env));
+    return (this.store ??= new BoardRows(this.ctx.storage, this.env, (promise) =>
+      this.ctx.waitUntil(promise),
+    ));
   }
 
   boardHead() {
