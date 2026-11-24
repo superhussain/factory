@@ -184,7 +184,11 @@ export async function startCancelWorker({ persistDir }) {
 }
 
 // The local HTTP suites, one file at a time, since they share the services' storage.
-const SUITES = ["tests/worker/project-api.test.mjs", "tests/worker/project-documents-api.test.mjs"];
+const SUITES = [
+  "tests/worker/http-v1.test.mjs",
+  "tests/worker/project-api.test.mjs",
+  "tests/worker/project-documents-api.test.mjs",
+];
 
 function nodeTest(env) {
   return new Promise((resolve) => {

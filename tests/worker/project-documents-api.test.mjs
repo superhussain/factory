@@ -33,7 +33,9 @@ test("the target guard refuses every other origin before any request", (t) => {
 
 const url = testUrl();
 
-describe("project documents API", { skip: url ? false : "set FACTORY_TEST_URL" }, () => {
+describe("project documents API", () => {
+  // Each test skips on its own, so a run without the URL counts them as skipped.
+  const skip = url ? false : "set FACTORY_TEST_URL";
   const get = (path) => request(url, path);
   const put = (path, body, condition) =>
     request(url, path, {
@@ -78,14 +80,14 @@ describe("project documents API", { skip: url ? false : "set FACTORY_TEST_URL" }
     }
   });
 
-  test("create race", async () => {
+  test("create race", { skip }, async () => {
     const p = path(undefined, "decisions.md");
     assert.equal((await get(p)).status, 404, "complete runs require fresh job-local persistence");
     const bodies = ["Created A\n", "Created B\n"];
     await assertWinner(p, bodies, await race(bodies.map((b) => [p, b, { "If-None-Match": "*" }])));
   });
 
-  test("independent names and projects", async () => {
+  test("independent names and projects", { skip }, async () => {
     const paths = [path(), path(undefined, "runbook.md"), path("documents-second")];
     const tags = [];
     for (const [i, p] of paths.entries()) tags.push(await reset(p, `Distinct base ${i}`));
@@ -104,14 +106,14 @@ describe("project documents API", { skip: url ? false : "set FACTORY_TEST_URL" }
       assert.deepEqual((await get(`/api/projects/${slug}.md`)).body, config);
   });
 
-  test("update race", async () => {
+  test("update race", { skip }, async () => {
     const p = path();
     const tag = strong((await get(p)).headers.get("ETag"));
     const bodies = ["Updated A\n", "Updated B\n"];
     await assertWinner(p, bodies, await race(bodies.map((b) => [p, b, { "If-Match": tag }])));
   });
 
-  test("validation, listing and missing registration", async () => {
+  test("validation, listing and missing registration", { skip }, async () => {
     const p = path();
     const original = await get(p);
     const tag = strong(original.headers.get("ETag"));

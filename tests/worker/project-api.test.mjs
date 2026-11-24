@@ -36,7 +36,9 @@ test("the target guard refuses every other origin before any request", (t) => {
 
 const url = testUrl();
 
-describe("project API", { skip: url ? false : "set FACTORY_TEST_URL" }, () => {
+describe("project API", () => {
+  // Each test skips on its own, so a run without the URL counts them as skipped.
+  const skip = url ? false : "set FACTORY_TEST_URL";
   const base = readFileSync(new URL("../fixtures/project-settings.md", import.meta.url));
   const more = (text) => Buffer.concat([base, Buffer.from(text)]);
   const get = () => request(url, PROJECT);
@@ -78,7 +80,7 @@ describe("project API", { skip: url ? false : "set FACTORY_TEST_URL" }, () => {
 
   const push = async (h) => (await factory(h, "push", SLUG)).code;
 
-  test("browser-like and device conflicts in both orders", async () => {
+  test("browser-like and device conflicts in both orders", { skip }, async () => {
     const h = await home("device");
     const [doc] = files(h);
     writeFileSync(doc, more("Device"));
@@ -94,7 +96,7 @@ describe("project API", { skip: url ? false : "set FACTORY_TEST_URL" }, () => {
     assert.deepEqual((await get()).body, more("Device second"));
   });
 
-  test("real atomic race and readback", async () => {
+  test("real atomic race and readback", { skip }, async () => {
     const bodies = [more("A"), more("B")];
     const results = await Promise.all(bodies.map((body) => put(body, tag)));
     assert.deepEqual(results.map((r) => r.status).sort(), [200, 412]);
@@ -105,7 +107,7 @@ describe("project API", { skip: url ? false : "set FACTORY_TEST_URL" }, () => {
     assert.equal(strong(got.headers.get("ETag")), strong(results[winner].headers.get("ETag")));
   });
 
-  test("two-device race, conflict, merge and where", async () => {
+  test("two-device race, conflict, merge and where", { skip }, async () => {
     const proxy = await barrierProxy(url, `PUT ${PROJECT}`);
     try {
       const homes = [await home("A", proxy.origin), await home("B", proxy.origin)];
@@ -139,7 +141,7 @@ describe("project API", { skip: url ? false : "set FACTORY_TEST_URL" }, () => {
     }
   });
 
-  test("validation and baseless stale writes leave bytes", async () => {
+  test("validation and baseless stale writes leave bytes", { skip }, async () => {
     for (const [headers, body, status] of [
       [{}, base, 428],
       [{ "If-Match": '"a", "b"' }, base, 400],
