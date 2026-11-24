@@ -158,7 +158,6 @@ impl Heart {
             let Some(all) = agents.get_or_init(|| list(None)) else {
                 return Ok((None, Vec::new()));
             };
-            *last = Some((key, Instant::now()));
             let stamp = now();
             let mut ids = Vec::new();
             for (i, agent) in due {
@@ -183,7 +182,10 @@ impl Heart {
                     );
                 }
             }
+            // Only a read that found nothing live is remembered: a write that fails leaves the
+            // same claims due, and the next pass must read and try again.
             if ids.is_empty() {
+                *last = Some((key, Instant::now()));
                 return Ok((None, ids));
             }
             board["updated"] = stamp.into();
@@ -649,5 +651,42 @@ pub(crate) mod tests {
         std::thread::sleep(reprobe);
         assert_eq!(beat(), 3, "past reprobe the same claims read again");
         assert_eq!(seen.lock().unwrap().len(), 5);
+    }
+
+    /// A write that fails is not remembered: the next pass reads Paseo again and retries it.
+    #[test]
+    fn a_failed_write_is_retried_next_pass() {
+        let old = minutes_ago(30);
+        let board = board_of(vec![job(
+            "001-a",
+            "build",
+            claim("mac", "s1", &old),
+            Some((SERVER, "a")),
+        )]);
+        let (origin, seen) = serve(vec![
+            get(&board),
+            (500, "{}", vec![]),
+            get(&board),
+            (200, "{}", vec![]),
+        ]);
+        let home = home_for("heartbeat-retry", &origin);
+        let fake = Fake::new(json!([agent("a", "running", "factory 001-a")]), vec![]);
+        let mut heart = Heart::every(Duration::MAX);
+        let list = |p: Option<&str>| fake.list(p);
+        assert!(heart
+            .beat_with(&home, "mac", SERVER, &list, &crate::shared::http::api)
+            .is_err());
+        let ids = heart
+            .beat_with(&home, "mac", SERVER, &list, &crate::shared::http::api)
+            .unwrap();
+        assert_eq!(ids, ["001-a"]);
+        assert_eq!(fake.asked.borrow().len(), 2);
+        let methods: Vec<String> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.method.clone())
+            .collect();
+        assert_eq!(methods, ["GET", "PATCH", "GET", "PATCH"]);
     }
 }
