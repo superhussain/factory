@@ -88,7 +88,7 @@ static AUDIT_FLAGS: [(&str, Pattern); 8] = [
 ];
 static AUDIT_SECRET_FILE: Pattern = Pattern::new(r#"(?:^|[\s/'\"=])\.env(?![\w.-])"#, Flags::NONE);
 static AUDIT_PR_MERGE: Pattern = Pattern::new(
-    r"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo)[ \t]+|[A-Za-z_]\w*=[^\s;&|(){}`]*[ \t]+)*gh\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/\d+/merge\b)",
+    r#"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo)[ \t]+|[A-Za-z_]\w*=[^\s;&|(){}`]*[ \t]+)*(?:gh\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/\d+/merge\b)|(?:""|''|\$\{?[A-Za-z_]\w*\}?|(?:[^\s;&|(){}`'"]*/)?factory)[ \t]+pr-merge(?![\w-]))"#,
     Flags::NONE,
 );
 static AUDIT_HEREDOC_OPEN: Pattern = Pattern::new(
@@ -461,7 +461,7 @@ fn audit_strip_quotes(command: &str) -> String {
     out
 }
 
-/// The names of the risky shapes one call matches. pr-merge needs a merge that runs; main drops it.
+/// The names of the risky shapes one call matches. pr-merge needs a merge that runs, by gh or the runtime; main drops it.
 fn audit_flags(
     name: &str,
     inp: &Map<String, Value>,
@@ -2822,6 +2822,39 @@ mod tests {
         let push = push.as_object().unwrap();
         let raw = audit_target_raw("Bash", push);
         assert_eq!(audit_flags("Bash", push, &raw, false, true), ["force-push"]);
+        let runtime = json!({"command": "\"$RUNTIME\" pr-merge factory/1017-add-x"});
+        let runtime = runtime.as_object().unwrap();
+        let raw = audit_target_raw("Bash", runtime);
+        assert!(audit_flags("Bash", runtime, &raw, false, true).is_empty());
+    }
+
+    #[test]
+    fn pr_merge_runtime_subcommand() {
+        let flags = |command: &str| {
+            let inp = json!({ "command": command });
+            let inp = inp.as_object().unwrap();
+            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false)
+        };
+        for command in [
+            "\"$RUNTIME\" pr-merge factory/1017-add-x",
+            "$RUNTIME pr-merge factory/1017-add-x",
+            "${RUNTIME} pr-merge factory/1017-add-x",
+            "~/.agents/skills/factory/runtime/factory pr-merge factory/1017-add-x",
+            "factory pr-merge factory/1017-add-x",
+            "cd x && \"$RUNTIME\" pr-merge factory/1017-add-x",
+            "exec \"$RUNTIME\" pr-merge factory/1017-add-x",
+        ] {
+            assert_eq!(flags(command), ["pr-merge"], "{command}");
+        }
+        for command in [
+            "grep -n pr-merge skills/factory/SKILL.md",
+            "echo \"$RUNTIME pr-merge x\"",
+            "cat >> build.md <<'EOF'\n\"$RUNTIME\" pr-merge factory/1017-add-x\nEOF",
+            "\"$RUNTIME\" pr-state factory/1017-add-x",
+            "myfactory pr-merge x",
+        ] {
+            assert!(flags(command).is_empty(), "{command}");
+        }
     }
 
     #[test]
@@ -2875,6 +2908,9 @@ mod tests {
             "\n".repeat(100_000),
             "\nenv".repeat(25_000),
             "\na=".repeat(33_000),
+            format!("({}", "a/".repeat(50_000)),
+            "(a/".repeat(33_000),
+            "($a ".repeat(25_000),
         ] {
             let start = std::time::Instant::now();
             let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text));
