@@ -140,11 +140,14 @@ test("a board write cannot drop an open trial or change its other keys", async (
   assert.deepEqual(await board(), before);
 });
 
-test("a misshapen open trial can be dropped", async () => {
+test("a malformed open trial can be dropped", async () => {
   const V11 = { ...V10, id: "factory-spec-v11", version: 11, opened: "garbage" };
   const V12 = { ...V10, id: "factory-spec-v12", version: "12" };
-  const { put } = await setup({ trials: [V10, V11, V12] });
-  for (const t of [V11, V12]) {
+  const V13 = { ...V10, id: "factory-spec-v13", version: 13, opened: "2026-02-30T00:00:00Z" };
+  const V14 = { ...V10, id: "../x-spec-v14", project: "../x", version: 14 };
+  const V15 = { ...V10, id: "factory-spec-v15", version: 15, opened: "0000-01-01T00:00:00Z" };
+  const { put } = await setup({ trials: [V10, V11, V12, V13, V14, V15] });
+  for (const t of [V11, V12, V13, V14, V15]) {
     const dropped = await put((ts) => ts.filter((s) => s.id !== t.id));
     assert.equal(dropped.status, 200, dropped.text);
   }
