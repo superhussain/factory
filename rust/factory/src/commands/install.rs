@@ -1136,6 +1136,61 @@ mod tests {
             );
             assert!(err.contains("FACTORY_RUNTIME=python is gone"), "{argv:?}");
         }
+        // Without the binary, one line names the installer and nothing runs.
+        fs::remove_file(runtime.join("factory")).unwrap();
+        fs::remove_file(runtime.join("factory.exe")).unwrap();
+        for argv in [
+            vec!["sh", &text, "a"],
+            vec!["python3", &text, "a"],
+            vec!["python3", "-c", &windows],
+        ] {
+            let p = std::process::Command::new(argv[0])
+                .args(&argv[1..])
+                .stdin(std::process::Stdio::null())
+                .output()
+                .unwrap();
+            let err = String::from_utf8(p.stderr).unwrap();
+            assert_eq!(
+                (p.status.code(), p.stdout.len()),
+                (Some(127), 0),
+                "{argv:?}"
+            );
+            assert_eq!(err.lines().count(), 1, "{argv:?}: {err}");
+            assert!(
+                err.starts_with("factory.py: no factory binary at ")
+                    && err.contains("sh tools/install.sh <skills folder>"),
+                "{argv:?}: {err}"
+            );
+        }
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Ported from tests/cli/test_roles.py: security-relevant rules the shipped prompts must keep.
+    /// Whitespace is collapsed where the files wrap lines freely.
+    #[test]
+    fn prompts_keep_their_security_contracts() {
+        let read = |rel: &str| {
+            fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../skills/factory")
+                    .join(rel),
+            )
+            .unwrap()
+        };
+        let flat = |text: String| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let skill = read("SKILL.md");
+        let approver = flat(read("agents/factory-approver.md"));
+        let feature = flat(read("references/commands/feature.md"));
+        assert!(skill.contains("- No agent runs `autonomy resume`, `autonomy allow`, `autonomy restore` or `autonomy promote`,\n"));
+        assert!(skill.contains("`script -qc`"));
+        assert!(approver.contains("**Protected paths.** Read the newest `round-N/review-plan.json` the listing shows. Its `protected` list names the branch's CI, check, hook and test-config files. For each path, ESCALATE with a sign-off bullet that names it, or APPROVE only after you justify it under a `## Protected paths` heading in decision.md, one bullet per path: the path, the spec task that names it, and why every check stays at least as strict. A path no spec task names is ESCALATE. When `protected` is null or no plan file exists, apply this rule to every such file in the diff."));
+        for rule in [
+            "Its `protected` list stays in `round-N/review-plan.json` for the approver.",
+            "Run `\"$RUNTIME\" review-floor \"$SLUG/<id>\"`. A non-zero exit puts its stderr line in the board `note`, and the build goes ahead. Set stage `build`",
+            "CHANGES is a normal fix round: run `\"$RUNTIME\" review-floor \"$SLUG/<id>\"` before sending the builder `decision.md`.",
+            "start no pre-review or review round and keep the tier. Before either patch below, reduce the line. `<kind>` is the builder's kind when it is `secret`, `tool`, `network` or `service`, else `unknown`. `<what is missing>` is only the name of the missing piece: the first env var, command, host or service the line names, without quotes or backticks and cut at its first `=`. Write `unnamed` instead when that name is not 1 to 64 characters of letters, digits, `_`, `.` or `-`, or holds a run of 16 or more letters and digits that mixes both. Never copy any other word of the line, a value, a token or a URL into `note` or `needs`.",
+        ] {
+            assert!(feature.contains(rule), "{rule}");
+        }
     }
 }
