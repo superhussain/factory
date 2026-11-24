@@ -20276,6 +20276,79 @@ exit "$archive_code"
                 .get("triage_failed_since")
                 .is_none());
         }
+
+        /// A checkout `studio` whose origin/main is three commits dated across a day; returns the
+        /// first commit and the last.
+        fn studio_with_origin_base(fx: &Fx) -> (String, String) {
+            let repo = fx.home.join("studio");
+            fs::create_dir(&repo).unwrap();
+            let git = |args: &[&str], date: Option<&str>| {
+                let mut command = std::process::Command::new("git");
+                command
+                    .arg("-C")
+                    .arg(&repo)
+                    .args([
+                        "-c",
+                        "user.name=Test",
+                        "-c",
+                        "user.email=test@example.invalid",
+                    ])
+                    .args(args);
+                if let Some(date) = date {
+                    command.env("GIT_COMMITTER_DATE", date);
+                }
+                let out = command.output().unwrap();
+                assert!(out.status.success(), "{args:?}");
+                String::from_utf8(out.stdout).unwrap().trim().to_string()
+            };
+            git(&["init", "-q"], None);
+            let mut commits = Vec::new();
+            for date in [
+                "2025-12-29T16:00:00Z",
+                "2025-12-30T14:00:00Z",
+                "2026-01-01T06:00:00Z",
+            ] {
+                git(&["commit", "-q", "--allow-empty", "-m", date], Some(date));
+                commits.push(git(&["rev-parse", "HEAD"], None));
+            }
+            let (first, last) = (commits[0].clone(), commits[2].clone());
+            git(&["update-ref", "refs/remotes/origin/main", &last], None);
+            fs::write(
+                fx.home.join("paths.md"),
+                format!("---\nstudio: {}\n---\n", repo.display()),
+            )
+            .unwrap();
+            (first, last)
+        }
+
+        #[test]
+        fn test_bundle_behind_since_reads_origin_base() {
+            let fx = Fx::new();
+            let (first, last) = studio_with_origin_base(&fx);
+            assert_eq!(
+                bundle_behind_since(&fx.home, &first).as_deref(),
+                Some("2025-12-30T14:00:00Z")
+            );
+            assert_eq!(bundle_behind_since(&fx.home, &last), None);
+            assert_eq!(bundle_behind_since(&fx.home, &"0".repeat(40)), None);
+            let stamp = json!({"commit": first, "tree": "b".repeat(64)});
+            fx.set_fakes(|f| f.bundle_stamp = Some(Rc::new(move || Some(stamp.clone()))));
+            let report = json!({"checks": []});
+            let body = host_status(
+                &fx.home,
+                &report,
+                "cron",
+                None,
+                Some("2026-01-01T09:00:00Z"),
+            )
+            .unwrap();
+            let keys: Vec<&String> = body.as_object().unwrap().keys().collect();
+            assert_eq!(
+                keys[keys.len() - 2..],
+                ["bundle_behind_since", "triage_failed_since"]
+            );
+            assert_eq!(body["bundle_behind_since"], "2025-12-30T14:00:00Z");
+        }
     }
 
     mod board_jobs_test {

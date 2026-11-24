@@ -1408,6 +1408,18 @@ fn explore_snapshot(slug: &str, folder: &Path, repo: &Path, base: &str) -> Res<V
         "checkout": checkout.display().to_string(), "out": out.display().to_string()}))
 }
 
+/// Set config.md's `device:` to id, leaving every other byte, and the file itself when it already says so.
+fn set_device(home: &Path, id: &str) -> Res<()> {
+    let config = home.join("config.md");
+    let text = read_raw(&config).map_err(|e| os_fail(e, &config))?;
+    let updated = device_line(&text, id)
+        .ok_or_else(|| fail("config.md has no frontmatter; run /factory init again", 2))?;
+    if updated != text {
+        write_atomic(&config, updated.as_bytes()).map_err(|e| os_fail(e, &config))?;
+    }
+    Ok(())
+}
+
 /// Pair this device with a host a person added in Settings. The code goes only into the POST body.
 pub fn host_cmd(call: &Call) -> Res<()> {
     let (sub, host_id, code) = (&call.args[0], &call.args[1], &call.args[2]);
@@ -1453,13 +1465,7 @@ pub fn host_cmd(call: &Call) -> Res<()> {
     if r.status == 409 {
         return Err(fail("this service token is already bound to another host. Each host needs its own Access service token.", 6));
     }
-    let config = home.join("config.md");
-    let text = read_raw(&config).map_err(|e| os_fail(e, &config))?;
-    let updated = device_line(&text, host_id)
-        .ok_or_else(|| fail("config.md has no frontmatter; run /factory init again", 2))?;
-    if updated != text {
-        write_atomic(&config, updated.as_bytes()).map_err(|e| os_fail(e, &config))?;
-    }
+    set_device(&home, host_id)?;
     report_status(&home, cached_status(&home), None);
     println!("paired {host_id}. config.md now sets device: {host_id}. Confirm the host in Settings, Hosts.");
     Ok(())
@@ -2167,6 +2173,57 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn bundle_behind_since_reads_origin_base() {
+        let dir = temp_dir("setup-behind");
+        let (home, repo) = (dir.join("home"), dir.join("studio"));
+        fs::create_dir_all(&repo).unwrap();
+        fs::create_dir(&home).unwrap();
+        let run = |args: &[&str], date: Option<&str>| {
+            let mut command = Command::new("git");
+            command.arg("-C").arg(&repo).args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+            ]);
+            command.args(args);
+            if let Some(date) = date {
+                command.env("GIT_COMMITTER_DATE", date);
+            }
+            let out = command.output().unwrap();
+            assert!(out.status.success(), "{args:?}");
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        run(&["init", "-q"], None);
+        let mut commits = Vec::new();
+        for date in [
+            "2025-12-29T16:00:00Z",
+            "2025-12-30T14:00:00Z",
+            "2026-01-01T06:00:00Z",
+        ] {
+            run(&["commit", "-q", "--allow-empty", "-m", date], Some(date));
+            commits.push(run(&["rev-parse", "HEAD"], None));
+        }
+        run(
+            &["update-ref", "refs/remotes/origin/main", &commits[2]],
+            None,
+        );
+        fs::write(
+            home.join("paths.md"),
+            format!("---\nstudio: {}\n---\n", repo.display()),
+        )
+        .unwrap();
+        assert_eq!(
+            bundle_behind_since(&home, &commits[0]).unwrap().as_deref(),
+            Some("2025-12-30T14:00:00Z")
+        );
+        assert_eq!(bundle_behind_since(&home, &commits[2]).unwrap(), None);
+        assert_eq!(bundle_behind_since(&home, &"0".repeat(40)).unwrap(), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn cached_status_rules() {
         let dir = temp_dir("setup-cached");
@@ -2241,6 +2298,55 @@ mod tests {
         assert_eq!(device_line("no frontmatter\n", "parity"), None);
         assert_eq!(device_line("---\nopen: yes\n", "parity"), None);
         assert_eq!(device_line("", "parity"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn set_device_replaces_only_the_first_line_and_skips_a_no_op_write() {
+        use std::os::unix::fs::MetadataExt;
+        let home = temp_dir("setup-set-device");
+        let config = home.join("config.md");
+        for (before, after) in [
+            (
+                "---\r\ndevice: old\r\nx: 1\r\n---\r\nbody\r\n",
+                "---\r\ndevice: host-a\r\nx: 1\r\n---\r\nbody\r\n",
+            ),
+            ("---\nx: 1\n---", "---\nx: 1\ndevice: host-a\n---"),
+            (
+                "---\ndevice: a\ndevice: b\n---\n",
+                "---\ndevice: host-a\ndevice: b\n---\n",
+            ),
+        ] {
+            fs::write(&config, before).unwrap();
+            set_device(&home, "host-a").unwrap();
+            assert_eq!(fs::read_to_string(&config).unwrap(), after);
+        }
+        let stamp = |path: &Path| {
+            let meta = fs::metadata(path).unwrap();
+            (meta.mtime(), meta.mtime_nsec(), meta.ino())
+        };
+        let before = stamp(&config);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        set_device(&home, "host-a").unwrap();
+        assert_eq!(stamp(&config), before);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn set_device_without_frontmatter_exits_2_and_keeps_the_file() {
+        let home = temp_dir("setup-set-device-bare");
+        let config = home.join("config.md");
+        for text in ["api_url: x\n", "---\napi_url: x\n"] {
+            fs::write(&config, text).unwrap();
+            let e = set_device(&home, "host-a").unwrap_err();
+            assert_eq!(e.code, 2);
+            assert_eq!(
+                e.stderr,
+                "factory.py: config.md has no frontmatter; run /factory init again\n"
+            );
+            assert_eq!(fs::read_to_string(&config).unwrap(), text);
+        }
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[cfg(unix)]
