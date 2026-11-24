@@ -88,7 +88,7 @@ static AUDIT_FLAGS: [(&str, Pattern); 8] = [
 ];
 static AUDIT_SECRET_FILE: Pattern = Pattern::new(r#"(?:^|[\s/'\"=])\.env(?![\w.-])"#, Flags::NONE);
 static AUDIT_PR_MERGE: Pattern = Pattern::new(
-    r"(?:^|[;&|(){}\n`])\s*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo)\s+|[A-Za-z_]\w*=[^\s;&|(){}`]*\s+)*gh\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/\d+/merge\b)",
+    r"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo)[ \t]+|[A-Za-z_]\w*=[^\s;&|(){}`]*[ \t]+)*gh\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/\d+/merge\b)",
     Flags::NONE,
 );
 static AUDIT_HEREDOC_OPEN: Pattern = Pattern::new(
@@ -2786,6 +2786,10 @@ mod tests {
             assert_eq!(flags(command), ["pr-merge"], "{command}");
         }
         assert_eq!(
+            flags(&format!("{}x\ngh pr merge 7", "\n".repeat(30_000))),
+            ["pr-merge"]
+        );
+        assert_eq!(
             flags("gh pr merge 7 && git push --force"),
             ["force-push", "pr-merge"]
         );
@@ -2800,6 +2804,9 @@ mod tests {
             "(gh api ".repeat(12_500),
             "{gh api {a}".repeat(9_000),
             "`a=".repeat(33_000),
+            "\n".repeat(100_000),
+            "\nenv".repeat(25_000),
+            "\na=".repeat(33_000),
         ] {
             let start = std::time::Instant::now();
             let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text));
