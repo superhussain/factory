@@ -1630,7 +1630,7 @@ fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
         }
         updates.push((tid.to_string(), update));
     }
-    let mut dropped = 0;
+    let mut dropped: Vec<String> = Vec::new();
     let data = cas(home, "/api/board", |text| {
         let mut data = load_board(text)?;
         let (gone, mut records): (Vec<Value>, Vec<Value>) = data
@@ -1641,7 +1641,7 @@ fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
             .filter(|t| t.is_object())
             .cloned()
             .partition(trial_droppable);
-        dropped = gone.len();
+        dropped = gone.iter().map(trial_drop_label).collect();
         for t in records.iter_mut() {
             if str_of(t, "status") != Some("open") {
                 continue;
@@ -1678,11 +1678,12 @@ fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
         data["updated"] = json!(now());
         Ok((Some(dump_board(&data)), data))
     })?;
-    if dropped > 0 {
+    if !dropped.is_empty() {
         writeln!(
             o.out,
-            "dropped malformed open trial records: {dropped} \
-             (opened is not a board timestamp or version is not a whole number)"
+            "dropped malformed open trial records: {} ({}; opened is not a board timestamp or version is not a whole number)",
+            dropped.len(),
+            dropped.join(", ")
         )
         .unwrap();
     }
