@@ -1043,8 +1043,7 @@ mod tests {
             (&decision["verdict"], &decision["decider"]),
             (&json!("APPROVE"), &json!("person"))
         );
-        let manifest =
-            read_text(&home.join("jobs/alpha/042-sample-export/.sync.json")).unwrap();
+        let manifest = read_text(&home.join("jobs/alpha/042-sample-export/.sync.json")).unwrap();
         assert_eq!(loads(&manifest).unwrap()["decision.md"]["etag"], "\"d1\"");
         fs::remove_dir_all(home).unwrap();
     }
