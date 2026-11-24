@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -44,6 +45,8 @@ FIELDS = ("exit code", "stdout", "stderr", "home tree") + tuple(f"{tool} calls" 
 DAYS = {"{today}": 0, "{today-6}": 6}
 # The host's OS label (host_os in the binary) in host-status.json and its PUT body, raw or JSON-escaped.
 HOST_OS = re.compile(rb'(\\?"os\\?": \\?")(?:Linux \(WSL\)|Linux|macOS|Windows|Other)(?=\\?")')
+# This host's name, where a device name falls back to it, as a whole word so a short name never matches inside a path.
+HOST = re.compile(rb"(?<![\w.-])" + re.escape(socket.gethostname().encode()) + rb"(?![\w.-])") if socket.gethostname() else None
 ELAPSED = re.compile(rb'"elapsed": \d+')
 STAMP = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
@@ -263,7 +266,8 @@ def run_side(case, command):
             data = data.replace(os.path.dirname(os.path.dirname(runtime)).encode(), b"{skill}")
             data = data.replace(str(home).encode(), b"{home}").replace(str(root).encode(), b"{tmp}")
             data = data.replace(str(ROOT).encode(), b"{root}")
-            return HOST_OS.sub(rb"\1{os}", ELAPSED.sub(rb'"elapsed": {n}', now_stamps(data, start, end)))
+            data = HOST_OS.sub(rb"\1{os}", ELAPSED.sub(rb'"elapsed": {n}', now_stamps(data, start, end)))
+            return HOST.sub(b"{host}", data) if HOST else data
 
         tree = [f"{path} {mode:o} {normalize(data)!r}" if data is not None else f"{path} {mode:o}"
                 for path, (mode, data) in snapshot(home).items()]
