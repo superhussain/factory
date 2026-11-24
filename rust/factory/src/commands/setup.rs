@@ -1690,6 +1690,215 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Every file under `dir` with its bytes, so a refusal can prove it wrote nothing.
+    fn tree(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        fn walk(dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
+            let mut entries: Vec<_> = fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect();
+            entries.sort();
+            for path in entries {
+                if path.is_dir() {
+                    walk(&path, out);
+                } else {
+                    let bytes = fs::read(&path).unwrap();
+                    out.push((path, bytes));
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(dir, &mut out);
+        out
+    }
+
+    /// A home whose config.md names each runtime's agents folder.
+    fn home_with_folders(dir: &Path, claude: &Path, opencode: &Path) -> PathBuf {
+        let home = dir.join("state");
+        fs::create_dir_all(&home).unwrap();
+        fs::write(
+            home.join("config.md"),
+            format!(
+                "---\nclaude_agents_dir: {}\nopencode_agents_dir: {}\n---\n",
+                claude.display(),
+                opencode.display()
+            ),
+        )
+        .unwrap();
+        home
+    }
+
+    #[test]
+    fn custom_agent_folders_and_separate_selection() {
+        let dir = temp_dir("setup-roles-custom");
+        let (claude, opencode) = (dir.join("custom-claude"), dir.join("custom-opencode"));
+        let home = home_with_folders(&dir, &claude, &opencode);
+        let only = agent_dirs(&home, &["opencode"]).unwrap();
+        assert_eq!(only.len(), 1);
+        assert_eq!(install_roles(&only).unwrap(), 9);
+        assert!(!claude.exists());
+        let both = agent_dirs(&home, &["claude", "opencode"]).unwrap();
+        assert_eq!(install_roles(&both).unwrap(), 18);
+        for folder in [&claude, &opencode] {
+            assert_eq!(fs::read_dir(folder).unwrap().count(), 9);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn every_opaque_header_survives_on_every_role_in_both_runtimes() {
+        const HEADERS: [&str; 4] = [
+            "---\nmodel: provider/model # local pin\npermission: deny\n---\n",
+            "---\r\n# comment\r\nmodel: \"provider/model#variant\"\r\nunknown: [\r\n---\r\n",
+            "---\ndescription: >-\n  expanded description\npermission:\n  bash: deny\n---\n",
+            "---\nmodel: \"invalid YAML\nunknown: true\n---",
+        ];
+        let dir = temp_dir("setup-roles-opaque");
+        let dirs = vec![
+            ("claude".to_string(), dir.join("claude")),
+            ("opencode".to_string(), dir.join("opencode")),
+        ];
+        assert_eq!(install_roles(&dirs).unwrap(), 18);
+        for (_, folder) in &dirs {
+            fs::write(folder.join("unrelated.md"), "unrelated content").unwrap();
+            for (name, text) in ROLES {
+                let source = native_header(text).unwrap();
+                assert!(!source.contains("model:"), "{name}");
+                let body = &text[source.len()..];
+                for header in HEADERS {
+                    let destination = folder.join(name);
+                    fs::write(&destination, format!("{header}\nold body")).unwrap();
+                    assert_eq!(install_roles(&dirs).unwrap(), 18);
+                    let separator = if header.ends_with('\n') { "" } else { "\n" };
+                    assert_eq!(
+                        fs::read_to_string(&destination).unwrap(),
+                        format!("{header}{separator}{body}")
+                    );
+                }
+            }
+            assert_eq!(
+                fs::read_to_string(folder.join("unrelated.md")).unwrap(),
+                "unrelated content"
+            );
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn malformed_last_role_prevents_all_writes_in_either_runtime() {
+        let dir = temp_dir("setup-roles-malformed");
+        let dirs = vec![
+            ("claude".to_string(), dir.join("claude")),
+            ("opencode".to_string(), dir.join("opencode")),
+        ];
+        install_roles(&dirs).unwrap();
+        let last = ROLE_NAMES[ROLE_NAMES.len() - 1];
+        for (_, folder) in &dirs {
+            let path = folder.join(last);
+            let saved = fs::read(&path).unwrap();
+            for invalid in [
+                "plain",
+                "---\nmissing close",
+                "---\n...\n---\n",
+                " ---\n---\n",
+            ] {
+                fs::write(&path, invalid).unwrap();
+                let before = tree(&dir);
+                let e = install_roles(&dirs).unwrap_err();
+                assert_eq!(e.code, 2, "{invalid:?}");
+                assert!(
+                    e.stderr.contains(&format!(
+                        "{}: cannot preflight native role; check paths and frontmatter delimiters",
+                        path.display()
+                    )),
+                    "{}",
+                    e.stderr
+                );
+                assert_eq!(tree(&dir), before, "{invalid:?}");
+            }
+            fs::write(&path, saved).unwrap();
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn agent_folder_refusals_name_the_folder() {
+        let dir = temp_dir("setup-roles-refused");
+        let shared = dir.join("shared");
+        let skill = skill_root().unwrap();
+        for (claude, opencode) in [
+            (PathBuf::from("relative"), dir.join("opencode")),
+            (skill.join("agents"), dir.join("opencode")),
+            (dir.join("claude"), skill.join("agents")),
+            (shared.clone(), shared),
+        ] {
+            let home = home_with_folders(&dir, &claude, &opencode);
+            let before = tree(&dir);
+            let e = agent_dirs(&home, &["claude", "opencode"]).unwrap_err();
+            assert_eq!(e.code, 2, "{claude:?} {opencode:?}");
+            assert!(
+                e.stderr.contains(
+                    "cannot preflight native role; check paths and frontmatter delimiters"
+                ),
+                "{}",
+                e.stderr
+            );
+            assert_eq!(tree(&dir), before);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_role_file_is_refused_without_writes() {
+        let dir = temp_dir("setup-roles-link");
+        let dirs = vec![
+            ("claude".to_string(), dir.join("claude")),
+            ("opencode".to_string(), dir.join("opencode")),
+        ];
+        install_roles(&dirs).unwrap();
+        let victim = dir.join("claude").join(ROLE_NAMES[ROLE_NAMES.len() - 1]);
+        let target = dir.join("target.md");
+        fs::write(&target, ROLES[ROLES.len() - 1].1).unwrap();
+        fs::remove_file(&victim).unwrap();
+        std::os::unix::fs::symlink(&target, &victim).unwrap();
+        let before = tree(&dir);
+        let e = install_roles(&dirs).unwrap_err();
+        assert_eq!(e.code, 2);
+        assert!(
+            e.stderr.contains(&victim.display().to_string()),
+            "{}",
+            e.stderr
+        );
+        assert_eq!(tree(&dir), before);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn disk_failure_names_the_destination_and_stops() {
+        let dir = temp_dir("setup-roles-disk");
+        let blocker = dir.join("blocker");
+        fs::write(&blocker, "a file where a folder must go").unwrap();
+        let first = blocker.join("agents");
+        let later = dir.join("later");
+        let dirs = vec![
+            ("claude".to_string(), first.clone()),
+            ("opencode".to_string(), later.clone()),
+        ];
+        let e = install_roles(&dirs).unwrap_err();
+        assert_eq!(e.code, 2);
+        assert!(
+            e.stderr.contains(&format!(
+                "{}: cannot refresh native role body",
+                first.join(ROLE_NAMES[0]).display()
+            )),
+            "{}",
+            e.stderr
+        );
+        assert!(!later.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn adopt_home_once() {

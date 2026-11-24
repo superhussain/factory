@@ -58,11 +58,34 @@
       "from": "tests/cli/test_factory.py::AgentInstallTest.test_init_installs_without_credentials_and_leaves_unrelated_files"
     },
     {
+      "id": "setup/init-agents-opencode",
+      "argv": ["--home", "{home}", "init", "--agents", "opencode"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_roles.py::RolesTest.test_separate_and_combined_selection_and_custom_locations"
+    },
+    {
       "id": "setup/init-agents-keep-header",
       "argv": ["--home", "{home}", "init", "--agents", "claude"],
       "home": "setup-agents",
       "stubs": {},
       "from": "tests/cli/test_factory.py::AgentInstallTest.test_repeated_init_preserves_native_header_and_refreshes_body"
+    },
+    {
+      "id": "setup/init-agents-bad-header",
+      "argv": ["--home", "{home}", "init", "--agents", "claude"],
+      "home": "setup-agents-bad",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_roles.py::RolesTest.test_malformed_last_role_prevents_all_writes_for_either_runtime"
+    },
+    {
+      "id": "setup/init-agents-relative-folder",
+      "argv": ["--home", "{home}", "init", "--agents", "claude"],
+      "home": "setup-agents-relative",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_roles.py::RolesTest.test_source_and_destination_links_overlap_and_relative_paths_refused"
     },
     {
       "id": "setup/init-agents-refuses-a-header-without-delimiters",
