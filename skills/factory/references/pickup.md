@@ -24,7 +24,7 @@ Set up automatic factory pickup on this host. You are a coding agent on the mach
 4. Check 7 is the timer. Show me the command SKILL/runtime/factory pickup setup --install and say that it writes and loads a 5 minute timer for this host. Run it only after I answer yes. Otherwise I run it myself.
 5. Run pickup setup again until it prints 7 of 7 ok. Then tell me which program the timer runs and any note it printed.
 
-A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.
+A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the daemon service or the host timer runs pickup.
 ```
 
 When the installed skill is older than this setup, run
@@ -71,7 +71,7 @@ scheduler. Running it again changes nothing:
 The timer runs the installed `factory` binary directly with `--home <home> pickup`, no interpreter. The second line of the output names the timer program. When a timer already exists but runs a different program or skill path than `--install` would write, check 7 stays ok and prints a `note:` line. On cron, `--install` replaces any old line that runs
 `factory pickup` and keeps every other line. The timer `PATH` holds the launcher folders, gh's folder when `gh` is on the installing shell's `PATH`, and the system folders. On launchd, a plist whose `PATH` differs from what `--install` would write gets the same `note:` line.
 
-A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.
+A stored Paseo or Claude schedule prompt does not pick up ideas. Only the daemon service or the host timer runs pickup.
 
 ## What it does
 
@@ -228,6 +228,8 @@ Each run, in order:
   the Worker after every run but `--dry-run`, failed runs included. It carries the OS,
   scheduler, run time, bundle stamp, doctor result, routes and checkout names.
   It is silent, calls no model, and never changes the run's output or exit code.
+  Beside a running daemon, which sends the heartbeat itself, a run sends it only
+  when the backlog triage failure changed.
 - Pushes this host's retro digest on its first run of each local date that
   `<home>/retro-push.json` does not record; a failed push prints one warning and
   the run goes on. On the host that keeps `<home>/retro-schedule-prompt.md`,
@@ -240,7 +242,10 @@ Each run, in order:
   records nothing.
 - Pushes this host's audit rows for each job at spec, build, review, approve or
   pr-open whose transcripts here changed since `<home>/audit-push.json` records;
-  a failed push prints one warning and the run goes on. When the push succeeds
+  a failed push prints one warning and the run goes on. A transcript a flag
+  pattern cannot finish reading pushes nothing for that job, prints
+  `audit push skipped <job-id> until its transcripts change: ...`, and the run
+  goes on. When the push succeeds
   and this host's token totals for the job changed, it also writes them to
   `tokens.<device>` and prints `recorded <device> tokens on <job-id>`.
 - Runs the read-only orphan scan on its first run of each local date that
@@ -384,10 +389,20 @@ A standing instruction from the user, the person you are working for. It is abou
 Where `factory daemon setup --install` has installed the daemon service, the
 daemon is the host's only pickup scheduler and no pickup timer exists.
 
-- `daemon setup --install` installs the service, then removes the pickup timer.
-  `daemon setup --uninstall` puts the timer back, then removes the service, so the
-  host never goes without a scheduler. When either rewrites the crontab, it first
-  saves it to `<home>/backups/daemon-setup-<stamp>/crontab.txt`.
+- `daemon setup --install` installs the service, then removes the pickup timer
+  and the daily retro-push timer. `daemon setup --uninstall` puts both timers
+  back, then removes the service, so the host never goes without a scheduler.
+  When either rewrites the crontab, it first saves it to
+  `<home>/backups/daemon-setup-<stamp>/crontab.txt`. Catch-up removes a
+  retro-push timer left beside the daemon and prints
+  `retro-push timer: replaced by the daemon`.
+- The daemon sends the host status heartbeat at start and every 5 minutes, with
+  its own scheduler and when its last pass began. A pickup run beside it sends
+  the status only when the backlog triage failure changed.
+- The daemon runs `retro push` at the retro-push timer's local times: 06:30,
+  07:30 and 08:30 on macOS, 08:30 elsewhere. After a sleep it pushes once for the
+  latest time missed. A time that passed before the daemon started is left to
+  pickup's first-run-of-the-day push.
 - The daemon starts a pass about 2 s after a board or backlog change, when a
   local Paseo agent titled `factory <id>` or `babysit <id>` stops running, right
   after a pass that launched a job, and after 5 minutes with no pass. Passes
@@ -396,8 +411,8 @@ daemon is the host's only pickup scheduler and no pickup timer exists.
   while nothing changes, and not at all once none runs.
 - While the daemon cannot reach `/events/host`, it still runs a pass at start
   and then every 5 minutes. The 5-minute pass covers stale
-  claims, takeover, `not before` schedules, retro and outcomes stamps, orphan
-  scans and the host status heartbeat.
+  claims, takeover, `not before` schedules, retro and outcomes stamps and orphan
+  scans.
 - `pickup setup` reports check 7 as `scheduler: daemon` and passes it, and
   `--install` writes no timer. `daemon setup` and `doctor` at a terminal show the
   daemon state and when its last pass began.
@@ -528,6 +543,7 @@ changes nothing. Then install one timer per host.
 - `pickup` watches each job at `spec`, `build`, `review` or `approve` that this device claimed and whose Paseo agent runs on this host's server. It skips jobs with an ask, a pause, a queued close or a batch lead.
 - The quiet signature is the agent, the worktree's `HEAD`, a hash of `git status --porcelain` and the job's `updated`. It lives in `<home>/idle-watch.json`, never on the board. Any commit, file edit or board write starts the window again.
 - Only an `idle` agent counts. A `running` agent keeps its entry and is skipped that run.
+- A claim the daemon's heartbeat refreshed counts as not idle. That means the claim's `seen` is under 20 minutes old and newer than the job's `updated`, which only the heartbeat leaves behind. The heartbeat refreshes an idle agent only while a Paseo subagent it launched runs, so the job keeps its entry and is skipped that run, as a `running` agent is.
 - After 20 quiet minutes, `pickup` sends the agent one fixed nudge with `paseo send --no-wait` and prints `nudged idle <id> <project>: agent <agent>`. `--dry-run` prints `would nudge idle ...` and writes nothing. A failed send prints `factory.py: pickup could not nudge idle <id>: paseo send failed` on stderr and retries next run.
 - The idle nudge skips an agent waiting at a permission dialog, as the priority nudge does, and prints `skip idle nudge <id> <project>: agent <agent> waits at a permission dialog` or `... permission state unknown`. The entry gets no `nudged`, so the job never moves to `needs-human` while it waits.
 - When the agent waits at a permission dialog, `pickup` sets the job's note once per wait to `permission: agent <agent> has waited at a permission dialog for 20 minutes; answer it in Paseo` and prints `surfaced <id> <project>: <note>`. The write needs the same stage and a claim by this host. It sets no `needs`, moves no stage and sends nothing. The entry records `surfaced`, so later runs write nothing until the quiet signature changes. `--dry-run` prints `would surface <id> <project>: <note>`. A `permission state unknown` answer writes no note.
@@ -667,4 +683,4 @@ Deploy the Worker, reinstall the skill on each host, write `launchers.json`, run
 pause (disable, do not delete) the stored ideas schedule. Run both together only
 briefly: the board claim stops double pickup.
 
-A stored Paseo or Claude schedule prompt does not pick up ideas. Only the host timer runs pickup.
+A stored Paseo or Claude schedule prompt does not pick up ideas. Only the daemon service or the host timer runs pickup.

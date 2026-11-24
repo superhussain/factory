@@ -5,7 +5,7 @@ import { checkOperatorText, HOST_NAME } from "./admission.js";
 export const OFFLINE_MINUTES = 30;
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const MOVES = { paired: ["active", "retired"], pending: ["retired"], active: ["retired"] };
-const SCHEDULERS = ["launchd", "cron", "schtasks", "none"];
+const SCHEDULERS = ["launchd", "systemd", "cron", "schtasks", "none"];
 const STATUS_KEYS = ["os", "scheduler", "last_pickup", "bundle", "doctor", "routes", "checkouts"];
 const OPTIONAL_STATUS_KEYS = ["triage_failed_since", "bundle_behind_since"];
 const ROUTE_KEYS = ["name", "provider", "model", "effort", "limited_until"];

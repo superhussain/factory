@@ -2187,6 +2187,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn gh_failure() {
+        // Empties PATH, so it runs alone: parallel tests need PATH to find git.
+        if !crate::shared::in_own_process(module_path!(), "gh_failure") {
+            return;
+        }
         let _lock = crate::shared::test_env_lock();
         let empty =
             std::env::temp_dir().join(format!("factory-test-gh-failure-{}", std::process::id()));

@@ -6,6 +6,13 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
+#[test]
+#[should_panic(expected = "hit the regex backtrack limit; stopping")]
+fn secret_check_stops_at_the_backtrack_limit() {
+    crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
+    check_untrusted("ghp_ eyJ plain text");
+}
+
 /// Parity writes the host-status "os" field as {os}, so only this test catches a wrong label.
 #[test]
 fn host_os_labels_each_platform() {
@@ -4870,6 +4877,34 @@ mod audit_pickup_test {
     }
 
     #[test]
+    fn test_a_scan_past_the_backtrack_limit_skips_the_push() {
+        let fx = setup();
+        crate::commands::audit::limit_secret_file_for_test();
+        // audit_push reads its device from factory_home, which follows XDG_CONFIG_HOME before
+        // HOME, so name the fixture home outright. fx holds the env lock until it drops.
+        let saved = std::env::var_os("FACTORY_HOME");
+        std::env::set_var("FACTORY_HOME", &fx.home);
+        let (code, out, err) = fx.pickup(&[]);
+        match saved {
+            Some(v) => std::env::set_var("FACTORY_HOME", v),
+            None => std::env::remove_var("FACTORY_HOME"),
+        }
+        assert_eq!((code, out.as_str()), (0, ""));
+        assert!(
+            err.starts_with(
+                "factory.py: audit push skipped 1017-add-x until its transcripts change: "
+            ) && err.ends_with(&format!("{}\n", crate::shared::pyre::LIMIT_HIT))
+                && err.lines().count() == 1,
+            "{err}"
+        );
+        assert!(fx.calls().iter().all(|c| !c.1.contains("/api/audit/")));
+        assert_eq!(
+            record(&fx),
+            json!({"version": 1, "jobs": {"1017-add-x": stamp_now()}})
+        );
+    }
+
+    #[test]
     fn test_a_failing_audit_push_still_claims() {
         let fx = setup();
         let log = push_fakes(&fx, Some(("made-up push failure", 1)));
@@ -6433,6 +6468,10 @@ mod gh_pr_test {
     #[cfg(unix)]
     #[test]
     fn test_gh_pr_reports_a_timeout() {
+        // Empties PATH, so it runs alone: parallel tests need PATH to find git.
+        if !crate::shared::in_own_process(module_path!(), "test_gh_pr_reports_a_timeout") {
+            return;
+        }
         let fx = Fx::new();
         fx.set_env(
             "PATH",
@@ -8400,6 +8439,23 @@ mod permission_guard_test {
         assert_eq!(fx.job("042-sample-export")["stage"], "build");
     }
 
+    /// A claim the daemon's heartbeat refreshed after the job's last board change reads as work
+    /// in progress, so the idle agent gets no nudge; one whose seen only matches updated does.
+    #[test]
+    fn test_idle_nudge_skips_a_heartbeat_fresh_claim() {
+        let (fx, p, _) = setup();
+        let claim = |seen: &str| json!({"claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z", "seen": seen}});
+        build(&fx, claim(&stamp(-3)));
+        quiet(&fx);
+        assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+        assert!(p.sent().is_empty() && fx.puts().is_empty());
+        build(&fx, claim("2026-01-01T10:00:00Z"));
+        let (code, out, _) = fx.pickup(&[]);
+        assert_eq!(code, 0);
+        assert!(out.starts_with("nudged idle 042-sample-export"), "{out}");
+        assert_eq!(p.sent().len(), 1);
+    }
+
     #[test]
     fn test_idle_permission_wait_sets_a_note_once() {
         let (fx, p, waits) = setup();
@@ -10155,6 +10211,8 @@ struct Sched {
     task: bool,
     /// Whether the launchd pickup timer is loaded, or its scheduled task exists.
     pickup: bool,
+    /// The same for the retro-push timer.
+    retro: bool,
     runs: Vec<Vec<String>>,
 }
 
@@ -10162,20 +10220,29 @@ impl Sched {
     fn answer(&mut self, argv: &[&str], stdin: Option<&str>) -> (i32, String) {
         self.runs.push(argv.iter().map(|a| a.to_string()).collect());
         let fail = |text: &str| (1, text.to_string());
-        let pickup = argv.iter().any(|a| {
-            a.ends_with("/factory.pickup")
-                || a.ends_with("factory.pickup.plist")
-                || *a == "factory-pickup"
-        });
-        if pickup {
+        let names = |label: &str, task: &str| {
+            argv.iter().any(|a| {
+                a.ends_with(&format!("/{label}"))
+                    || a.ends_with(&format!("{label}.plist"))
+                    || *a == task
+            })
+        };
+        let timer = if names("factory.pickup", "factory-pickup") {
+            Some(&mut self.pickup)
+        } else if names("factory.retro-push", "factory-retro-push") {
+            Some(&mut self.retro)
+        } else {
+            None
+        };
+        if let Some(timer) = timer {
             return match argv[1] {
-                "print" | "/Query" if !self.pickup => fail("not found"),
+                "print" | "/Query" if !*timer => fail("not found"),
                 "bootstrap" | "/Create" => {
-                    self.pickup = true;
+                    *timer = true;
                     (0, String::new())
                 }
                 "bootout" | "/Delete" => {
-                    self.pickup = false;
+                    *timer = false;
                     (0, String::new())
                 }
                 _ => (0, String::new()),
@@ -10342,6 +10409,77 @@ mod daemon_setup_test {
         assert!(!timer_installed("cron", &PICKUP).0);
     }
 
+    /// The daemon pushes the retro digest, so install removes the documented retro-push line and
+    /// keeps every other line; uninstall puts a daily 08:30 line back beside the pickup timer.
+    #[test]
+    fn cron_install_removes_the_retro_push_line_and_uninstall_restores_it() {
+        let ds = Ds::new("cron");
+        let retro =
+            "30 8 * * * /opt/skill/runtime/factory retro push >> /h/logs/retro-push.log 2>&1";
+        let other = "0 1 * * * /usr/bin/true";
+        ds.sched.borrow_mut().crontab = format!("{retro}\n{other}\n");
+        assert!(unit_line(retro, &RETRO_PUSH));
+        assert!(!unit_line(retro, &PICKUP) && !unit_line(other, &RETRO_PUSH));
+        assert!(!unit_line("30 8 * * * factory retro pull", &RETRO_PUSH));
+        let (code, out, err) = ds.run(Install);
+        assert_eq!(code, 0, "{out}{err}");
+        assert!(out.starts_with("backup: "), "{out}");
+        assert!(
+            out.contains("\nretro-push timer: removed cron timer: crontab\n"),
+            "{out}"
+        );
+        let crontab = ds.sched.borrow().crontab.clone();
+        assert!(
+            !crontab.contains("retro push") && crontab.contains(other),
+            "{crontab}"
+        );
+        assert!(timer_installed("cron", &DAEMON).0);
+
+        let (code, out, err) = ds.run(Uninstall);
+        assert_eq!(code, 0, "{out}{err}");
+        assert!(
+            out.contains("\nretro-push timer: installed cron timer: crontab\n"),
+            "{out}"
+        );
+        let line = timer_text("cron", &timer_values(&ds.fx.home, &RETRO_PUSH));
+        let home = ds.fx.home.display().to_string();
+        assert!(line.starts_with("30 8 * * * PATH="), "{line}");
+        assert!(line.contains(&shlex_join(&[
+            "/opt/my skill/runtime/factory".to_string(),
+            "--home".into(),
+            home.clone(),
+            "retro".into(),
+            "push".into(),
+        ])));
+        assert!(
+            line.ends_with(&format!(" >> {}/logs/retro-push.log 2>&1", home)),
+            "{line}"
+        );
+        let crontab = ds.sched.borrow().crontab.clone();
+        assert!(
+            crontab.contains(&line) && crontab.contains(other),
+            "{crontab}"
+        );
+        assert!(timer_installed("cron", &RETRO_PUSH).0 && timer_installed("cron", &PICKUP).0);
+        assert!(!timer_installed("cron", &DAEMON).0);
+    }
+
+    /// The task's `/ST` is the one time retro_push_times gives Task Scheduler, which the daemon
+    /// also pushes at.
+    #[test]
+    fn schtasks_retro_push_task_runs_daily_at_0830() {
+        let [(hour, minute)] = retro_push_times("schtasks") else {
+            panic!("Task Scheduler runs the retro push once a day");
+        };
+        let at = format!("{hour:02}:{minute:02}");
+        assert_eq!(
+            schtasks_schedule(&RETRO_PUSH),
+            ["/SC", "DAILY", "/ST", at.as_str()]
+        );
+        assert_eq!(at, "08:30");
+        assert_eq!(cron_detail(&RETRO_PUSH), "crontab runs retro-push daily");
+    }
+
     #[test]
     fn schtasks_install_backs_up_the_pickup_task_xml() {
         let ds = Ds::new("schtasks");
@@ -10393,6 +10531,89 @@ mod daemon_setup_test {
         assert!(!timer.exists());
     }
 
+    /// A pickup plist that is not loaded is not installed, but it is still left to remove.
+    #[cfg(unix)]
+    #[test]
+    fn unloaded_pickup_plist_is_left_and_removed_beside_the_launchd_daemon() {
+        let ds = Ds::new("launchd");
+        let timer = ds.fx.root.join("Library/LaunchAgents/factory.pickup.plist");
+        fs::create_dir_all(timer.parent().unwrap()).unwrap();
+        fs::write(&timer, "synthetic").unwrap();
+        assert!(!timer_installed("launchd", &PICKUP).0);
+        assert!(timer_left("launchd", &PICKUP));
+        let out = uninstall_timer(&ds.fx.home, "launchd", &PICKUP).unwrap();
+        assert_eq!(out, format!("removed launchd timer: {}", timer.display()));
+        assert!(!timer_left("launchd", &PICKUP));
+    }
+
+    /// While the new daemon's pid file is empty or still names the killed daemon, the poll
+    /// keeps going instead of reporting it.
+    #[test]
+    fn daemon_pid_waits_past_a_stale_or_empty_pid_file() {
+        let home = Path::new("/synthetic");
+        let mut reads = vec![
+            Ok(Some(9)),
+            Err("a daemon runs, but its pid file holds no valid pid".to_string()),
+            Ok(Some(7)),
+            Ok(None),
+        ];
+        assert_eq!(
+            daemon_pid(home, Some(7), &mut || reads.pop().unwrap()),
+            Ok(9)
+        );
+        let mut stale = || Ok(Some(7));
+        assert!(daemon_pid(home, Some(7), &mut stale).is_err());
+    }
+
+    /// spawn_daemon runs the */5 daemon line's command, the installed binary it names, and
+    /// fails plainly when the crontab has no such line.
+    #[cfg(unix)]
+    #[test]
+    fn spawn_daemon_runs_the_cron_line() {
+        let ds = Ds::new("cron");
+        assert_eq!(
+            spawn_daemon(),
+            Err(
+                "no */5 daemon line in the crontab; run factory daemon setup --install".to_string()
+            )
+        );
+        let bin = ds.fx.root.join("factory");
+        let marker = ds.fx.root.join("started");
+        let part = ds.fx.root.join("started.part");
+        crate::shared::build::tests::script(
+            &bin,
+            &format!(
+                "{{ echo \"$@\"; pwd; env | cut -d= -f1 | sort; }} > '{0}'\nmv '{0}' '{1}'\n",
+                part.display(),
+                marker.display()
+            ),
+        );
+        ds.sched.borrow_mut().crontab = format!(
+            "@reboot {0} --home /h daemon\n*/5 * * * * {0} --home /h daemon\n",
+            bin.display()
+        );
+        assert_eq!(spawn_daemon(), Ok(()));
+        let start = Instant::now();
+        while !marker.exists() && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let text = fs::read_to_string(&marker).unwrap();
+        let mut lines = text.lines();
+        assert_eq!(lines.next(), Some("--home /h daemon"));
+        // It runs in the user's home with only cron's variables, none of the caller's.
+        let home = std::env::home_dir().unwrap();
+        assert_eq!(lines.next(), Some(home.to_str().unwrap()));
+        let cron = [
+            "HOME", "LOGNAME", "OLDPWD", "PATH", "PWD", "SHELL", "SHLVL", "_",
+        ];
+        let names: Vec<&str> = lines.collect();
+        assert!(names.iter().all(|n| cron.contains(n)), "{names:?}");
+        assert!(
+            names.contains(&"HOME") && names.contains(&"PATH"),
+            "{names:?}"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn launchd_install_is_idempotent_and_uninstall_removes() {
@@ -10411,22 +10632,31 @@ mod daemon_setup_test {
         let timer = ds.fx.root.join("Library/LaunchAgents/factory.pickup.plist");
         fs::create_dir_all(timer.parent().unwrap()).unwrap();
         fs::write(&timer, "synthetic").unwrap();
-        ds.sched.borrow_mut().pickup = true;
+        let retro = ds
+            .fx
+            .root
+            .join("Library/LaunchAgents/factory.retro-push.plist");
+        fs::write(&retro, "synthetic retro").unwrap();
+        (ds.sched.borrow_mut().pickup, ds.sched.borrow_mut().retro) = (true, true);
         let (code, out, err) = ds.run(Install);
         assert_eq!(code, 0, "{out}{err}");
-        let saved = out
+        let saved: Vec<&str> = out
             .lines()
-            .next()
-            .and_then(|l| l.strip_prefix("backup: "))
-            .unwrap();
-        assert!(saved.ends_with("/factory.pickup.plist"), "{out}");
-        assert_eq!(fs::read_to_string(saved).unwrap(), "synthetic");
+            .take(2)
+            .filter_map(|l| l.strip_prefix("backup: "))
+            .collect();
+        assert!(saved[0].ends_with("/factory.pickup.plist"), "{out}");
+        assert_eq!(fs::read_to_string(saved[0]).unwrap(), "synthetic");
+        assert!(saved[1].ends_with("/factory.retro-push.plist"), "{out}");
+        assert_eq!(fs::read_to_string(saved[1]).unwrap(), "synthetic retro");
         assert!(out.contains(&format!(
-            "\ninstalled launchd service: {}\nremoved launchd timer: {}\n",
+            "\ninstalled launchd service: {}\nremoved launchd timer: {}\nretro-push timer: removed launchd timer: {}\n",
             plist.display(),
-            timer.display()
+            timer.display(),
+            retro.display()
         )));
         assert!(!timer.exists() && !ds.sched.borrow().pickup);
+        assert!(!retro.exists() && !ds.sched.borrow().retro);
         assert!(
             out.contains("launchd): stopped\n    launchd job factory.daemon is loaded\n"),
             "{out}"
@@ -10460,10 +10690,27 @@ mod daemon_setup_test {
         let (code, out, _) = ds.run(Uninstall);
         assert_eq!(code, 0, "{out}");
         assert!(out.starts_with(&format!(
-            "installed launchd timer: {}\nremoved launchd service: {}\n",
+            "installed launchd timer: {}\nretro-push timer: installed launchd timer: {}\nremoved launchd service: {}\n",
             timer.display(),
+            retro.display(),
             plist.display()
         )));
+        let doc = plist_loads(&fs::read(&retro).unwrap()).unwrap();
+        assert_eq!(doc["Label"], "factory.retro-push");
+        assert_eq!(
+            doc["StartCalendarInterval"],
+            json!([{"Hour": 6, "Minute": 30}, {"Hour": 7, "Minute": 30}, {"Hour": 8, "Minute": 30}])
+        );
+        assert!(doc.get("StartInterval").is_none() && doc.get("KeepAlive").is_none());
+        let mut argv = ds.argv();
+        argv.pop();
+        argv.extend(["retro".into(), "push".into()]);
+        assert_eq!(doc["ProgramArguments"], json!(argv));
+        assert_eq!(
+            doc["StandardOutPath"],
+            ds.fx.home.join("logs/retro-push.log").display().to_string()
+        );
+        assert!(ds.sched.borrow().retro);
         let domain = format!("gui/{}", getuid());
         let timer_target = format!("gui/{}/factory.pickup", getuid());
         assert!(
@@ -10632,7 +10879,7 @@ mod daemon_setup_test {
         assert_eq!(code, 0, "{out}");
         assert!(
             out.contains(&format!(
-                "\ninstalled cron timer: crontab\nremoved cron service: crontab\nstopped the running daemon (pid {})\n",
+                "\ninstalled cron timer: crontab\nretro-push timer: installed cron timer: crontab\nremoved cron service: crontab\nstopped the running daemon (pid {})\n",
                 std::process::id()
             )),
             "{out}"
@@ -10640,9 +10887,10 @@ mod daemon_setup_test {
         assert!(ds.ran(&["kill", &std::process::id().to_string()]));
         let crontab = ds.sched.borrow().crontab.clone();
         let lines: Vec<&str> = crontab.lines().collect();
-        assert_eq!(lines.len(), 2, "{crontab}");
+        assert_eq!(lines.len(), 3, "{crontab}");
         assert_eq!(lines[0], "0 1 * * * true");
         assert!(unit_line(lines[1], &PICKUP) && !unit_line(lines[1], &DAEMON));
+        assert!(unit_line(lines[2], &RETRO_PUSH) && lines[2].starts_with("30 8 * * * "));
     }
 
     #[test]
@@ -10787,8 +11035,14 @@ mod daemon_setup_test {
         );
     }
 
+    /// Runs in its own test process. A child that a parallel test forks keeps a copy of each
+    /// daemon lock this test takes until that child execs, so in a shared process the lock can
+    /// still look held after this test drops it.
     #[test]
     fn kill_refuses_pids_kill_would_misread() {
+        if !crate::shared::in_own_process(module_path!(), "kill_refuses_pids_kill_would_misread") {
+            return;
+        }
         assert_eq!(kill_argv(0), None);
         assert_eq!(kill_argv(i32::MAX as u32 + 1), None);
         assert_eq!(kill_argv(u32::MAX), None);
@@ -11111,6 +11365,61 @@ mod pickup_heartbeat_test {
             .unwrap()
             .get("triage_failed_since")
             .is_none());
+    }
+
+    /// While a daemon holds the lock, its own heartbeat reports the daemon's scheduler, so a
+    /// systemd host says systemd rather than cron, with its last pass, and the cache keeps it. A
+    /// pass beside it sends a status only when the triage failure changed, which the next
+    /// heartbeat then carries.
+    #[test]
+    fn test_a_daemon_host_reports_the_daemon_scheduler() {
+        let (fx, worker) = setup("device: host-a\n");
+        fx.set_fakes(|f| {
+            f.backlog_triage_pass = Some(Rc::new(|_| Ok(())));
+            f.daemon_scheduler = Some("systemd");
+        });
+        assert_eq!(fx.pickup(&["--triage-now"]).0, 0);
+        assert_eq!(worker.last_body()["scheduler"], PICKUP_SCHEDULER);
+        let _lock = daemon::take_lock(&fx.home).unwrap().unwrap();
+        let statuses = || worker.keys().iter().filter(|k| *k == STATUS).count();
+        let before = statuses();
+        assert_eq!(fx.pickup(&["--triage-now"]).0, 0);
+        assert_eq!(
+            statuses(),
+            before,
+            "the pass left the heartbeat to the daemon"
+        );
+        fs::write(
+            fx.home.join("logs/daemon/last-pass"),
+            "2026-11-23T10:00:00Z\n",
+        )
+        .unwrap();
+        assert!(daemon_heartbeat(&fx.home));
+        let body = worker.last_body();
+        assert_eq!(body["scheduler"], "systemd");
+        assert_eq!(body["last_pickup"], "2026-11-23T10:00:00Z");
+        assert_eq!(cached_status(&fx.home).0, "systemd");
+
+        fx.set_fakes(|f| {
+            f.backlog_triage_pass = Some(Rc::new(|_| {
+                Err(fail("GET .../api/backlog returned 500: boom", 5))
+            }))
+        });
+        assert_eq!(fx.pickup(&["--triage-now"]).0, 0);
+        assert_eq!(statuses(), before + 2);
+        let failed = worker.last_body()["triage_failed_since"].clone();
+        assert_eq!(
+            (&worker.last_body()["scheduler"], failed.is_string()),
+            (&json!("systemd"), true)
+        );
+        assert_eq!(fx.pickup(&["--triage-now"]).0, 0);
+        assert_eq!(
+            statuses(),
+            before + 2,
+            "an unchanged failure waits for the heartbeat"
+        );
+        assert!(daemon_heartbeat(&fx.home));
+        assert_eq!(worker.last_body()["triage_failed_since"], failed);
     }
 }
 

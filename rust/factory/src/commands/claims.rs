@@ -206,7 +206,7 @@ fn jobs_of(data: &Value) -> Res<&Vec<Value>> {
         .ok_or_else(|| fail("the board has no jobs list", 1))
 }
 
-const CLAIM_REFRESH_MINUTES: f64 = 10.0;
+pub(crate) const CLAIM_REFRESH_MINUTES: f64 = 10.0;
 const REVIEWERS: [&str; 4] = ["security", "ux", "ui", "code"];
 const TRACER_GATE_NOTE: &str = "gate: tracer-scope";
 const TRACER_APPROVED_NOTE: &str = "spec approved in Tracer";

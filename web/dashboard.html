@@ -689,6 +689,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .doc h1, .doc h2, .doc h3, .doc h4 { line-height: 1.25; margin: 1.2em 0 .5em; }
   .doc h1 { font-size: 20px; } .doc h2 { font-size: 17px; } .doc h3 { font-size: 15px; } .doc h4 { font-size: 14px; }
   .doc > :first-child { margin-top: 0; }
+  .doc .round-head { font-size: 20px; border-top: 2px solid var(--line); padding-top: 16px; margin-top: 32px; }
+  .doc > .round-head:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
   .doc code { font: 12.5px var(--font-mono); background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
   .doc pre { background: var(--code-bg); padding: 10px 12px; border-radius: 6px; overflow-x: auto; }
   .doc pre code { padding: 0; background: none; }
@@ -1186,7 +1188,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
       <h3 id="scheduler-settings-heading" tabindex="-1">Scheduler</h3>
       <p class="muted" id="scheduler-intro">Automatic pickup needs each host to run factory pickup every 5 minutes, with a launcher for each route. Let a coding agent on the host set it up, or follow the manual steps.</p>
-      <p class="muted" id="scheduler-not-a-prompt">A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the host timer runs pickup.</p>
+      <p class="muted" id="scheduler-not-a-prompt">A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the daemon service or the host timer runs pickup.</p>
       <div class="settings-tabs" id="scheduler-mode-tabs" role="tablist" aria-label="Setup method">
         <button type="button" role="tab" id="scheduler-mode-tab-agent" aria-controls="scheduler-mode-panel-agent" aria-selected="true" tabindex="0">Agent</button>
         <button type="button" role="tab" id="scheduler-mode-tab-human" aria-controls="scheduler-mode-panel-human" aria-selected="false" tabindex="-1">Human</button>
@@ -1208,7 +1210,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
 4. Check 7 is the timer. Show me the command SKILL/runtime/factory pickup setup --install and say that it writes and loads a 5 minute timer for this host. Run it only after I answer yes. Otherwise I run it myself.
 5. Run pickup setup again until it prints 7 of 7 ok. Then tell me which program the timer runs and any note it printed.
 
-A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.</code></pre></div>
+A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the daemon service or the host timer runs pickup.</code></pre></div>
       </div>
       <div id="scheduler-mode-panel-human" role="tabpanel" aria-labelledby="scheduler-mode-tab-human" hidden>
       <p class="muted">Nothing here is saved. Copy a snippet, then replace each placeholder with this host's values.</p>

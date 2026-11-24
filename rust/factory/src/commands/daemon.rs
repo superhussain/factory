@@ -2,7 +2,8 @@
 //! scheduler where it is installed. A pass runs per burst of board or backlog writes, when a local
 //! factory agent stops running, right after a pass that launched a job, and after 5 minutes with
 //! no pass. It also keeps the board mirror (`mirror.rs`) current from the socket's rows frames and
-//! serves it to this host's commands.
+//! serves it to this host's commands, sends the host status heartbeat every 5 minutes, and pushes
+//! the retro digest at the retro-push timer's times, in place of that timer.
 
 use std::collections::hash_map::RandomState;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -26,13 +27,14 @@ use crate::cli::Call;
 use crate::commands::mirror::{self, Mirror};
 use crate::shared::conf::read_conf;
 use crate::shared::exit::{fail, Res};
+use crate::shared::fs::is_link;
 use crate::shared::home::factory_home;
 use crate::shared::http::{access_message, api_url, token_message};
-use crate::shared::proc::{capture, which};
 use crate::shared::py::os_error;
-use crate::shared::time::now;
+use crate::shared::time::{format_stamp, now, unix_now};
 
 const HOST_EVENTS_PATH: &str = "/events/host";
+const HOST_403: &str = "HTTP 403: no paired or active host is bound to this service token; pair this host, or check its record under Settings, Hosts";
 
 #[derive(Clone, Copy)]
 struct Timing {
@@ -70,6 +72,9 @@ enum Event {
     Note(String),
     Closed(String),
 }
+
+/// How often the daemon sends the host status heartbeat.
+const HEARTBEAT: Duration = Duration::from_secs(300);
 
 /// How long after a failed board fetch the reader tries again.
 const REFETCH: Duration = Duration::from_secs(10);
@@ -162,11 +167,17 @@ fn run(home: &Path) -> Res<()> {
             &format!("mirror endpoint failed: {}", os_error(&e, None)),
         );
     }
+    // Tests that run the whole daemon never send this host's status or push its digest.
+    if !cfg!(test) {
+        let (exe, home) = (exe.clone(), home.clone());
+        std::thread::spawn(move || timers(&exe, &home));
+    }
     println!(
         "factory daemon: watching {url}; log {}",
         home.join("logs").join("daemon").display()
     );
     let terminal = io::stderr().is_terminal();
+    let mut heart = crate::commands::heartbeat::Heart::default();
     serve(
         &url,
         &headers,
@@ -186,7 +197,9 @@ fn run(home: &Path) -> Res<()> {
         },
         &running_agents,
         &mut |_| {
+            cap_log(&home.join("logs").join("daemon.log"));
             let _ = std::fs::write(lock_dir(&home).join(LAST_PASS_FILE), now() + "\n");
+            heart.before_pass(&home, &|msg| log_line(&home, msg));
             let (code, stopped, launched) = run_pickup(&exe, &home, signal_stop);
             log_line(&home, &format!("pickup exited {code}"));
             if !terminal {
@@ -201,6 +214,107 @@ fn run(home: &Path) -> Res<()> {
     );
     mirror::unlisten(&home);
     Ok(())
+}
+
+/// Sends the heartbeat at start and every HEARTBEAT, and runs `retro push` once at each of the
+/// retro-push timer's local times, or at the first check after one, as launchd runs a time a
+/// sleeping Mac missed. A time that passed before the daemon started is left to pickup's push on
+/// its first run of the day. Runs until a stop signal.
+fn timers(exe: &Path, home: &Path) {
+    let times =
+        crate::commands::pickup::retro_push_times(crate::commands::pickup::pickup_scheduler());
+    let local = || {
+        let utc = unix_now();
+        format_stamp(utc + crate::commands::pickup::local_offset(utc))
+    };
+    let mut pushed = retro_slot(&local(), times);
+    let mut beat: Option<Instant> = None;
+    while signal_stop().is_none() {
+        if beat.is_none_or(|at| at.elapsed() >= HEARTBEAT) {
+            beat = Some(Instant::now());
+            crate::commands::pickup::daemon_heartbeat(home);
+        }
+        let slot = retro_slot(&local(), times);
+        if slot.is_some() && slot != pushed {
+            pushed = slot;
+            log_line(home, "retro push");
+            log_line(
+                home,
+                &format!("retro push exited {}", run_retro_push(exe, home)),
+            );
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
+/// The latest of times at or before the local stamp `YYYY-MM-DDTHH:MM:SSZ`, as `YYYY-MM-DD HH:MM`,
+/// or None before the first of the day.
+fn retro_slot(local: &str, times: &[(u32, u32)]) -> Option<String> {
+    let (date, clock) = (&local[..10], &local[11..16]);
+    times
+        .iter()
+        .map(|(hour, minute)| format!("{hour:02}:{minute:02}"))
+        .filter(|at| at.as_str() <= clock)
+        .last()
+        .map(|at| format!("{date} {at}"))
+}
+
+/// Runs `exe --home <home> retro push` with its output appended to the day log, and returns its
+/// exit code.
+fn run_retro_push(exe: &Path, home: &Path) -> i32 {
+    let status = day_log(home).and_then(|(log, _)| {
+        Command::new(exe)
+            .arg("--home")
+            .arg(home)
+            .args(["retro", "push"])
+            .stdin(Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log)
+            .status()
+    });
+    match status {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(e) => {
+            log_line(home, &os_error(&e, Some(exe)));
+            1
+        }
+    }
+}
+
+/// The size past which a pass trims daemon.log, and the tail it keeps.
+const LOG_CAP: u64 = 5 << 20;
+const LOG_KEEP: u64 = 1 << 20;
+
+/// Trims the service log at path to its last LOG_KEEP bytes, from a line start, once it passes
+/// LOG_CAP. launchd, systemd and cron open it for append, so the daemon's writes go on at the new
+/// end. Windows' `>>` keeps its own offset, so the log there stays as it is. A link there is left
+/// alone, so the trim never truncates another file.
+fn cap_log(path: &Path) {
+    if cfg!(windows) || is_link(path).unwrap_or(true) {
+        return;
+    }
+    let mut options = OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, crate::shared::fs::O_NOFOLLOW);
+    let Ok(mut file) = options.open(path) else {
+        return;
+    };
+    let len = file.metadata().map_or(0, |m| m.len());
+    if len <= LOG_CAP {
+        return;
+    }
+    let mut tail = Vec::new();
+    let read = io::Seek::seek(&mut file, io::SeekFrom::Start(len - LOG_KEEP))
+        .and_then(|_| io::Read::read_to_end(&mut io::Read::take(&mut file, LOG_KEEP), &mut tail));
+    if read.is_err() {
+        return;
+    }
+    let start = tail.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let _ = file
+        .set_len(0)
+        .and_then(|_| io::Seek::seek(&mut file, io::SeekFrom::Start(0)))
+        .and_then(|_| io::Write::write_all(&mut file, &tail[start..]));
 }
 
 /// The file beside the lock that holds when the daemon's last pass began.
@@ -220,16 +334,7 @@ fn running_agents() -> Option<Vec<String>> {
     if cfg!(test) {
         return None;
     }
-    let exe = which("paseo")?.to_string_lossy().into_owned();
-    let home = std::env::var("PASEO_HOME").unwrap_or_default();
-    let mut argv = vec![exe.as_str(), "ls", "-g", "--json"];
-    if !home.is_empty() {
-        argv.extend(["--home", home.as_str()]);
-    }
-    let r = capture(&argv, None, &[], Some(Duration::from_secs(20))).ok()?;
-    let agents: serde_json::Value = serde_json::from_str(&r.stdout)
-        .ok()
-        .filter(|_| r.code == 0)?;
+    let agents = crate::shared::paseo::paseo_ls(&[])?;
     Some(factory_running(&agents))
 }
 
@@ -344,6 +449,8 @@ fn connect(
     let limit = t.connect_timeout;
     std::thread::spawn(move || {
         if wait.recv_timeout(limit) == Err(RecvTimeoutError::Timeout) {
+            // Hang up first, so a handshake that fails on the shutdown always reads as timed out.
+            drop(wait);
             let _ = watchdog.shutdown(Shutdown::Both);
         }
     });
@@ -356,13 +463,18 @@ fn connect(
         Err(HandshakeError::Interrupted(_)) => return Err("timed out".to_string()),
         Err(HandshakeError::Failure(tungstenite::Error::Http(response))) => {
             return Err(match response.status().as_u16() {
-                301 | 302 | 303 | 307 | 308 | 401 | 403 => access_message(env_file),
+                301 | 302 | 303 | 307 | 308 | 401 => access_message(env_file),
+                // Access passed the token; the Worker found no paired or active host bound to it.
+                403 => format!(
+                    "{HOST_403}; if its service token was revoked or rotated in Access, check FACTORY_ACCESS_CLIENT_ID/SECRET in {}",
+                    env_file.display()
+                ),
                 404 => format!(
                     "HTTP 404: this Worker has no {HOST_EVENTS_PATH} route; deploy the Worker first"
                 ),
                 503 => "HTTP 503: the events room is full".to_string(),
                 status => format!("HTTP {status}"),
-            })
+            });
         }
         Err(HandshakeError::Failure(e)) => return Err(e.to_string()),
     };
@@ -530,7 +642,8 @@ fn serve(
     let mut last_start: Option<Instant> = None;
     // The factory agents the last read saw running. The list is read at start and after a pass
     // that launched (watch), and again while it holds an agent: every agent_poll, doubling up to
-    // agent_poll_max while it stays the same. A read that finds none stops the reads.
+    // agent_poll_max while it stays the same or the read fails. A read that finds none stops the
+    // reads.
     let mut running: Vec<String> = Vec::new();
     let mut watch = true;
     let mut polled: Option<Instant> = None;
@@ -592,6 +705,8 @@ fn serve(
                         t.agent_poll
                     };
                     running = now_running;
+                } else {
+                    gap = (gap * 2).min(t.agent_poll_max);
                 }
             }
             if pending.is_none() && last_start.is_some_and(|at| at.elapsed() >= t.fallback) {
@@ -1101,6 +1216,31 @@ mod tests {
         assert!((5..=10).contains(&reads.get()), "{}", reads.get());
     }
 
+    /// A paseo ls that keeps failing backs off the same way, so a broken paseo is not run every
+    /// agent_poll.
+    #[test]
+    fn failed_agent_reads_back_off() {
+        let origin = quiet();
+        let home = home("agent-fails", &origin);
+        let t = Timing {
+            fallback: Duration::from_millis(1000),
+            ..TEST
+        };
+        let reads = std::cell::Cell::new(0);
+        let agents = || {
+            reads.set(reads.get() + 1);
+            if reads.get() == 1 {
+                Some(vec!["a1".to_string()])
+            } else {
+                None
+            }
+        };
+        let seen = run_with(&home, &origin, 2, &t, &agents, &[]);
+        assert_eq!(seen, ["connect", "fallback"]);
+        // Reads at 0, 50, 150, 350 ms, then every 200 ms: about 8 in 1 s, not 20.
+        assert!((5..=10).contains(&reads.get()), "{}", reads.get());
+    }
+
     /// With no socket, a fallback pass runs at start and then every fallback.
     #[test]
     fn fallback_runs_while_the_socket_is_down() {
@@ -1183,6 +1323,26 @@ mod tests {
         )
         .unwrap();
         assert_eq!(last_pass(&home).as_deref(), Some("2026-11-23T10:00:00Z"));
+    }
+
+    /// The latest retro-push time passed today names the slot; a new slot is a push due.
+    #[test]
+    fn retro_slot_names_the_latest_time_passed() {
+        let mac = [(6, 30), (7, 30), (8, 30)];
+        assert_eq!(retro_slot("2026-11-24T06:29:59Z", &mac), None);
+        assert_eq!(
+            retro_slot("2026-11-24T06:30:00Z", &mac).as_deref(),
+            Some("2026-11-24 06:30")
+        );
+        assert_eq!(
+            retro_slot("2026-11-24T23:59:00Z", &mac).as_deref(),
+            Some("2026-11-24 08:30")
+        );
+        assert_eq!(retro_slot("2026-11-24T08:29:00Z", &[(8, 30)]), None);
+        assert_eq!(
+            retro_slot("2026-11-24T10:00:00Z", &[(8, 30)]).as_deref(),
+            Some("2026-11-24 08:30")
+        );
     }
 
     #[test]
@@ -1375,12 +1535,63 @@ mod tests {
     }
 
     #[test]
-    fn handshake_403_logs_access_message() {
-        let (origin, _) = fake(Some(403), |_| sleep(Duration::from_secs(1)));
-        let home = home("403", &origin);
+    fn handshake_401_logs_access_message() {
+        let (origin, _) = fake(Some(401), |_| sleep(Duration::from_secs(1)));
+        let home = home("401", &origin);
         assert_eq!(run(&home, &origin, 2), ["fallback", "connect"]);
         let message = access_message(&home.join(".env"));
         assert!(log_text(&home).contains(&format!("connect failed: {message}; retry in ")));
+    }
+
+    /// A 403 comes from the Worker's host binding check, past Access, so it names the host record.
+    #[test]
+    fn handshake_403_logs_host_record_message() {
+        let (origin, _) = fake(Some(403), |_| sleep(Duration::from_secs(1)));
+        let home = home("403", &origin);
+        assert_eq!(run(&home, &origin, 2), ["fallback", "connect"]);
+        let log = log_text(&home);
+        assert!(
+            log.contains(&format!(
+                "connect failed: {HOST_403}; if its service token was revoked or rotated in Access, check FACTORY_ACCESS_CLIENT_ID/SECRET in {}; retry in ",
+                home.join(".env").display()
+            )),
+            "{log}"
+        );
+        assert!(!log.contains("Access rejected"), "{log}");
+    }
+
+    /// Past LOG_CAP the log keeps its last LOG_KEEP bytes from a line start, and a writer that
+    /// opened it for append, as the service did, goes on at the new end.
+    #[cfg(unix)]
+    #[test]
+    fn service_log_is_capped() {
+        let path = temp_dir("daemon-log-cap").join("daemon.log");
+        let line = format!("{}\n", "x".repeat(99));
+        std::fs::write(&path, line.repeat(60_000)).unwrap();
+        let mut service = OpenOptions::new().append(true).open(&path).unwrap();
+        cap_log(&path);
+        io::Write::write_all(&mut service, b"after\n").unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.len() as u64 <= LOG_KEEP + 6, "{}", text.len());
+        assert!(text.starts_with(&line) && text.ends_with(&format!("{line}after\n")));
+        // Under the cap, nothing changes.
+        std::fs::write(&path, &line).unwrap();
+        cap_log(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), line);
+    }
+
+    /// A daemon.log that is a symlink is not followed, so its target keeps every byte.
+    #[cfg(unix)]
+    #[test]
+    fn service_log_link_is_left_alone() {
+        let dir = temp_dir("daemon-log-link");
+        let target = dir.join("other.txt");
+        let text = "y".repeat((LOG_CAP + 10) as usize);
+        std::fs::write(&target, &text).unwrap();
+        let path = dir.join("daemon.log");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        cap_log(&path);
+        assert_eq!(std::fs::metadata(&target).unwrap().len(), text.len() as u64);
     }
 
     #[test]
@@ -1496,24 +1707,27 @@ mod tests {
         );
     }
 
+    /// The server holds the connection open until connect returns, so only the watchdog can end the
+    /// handshake, however slowly a loaded machine runs it. Without one, the hold ends after 60 s
+    /// with a closed socket, not "timed out".
     #[test]
     fn stalled_tls_handshake_times_out() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
+        let (release, held_until) = mpsc::channel::<()>();
         std::thread::spawn(move || {
             let held: Vec<_> = listener.incoming().take(1).collect();
-            sleep(Duration::from_secs(10));
+            let _ = held_until.recv_timeout(Duration::from_secs(60));
             drop(held);
         });
         let t = Timing {
             connect_timeout: Duration::from_millis(300),
             ..TEST
         };
-        let start = Instant::now();
         let url = format!("wss://127.0.0.1:{port}{HOST_EVENTS_PATH}");
         let e = connect(&url, &[], &t, Path::new(".env")).err().unwrap();
+        let _ = release.send(());
         assert_eq!(e, "timed out");
-        assert!(start.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
@@ -1544,5 +1758,101 @@ mod tests {
             took >= t.silence && took < Duration::from_millis(290),
             "{took:?}"
         );
+    }
+
+    /// Each pass refreshes live claims first, in one board write: the first pass writes the two
+    /// live sessions' seen in one PATCH and leaves the dead one, and the next pass, which reads
+    /// them fresh, writes nothing and never asks paseo.
+    #[test]
+    fn each_pass_refreshes_live_claims_once() {
+        use crate::commands::heartbeat::{report, tests as hb, Heart};
+        let old = hb::minutes_ago(30);
+        let fresh = hb::minutes_ago(0);
+        let jobs = |seen: &str| {
+            vec![
+                hb::job(
+                    "001-a",
+                    "build",
+                    hb::claim("mac", "s1", seen),
+                    Some((hb::SERVER, "a1")),
+                ),
+                hb::job(
+                    "002-b",
+                    "build",
+                    hb::claim("mac", "s2", &old),
+                    Some((hb::SERVER, "dead")),
+                ),
+                hb::job(
+                    "003-c",
+                    "review",
+                    hb::claim("mac", "s3", seen),
+                    Some((hb::SERVER, "orch")),
+                ),
+            ]
+        };
+        let mut after = hb::board_of(jobs(&fresh));
+        after["jobs"][1]["claim"]["seen"] = hb::minutes_ago(5).into();
+        let (api_origin, requests) = crate::shared::http::tests::serve(vec![
+            hb::get(&hb::board_of(jobs(&old))),
+            (200, "{}", vec![]),
+            hb::get(&after),
+        ]);
+        let home = home("heartbeat", &api_origin);
+        let origin = quiet();
+        let fake = hb::Fake::new(
+            serde_json::json!([
+                hb::agent("a1", "running", "factory 001-a"),
+                hb::agent("dead", "closed", "factory 002-b"),
+                hb::agent("orch", "idle", "factory 003-c"),
+                hb::agent("sub", "running", "x"),
+            ]),
+            vec![(
+                "orch",
+                serde_json::json!([hb::agent("sub", "running", "x")]),
+            )],
+        );
+        let mut heart = Heart::default();
+        let headers = access_headers(&home, &origin).unwrap();
+        let mut passes = Vec::new();
+        serve(
+            &host_url(&origin),
+            &headers,
+            &TEST,
+            &home.join(".env"),
+            None,
+            no_stop,
+            &|msg| log_line(&home, msg),
+            &|| None,
+            &mut |reason| {
+                let result = heart.beat_with(
+                    &home,
+                    "mac",
+                    hb::SERVER,
+                    &|p| fake.list(p),
+                    &crate::shared::http::api,
+                );
+                report(result, &|msg| log_line(&home, msg));
+                passes.push(reason.to_string());
+                // The first pass reports a launch, so a second follows at min_gap.
+                if passes.len() == 2 {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(true)
+                }
+            },
+        );
+        assert_eq!(passes, ["connect", "room left"]);
+        // Pass one lists the agents and asks for the idle orchestrator's children; pass two
+        // finds every claim fresh and asks nothing.
+        assert_eq!(fake.asked.borrow().len(), 2);
+        let requests = requests.lock().unwrap();
+        let methods: Vec<&str> = requests.iter().map(|r| r.method.as_str()).collect();
+        assert_eq!(methods, ["GET", "PATCH", "GET"]);
+        let log = log_text(&home);
+        assert!(
+            log.contains(" heartbeat: refreshed seen on 001-a 003-c\n"),
+            "{log}"
+        );
+        assert_eq!(log.matches("heartbeat:").count(), 1, "{log}");
     }
 }

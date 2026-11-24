@@ -58,7 +58,7 @@ const USAGE_PICKUP_SETUP: &str = "usage: pickup setup [--install]";
 const USAGE_DAEMON_SETUP: &str = "usage: daemon setup [--install | --uninstall]";
 const TRIAGE_SWEEP_MINUTES: i64 = 30;
 const FETCH_TIMEOUT_SECONDS: u64 = 60;
-const SCHEDULERS: &[&str] = &["launchd", "cron", "schtasks", "none"];
+const SCHEDULERS: &[&str] = &["launchd", "systemd", "cron", "schtasks", "none"];
 const PICKUP_SCHEDULER: &str = if cfg!(target_os = "macos") {
     "launchd"
 } else if cfg!(windows) {

@@ -145,11 +145,15 @@ pub fn bundle_entry(skill: &Path) -> Option<Vec<String>> {
         .map(|v| v.as_str().map(String::from))
         .collect::<Option<_>>()?;
     let first = Path::new(args.first().filter(|a| !a.is_empty())?);
+    // A Windows drive-relative `C:x` is neither absolute nor rooted, but join drops the skill for it.
     if first.is_absolute()
         || first.has_root()
-        || first
-            .components()
-            .any(|c| c == std::path::Component::ParentDir)
+        || first.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir | std::path::Component::Prefix(_)
+            )
+        })
     {
         return None;
     }
@@ -294,10 +298,18 @@ pub fn device_name(home: &Path) -> String {
     }
 }
 
+/// FACTORY_SESSION, or "" when unset. A non-UTF-8 value reads lossily, so it stays set and fails
+/// the tag check instead of passing as no session.
+pub fn env_session() -> String {
+    std::env::var_os("FACTORY_SESSION")
+        .map(|v| v.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 /// (device, session, claim_stale_minutes) this process claims jobs as.
 pub fn holder(home: &Path) -> Res<(String, String, u32)> {
     let (config, meta) = config_meta(home)?;
-    let session = std::env::var("FACTORY_SESSION").unwrap_or_default();
+    let session = env_session();
     if !session.is_empty() && !SLUG.is_full(&session) {
         return Err(fail(
             format!(
@@ -369,6 +381,27 @@ mod tests {
                 "-q".into()
             ])
         );
+        fs::remove_dir_all(&skill).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bundle_entry_refuses_a_drive_relative_path() {
+        let skill =
+            std::env::temp_dir().join(format!("factory-bundle-drive-{}", std::process::id()));
+        fs::create_dir_all(&skill).unwrap();
+        for bad in [
+            r"C:factory.exe",
+            r"C:runtime\factory.exe",
+            r"\\?\C:factory.exe",
+        ] {
+            fs::write(
+                skill.join("bundle.json"),
+                json!({"commit": "c", "entry": [bad]}).to_string(),
+            )
+            .unwrap();
+            assert_eq!(bundle_entry(&skill), None, "{bad}");
+        }
         fs::remove_dir_all(&skill).unwrap();
     }
 

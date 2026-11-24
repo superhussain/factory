@@ -392,7 +392,10 @@ fn check_untrusted(text: &str) -> Option<String> {
     if NOTE_LINK.search(text).is_some() {
         return Some("links are not allowed".into());
     }
-    if NOTE_SECRETS.iter().any(|p| p.search(text).is_some()) {
+    if NOTE_SECRETS
+        .iter()
+        .any(|p| p.search_or_stop(text).is_some())
+    {
         return Some("looks like a secret".into());
     }
     for (rule, p) in NOTE_PHRASES.iter() {
@@ -6102,6 +6105,13 @@ fn random_tag() -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn secret_check_stops_at_the_backtrack_limit() {
+        crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
+        check_untrusted("ghp_ eyJ plain text");
+    }
+
     const PARSE: &str = "sample: Parse recipe URLs (sub-job-of 041-recipe-import)";
     const STORE: &str = "sample: Store imported recipes (sub-job-of 041-recipe-import)";
 
@@ -7218,16 +7228,11 @@ mod tests {
 
     #[test]
     fn neutralize_chat_long_token_is_fast() {
-        let start = std::time::Instant::now();
-        assert_eq!(
-            super::neutralize_chat(&format!("{}x.test/a", "-".repeat(20000))),
-            "(link: x.test)"
-        );
-        assert_eq!(
-            super::neutralize_chat(&format!("{}@x.test/a", "-".repeat(20000))),
-            "(link: x.test)"
-        );
-        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+        for suffix in ["x.test/a", "@x.test/a"] {
+            crate::shared::assert_linear("", "-", suffix, 20000, |text| {
+                assert_eq!(super::neutralize_chat(text), "(link: x.test)")
+            });
+        }
     }
 }
 

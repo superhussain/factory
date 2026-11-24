@@ -190,9 +190,10 @@ because WSL starts no cron on its own:
 - A Windows Task Scheduler task that starts WSL at logon, so the `[boot]` command
   runs.
 
-A cron-only host restarts the daemon from the `*/5` line. After catch-up stops
-the old daemon, or after a crash, there can be a gap of up to 5 minutes before
-the new one runs.
+A cron-only host restarts the daemon from the `*/5` line, so after a crash there
+can be a gap of up to 5 minutes before the new one runs. Catch-up does not wait
+for the line: it stops the old daemon, starts the new binary itself, and prints
+`daemon: restarted (pid N)` once the new daemon holds its lock.
 
 If macOS reports a disabled label, enable it and install again:
 
@@ -211,11 +212,15 @@ catch-up removes it and prints `pickup timer: replaced by the daemon`.
 To go back to the timer, run `daemon setup --uninstall`. It puts the pickup timer
 back before it removes the service.
 
-### The retro push timer stays
+### The retro push timer goes too
 
-The daily `retro push` timer is separate from the daemon. Keep it. Its lines are
-in [the schedules reference](../skills/factory/references/schedules.md#daily-retro-push).
-Point it at the binary as the next section shows.
+The daemon pushes the retro digest at the timer's times, so the host has no
+`retro push` timer either. `daemon setup --install` removes it with the same
+backup, and catch-up removes a survivor and prints
+`retro-push timer: replaced by the daemon`. `daemon setup --uninstall` puts it
+back. A host without the daemon keeps the timer its
+[schedules reference](../skills/factory/references/schedules.md#daily-retro-push)
+lines set up; point it at the binary as the next section shows.
 
 ## Update old automations
 

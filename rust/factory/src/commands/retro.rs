@@ -3389,7 +3389,10 @@ fn check_untrusted(text: &str) -> Option<String> {
     if NOTE_LINK.search(text).is_some() {
         return Some("links are not allowed".into());
     }
-    if NOTE_SECRETS.iter().any(|p| p.search(text).is_some()) {
+    if NOTE_SECRETS
+        .iter()
+        .any(|p| p.search_or_stop(text).is_some())
+    {
         return Some("looks like a secret".into());
     }
     NOTE_PHRASES
@@ -3618,6 +3621,13 @@ mod tests {
 
     /// Wall-clock ceiling per linear-time input. Loose enough for a loaded parallel suite.
     const LINEAR_BOUND: Duration = Duration::from_secs(5);
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn secret_check_stops_at_the_backtrack_limit() {
+        crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
+        check_untrusted("ghp_ eyJ plain text");
+    }
 
     const SLUG: &str = "-home-u--paseo-worktrees-ab12-factory-1017-add-x";
 

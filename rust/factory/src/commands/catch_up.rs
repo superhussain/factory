@@ -56,6 +56,8 @@ struct Fakes {
     daemon_service: Option<Option<&'static str>>,
     daemon_drift: Option<bool>,
     remove_timer: Option<Rc<dyn Fn(&str) -> Result<(), String>>>,
+    retro_left: Option<bool>,
+    remove_retro: Option<Rc<dyn Fn(&str) -> Result<(), String>>>,
     gh: Option<Rc<dyn Fn(&str, &[&str]) -> (i32, String)>>,
     setup_run: Option<Rc<dyn Fn(&[&str]) -> (i32, String)>>,
     backup: Option<Rc<dyn Fn() -> Result<PathBuf, String>>>,
@@ -63,6 +65,8 @@ struct Fakes {
     run: Option<Rc<dyn Fn(&[String], Option<Duration>) -> Option<io::Result<Out>>>>,
     build: Option<Rc<dyn Fn(&Path, &mut dyn Write) -> Result<PathBuf, String>>>,
     install: Option<Rc<dyn Fn(&[String]) -> Out>>,
+    spawn: Option<Rc<dyn Fn() -> Result<(), String>>>,
+    locked_pid: Option<Rc<dyn Fn() -> Result<Option<u32>, String>>>,
 }
 
 #[cfg(test)]
@@ -85,10 +89,15 @@ fn scheduler() -> &'static str {
     pickup::pickup_scheduler()
 }
 
-fn timer_installed(scheduler: &str) -> bool {
+/// Whether this host has a pickup timer. Beside the daemon an unloaded launchd plist counts too,
+/// since it is a leftover to remove.
+fn timer_installed(scheduler: &str, daemon: bool) -> bool {
     #[cfg(test)]
     if let Some(t) = fake!(timer_installed) {
         return t;
+    }
+    if daemon {
+        return pickup::timer_left(scheduler, &pickup::PICKUP);
     }
     pickup::timer_installed(scheduler, &pickup::PICKUP).0
 }
@@ -101,6 +110,31 @@ fn timer_drift(scheduler: &str, home: &Path) -> bool {
     }
     pickup::timer_drift(scheduler, &pickup::timer_values(home, &pickup::PICKUP))
         .is_some_and(|s| !s.is_empty())
+}
+
+/// Whether a retro-push timer, loaded or not, is left beside the daemon, which pushes the digest
+/// itself.
+#[cfg_attr(test, allow(unused_variables))]
+fn retro_left(scheduler: &str) -> bool {
+    #[cfg(test)]
+    return fake!(retro_left).unwrap_or(false);
+    #[cfg_attr(test, allow(unreachable_code))]
+    pickup::timer_left(scheduler, &pickup::RETRO_PUSH)
+}
+
+/// Removes the retro-push timer, through the same code `daemon setup --install` uses.
+#[cfg_attr(test, allow(unused_variables))]
+fn remove_retro(scheduler: &str, home: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(remove_retro) {
+        return f(scheduler);
+    }
+    #[cfg(test)]
+    panic!("a test removed a real retro-push timer");
+    #[cfg_attr(test, allow(unreachable_code))]
+    pickup::uninstall_timer(home, scheduler, &pickup::RETRO_PUSH)
+        .map(|_| ())
+        .map_err(|e| strip(e.stderr.trim_start_matches("factory.py: ")).to_string())
 }
 
 /// Removes the pickup timer, through the same code `daemon setup --install` uses.
@@ -123,7 +157,9 @@ fn launchctl(argv: &[&str]) -> (i32, String) {
 
 /// Restarts the installed daemon service with the scheduler's own commands, so it runs the binary
 /// catch-up just installed: the restarted line's detail, or None when there was nothing to
-/// restart (cron with no daemon running). launchd reloads the plist and then must show a pid.
+/// restart (cron with no daemon running). launchd reloads the plist and then must show a pid; on
+/// the other schedulers a new daemon must hold the lock. After a kill the old daemon must let go of
+/// the lock first, and on cron catch-up then starts the new one rather than wait for the */5 line.
 /// schtasks /End fails when the task is not running, so its failure does not count.
 fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String> {
     if scheduler == "launchd" {
@@ -142,9 +178,38 @@ fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String
         return Ok(Some(format!("restarted (pid {pid})")));
     }
     let argvs = pickup::daemon_restart_argvs(scheduler, home)?;
-    for argv in &argvs {
+    if argvs.is_empty() {
+        return Ok(None);
+    }
+    let ran = run_restart(&argvs, home);
+    if ran.is_err() && scheduler == "schtasks" {
+        // The marker written before /End would make the .cmd loop exit at every logon.
+        let _ = pickup::clear_stop_marker(home);
+    }
+    ran?;
+    if scheduler == "cron" {
+        spawn_daemon().map_err(|e| format!("could not start the daemon: {e}"))?;
+    }
+    // The pid in the kill argv: `kill <pid>` or `taskkill /PID <pid> ...`.
+    let killed = argvs
+        .iter()
+        .filter(|a| a[0] == "kill" || a[0] == "taskkill")
+        .find_map(|a| a.iter().find_map(|w| w.parse().ok()));
+    let pid = pickup::daemon_pid(home, killed, &mut || locked_pid(home))?;
+    Ok(Some(format!("restarted (pid {pid})")))
+}
+
+/// Runs a restart's argvs in order. A kill that fails counts only while the daemon still holds
+/// its lock: /End may already have ended it, and then taskkill finds no process.
+fn run_restart(argvs: &[Vec<String>], home: &Path) -> Result<(), String> {
+    for argv in argvs {
+        if argv[0] == "schtasks" && argv[1] == "/Run" {
+            pickup::clear_stop_marker(home).map_err(|e| strip(&e.stderr).to_string())?;
+        }
         let r = run(argv, Some(TIMER_TIMEOUT));
-        if r.code != 0 && !(argv[0] == "schtasks" && argv[1] == "/End") {
+        let kill = argv[0] == "kill" || argv[0] == "taskkill";
+        let gone = || kill && matches!(locked_pid(home), Ok(None));
+        if r.code != 0 && !(argv[0] == "schtasks" && argv[1] == "/End") && !gone() {
             let both = r.stderr + &r.stdout;
             let text = strip(&both);
             return Err(format!(
@@ -153,8 +218,34 @@ fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String
                 text.split('\n').next().unwrap_or("")
             ));
         }
+        if kill {
+            let pid = argv.iter().find_map(|w| w.parse().ok()).unwrap_or_default();
+            pickup::daemon_stopped(pid, &mut || locked_pid(home))?;
+        }
     }
-    Ok((!argvs.is_empty()).then(|| "restarted".to_string()))
+    Ok(())
+}
+
+/// The pid of the daemon that holds the lock, through a fake in tests: other tests' child
+/// processes can hold a copy of a test's real lock for a moment, so the polls would misread it.
+fn locked_pid(home: &Path) -> Result<Option<u32>, String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(locked_pid) {
+        return f();
+    }
+    crate::commands::daemon::locked_pid(home)
+}
+
+/// Starts the cron daemon detached, through a fake in tests.
+fn spawn_daemon() -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(spawn) {
+        return f();
+    }
+    #[cfg(test)]
+    panic!("a test started a real daemon");
+    #[cfg_attr(test, allow(unreachable_code))]
+    pickup::spawn_daemon()
 }
 
 /// Reloads the launchd retro-push timer when it runs this binary, so launchd takes the new
@@ -855,10 +946,12 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
         "factory"
     });
     // One crontab read serves every check, so a host without a daemon reads it as before.
-    let (timer, daemon, legacy) = pickup::with_crontab_memo(|| {
+    let (timer, daemon, retro, legacy) = pickup::with_crontab_memo(|| {
+        let daemon = daemon_service();
         (
-            timer_installed(scheduler),
-            daemon_service(),
+            timer_installed(scheduler, daemon.is_some()),
+            daemon,
+            daemon.is_some() && retro_left(scheduler),
             legacy_scan(home, scheduler, &binary.to_string_lossy()),
         )
     });
@@ -875,7 +968,7 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
         let have = installed.map_or_else(|| "unknown".to_string(), |c| short(&c));
         outln!(out, "skill: {have} installed, {h7} on origin/{base}");
     }
-    if current && !stale && !daemon_stale && legacy.is_empty() {
+    if current && !stale && !daemon_stale && !retro && legacy.is_empty() {
         if timer {
             outln!(out, "pickup timer: current");
         } else {
@@ -1017,6 +1110,18 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             } else {
                 failed += 1;
                 outln!(out, "pickup timer: {text}");
+            }
+        }
+        // The daemon pushes the retro digest, so a retro-push timer beside it goes too.
+        if retro && !ok {
+            outln!(out, "retro-push timer: skipped, skill install failed");
+        } else if retro {
+            match remove_retro(scheduler, home) {
+                Ok(()) => outln!(out, "retro-push timer: replaced by the daemon"),
+                Err(e) => {
+                    failed += 1;
+                    outln!(out, "retro-push timer: {e}");
+                }
             }
         }
         if daemon.is_some() {
@@ -1194,6 +1299,30 @@ mod tests {
     static BACKUP_NAME: Pattern = Pattern::new(r"catch-up-\d{8}T\d{6}Z-[0-9a-f]{6}", Flags::NONE);
 
     type Calls = Rc<RefCell<Vec<Vec<String>>>>;
+
+    thread_local! {
+        /// The real daemon lock this test holds while its first fake daemon runs, so the restart
+        /// finds a pid to kill.
+        static DAEMON_LOCK: RefCell<Option<fs::File>> = const { RefCell::new(None) };
+        /// Whether a fake daemon runs, as the restart's polls see it.
+        static UP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// How many fake daemons have started since the first; each takes the next pid.
+        static RESTARTS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+        /// False when a restarted fake daemon never comes up.
+        static STARTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    }
+
+    /// Starts the first fake daemon for home: this test takes its real lock.
+    fn daemon_runs(home: &Path) {
+        DAEMON_LOCK.with(|l| *l.borrow_mut() = crate::commands::daemon::take_lock(home).unwrap());
+        UP.set(true);
+    }
+
+    /// Ends the fake daemon: this test lets go of its lock.
+    fn stop() {
+        DAEMON_LOCK.with(|l| *l.borrow_mut() = None);
+        UP.set(false);
+    }
 
     fn sh_git(cwd: &Path, args: &[&str]) -> String {
         let o = Command::new("git")
@@ -1482,12 +1611,28 @@ mod tests {
         }
 
         /// Fakes the scheduler commands a daemon restart runs: it records each argv and replies
-        /// with code and out, except a failing schtasks /End when end_fails.
+        /// with code and out, except a failing schtasks /End when end_fails. The daemon is this
+        /// test holding the lock: a kill ends it, and a successful systemctl restart, schtasks
+        /// /Run or cron spawn starts it again unless STARTS is false. The restart's polls read
+        /// UP, not the real lock.
         fn service_calls(&self, code: i32, out: &str, end_fails: bool) -> Calls {
             let calls: Calls = Rc::default();
             let prev = FAKES.with(|f| f.borrow().run.clone());
             let (seen, out) = (calls.clone(), out.to_string());
+            let start = || {
+                if STARTS.get() {
+                    UP.set(true);
+                    RESTARTS.set(RESTARTS.get() + 1);
+                }
+            };
             FAKES.with(|f| {
+                f.borrow_mut().spawn = Some(Rc::new(move || {
+                    start();
+                    Ok(())
+                }));
+                f.borrow_mut().locked_pid = Some(Rc::new(|| {
+                    Ok(UP.get().then(|| std::process::id() + RESTARTS.get()))
+                }));
                 f.borrow_mut().run = Some(Rc::new(move |argv, timeout| {
                     let tools = ["launchctl", "systemctl", "schtasks", "kill", "taskkill"];
                     if !tools.contains(&argv[0].as_str()) {
@@ -1500,6 +1645,17 @@ mod tests {
                     } else {
                         code
                     };
+                    if code == 0 {
+                        match (argv[0].as_str(), argv[1].as_str()) {
+                            ("kill" | "taskkill", _) => stop(),
+                            ("systemctl", _) => {
+                                stop();
+                                start();
+                            }
+                            ("schtasks", "/Run") => start(),
+                            _ => {}
+                        }
+                    }
                     Some(Ok(Out {
                         code,
                         stdout: out.clone(),
@@ -1929,18 +2085,22 @@ mod tests {
             .collect()
     }
 
-    /// After a new skill, an installed systemd service restarts once with its own command; the
-    /// next run, with nothing new, restarts nothing.
+    /// After a new skill, an installed systemd service restarts once with its own command and
+    /// counts once a daemon holds the lock; the next run, with nothing new, restarts nothing.
     #[test]
     fn new_skill_restarts_the_systemd_service() {
         let t = T::new("restart-systemd");
         t.daemon(Some("systemd"), false);
+        daemon_runs(&t.home);
         let calls = t.service_calls(0, "", false);
         let (code, lines) = t.lines();
         assert_eq!(code, 0, "{lines:?}");
         assert_eq!(
             daemon_lines(&lines),
-            ["daemon service: current", "daemon: restarted"]
+            [
+                "daemon service: current",
+                &format!("daemon: restarted (pid {})", std::process::id() + 1)
+            ]
         );
         assert_eq!(
             *calls.borrow(),
@@ -2110,24 +2270,36 @@ mod tests {
         assert!(!calls.borrow().iter().any(|a| a[1] == "bootout"));
     }
 
+    /// The stop marker is written before /End, so the .cmd loop exits rather than restart the
+    /// killed daemon, and cleared before /Run.
     #[test]
     fn new_skill_restarts_the_windows_task_and_its_loop_daemon() {
         let t = T::new("restart-schtasks");
         t.daemon(Some("schtasks"), false);
         let marker = crate::commands::daemon::stop_marker(&t.home);
-        fs::create_dir_all(marker.parent().unwrap()).unwrap();
-        fs::write(&marker, "").unwrap();
-        let _lock = crate::commands::daemon::take_lock(&t.home)
-            .unwrap()
-            .unwrap();
+        daemon_runs(&t.home);
         let calls = t.service_calls(0, "", true);
+        let inner = FAKES.with(|f| f.borrow().run.clone()).unwrap();
+        let marked: Rc<RefCell<Vec<bool>>> = Rc::default();
+        let (m, seen) = (marker.clone(), marked.clone());
+        FAKES.with(|f| {
+            f.borrow_mut().run = Some(Rc::new(move |argv, timeout| {
+                if argv[0] == "schtasks" || argv[0] == "kill" {
+                    seen.borrow_mut().push(m.exists());
+                }
+                inner(argv, timeout)
+            }))
+        });
         let (code, lines) = t.lines();
         assert_eq!(code, 0, "{lines:?}");
+        let pid = std::process::id().to_string();
         assert!(
-            lines.contains(&"daemon: restarted".to_string()),
+            lines.contains(&format!(
+                "daemon: restarted (pid {})",
+                std::process::id() + 1
+            )),
             "{lines:?}"
         );
-        let pid = std::process::id().to_string();
         assert_eq!(
             *calls.borrow(),
             argvs(&[
@@ -2136,11 +2308,99 @@ mod tests {
                 &["schtasks", "/Run", "/TN", "factory-daemon"],
             ])
         );
+        assert_eq!(*marked.borrow(), [true, true, false]);
         assert!(!marker.exists(), "the restart clears the stop marker");
     }
 
+    /// Wraps the service fakes so the daemon kill exits 1; with ends, the daemon still goes.
+    fn kill_fails(ends: bool) {
+        let inner = FAKES.with(|f| f.borrow().run.clone()).unwrap();
+        FAKES.with(|f| {
+            f.borrow_mut().run = Some(Rc::new(move |argv, timeout| {
+                if argv[0] != "kill" && argv[0] != "taskkill" {
+                    return inner(argv, timeout);
+                }
+                if ends {
+                    inner(argv, timeout);
+                }
+                Some(Ok(Out {
+                    code: 1,
+                    stdout: String::new(),
+                    stderr: "ERROR: The process not found.\n".into(),
+                }))
+            }))
+        });
+    }
+
+    /// A failed kill of a daemon that still runs is a failed step, and the stop marker goes, so
+    /// the task's loop still starts the daemon at the next logon.
     #[test]
-    fn new_skill_ends_a_running_cron_daemon_only() {
+    fn failed_windows_restart_clears_the_stop_marker() {
+        let t = T::new("restart-schtasks-kill-fails");
+        t.daemon(Some("schtasks"), false);
+        let marker = crate::commands::daemon::stop_marker(&t.home);
+        daemon_runs(&t.home);
+        let calls = t.service_calls(0, "", false);
+        kill_fails(false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1, "{lines:?}");
+        let pid = std::process::id().to_string();
+        assert!(
+            lines.contains(&format!(
+                "daemon: restart failed: kill {pid}: ERROR: The process not found."
+            )),
+            "{lines:?}"
+        );
+        assert!(!calls.borrow().iter().any(|a| a[1] == "/Run"));
+        assert!(!marker.exists(), "a failed restart leaves the stop marker");
+    }
+
+    /// A kill that fails because /End already ended the daemon still counts as stopped.
+    #[test]
+    fn kill_of_a_daemon_end_already_stopped_counts() {
+        let t = T::new("restart-schtasks-ended");
+        t.daemon(Some("schtasks"), false);
+        daemon_runs(&t.home);
+        t.service_calls(0, "", false);
+        kill_fails(true);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&format!(
+                "daemon: restarted (pid {})",
+                std::process::id() + 1
+            )),
+            "{lines:?}"
+        );
+    }
+
+    /// A pid file caught empty between the new daemon's lock and its write fails the restart
+    /// before the stop marker is written or /End runs.
+    #[test]
+    fn unreadable_pid_fails_the_windows_restart_before_the_marker() {
+        let t = T::new("restart-schtasks-empty-pid");
+        t.daemon(Some("schtasks"), false);
+        let marker = crate::commands::daemon::stop_marker(&t.home);
+        daemon_runs(&t.home);
+        fs::write(marker.parent().unwrap().join("daemon.pid"), "").unwrap();
+        let calls = t.service_calls(0, "", false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1, "{lines:?}");
+        assert!(
+            lines.contains(
+                &"daemon: restart failed: a daemon runs, but its pid file holds no valid pid"
+                    .to_string()
+            ),
+            "{lines:?}"
+        );
+        assert!(calls.borrow().is_empty(), "{:?}", calls.borrow());
+        assert!(!marker.exists(), "the stop marker was left behind");
+    }
+
+    /// On cron, catch-up ends the running daemon, waits for its lock to go, starts the new binary
+    /// itself and reports its pid; with no daemon running it leaves the start to the crontab.
+    #[test]
+    fn new_skill_restarts_a_running_cron_daemon() {
         let t = T::new("restart-cron-idle");
         t.daemon(Some("cron"), false);
         let calls = t.service_calls(0, "", false);
@@ -2158,19 +2418,72 @@ mod tests {
         drop(t);
         let t = T::new("restart-cron-running");
         t.daemon(Some("cron"), false);
-        let _lock = crate::commands::daemon::take_lock(&t.home)
-            .unwrap()
-            .unwrap();
+        daemon_runs(&t.home);
         let calls = t.service_calls(0, "", false);
         let (code, lines) = t.lines();
         assert_eq!(code, 0);
+        let pid = std::process::id().to_string();
         assert!(
-            lines.contains(&"daemon: restarted".to_string()),
+            lines.contains(&format!(
+                "daemon: restarted (pid {})",
+                std::process::id() + 1
+            )),
             "{lines:?}"
         );
-        assert_eq!(
-            *calls.borrow(),
-            argvs(&[&["kill", &std::process::id().to_string()]])
+        assert_eq!(*calls.borrow(), argvs(&[&["kill", &pid]]));
+        assert!(UP.get(), "no daemon spawned");
+    }
+
+    /// A restart that leaves no daemon holding the lock is a failed step, not "restarted".
+    #[test]
+    fn restart_without_a_daemon_after_it_is_a_failed_step() {
+        for scheduler in ["systemd", "cron"] {
+            let t = T::new(&format!("restart-{scheduler}-down"));
+            t.daemon(Some(scheduler), false);
+            daemon_runs(&t.home);
+            STARTS.set(false);
+            t.service_calls(0, "", false);
+            let (code, lines) = t.lines();
+            assert_eq!(code, 1, "{lines:?}");
+            let log = t.home.join("logs").join("daemon.log");
+            assert!(
+                lines.contains(&format!(
+                    "daemon: restart failed: no daemon holds the lock 5 s after the restart; see {}",
+                    log.display()
+                )),
+                "{lines:?}"
+            );
+            STARTS.set(true);
+        }
+    }
+
+    /// A daemon that keeps its lock after the kill is a failed step, and cron starts no second one.
+    #[test]
+    fn cron_restart_waits_for_the_old_daemon_to_stop() {
+        let t = T::new("restart-cron-stuck");
+        t.daemon(Some("cron"), false);
+        daemon_runs(&t.home);
+        t.service_calls(0, "", false);
+        // The kill is recorded but the lock stays held, as by a daemon that ignores SIGTERM.
+        let inner = FAKES.with(|f| f.borrow().run.clone()).unwrap();
+        FAKES.with(|f| {
+            f.borrow_mut().run = Some(Rc::new(move |argv, timeout| {
+                let r = inner(argv, timeout);
+                if argv[0] == "kill" {
+                    UP.set(true);
+                }
+                r
+            }));
+            f.borrow_mut().spawn = Some(Rc::new(|| panic!("spawned beside a running daemon")));
+        });
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1, "{lines:?}");
+        assert!(
+            lines.contains(&format!(
+                "daemon: restart failed: the old daemon (pid {0}) still holds its lock 35 s after the kill; stop it with kill {0}, then run catch-up again",
+                std::process::id()
+            )),
+            "{lines:?}"
         );
     }
 
@@ -2346,6 +2659,60 @@ mod tests {
         assert_eq!(code, 1);
         assert!(
             lines.contains(&"pickup timer: could not remove the cron timer: synthetic".to_string()),
+            "{lines:?}"
+        );
+    }
+
+    /// The daemon pushes the retro digest, so a retro-push timer beside it is removed after the
+    /// backup; a host without the daemon keeps its timer.
+    #[test]
+    fn daemon_host_removes_a_leftover_retro_push_timer() {
+        let t = T::new("leftover-retro");
+        t.timer(false);
+        t.drift(None);
+        let removed: Calls = Rc::default();
+        let seen = removed.clone();
+        FAKES.with(|f| {
+            let mut f = f.borrow_mut();
+            f.retro_left = Some(true);
+            f.remove_retro = Some(Rc::new(move |scheduler| {
+                seen.borrow_mut().push(vec![scheduler.to_string()]);
+                Ok(())
+            }));
+        });
+        t.lines();
+        let backups = t.backups().len();
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            !lines.iter().any(|l| l.starts_with("retro-push")),
+            "{lines:?}"
+        );
+        assert!(removed.borrow().is_empty());
+        assert_eq!(t.backups().len(), backups);
+
+        t.daemon(Some("cron"), false);
+        t.service_calls(0, "", false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"retro-push timer: replaced by the daemon".to_string()),
+            "{lines:?}"
+        );
+        assert_eq!(t.backups().len(), backups + 1, "backed up first");
+        assert_eq!(*removed.borrow(), [vec!["cron".to_string()]]);
+
+        FAKES.with(|f| {
+            f.borrow_mut().remove_retro = Some(Rc::new(|_| {
+                Err("could not remove the cron timer: synthetic".into())
+            }))
+        });
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1);
+        assert!(
+            lines.contains(
+                &"retro-push timer: could not remove the cron timer: synthetic".to_string()
+            ),
             "{lines:?}"
         );
     }

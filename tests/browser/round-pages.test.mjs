@@ -14,7 +14,7 @@ const documents = {
     "round-1/review-code.md": `VERDICT: CHANGES\n\nThe synthetic round 1 code review.\n\n${FILLER}\n`,
     "round-1/grounding.md": "GROUNDING: UNVERIFIED 2\n\nThe synthetic grounding report.\n",
     "round-2/review-code.md":
-      "VERDICT: PASS\n\nThe synthetic round 2 code review.\n\n![shot](shot.png)\n",
+      "VERDICT: PASS\n\nThe synthetic round 2 code review.\n\n![shot](shot.png)\n\n## Findings\n\nSynthetic finding.\n",
     "decision.md": "APPROVE\n\nThe synthetic decision.\n",
   },
   "141-round-escalate": {
@@ -118,6 +118,24 @@ test(
             ["H2", "1", "Round 1"],
             ["H2", "2", "Round 2"],
           ],
+        );
+        assert.deepEqual(
+          await page.$$eval("#d-doc .round-head", (heads) =>
+            heads.map((h) => {
+              const style = getComputedStyle(h);
+              return [style.fontSize, style.borderTopWidth, style.borderTopStyle];
+            }),
+          ),
+          [
+            ["20px", "0px", "none"],
+            ["20px", "2px", "solid"],
+          ],
+        );
+        assert.deepEqual(
+          await page.$$eval("#d-doc h2:not(.round-head)", (heads) =>
+            heads.map((h) => getComputedStyle(h).fontSize),
+          ),
+          ["17px"],
         );
         const text = await page.$eval("#d-doc", (doc) => doc.textContent);
         assert.ok(
