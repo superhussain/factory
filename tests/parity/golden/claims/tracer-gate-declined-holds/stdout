@@ -1,0 +1,16 @@
+{
+  "id": "001-test",
+  "project": "sample",
+  "stage": "needs-human",
+  "round": 0,
+  "updated": "{now}",
+  "started": "2026-11-01T00:00:00Z",
+  "tracer": {
+    "follow": true,
+    "gather": true,
+    "feature": "factory-1",
+    "scope": "declined"
+  },
+  "note": "gate: spec-approval",
+  "needs": "approve"
+}

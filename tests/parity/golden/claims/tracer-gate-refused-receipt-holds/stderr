@@ -1,0 +1,2 @@
+factory.py: PUT {api}/api/board returned 400: a board write from a device cannot set the note "spec approved in Tracer" on "001-test" without a Tracer-signed scope receipt for FACTORY-1. Nothing was written.
+factory.py: the Worker refused Tracer's receipt (check tracer_receipt_key); 001-test waits at gate: spec-approval instead

@@ -3163,6 +3163,18 @@ Nothing.
     }
 
     #[test]
+    fn gather_without_follow_makes_no_tracer_request() {
+        let (fake, t) = gather_home();
+        let err = board_patch(
+            &fake,
+            &t,
+            json!({"tracer": {"gather": true}, "stage": "idea"}),
+        );
+        assert_eq!(err, "");
+        assert!(fake.requests().is_empty());
+    }
+
+    #[test]
     fn gathering_skips_task_mirror() {
         let (fake, t) = gather_home();
         gather(&fake, &t);
@@ -3907,6 +3919,15 @@ Nothing.
             );
         }
         assert_eq!(writes(&fake), 0);
+        assert!(fake.requests().is_empty());
+    }
+
+    #[test]
+    fn off_board_patch_makes_no_tracer_request() {
+        let (fake, t) = off_home();
+        let patch = json!({"stage": "build", "tracer": {"follow": true}});
+        assert_eq!(board_patch(&fake, &t, patch), "");
+        assert_eq!(fake.job()["tracer"], json!({"follow": true}));
         assert!(fake.requests().is_empty());
     }
 

@@ -1,0 +1,1 @@
+factory.py: tracer must be {"follow": true} or null, optionally with "gather": true; only factory.py sets tracer.feature, tracer.url, tracer.scope, tracer.receipt, tracer.building, tracer.stopped and tracer.tasks

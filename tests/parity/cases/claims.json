@@ -239,6 +239,261 @@
       "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_stacked_patch"
     },
     {
+      "id": "claims/tracer-follow-true",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": true}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/tracer-follow-null-value",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": null}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/tracer-null-drops-the-key",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": null}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"tracer\":{\"follow\":true}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/tracer-refuses-url",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"url\": \"x\"}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/tracer-refuses-feature",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"feature\": \"f\"}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/tracer-refuses-follow-false",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": false}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/tracer-refuses-follow-with-url",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": true, \"url\": \"x\"}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/tracer-refuses-building",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"building\": true}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/tracer-refuses-tasks",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"tasks\": []}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/tracer-refuses-a-string",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": \"yes\"}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/tracer-refuses-a-list",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": []}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/tracer-gather-stored",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": true, \"gather\": true}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
+      "id": "claims/tracer-refuses-gather-false",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"gather\": false}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
+      "id": "claims/tracer-refuses-scope",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"scope\": \"approved\"}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
+      "id": "claims/tracer-refuses-stopped",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"stopped\": true}}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
       "id": "claims/refuses-close",
       "argv": ["--home", "{home}", "board", "{home}", "001-test"],
       "home": "claims",
@@ -1130,6 +1385,80 @@
         "PUT /api/board": [200, ""]
       },
       "exit": 0
+    },
+    {
+      "id": "claims/tracer-gate-refused-receipt-holds",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: tracer-scope\", \"needs\": \"approve\"}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"spec\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"tracer\":{\"scope\":\"approved\",\"feature\":\"factory-1\",\"receipt\":{\"job\":\"001-test\",\"feature\":\"factory-1\",\"ticket\":\"FACTORY-1\",\"approved_at\":\"2026-01-02T00:00:00Z\",\"signature\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==\"}}}]}\n"
+        ],
+        "PUT /api/board": [
+          [
+            400,
+            "a board write from a device cannot set the note \"spec approved in Tracer\" on \"001-test\" without a Tracer-signed scope receipt for FACTORY-1. Nothing was written."
+          ],
+          [200, ""]
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gate_patch_with_refused_receipt_holds"
+    },
+    {
+      "id": "claims/tracer-gate-503-keeps-the-receipt-write",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: tracer-scope\", \"needs\": \"approve\"}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"spec\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"tracer\":{\"scope\":\"approved\",\"feature\":\"factory-1\",\"receipt\":{\"job\":\"001-test\",\"feature\":\"factory-1\",\"ticket\":\"FACTORY-1\",\"approved_at\":\"2026-01-02T00:00:00Z\",\"signature\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==\"}}}]}\n"
+        ],
+        "PUT /api/board": [503, "Storage is busy."]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_transient_failure_keeps_the_receipt_write"
+    },
+    {
+      "id": "claims/tracer-gate-gathering-holds",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: spec-approval\", \"needs\": \"approve\"}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"spec\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"tracer\":{\"follow\":true,\"gather\":true,\"feature\":\"factory-1\",\"scope\":\"gathering\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gate_patch_without_approval_holds"
+    },
+    {
+      "id": "claims/tracer-gate-declined-holds",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: spec-approval\", \"needs\": \"approve\"}",
+      "env": { "FACTORY_SESSION": "sender" },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"spec\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"tracer\":{\"follow\":true,\"gather\":true,\"feature\":\"factory-1\",\"scope\":\"declined\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gate_patch_without_approval_holds"
     },
     {
       "id": "claims/cas-412-retry",
