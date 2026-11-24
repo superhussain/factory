@@ -459,6 +459,118 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A home whose projects/sample.sync.json and one job manifest the walk will read.
+    fn synced_home(name: &str) -> (PathBuf, PathBuf, PathBuf, Value) {
+        let home = temp_dir(name);
+        fs::write(home.join("config.md"), "---\napi_url: https://x\n---\n").unwrap();
+        fs::create_dir(home.join("projects")).unwrap();
+        let project = home.join("projects/sample.sync.json");
+        let state = json!({"version": 1, "etag": "\"base\"", "sha256": "0".repeat(64)});
+        fs::write(&project, state.to_string()).unwrap();
+        fs::create_dir_all(home.join("jobs/sample/001-test")).unwrap();
+        let manifest = home.join("jobs/sample/001-test/.sync.json");
+        fs::write(&manifest, "{}").unwrap();
+        (home, project, manifest, state)
+    }
+
+    #[test]
+    fn validate_home_refuses_bad_sync_state_and_manifests() {
+        let (home, project, manifest, state) = synced_home("home-sync-state");
+        assert!(
+            validate_home(&home, true).is_ok(),
+            "an empty manifest is valid"
+        );
+        let mut weak = state.clone();
+        weak["etag"] = json!("W/\"base\"");
+        let mut boolean = state.clone();
+        boolean["version"] = json!(true);
+        for bad in [json!({}), boolean, weak] {
+            fs::write(&project, bad.to_string()).unwrap();
+            assert_eq!(
+                validate_home(&home, true).unwrap_err().stderr,
+                "factory.py: Invalid local metadata: projects/sample.sync.json.\n",
+                "{bad}"
+            );
+        }
+        fs::write(&project, state.to_string()).unwrap();
+        let zeros = "0".repeat(64);
+        for bad in [
+            json!([]),
+            json!({"../escape.md": {"etag": "x", "sha256": zeros}}),
+            json!({"build.md": {"etag": "", "sha256": zeros}}),
+            json!({"build.md": {"etag": "x", "sha256": "A".repeat(64)}}),
+        ] {
+            fs::write(&manifest, bad.to_string()).unwrap();
+            assert_eq!(
+                validate_home(&home, true).unwrap_err().stderr,
+                "factory.py: Invalid local metadata: jobs/sample/001-test/.sync.json.\n",
+                "{bad}"
+            );
+        }
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_home_refuses_unreadable_metadata_and_unlistable_folders() {
+        use std::os::unix::fs::PermissionsExt;
+        let (home, _, _, _) = synced_home("home-unreadable");
+        let chmod = |path: &Path, mode| fs::set_permissions(path, fs::Permissions::from_mode(mode));
+        let config = home.join("config.md");
+        let jobs = home.join("jobs");
+        chmod(&config, 0).unwrap();
+        chmod(&jobs, 0).unwrap();
+        let root = fs::read(&config).is_ok();
+        let got = (!root).then(|| {
+            let config_error = validate_home(&home, true).unwrap_err();
+            chmod(&config, 0o644).unwrap();
+            let jobs_error = validate_home(&home, true).unwrap_err();
+            (config_error.stderr, jobs_error.stderr, jobs_error.code)
+        });
+        chmod(&config, 0o644).unwrap();
+        chmod(&jobs, 0o755).unwrap();
+        fs::remove_dir_all(home).unwrap();
+        if let Some((config_error, jobs_error, code)) = got {
+            assert_eq!(
+                config_error,
+                "factory.py: Invalid local metadata: config.md.\n"
+            );
+            assert_eq!(jobs_error, "factory.py: Invalid local metadata: jobs.\n");
+            assert_eq!(code, 2);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_pointer_is_invalid() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("home-unreadable-pointer");
+        let home = dir.join("home");
+        fs::create_dir(&home).unwrap();
+        fs::write(home.join("config.md"), "---\napi_url: https://x\n---\n").unwrap();
+        let pointer = dir.join("factory-location.json");
+        fs::write(
+            &pointer,
+            format!("{{\"version\": 1, \"home\": \"{}\"}}\n", home.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&pointer, fs::Permissions::from_mode(0)).unwrap();
+        let root = fs::read(&pointer).is_ok();
+        let got = (!root).then(|| resolve_home(None, Some(dir.as_os_str()), None).unwrap_err());
+        fs::set_permissions(&pointer, fs::Permissions::from_mode(0o600)).unwrap();
+        if let Some(e) = got {
+            assert_eq!(e.code, 2);
+            assert_eq!(
+                e.stderr,
+                format!(
+                    "factory.py: Invalid location pointer: {}.\n",
+                    pointer.display()
+                )
+            );
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn holder_checks_minutes() {
         let dir = temp_dir("home-holder");

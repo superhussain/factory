@@ -586,6 +586,11 @@ fn init_in(home: PathBuf, call: &Call) -> Res<()> {
     register_project(&home, repo_path)
 }
 
+/// A test pauses adopters of this pointer just before they publish, so two can race.
+#[cfg(test)]
+static PUBLISH_BARRIER: std::sync::Mutex<Option<(PathBuf, std::sync::Arc<std::sync::Barrier>)>> =
+    std::sync::Mutex::new(None);
+
 /// Point the location file at an existing, valid home. A second run with the same home changes nothing.
 fn adopt_home(existing: &Path, pointer: &Path) -> Res<()> {
     if !existing.is_absolute() {
@@ -653,6 +658,13 @@ fn adopt_home(existing: &Path, pointer: &Path) -> Res<()> {
         .write_all(text.as_bytes())
         .and_then(|()| file.sync_all());
     drop(file);
+    #[cfg(test)]
+    {
+        let barrier = PUBLISH_BARRIER.lock().unwrap().clone();
+        if let Some((_, barrier)) = barrier.filter(|(path, _)| path == pointer) {
+            barrier.wait();
+        }
+    }
     if published.is_ok() {
         published = fs::hard_link(&temporary, pointer);
     }
@@ -2006,6 +2018,152 @@ mod tests {
                 pointer.display()
             )
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// An adoptable home folder holding a minimal config.md.
+    #[cfg(unix)]
+    fn adoptable(dir: &Path, name: &str) -> PathBuf {
+        let home = dir.join(name);
+        fs::create_dir(&home).unwrap();
+        fs::write(
+            home.join("config.md"),
+            "---\napi_url:\nunknown: retained\n---\nBody\n",
+        )
+        .unwrap();
+        home
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn adopt_home_refuses_a_different_initialized_default() {
+        let dir = temp_dir("setup-adopt-default");
+        let home = adoptable(&dir, "home");
+        let pointer = dir.join("config/factory-location.json");
+        adopt_home(&home, &pointer).unwrap();
+        let before = fs::read(&pointer).unwrap();
+        let default = dir.join("config/factory");
+        fs::create_dir(&default).unwrap();
+        fs::write(default.join("config.md"), "malformed but initialized").unwrap();
+        let e = adopt_home(&home, &pointer).unwrap_err();
+        assert_eq!(e.code, 2);
+        assert_eq!(
+            e.stderr,
+            format!(
+                "factory.py: {}: a different initialized factory home exists\n",
+                default.display()
+            )
+        );
+        assert_eq!(fs::read(&pointer).unwrap(), before);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn adopt_home_trusts_a_default_that_aliases_the_home() {
+        let dir = temp_dir("setup-adopt-alias");
+        let home = adoptable(&dir, "home");
+        let pointer = dir.join("config/factory-location.json");
+        adopt_home(&home, &pointer).unwrap();
+        std::os::unix::fs::symlink(&home, dir.join("config/factory")).unwrap();
+        adopt_home(&home, &pointer).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn adopt_home_leaves_dirty_metadata_untouched() {
+        let dir = temp_dir("setup-adopt-dirty");
+        let home = adoptable(&dir, "home");
+        fs::write(
+            home.join("paths.md"),
+            format!("---\nsample: {}\n---\n", dir.join("not-present").display()),
+        )
+        .unwrap();
+        let projects = home.join("projects");
+        fs::create_dir(&projects).unwrap();
+        fs::write(
+            projects.join("sample.md"),
+            "---\npath: legacy\nunknown: retained\n---\nDirty",
+        )
+        .unwrap();
+        fs::write(projects.join("sample.md.remote"), "remote").unwrap();
+        let state = json!({"version": 1, "etag": "\"base\"", "sha256": "0".repeat(64)});
+        fs::write(projects.join("sample.sync.json"), state.to_string()).unwrap();
+        let job = home.join("jobs/sample/001-test");
+        fs::create_dir_all(&job).unwrap();
+        fs::write(job.join(".sync.json"), "{}").unwrap();
+        fs::write(job.join("build.md.remote"), "other device").unwrap();
+        let tree = |root: &Path| {
+            let mut found = Vec::new();
+            let mut stack = vec![root.to_path_buf()];
+            while let Some(dir) = stack.pop() {
+                for entry in fs::read_dir(&dir).unwrap() {
+                    let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else {
+                        found.push((path.clone(), fs::read(&path).unwrap()));
+                    }
+                }
+            }
+            found.sort();
+            found
+        };
+        let before = tree(&home);
+        adopt_home(&home, &dir.join("config/factory-location.json")).unwrap();
+        assert_eq!(tree(&home), before);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn adopt_home_cleans_up_a_failed_publication() {
+        let dir = temp_dir("setup-adopt-interrupted");
+        let home = adoptable(&dir, "home");
+        // A name past NAME_MAX lets the temporary file open and fails the link.
+        let pointer = dir.join("config").join("p".repeat(300));
+        let e = adopt_home(&home, &pointer).unwrap_err();
+        assert_eq!(e.code, 2);
+        assert_eq!(
+            e.stderr,
+            format!(
+                "factory.py: {}: cannot publish factory location atomically\n",
+                pointer.display()
+            )
+        );
+        assert!(!pointer.exists());
+        assert_eq!(fs::read_dir(dir.join("config")).unwrap().count(), 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn simultaneous_adopters_publish_one_pointer() {
+        use std::sync::{Arc, Barrier};
+        let dir = temp_dir("setup-adopt-race");
+        let (a, b) = (adoptable(&dir, "a"), adoptable(&dir, "b"));
+        let pointer = dir.join("config/factory-location.json");
+        for (first, second) in [(&a, &b), (&a, &a)] {
+            *PUBLISH_BARRIER.lock().unwrap() = Some((pointer.clone(), Arc::new(Barrier::new(2))));
+            let results: Vec<_> = std::thread::scope(|scope| {
+                let jobs = [first, second]
+                    .map(|home| scope.spawn(|| adopt_home(home, &pointer).map_err(|e| e.code)));
+                jobs.map(|job| job.join().unwrap()).into()
+            });
+            *PUBLISH_BARRIER.lock().unwrap() = None;
+            let mut codes: Vec<_> = results.iter().map(|r| r.clone().err()).collect();
+            codes.sort();
+            if first == second {
+                assert_eq!(codes, [None, None]);
+            } else {
+                assert_eq!(codes, [None, Some(2)]);
+            }
+            let chosen = read_location(&pointer).unwrap();
+            assert!(chosen == *first || chosen == *second);
+            assert_eq!(fs::read_dir(dir.join("config")).unwrap().count(), 1);
+            fs::remove_file(&pointer).unwrap();
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 
