@@ -88,10 +88,7 @@ exit 1 means it is older.
 
 It fetches the checkout's origin and backs up. Then it builds origin's binary
 through the build cache, installs the skill and fixes the pickup timer. It ends with
-`catch-up: done`. If the old install had no Rust entry, it also prints
-`skill: the old install had no Rust entry; finish the move with <checkout>/docs/migrating-to-rust.md`.
-If you arrived from that line, continue at [Check the host](#check-the-host), then
-[Set up automations](#set-up-automations).
+`catch-up: done`.
 
 **A Mac on a build older than `e137ba69`.** The old binary builds under the
 default `TMPDIR`, which sits below `/var`, a symlink. The installer refuses that
@@ -222,13 +219,15 @@ Point it at the binary as the next section shows.
 
 ## Update old automations
 
-On macOS and Linux, anything that still calls
-`python3 <installed-skill>/runtime/factory.py` keeps working for one release. The
-installed `factory.py` is now a small stub. It runs `runtime/factory` beside it
-with the same arguments and prints a deprecation line on stderr. Move every caller
-to the binary before the stub goes.
+Anything that still calls `python3 <installed-skill>/runtime/factory.py`, or
+`py -3 <installed-skill>\runtime\factory.py` on Windows, keeps working for one
+release. The installed `factory.py` is now a small stub. It prints one
+deprecation line on stderr, then runs `runtime/factory` (`runtime\factory.exe`
+on Windows) with the same arguments. The binary's exit code passes through. Move
+every caller to the binary before the stub goes.
 
-On Windows, move `py -3` callers to `factory.exe` now.
+If the stub finds no binary beside it, it prints one line that names
+`sh tools/install.sh <skills folder>` (`tools\install.ps1` on Windows) and exits 127. Take the [Fresh install](#fresh-install-or-a-python-only-bundle) path.
 
 Find them:
 
