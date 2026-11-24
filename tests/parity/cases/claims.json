@@ -3983,6 +3983,988 @@
       "exit": 0
     },
     {
+      "id": "claims/board-tracer-bad-url",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"url\": \"x\"}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-feature",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"feature\": \"f\"}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-false",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": false}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-follow-url",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": true, \"url\": \"x\"}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-string",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": \"yes\"}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-list",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": []}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-follow-null",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": null}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z",
+                "tracer": {
+                  "follow": true
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-null",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": null}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z",
+                "tracer": {
+                  "follow": true
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-building",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"building\": true}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-tasks",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"tasks\": []}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-gather-false",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"gather\": false}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-scope",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"scope\": \"approved\"}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-stopped",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"stopped\": true}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-gather-follow",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": true, \"gather\": true}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "idea",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": false
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-gate-gathering",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: spec-approval\", \"needs\": \"approve\"}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z",
+                "tracer": {
+                  "follow": true,
+                  "gather": true,
+                  "feature": "factory-1",
+                  "url": "{api}/#/f/factory-1",
+                  "scope": "gathering"
+                },
+                "idea": "Export samples as CSV\nWith a header row."
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ],
+        "GET /api/features/factory-1": [
+          200,
+          {
+            "id": "factory-1",
+            "ticket": "FACTORY-1",
+            "tasks": [],
+            "agents": []
+          }
+        ],
+        "POST /api/features": [
+          201,
+          {
+            "id": "factory-1",
+            "ticket": "FACTORY-1",
+            "tasks": [],
+            "agents": []
+          }
+        ],
+        "PUT /api/features/factory-1/agents/factory-builder": [
+          200,
+          {}
+        ],
+        "PUT /api/features/factory-1/tasks/t1": [
+          200,
+          {
+            "id": "t1"
+          }
+        ],
+        "PUT /api/features/factory-1/tasks/t2": [
+          200,
+          {
+            "id": "t2"
+          }
+        ],
+        "PUT /api/features/factory-1/tasks/t3": [
+          200,
+          {
+            "id": "t3"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t1": [
+          200,
+          {
+            "id": "t1"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t2": [
+          200,
+          {
+            "id": "t2"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t3": [
+          200,
+          {
+            "id": "t3"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gate_patch_without_approval_holds"
+    },
+    {
+      "id": "claims/board-tracer-gate-declined",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: spec-approval\", \"needs\": \"approve\"}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z",
+                "tracer": {
+                  "follow": true,
+                  "gather": true,
+                  "feature": "factory-1",
+                  "url": "{api}/#/f/factory-1",
+                  "scope": "declined"
+                },
+                "idea": "Export samples as CSV\nWith a header row."
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ],
+        "GET /api/features/factory-1": [
+          200,
+          {
+            "id": "factory-1",
+            "ticket": "FACTORY-1",
+            "tasks": [],
+            "agents": [],
+            "closed": true
+          }
+        ],
+        "POST /api/features": [
+          201,
+          {
+            "id": "factory-1",
+            "ticket": "FACTORY-1",
+            "tasks": [],
+            "agents": [],
+            "closed": true
+          }
+        ],
+        "PUT /api/features/factory-1/agents/factory-builder": [
+          200,
+          {}
+        ],
+        "PUT /api/features/factory-1/tasks/t1": [
+          200,
+          {
+            "id": "t1"
+          }
+        ],
+        "PUT /api/features/factory-1/tasks/t2": [
+          200,
+          {
+            "id": "t2"
+          }
+        ],
+        "PUT /api/features/factory-1/tasks/t3": [
+          200,
+          {
+            "id": "t3"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t1": [
+          200,
+          {
+            "id": "t1"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t2": [
+          200,
+          {
+            "id": "t2"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t3": [
+          200,
+          {
+            "id": "t3"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gate_patch_without_approval_holds"
+    },
+    {
+      "id": "claims/board-tracer-gather-needs-follow",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"gather\": true}, \"stage\": \"idea\"}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "idea",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_needs_follow"
+    },
+    {
+      "id": "claims/board-tracer-off-patch",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-sample"
+      ],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"stage\": \"build\", \"tracer\": {\"follow\": true}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": false
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::OffTest.test_off_board_patch_makes_no_tracer_call"
+    },
+    {
       "id": "claims/board-tracer-failure-warns",
       "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
       "home": "tracer-mirror",
