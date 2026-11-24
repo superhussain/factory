@@ -4,11 +4,13 @@
 // SQL row per page. The Workers Free plan caps SQLite at 5M rows read and 100k rows written a
 // day, so every operation's row count is budgeted in build.md and pinned in a test.
 //
-// GET /board.json is built from the pages and cached per version. R2's board.json is a copy the
-// room writes: before a full write answers, and within FLUSH_MS of a row commit. Each copy is
-// tagged with the room's sequence number, so the room knows its own copy after a restart. The
-// room adopts a board.json that something else wrote to R2, such as a Worker version from
-// before this store or an operator's restore, and merges its own unflushed rows over it.
+// GET /board.json streams R2's bytes while R2's copy is the current version, and otherwise is
+// built from the pages and cached per version in memory, which an eviction loses. R2's
+// board.json is a copy the room writes: before a full write answers, and within FLUSH_MS of a
+// row commit. Each copy is tagged with the room's sequence number, so the room knows its own
+// copy after a restart. The room adopts a board.json that something else wrote to R2, such as a
+// Worker version from before this store or an operator's restore, and merges its own unflushed
+// rows over it.
 //
 // boardStore(env) is the Worker's handle. Without a room binding (unit tests that give the Worker
 // a memory bucket alone, or a room stub with fetch alone) it reads and writes R2's board.json
@@ -126,9 +128,6 @@ function boardText(pairs, rows) {
   return "{" + parts.join(",") + "}";
 }
 
-// The comma-joined row JSON inside one page's JSON array text.
-const pageBody = (json) => json.slice(1, -1);
-
 const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS board_pages (page INTEGER PRIMARY KEY, json TEXT NOT NULL)",
   // One row per board row: its page and the columns a PATCH looks up. Rows sit in page order,
@@ -144,10 +143,14 @@ const SCHEMA = [
   "CREATE TABLE IF NOT EXISTS board_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)",
 ];
 
-/** The room's side of the store. storage is the Durable Object's ctx.storage. */
+/**
+ * The room's side of the store. storage is the Durable Object's ctx.storage; waitUntil keeps a
+ * read's R2 copy running after the read answers.
+ */
 export class BoardRows {
-  constructor(storage, env) {
+  constructor(storage, env, waitUntil = (promise) => promise.catch(() => {})) {
     this.storage = storage;
+    this.waitUntil = waitUntil;
     // SQLite rows read and written, summed from each cursor, which the Free plan caps per day.
     this.work = { rowsRead: 0, rowsWritten: 0 };
     this.sql = {
@@ -160,7 +163,8 @@ export class BoardRows {
       },
     };
     this.env = env;
-    this.memo = { etag: null, text: "" };
+    this.memo = { etag: null, blob: null };
+    this.decoded = { etag: null, text: "" };
     // While an R2 copy is under way, its promise; while a full write is, its promise.
     this.inflight = undefined;
     this.replacing = undefined;
@@ -315,7 +319,7 @@ export class BoardRows {
       state.lastPage = page;
     }
     this.save(state);
-    this.memo = { etag: null, text: "" };
+    this.memo = { etag: null, blob: null };
     return state;
   }
 
@@ -437,7 +441,7 @@ export class BoardRows {
     if (recount)
       maxNum = this.sql.exec("SELECT MAX(num) AS m FROM board_index").toArray()[0].m ?? null;
     Object.assign(state, { bytes, count, maxNum });
-    this.memo = { etag: null, text: "" };
+    this.memo = { etag: null, blob: null };
     return true;
   }
 
@@ -558,11 +562,13 @@ export class BoardRows {
   }
 
   // Records that R2 holds the room's copy at seq as r2etag. flushed maps each id changed after
-  // seq to its JSON in that copy; headAt is the copy's headKey.
-  recordCopy(r2etag, seq, flushed, headAt) {
+  // seq to its JSON in that copy; headAt is the copy's headKey. A copy of version etag, when no
+  // commit has moved the board since, is the board byte for byte, so reads serve R2's bytes.
+  recordCopy(r2etag, seq, flushed, headAt, etag) {
     const now = this.state();
     if (now.seq < seq) return;
     now.r2etag = r2etag;
+    if (etag !== undefined && now.etag === etag) now.verbatim = true;
     for (const [id, [before, s]] of Object.entries(now.dirty))
       if (s <= seq) delete now.dirty[id];
       else if (flushed.has(id)) now.dirty[id] = [rowHash(flushed.get(id)), s];
@@ -576,16 +582,34 @@ export class BoardRows {
       await this.storage.setAlarm(Date.now() + FLUSH_MS);
   }
 
-  text(state) {
-    if (this.memo.etag !== state.etag) {
-      const pages = this.sql.exec("SELECT json FROM board_pages ORDER BY page").toArray();
-      const rows = pages
-        .map((p) => pageBody(p.json))
-        .filter(Boolean)
-        .join(",");
-      this.memo = { etag: state.etag, text: boardText(state.head, rows) };
+  // The board's bytes at state built from the pages, kept per version in memory, which
+  // production loses whenever the hibernating room is evicted, about a minute after its last
+  // request.
+  blob(state) {
+    if (this.memo.etag !== state.etag) this.memo = { etag: state.etag, blob: this.build(state) };
+    return this.memo.blob;
+  }
+
+  // The board document's bytes from the pages. Each page comes out of SQLite as a blob and goes
+  // in as it is, so no row is decoded to a string, joined, and encoded again, about 40% of the
+  // build's CPU under workerd.
+  build(state) {
+    // A raw NUL never appears in JSON text, so it marks where the rows go.
+    const [open, close] = boardText(state.head, "\0").split("\0");
+    const parts = [open];
+    if (close !== undefined) {
+      for (const { json } of this.sql
+        .exec("SELECT CAST(json AS BLOB) AS json FROM board_pages ORDER BY page")
+        .toArray()) {
+        // workerd gives an ArrayBuffer, which this views; Node's SQLite a Uint8Array.
+        const rows = new Uint8Array(json).subarray(1, -1);
+        if (!rows.length) continue;
+        if (parts.length > 1) parts.push(",");
+        parts.push(rows);
+      }
+      parts.push(close);
     }
-    return this.memo.text;
+    return new Blob(parts);
   }
 
   async head() {
@@ -594,19 +618,51 @@ export class BoardRows {
     return state ? { etag: state.etag } : null;
   }
 
+  // The board as { etag, body }, its bytes undecoded, or null when there is none. While R2's
+  // copy is the board, its body streams through, which costs the room almost no CPU however it
+  // was evicted; otherwise the bytes come from the memo or the pages. A BOARD_DEBUG var logs
+  // which one each read took.
+  async body() {
+    await this.sync();
+    return this.bodyOf(this.state());
+  }
+
+  async bodyOf(state) {
+    if (!state) return null;
+    const debug = (how) =>
+      this.env.BOARD_DEBUG && console.log(`board store: read ${how} for ${state.etag}`);
+    if (!state.readable || (state.verbatim && this.memo.etag !== state.etag)) {
+      const object = await this.env.BUCKET.get(BOARD_KEY);
+      if (!state.readable) return object && { etag: state.etag, body: object.body };
+      if (object?.httpEtag === state.r2etag) {
+        debug("R2's bytes");
+        return { etag: state.etag, body: object.body };
+      }
+      // R2 moved during the get, so the board may have too: build from the state as it is now,
+      // never an old head over the current pages.
+      state = this.state();
+    }
+    const built = this.memo.etag !== state.etag;
+    debug(built ? "the pages" : "the memo");
+    const body = this.blob(state);
+    // The first read that builds a version copies those bytes to R2 at once, the alarm's copy
+    // early, so later reads stream R2's and the alarm finds nothing to do. The read does not
+    // wait on the put; a put that fails or loses its condition leaves the alarm to retry.
+    if (built && this.hasDirty(state)) this.waitUntil(this.flush());
+    return { etag: state.etag, body };
+  }
+
+  // The board as { etag, text }. The text is kept per version, so the boardRead RPC behind
+  // readSlim and readBoardJson decodes each version once while the room stays in memory.
   async read() {
     await this.sync();
     const state = this.state();
-    if (!state) return null;
-    // An unchanged board answers with R2's own bytes, such as a PUT body's trailing newline.
-    if (state.readable && state.verbatim && this.memo.etag !== state.etag) {
-      const object = await this.env.BUCKET.get(BOARD_KEY);
-      if (object?.httpEtag === state.r2etag)
-        this.memo = { etag: state.etag, text: await object.text() };
+    if (!state || state.etag !== this.decoded.etag) {
+      const board = await this.bodyOf(state);
+      if (!board) return null;
+      this.decoded = { etag: board.etag, text: await new Response(board.body).text() };
     }
-    if (state.readable) return { etag: state.etag, text: this.text(state) };
-    const object = await this.env.BUCKET.get(BOARD_KEY);
-    return object ? { etag: state.etag, text: await object.text() } : null;
+    return { ...this.decoded };
   }
 
   // What a row PATCH decides from, at the current version, or null when at names another.
@@ -844,14 +900,14 @@ export class BoardRows {
     const flushed = new Map(
       ids.map((id) => [id, rows.has(id) ? JSON.stringify(rows.get(id).row) : null]),
     );
-    const put = await this.env.BUCKET.put(BOARD_KEY, this.text(state), {
+    const put = await this.env.BUCKET.put(BOARD_KEY, await this.blob(state).arrayBuffer(), {
       onlyIf: new Headers(state.r2etag ? { "If-Match": state.r2etag } : { "If-None-Match": "*" }),
       httpMetadata: { contentType: "application/json" },
       customMetadata: { store: ROOM_COPY, seq: String(state.seq) },
     });
     if (put)
       this.storage.transactionSync(() =>
-        this.recordCopy(put.httpEtag, state.seq, flushed, headKey(state.head)),
+        this.recordCopy(put.httpEtag, state.seq, flushed, headKey(state.head), state.etag),
       );
     else await this.sync(true);
     if (this.hasDirty()) await this.schedule();

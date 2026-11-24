@@ -1,0 +1,20 @@
+wrote {home}/retro/card-daily-cap/findings.md
+added sample-tools: Day 0 with context
+link: {api}/#/backlog/ef8d5e439603
+held sample-tools: Day 0 for review: retro items always wait for a person
+added sample-tools: Day 1 with context
+link: {api}/#/backlog/44e335944b99
+held sample-tools: Day 1 for review: retro items always wait for a person
+{
+  "admitted": [
+    "sample-tools: Day 0",
+    "sample-tools: Day 1"
+  ],
+  "skipped": [
+    {
+      "title": "Day 2",
+      "reason": "daily cap"
+    }
+  ]
+}
+uploaded retro run card-daily-cap

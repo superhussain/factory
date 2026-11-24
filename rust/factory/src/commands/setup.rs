@@ -1510,6 +1510,26 @@ mod tests {
     use super::*;
     use crate::shared::fs::temp_dir;
 
+    /// Parity writes the host-status "os" field as {os}, so only this test catches a wrong label.
+    #[test]
+    fn host_os_labels_each_platform() {
+        let os = host_os();
+        #[cfg(target_os = "macos")]
+        assert_eq!(os, "macOS");
+        #[cfg(windows)]
+        assert_eq!(os, "Windows");
+        #[cfg(target_os = "linux")]
+        {
+            let wsl = fs::read_to_string("/proc/sys/kernel/osrelease")
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("microsoft");
+            assert_eq!(os, if wsl { "Linux (WSL)" } else { "Linux" });
+        }
+        #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+        assert_eq!(os, "Other");
+    }
+
     /// The daemon line goes only to a terminal, so piped doctor output stays factory.py's.
     #[test]
     fn doctor_daemon_line_only_on_a_terminal() {
@@ -1520,6 +1540,95 @@ mod tests {
         assert!(err.is_empty());
         daemon_line(&mut err, true, || "running".into());
         assert_eq!(String::from_utf8(err).unwrap(), "daemon: running\n");
+    }
+
+    #[cfg(unix)]
+    fn names(dir: &Path) -> Vec<String> {
+        let mut found: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_explore_snapshot() {
+        let root = temp_dir("setup-explore-snapshot");
+        let repo = root.join("repo");
+        fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        git(&["init", "-q"]);
+        fs::write(repo.join("a.txt"), "a\n").unwrap();
+        fs::write(repo.join(".env.example"), "KEY=\n").unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", repo.join("link")).unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "one"]);
+        fs::write(repo.join("b.txt"), "b\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "two"]);
+        let head = git(&["rev-parse", "HEAD"]);
+        let dest = root.join("explore/sample/run-1");
+        snapshot(&repo, &head, &dest).unwrap();
+        assert_eq!(names(&dest), [".env.example", "a.txt", "b.txt"]);
+        assert_eq!(fs::read_to_string(dest.join("a.txt")).unwrap(), "a\n");
+        assert!(!dest.join("link").exists() && fs::symlink_metadata(dest.join("link")).is_err());
+        assert!(!dest.join(".git").exists());
+        assert!(!root.join("explore/sample/run-1.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_explore_done_refuses_linked_parents() {
+        let _lock = crate::shared::test_env_lock();
+        let root = temp_dir("setup-explore-linked");
+        let home = root.join("home");
+        let elsewhere = root.join("elsewhere");
+        fs::create_dir_all(elsewhere.join("sample/run-1")).unwrap();
+        fs::create_dir(&home).unwrap();
+        let saved = std::env::var_os("FACTORY_HOME");
+        std::env::set_var("FACTORY_HOME", &home);
+        let call = Call {
+            args: ["sample", "done", "run-1"].map(String::from).to_vec(),
+            agents: None,
+            connection: None,
+        };
+        let mut results = Vec::new();
+        for link in ["explore", "sample"] {
+            let (at, target) = if link == "explore" {
+                (home.join("explore"), elsewhere.clone())
+            } else {
+                fs::create_dir(home.join("explore")).unwrap();
+                (home.join("explore/sample"), elsewhere.join("sample"))
+            };
+            std::os::unix::fs::symlink(target, &at).unwrap();
+            results.push(explore(&call).unwrap_err());
+            fs::remove_file(&at).unwrap();
+        }
+        match saved {
+            Some(v) => std::env::set_var("FACTORY_HOME", v),
+            None => std::env::remove_var("FACTORY_HOME"),
+        }
+        for e in results {
+            assert_eq!(
+                (e.code, e.stderr.as_str()),
+                (4, "factory.py: no explorer checkout sample/run-1\n")
+            );
+        }
+        assert!(elsewhere.join("sample/run-1").is_dir());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1647,6 +1756,78 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    fn tree_bytes(dir: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut rows: Vec<(String, Vec<u8>)> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| {
+                let path = e.unwrap().path();
+                (
+                    path.file_name().unwrap().to_string_lossy().into_owned(),
+                    fs::read(&path).unwrap(),
+                )
+            })
+            .collect();
+        rows.sort();
+        rows
+    }
+
+    #[test]
+    fn malformed_last_role_prevents_all_writes_for_either_runtime() {
+        let dir = temp_dir("setup-roles-malformed");
+        let dirs = vec![
+            ("claude".to_string(), dir.join("claude")),
+            ("opencode".to_string(), dir.join("opencode")),
+        ];
+        assert_eq!(install_roles(&dirs).unwrap(), 18);
+        for (_, directory) in &dirs {
+            let last = directory.join(ROLE_NAMES[ROLE_NAMES.len() - 1]);
+            let saved = fs::read(&last).unwrap();
+            for invalid in [
+                &b"plain"[..],
+                b"---\nmissing close",
+                b"---\n...\n---\n",
+                b" ---\n---\n",
+            ] {
+                fs::write(&last, invalid).unwrap();
+                let before: Vec<_> = dirs.iter().map(|(_, d)| tree_bytes(d)).collect();
+                // Every role is stale-able, so a partial write would change another file.
+                let first = directory.join(ROLE_NAMES[0]);
+                fs::write(&first, "---\n---\nstale body\n").unwrap();
+                let before_first = fs::read(&first).unwrap();
+                assert_eq!(install_roles(&dirs).unwrap_err().code, 2);
+                assert_eq!(fs::read(&first).unwrap(), before_first);
+                assert_eq!(fs::read(&last).unwrap(), invalid);
+                for ((_, d), rows) in dirs.iter().zip(&before) {
+                    let mut now = tree_bytes(d);
+                    let mut was = rows.clone();
+                    now.retain(|(n, _)| n != ROLE_NAMES[0]);
+                    was.retain(|(n, _)| n != ROLE_NAMES[0]);
+                    assert_eq!(now, was);
+                }
+            }
+            fs::write(&last, saved).unwrap();
+            fs::write(directory.join(ROLE_NAMES[0]), "---\n---\n").unwrap();
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_and_destination_links_refused() {
+        let dir = temp_dir("setup-roles-link");
+        let agents = dir.join("agents");
+        let dirs = vec![("claude".to_string(), agents.clone())];
+        assert_eq!(install_roles(&dirs).unwrap(), 9);
+        let victim = agents.join(ROLE_NAMES[ROLE_NAMES.len() - 1]);
+        let target = dir.join("elsewhere.md");
+        fs::rename(&victim, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &victim).unwrap();
+        let before = tree_bytes(&agents);
+        assert_eq!(install_roles(&dirs).unwrap_err().code, 2);
+        assert_eq!(tree_bytes(&agents), before);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn adopt_home_once() {
@@ -1687,6 +1868,252 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A home with the config.md the Python LocationTest.state helper wrote.
+    #[cfg(unix)]
+    fn location_home(dir: &Path, name: &str) -> PathBuf {
+        let home = dir.join(name);
+        fs::create_dir(&home).unwrap();
+        fs::write(
+            home.join("config.md"),
+            b"---\napi_url:\nunknown: retained\n---\nBody\n",
+        )
+        .unwrap();
+        resolve(&home).unwrap()
+    }
+
+    /// Every path under `root` with its bytes and mode, to compare a tree before and after.
+    #[cfg(unix)]
+    fn tree_snapshot(root: &Path) -> Vec<(String, Vec<u8>, u32)> {
+        use std::os::unix::fs::PermissionsExt;
+        fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>, u32)>) {
+            let mut names: Vec<_> = fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect();
+            names.sort();
+            for path in names {
+                let meta = fs::symlink_metadata(&path).unwrap();
+                let rel = path.strip_prefix(root).unwrap().display().to_string();
+                let bytes = if meta.is_file() {
+                    fs::read(&path).unwrap()
+                } else {
+                    Vec::new()
+                };
+                out.push((rel, bytes, meta.permissions().mode()));
+                if meta.is_dir() {
+                    walk(root, &path, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(root, root, &mut out);
+        out
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_pointer_and_trusted_default_alias() {
+        use crate::shared::home::resolve_home;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("setup-alias");
+        let home = location_home(&dir, "existing");
+        let pointer = dir.join("config/factory-location.json");
+        adopt_home(&home, &pointer).unwrap();
+        std::os::unix::fs::symlink(&home, dir.join("config/factory")).unwrap();
+        adopt_home(&home, &pointer).unwrap();
+        fs::set_permissions(&pointer, fs::Permissions::from_mode(0)).unwrap();
+        let e = resolve_home(None, Some(dir.join("config").as_os_str()), None).unwrap_err();
+        fs::set_permissions(&pointer, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(e.code, 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn metadata_validation_keeps_dirty_remote_and_empty_manifests() {
+        let dir = temp_dir("setup-metadata");
+        let home = location_home(&dir, "existing");
+        let pointer = dir.join("config/factory-location.json");
+        fs::write(
+            home.join("paths.md"),
+            format!("---\nsample: {}\n---\n", dir.join("not-present").display()),
+        )
+        .unwrap();
+        fs::create_dir(home.join("projects")).unwrap();
+        let projects = home.join("projects");
+        fs::write(
+            projects.join("sample.md"),
+            "---\npath: legacy\nunknown: retained\n---\nDirty",
+        )
+        .unwrap();
+        fs::write(projects.join("sample.md.remote"), "remote").unwrap();
+        let state = |version: &str, etag: &str| {
+            format!(
+                "{{\"version\": {version}, \"etag\": {etag}, \"sha256\": \"{}\"}}",
+                "0".repeat(64)
+            )
+        };
+        let metadata = projects.join("sample.sync.json");
+        fs::write(&metadata, state("1", "\"\\\"base\\\"\"")).unwrap();
+        let job = home.join("jobs/sample/001-test");
+        fs::create_dir_all(&job).unwrap();
+        fs::write(job.join(".sync.json"), "{}").unwrap();
+        fs::write(job.join("build.md.remote"), "other device").unwrap();
+        let before = tree_snapshot(&home);
+        adopt_home(&home, &pointer).unwrap();
+        assert_eq!(tree_snapshot(&home), before);
+        for bad in [
+            "{}".to_string(),
+            state("true", "\"\\\"base\\\"\""),
+            state("1", "\"W/\\\"base\\\"\""),
+        ] {
+            fs::write(&metadata, bad).unwrap();
+            assert_eq!(validate_home(&home, true).unwrap_err().code, 2);
+        }
+        fs::write(&metadata, state("1", "\"\\\"base\\\"\"")).unwrap();
+        let sha = "0".repeat(64);
+        let upper = "A".repeat(64);
+        for bad in [
+            "[]".to_string(),
+            format!("{{\"../escape.md\": {{\"etag\": \"x\", \"sha256\": \"{sha}\"}}}}"),
+            format!("{{\"build.md\": {{\"etag\": \"\", \"sha256\": \"{sha}\"}}}}"),
+            format!("{{\"build.md\": {{\"etag\": \"x\", \"sha256\": \"{upper}\"}}}}"),
+        ] {
+            fs::write(job.join(".sync.json"), bad).unwrap();
+            assert_eq!(validate_home(&home, true).unwrap_err().code, 2);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_metadata_and_unlistable_tree() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("setup-unreadable");
+        let home = location_home(&dir, "existing");
+        let pointer = dir.join("config/factory-location.json");
+        let config = home.join("config.md");
+        fs::set_permissions(&config, fs::Permissions::from_mode(0)).unwrap();
+        let first = adopt_home(&home, &pointer);
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(first.unwrap_err().code, 2);
+        let folder = home.join("jobs");
+        fs::create_dir(&folder).unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0)).unwrap();
+        let second = adopt_home(&home, &pointer);
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(second.unwrap_err().code, 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Python forced fsync, link and write failures; the Rust code has no hook for those, so a
+    /// pointer name past the filename limit makes the final hard link fail after the temporary exists.
+    #[cfg(unix)]
+    #[test]
+    fn interrupted_publication_cleans_only_own_temporary() {
+        let dir = temp_dir("setup-interrupted");
+        let home = location_home(&dir, "existing");
+        let folder = dir.join("config");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("unrelated"), "keep").unwrap();
+        let pointer = folder.join("p".repeat(300));
+        let e = adopt_home(&home, &pointer).unwrap_err();
+        assert_eq!(e.code, 2);
+        assert!(e
+            .stderr
+            .ends_with(": cannot publish factory location atomically\n"));
+        let left: Vec<_> = fs::read_dir(&folder)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, vec![std::ffi::OsString::from("unrelated")]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn simultaneous_different_adopters_and_identical_winner() {
+        for round in 0..20 {
+            let dir = temp_dir("setup-race");
+            let home = location_home(&dir, "existing");
+            let other = location_home(&dir, "other");
+            let pointer = dir.join("config/factory-location.json");
+            fs::create_dir(dir.join("config")).unwrap();
+            let different = round % 2 == 0;
+            let picks = [
+                home.clone(),
+                if different {
+                    other.clone()
+                } else {
+                    home.clone()
+                },
+            ];
+            let results: Vec<i32> = std::thread::scope(|s| {
+                let handles: Vec<_> = picks
+                    .iter()
+                    .map(|pick| {
+                        let pointer = &pointer;
+                        s.spawn(move || adopt_home(pick, pointer).map_or_else(|e| e.code, |()| 0))
+                    })
+                    .collect();
+                handles.into_iter().map(|h| h.join().unwrap()).collect()
+            });
+            let mut sorted = results.clone();
+            sorted.sort();
+            assert_eq!(sorted, if different { vec![0, 2] } else { vec![0, 0] });
+            let chosen = read_location(&pointer).unwrap();
+            assert!(chosen == home || chosen == other);
+            assert_eq!(fs::read_dir(dir.join("config")).unwrap().count(), 1);
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_git_worktree_and_state_unchanged() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("setup-gitwt");
+        let home = location_home(&dir, "existing");
+        let repo = dir.join("repo");
+        fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}");
+            out.stdout
+        };
+        git(&["init"]);
+        git(&["commit", "--allow-empty", "-m", "initial"]);
+        let worktree = home.join("worktrees/sample/001-test");
+        git(&[
+            "worktree",
+            "add",
+            "-b",
+            "factory/001-test",
+            worktree.to_str().unwrap(),
+        ]);
+        let env = home.join(".env");
+        fs::write(
+            &env,
+            "FACTORY_ACCESS_CLIENT_SECRET=synthetic-private\nunknown=retained\n",
+        )
+        .unwrap();
+        fs::set_permissions(&env, fs::Permissions::from_mode(0o640)).unwrap();
+        let before = tree_snapshot(&home);
+        let admin = tree_snapshot(&repo.join(".git"));
+        let listed = git(&["worktree", "list", "--porcelain"]);
+        adopt_home(&home, &dir.join("config/factory-location.json")).unwrap();
+        assert_eq!(tree_snapshot(&home), before);
+        assert_eq!(tree_snapshot(&repo.join(".git")), admin);
+        assert_eq!(git(&["worktree", "list", "--porcelain"]), listed);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn cached_status_rules() {
         let dir = temp_dir("setup-cached");
@@ -1716,6 +2143,57 @@ mod tests {
             write(bad);
             assert_eq!(cached_status(&dir), none, "{bad}");
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn bundle_behind_since_reads_origin_base() {
+        let dir = temp_dir("setup-behind");
+        let repo = dir.join("studio");
+        fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str], date: Option<&str>| {
+            let mut c = std::process::Command::new("git");
+            c.arg("-C")
+                .arg(&repo)
+                .args([
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                ])
+                .args(args);
+            if let Some(date) = date {
+                c.env("GIT_COMMITTER_DATE", date);
+            }
+            let out = c.output().unwrap();
+            assert!(out.status.success(), "git {args:?}");
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        git(&["init", "-q"], None);
+        let mut commits = Vec::new();
+        for date in [
+            "2025-12-29T16:00:00Z",
+            "2025-12-30T14:00:00Z",
+            "2026-01-01T06:00:00Z",
+        ] {
+            git(&["commit", "-q", "--allow-empty", "-m", date], Some(date));
+            commits.push(git(&["rev-parse", "HEAD"], None));
+        }
+        git(
+            &["update-ref", "refs/remotes/origin/main", &commits[2]],
+            None,
+        );
+        fs::write(
+            dir.join("paths.md"),
+            format!("---\nstudio: {}\n---\n", repo.display()),
+        )
+        .unwrap();
+        assert_eq!(
+            bundle_behind_since(&dir, &commits[0]).unwrap(),
+            Some("2025-12-30T14:00:00Z".to_string())
+        );
+        assert_eq!(bundle_behind_since(&dir, &commits[2]).unwrap(), None);
+        assert_eq!(bundle_behind_since(&dir, &"0".repeat(40)).unwrap(), None);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1797,6 +2275,32 @@ mod tests {
         refused(format!(
             "cannot read {shown}: check its permissions and that it is UTF-8 text."
         ));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unsearchable_home() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("setup-cloudflare-unsearchable");
+        let env = dir.join(".env");
+        fs::write(&env, "CLOUDFLARE_API_TOKEN=tok\n").unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0)).unwrap();
+        // root can still search a mode 0 folder, so only assert when the OS refuses.
+        if fs::symlink_metadata(&env).is_err() {
+            let e = cloudflare_env(&env).unwrap_err();
+            assert_eq!(
+                (e.code, e.stderr),
+                (
+                    5,
+                    format!(
+                        "factory.py: cannot read {}: check its permissions and that it is UTF-8 text.\n",
+                        env.display()
+                    )
+                )
+            );
+        }
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
         fs::remove_dir_all(dir).unwrap();
     }
 

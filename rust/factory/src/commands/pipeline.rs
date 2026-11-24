@@ -1342,41 +1342,43 @@ fn trial_valid(t: &Value) -> bool {
     let (Some(project), Some(stage)) = (str_of(t, "project"), str_of(t, "stage")) else {
         return false;
     };
-    let Some(version) = py_int(map.get("version")) else {
+    let Some(version) = trial_whole(map.get("version")) else {
         return false;
     };
     SLUG.is_full(project)
         && PIPELINE_STAGES.contains(&stage)
-        && py_int(map.get("champion_version")).is_some_and(|v| v >= 0)
+        && trial_whole(map.get("champion_version")).is_some_and(|v| v >= 0)
         && str_of(t, "id") == Some(&format!("{project}-{stage}-v{version}"))
-        && stamp_of(map.get("opened")).is_some()
+        && str_of(t, "opened").is_some_and(|s| TRIAL_STAMP.is_full(s) && parse_stamp(s).is_some())
+}
+
+/// A whole number JavaScript holds exactly, as the Worker's Number.isSafeInteger reads it.
+fn trial_whole(v: Option<&Value>) -> Option<i64> {
+    const MAX: i64 = 9_007_199_254_740_991;
+    let v = v?;
+    let n = if v.is_i64() || v.is_u64() {
+        v.as_i64()?
+    } else {
+        let f = v
+            .as_f64()
+            .filter(|f| f.fract() == 0.0 && f.abs() <= MAX as f64)?;
+        f as i64
+    };
+    (n.unsigned_abs() <= MAX as u64).then_some(n)
 }
 
 /// The Worker's BOARD_STAMP.
 static TRIAL_STAMP: Pattern = Pattern::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", Flags::ASCII);
 
-/// True when a trial's opened is not a board stamp or its version is not a whole number, the
-/// Worker's trialMisshapen.
-fn trial_misshapen(t: &Value) -> bool {
-    let whole = match t.get("version") {
-        Some(v) if v.is_i64() || v.is_u64() => true,
-        Some(v) => v
-            .as_f64()
-            .is_some_and(|f| f.is_finite() && f.fract() == 0.0),
-        None => false,
-    };
-    !whole || !str_of(t, "opened").is_some_and(|s| TRIAL_STAMP.is_full(s))
-}
-
-/// True for an open trial record trial settle drops: not well formed, and misshapen.
+/// True for an open trial record trial settle drops: not well formed.
 fn trial_droppable(t: &Value) -> bool {
-    t.is_object() && str_of(t, "status") == Some("open") && !trial_valid(t) && trial_misshapen(t)
+    t.is_object() && str_of(t, "status") == Some("open") && !trial_valid(t)
 }
 
-/// A dropped trial record's id for the settle line, escaped, or "(no id)" when it has no non-empty string id.
+/// A dropped trial record's id for the settle line, quoted and escaped by {:?}, or "(no id)" when it has no non-empty string id.
 fn trial_drop_label(t: &Value) -> String {
     match str_of(t, "id") {
-        Some(id) if !id.is_empty() => id.escape_debug().to_string(),
+        Some(id) if !id.is_empty() => format!("{id:?}"),
         _ => "(no id)".to_string(),
     }
 }
@@ -1394,7 +1396,7 @@ fn open_trial_for<'a>(data: &'a Value, slug: &str, stage: &str) -> Option<&'a Va
 
 /// The trial stage's note in the pipeline version the edit replaced, or "" when absent.
 fn trial_champion(home: &Path, trial: &Value) -> Res<String> {
-    let version = py_int(trial.get("champion_version")).unwrap_or(0);
+    let version = trial_whole(trial.get("champion_version")).unwrap_or(0);
     if version == 0 {
         return Ok(String::new());
     }
@@ -1681,7 +1683,7 @@ fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
     if !dropped.is_empty() {
         writeln!(
             o.out,
-            "dropped malformed open trial records: {} ({}; opened is not a board timestamp or version is not a whole number)",
+            "dropped malformed open trial records: {} ({}; bad id, project, stage, version, champion_version or opened)",
             dropped.len(),
             dropped.join(", ")
         )
@@ -5508,9 +5510,7 @@ mod tests {
         #[cfg(unix)]
         #[test]
         fn pick_runtime() {
-            let _lock = crate::shared::TEST_ENV_LOCK
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let _lock = crate::shared::test_env_lock();
             let home = home("routes-runtime", ROUTES);
             let paseo = home.join("paseo");
             fs::create_dir(&paseo).unwrap();
@@ -5821,15 +5821,17 @@ mod tests {
         fn trial_drop_label_names_the_id() {
             assert_eq!(
                 trial_drop_label(&json!({"id": "factory-spec-v10"})),
-                "factory-spec-v10"
+                "\"factory-spec-v10\""
             );
             assert_eq!(trial_drop_label(&json!({})), "(no id)");
             assert_eq!(trial_drop_label(&json!({"id": ""})), "(no id)");
             assert_eq!(trial_drop_label(&json!({"id": 42})), "(no id)");
             assert_eq!(
                 trial_drop_label(&json!({"id": "bad\u{1b}[31m"})),
-                "bad\\u{1b}[31m"
+                "\"bad\\u{1b}[31m\""
             );
+            assert_eq!(trial_drop_label(&json!({"id": "a, b; x"})), "\"a, b; x\"");
+            assert_eq!(trial_drop_label(&json!({"id": "a\"b"})), "\"a\\\"b\"");
         }
 
         fn arm_ids(trial_id: &str, arm: &str, count: usize) -> Vec<String> {
@@ -5854,6 +5856,28 @@ mod tests {
             assert!((2100..2300)
                 .zip(&arms)
                 .all(|(n, arm)| trial_arm(TRIAL, &format!("{n}-x")) == *arm));
+        }
+
+        #[test]
+        fn trial_valid_follows_the_shared_rule() {
+            assert!(trial_valid(&trial(
+                json!({"version": 10.0, "id": "factory-spec-v10"})
+            )));
+            for opened in [
+                "2026-02-30T00:00:00Z",
+                "2026-11-12T24:00:00Z",
+                "0000-01-01T00:00:00Z",
+                "2026-2-3T01:02:03Z",
+            ] {
+                let t = trial(json!({ "opened": opened }));
+                assert!(!trial_valid(&t), "{opened}");
+                assert!(trial_droppable(&t), "{opened}");
+            }
+            assert!(!trial_valid(&trial(
+                json!({"version": 9007199254740992u64})
+            )));
+            assert!(!trial_valid(&trial(json!({"version": i64::MIN}))));
+            assert!(!trial_valid(&trial(json!({"champion_version": 1.5}))));
         }
 
         #[test]
@@ -7336,8 +7360,8 @@ mod tests {
                     "deterministic",
                 ),
             ];
-            CHECK_TIMEOUT.with(|t| t.set(Some(1)));
             for (row, unit, exit, cell) in rows {
+                CHECK_TIMEOUT.with(|t| t.set(Some(if row == "budget" { 1 } else { 60 })));
                 let _ = fs::remove_file(&record);
                 f.base(Some(json!([check("lint", "pass"), unit])), None);
                 let (code, out, err) = f.gate();

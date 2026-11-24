@@ -125,6 +125,7 @@ struct Fakes {
     setup_run: Option<Rc<dyn Fn(&[&str], Option<&str>) -> (i32, String)>>,
     pickup_pass: Option<Rc<dyn Fn(&mut Io, &Path) -> Res<()>>>,
     orphan_pickup_scan: Hook,
+    orphan_scan: Option<Rc<dyn Fn(&Path) -> Res<(Vec<Orphan>, Vec<String>)>>>,
     outcomes_pickup_record: Hook,
     pick_route: Option<Rc<dyn Fn(&Path) -> Res<Option<Route>>>>,
     launch_idea: Option<Launch>,
@@ -3132,6 +3133,10 @@ struct Orphan {
 /// (orphans, skipped): factory branches on origin, open factory PRs, job worktrees and
 /// factory-<id> Paseo workspaces that no open board job owns. Only reads.
 fn orphan_scan(home: &Path) -> Res<(Vec<Orphan>, Vec<String>)> {
+    #[cfg(test)]
+    if let Some(f) = fake!(orphan_scan) {
+        return f(home);
+    }
     let board = read_board(home)?;
     let jobs: &[Value] = board["jobs"].as_array().map_or(&[], Vec::as_slice);
     let paths = paths_of(home)?;
@@ -9399,7 +9404,26 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Mutex, MutexGuard};
 
-    use crate::shared::TEST_ENV_LOCK as ENV_LOCK;
+    /// Parity writes the host-status "os" field as {os}, so only this test catches a wrong label.
+    #[test]
+    fn host_os_labels_each_platform() {
+        let os = host_os();
+        #[cfg(target_os = "macos")]
+        assert_eq!(os, "macOS");
+        #[cfg(windows)]
+        assert_eq!(os, "Windows");
+        #[cfg(target_os = "linux")]
+        {
+            let wsl = fs::read_to_string("/proc/sys/kernel/osrelease")
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("microsoft");
+            assert_eq!(os, if wsl { "Linux (WSL)" } else { "Linux" });
+        }
+        #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+        assert_eq!(os, "Other");
+    }
+
     const DEVICE: &str = "host-a";
     const IDEA_TEXT: &str = "$(touch pwned)";
     const PLACEHOLDERS: [&str; 10] = [
@@ -9616,7 +9640,7 @@ exit "$code"
 
     impl Fx {
         pub fn new() -> Fx {
-            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = crate::shared::test_env_lock();
             let tmp = TempHome::new();
             let root = tmp.0.clone();
             let home = root.join("home");
@@ -12745,20 +12769,18 @@ exit "$archive_code"
             assert!(tc.fx.job("042-sample-export").get("token_cap").is_none());
         }
 
-        /// The board command belongs to the claims slice and is not ported yet, so it writes
-        /// nothing at all; pickup stays the only writer of token_cap.
+        /// The board command refuses a token_cap patch; pickup stays its only writer.
         #[test]
         fn test_board_refuses_token_cap() {
             let tc = setup();
             export_job(&tc.fx, json!({}));
-            let home = tc.fx.home.display().to_string();
             assert_eq!(
-                crate::cli::main(vec![
-                    "board".into(),
-                    home.into(),
-                    "042-sample-export".into()
-                ]),
-                2
+                board_patch(&tc.fx, "042-sample-export", json!({"token_cap": {}})),
+                (
+                    2,
+                    "factory.py: only factory.py pickup sets token_cap. Nothing was written.\n"
+                        .into()
+                )
             );
             assert!(tc.fx.puts().is_empty());
         }
@@ -13414,23 +13436,6 @@ exit "$archive_code"
                 launch_reason(&format!("exit\t3\n\u{200b}{}", "x".repeat(300))),
                 format!("exit 3 {}", "x".repeat(193))
             );
-        }
-
-        /// The board command belongs to the claims slice and is not ported yet, so it writes nothing.
-        #[test]
-        fn test_board_refuses_the_field() {
-            let fx = Fx::new();
-            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
-            let home = fx.home.display().to_string();
-            assert_eq!(
-                crate::cli::main(vec![
-                    "board".into(),
-                    home.into(),
-                    "120-sample-digest".into()
-                ]),
-                2
-            );
-            assert!(fx.puts().is_empty());
         }
     }
 
@@ -14329,6 +14334,140 @@ exit "$archive_code"
             assert!(seen.borrow().is_empty());
             assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
             assert_eq!(*seen.borrow(), vec![fx.home.clone()]);
+        }
+    }
+
+    mod orphan_summary_test {
+        use super::*;
+
+        fn rows(kinds: &[&'static str]) -> Vec<Orphan> {
+            kinds
+                .iter()
+                .map(|kind| Orphan {
+                    kind,
+                    name: Some("x".into()),
+                })
+                .collect()
+        }
+
+        #[test]
+        fn example_line() {
+            assert_eq!(
+                orphan_summary(&rows(&["branch", "pr", "worktree", "workspace"]), &[]),
+                "orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory.py orphans to list them"
+            );
+        }
+
+        #[test]
+        fn plurals_and_skips() {
+            let four = rows(&["branch", "branch", "workspace", "workspace"]);
+            assert_eq!(
+                orphan_summary(&four, &["prs: gh is not on PATH".to_string()]),
+                "orphan scan: 4 orphaned (2 branches, 2 Paseo workspaces), 1 source skipped; run factory.py orphans to list them"
+            );
+            let two =
+                ["prs: gh is not on PATH", "workspaces: paseo is not on PATH"].map(String::from);
+            assert_eq!(
+                orphan_summary(&[], &two),
+                "orphan scan: nothing orphaned, 2 sources skipped; run factory.py orphans to list them"
+            );
+        }
+    }
+
+    mod orphan_pickup_scan_test {
+        use super::*;
+        use std::cell::Cell;
+
+        /// Fake orphan_scan answering with one open-PR orphan (or a stop with exit 5), counting calls.
+        fn scan_fake(stop: bool) -> Rc<Cell<usize>> {
+            let calls = Rc::new(Cell::new(0));
+            let seen = calls.clone();
+            FAKES.with(|f| {
+                *f.borrow_mut() = Fakes {
+                    orphan_scan: Some(Rc::new(move |_| {
+                        seen.set(seen.get() + 1);
+                        if stop {
+                            return Err(crate::shared::exit::exit(5));
+                        }
+                        Ok((
+                            vec![Orphan {
+                                kind: "pr",
+                                name: Some("https://github.com/example/factory/pull/7".into()),
+                            }],
+                            Vec::new(),
+                        ))
+                    })),
+                    ..Fakes::default()
+                }
+            });
+            calls
+        }
+
+        fn run_scan(home: &Path) -> (String, String) {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let mut io = Io {
+                out: &mut out,
+                err: &mut err,
+            };
+            orphan_pickup_scan(&mut io, home).unwrap();
+            (
+                String::from_utf8(out).unwrap(),
+                String::from_utf8(err).unwrap(),
+            )
+        }
+
+        #[test]
+        fn once_per_local_date() {
+            let home = crate::shared::fs::temp_dir("orphan-once");
+            let calls = scan_fake(false);
+            let (utc, offset) = local_now();
+            let today = local_date(utc, offset);
+            assert_eq!(
+                run_scan(&home),
+                (
+                    "orphan scan: 1 orphaned (1 open PR); run factory.py orphans to list them\n"
+                        .to_string(),
+                    String::new()
+                )
+            );
+            assert_eq!(
+                read_json(&home.join("orphan-scan.json")).unwrap(),
+                json!({"version": 1, "date": today})
+            );
+            assert_eq!(run_scan(&home), (String::new(), String::new()));
+            assert_eq!(calls.get(), 1);
+            fs::remove_dir_all(home).unwrap();
+        }
+
+        #[test]
+        fn new_date_scans_again() {
+            let home = crate::shared::fs::temp_dir("orphan-new-date");
+            let calls = scan_fake(false);
+            fs::write(
+                home.join("orphan-scan.json"),
+                "{\"version\": 1, \"date\": \"2000-01-01\"}\n",
+            )
+            .unwrap();
+            assert_eq!(run_scan(&home).0.matches('\n').count(), 1);
+            assert_eq!(calls.get(), 1);
+            fs::remove_dir_all(home).unwrap();
+        }
+
+        #[test]
+        fn stopped_scan_costs_one_line_and_waits() {
+            let home = crate::shared::fs::temp_dir("orphan-stopped");
+            let calls = scan_fake(true);
+            assert_eq!(
+                run_scan(&home),
+                (
+                    String::new(),
+                    "factory.py: orphan scan stopped (exit 5); it runs again tomorrow\n"
+                        .to_string()
+                )
+            );
+            assert_eq!(run_scan(&home), (String::new(), String::new()));
+            assert_eq!(calls.get(), 1);
+            fs::remove_dir_all(home).unwrap();
         }
     }
 
@@ -15977,6 +16116,35 @@ exit "$archive_code"
             assert!(!wt.exists());
             assert!(!branch_exists(&fx));
             assert_eq!(left(&fx), json!([]));
+        }
+
+        /// stop_pids gives None when lsof is missing. worktree.rs prints the "lsof not found" line
+        /// itself, so the fake only stands in for that unchecked answer.
+        #[test]
+        fn test_cleanup_without_lsof_still_removes_a_merged_job() {
+            let (fx, wt, _) = setup();
+            git_in(
+                &fx.repo_a,
+                &[
+                    &ID[..],
+                    &[
+                        "merge",
+                        "-q",
+                        "--no-ff",
+                        "-m",
+                        "merge",
+                        "factory/042-sample-export",
+                    ],
+                ]
+                .concat(),
+            );
+            fx.set_fakes(|f| f.stop_pids = Some(Rc::new(|_: &Path| None)));
+            fx.jobs(json!([closed(json!({}))]));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(0, "cleaned up 042-sample-export alpha\n", "")
+            );
+            assert!(!wt.exists());
         }
 
         /// Rust cleanup_job cannot fail, so Python's raising cleanup_job is a fake that leaves work:
@@ -20297,6 +20465,106 @@ exit "$archive_code"
                 .unwrap()
                 .get("triage_failed_since")
                 .is_none());
+        }
+    }
+
+    mod autonomy_hold_test {
+        use super::*;
+
+        #[test]
+        fn test_pass_holds() {
+            let fx = Fx::new();
+            let visible = json!({"security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS"});
+            let reverted = json!({"id": "1019-add-z", "project": "alpha", "stage": "merged",
+                "done": "2099-01-01T00:00:00Z", "updated": "2026-01-05T10:00:00Z", "rounds": [visible],
+                "outcome": {"result": "reverted", "at": "2026-01-09T12:00:00Z", "evidence": []}});
+            let shipping = json!({"id": "1031-add-w", "project": "alpha", "stage": "pr-open",
+                "automerge": true, "pr": "https://github.com/example/alpha/pull/631",
+                "rounds": [visible], "updated": "2026-01-10T10:00:00Z"});
+            let board = json!({"updated": "2026-01-10T10:00:00Z", "jobs": [reverted, shipping]});
+            fx.jobs(board["jobs"].clone());
+            let mut data = board.clone();
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let mut io = Io {
+                out: &mut out,
+                err: &mut err,
+            };
+            autonomy_hold_pass(&mut io, &fx.home, &mut data, false).unwrap();
+            assert_eq!(
+                String::from_utf8(out).unwrap(),
+                "held 1031-add-w alpha PR #631 for a person\n"
+            );
+            assert_eq!(fx.puts().len(), 1);
+            let job = fx.job("1031-add-w");
+            assert_eq!(
+                (&job["automerge"], &job["needs"], &job["note"]),
+                (
+                    &json!(false),
+                    &json!("review and merge PR #631: earned autonomy holds alpha visible PRs after reverted 1019-add-z; a person lifts it with factory.py autonomy restore alpha visible"),
+                    &json!("earned autonomy hold: a person reviews and merges")
+                )
+            );
+            assert_eq!(
+                autonomy_holds(&board),
+                vec![(
+                    ("alpha".to_string(), "visible"),
+                    vec!["1019-add-z".to_string()]
+                )]
+            );
+        }
+    }
+
+    mod daily_tokens_test {
+        use super::*;
+
+        const MIDNIGHT: i64 = 1_767_225_600; // 2026-01-01T00:00:00Z
+
+        fn turn(id: &str, n: [i64; 4], stamp: &str) -> String {
+            json!({"type": "assistant", "isSidechain": false, "timestamp": stamp,
+                "message": {"id": id, "model": "claude-opus-5-5", "usage": {
+                "input_tokens": n[0], "output_tokens": n[1], "cache_creation_input_tokens": n[2],
+                "cache_read_input_tokens": n[3]}}})
+            .to_string()
+                + "\n"
+        }
+
+        fn seed(fx: &Fx) -> PathBuf {
+            let projects = fx.root.join("claude/projects");
+            let job = projects.join("-home-u--paseo-worktrees-ab12-factory-1017-add-x");
+            fs::create_dir_all(&job).unwrap();
+            let d2 = turn("d2", [10, 20, 30, 40], "2026-01-01T00:00:00.250Z");
+            let day = [
+                turn("d1", [1, 2, 3, 4], "2025-12-31T23:59:59.900Z"),
+                d2.clone(),
+                d2,
+            ]
+            .concat();
+            fs::write(job.join("day.jsonl"), day).unwrap();
+            fx.set_env("CLAUDE_CONFIG_DIR", fx.root.join("claude"));
+            projects
+        }
+
+        #[test]
+        fn test_outside_a_job_folder() {
+            let fx = Fx::new();
+            let projects = seed(&fx);
+            assert_eq!(daily_tokens(MIDNIGHT), Ok(60));
+            let outside = projects.join("-home-u-dev-factory");
+            fs::create_dir_all(&outside).unwrap();
+            fs::write(
+                outside.join("day.jsonl"),
+                turn("d3", [500, 0, 0, 0], "2026-01-01T01:00:00.000Z"),
+            )
+            .unwrap();
+            assert_eq!(daily_tokens(MIDNIGHT), Ok(60));
+        }
+
+        #[test]
+        fn test_no_root() {
+            let fx = Fx::new();
+            seed(&fx);
+            fx.set_env("CLAUDE_CONFIG_DIR", fx.root.join("missing"));
+            assert_eq!(daily_tokens(MIDNIGHT), Ok(0));
         }
     }
 

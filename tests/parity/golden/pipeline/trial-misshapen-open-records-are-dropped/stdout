@@ -1,1 +1,1 @@
-dropped malformed open trial records: 1 (factory-spec-v11; opened is not a board timestamp or version is not a whole number)
+dropped malformed open trial records: 1 ("factory-spec-v11"; bad id, project, stage, version, champion_version or opened)

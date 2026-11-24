@@ -1,0 +1,4 @@
+{"argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"]}
+{"argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"]}
+{"argv": ["-C", "/work/factory-042-dark-mode", "reflog", "show", "--format=%H %gs", "refs/heads/factory/042-dark-mode"]}
+{"argv": ["-C", "/work/factory-042-dark-mode", "log", "--format=%h %s", "HEAD", "--not", "--remotes", "--exclude=factory/042-dark-mode", "--branches"]}

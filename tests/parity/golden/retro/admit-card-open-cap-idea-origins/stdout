@@ -1,0 +1,11 @@
+wrote {home}/retro/card-open-cap-idea-origins/findings.md
+{
+  "admitted": [],
+  "skipped": [
+    {
+      "title": "Sample one",
+      "reason": "open cap"
+    }
+  ]
+}
+uploaded retro run card-open-cap-idea-origins
