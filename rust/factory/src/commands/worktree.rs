@@ -2232,6 +2232,22 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Ported from tests/cli/test_pickup.py CloseCleanupTest.test_cleanup_without_lsof_still_removes_a_merged_job:
+    /// an unchecked worktree (no /proc, no lsof) of a merged job is still removed with its branch.
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_without_lsof_still_removes_a_merged_job() {
+        let t = Checkout::new("wt-clean-no-lsof");
+        t.merge();
+        let alive = stop_pids_with(&t.wt, &t.home.join("no-proc"), None);
+        assert_eq!(alive, None);
+        assert_eq!(
+            cleanup_after_stop(&text(&t.repo), &t.wt, BRANCH, false, None, alive),
+            (vec![t.shown_wt(), format!("branch {BRANCH}")], vec![])
+        );
+        assert!(!t.wt.exists());
+    }
+
     #[cfg(unix)]
     #[test]
     fn stop_pids_never_signals_a_group() {
