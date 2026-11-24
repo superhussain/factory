@@ -103,7 +103,7 @@ jobs:
       - if: steps.factory-bin.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
           save-if: false
       # rust-build runs beside this job, so a PR that changes Rust always misses the binary above. rust-build's
@@ -183,6 +183,7 @@ jobs:
   # The host binary keeps panic = "abort"; cargo test needs unwinding, so build and test are separate jobs.
   # rust-cache keys on Cargo.lock, Cargo.toml and rustc, so a source-only change reuses the compiled dependencies.
   # warm.yml saves the same keys, and the incremental artifacts, from main, so a PR's first run starts warm too.
+  # The key leaves out Cargo.toml's [profile] tables, so a profile change must bump prefix-key here and in warm.yml.
   rust-build:
     needs: plan
     if: needs.plan.outputs.all != 'true' && needs.plan.outputs.rust != 'true'
@@ -199,7 +200,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
       # rust-cache keeps only dependencies and sets CARGO_INCREMENTAL=0, so each source change compiled the factory
       # crate from scratch. This PR's previous build's incremental artifacts let rustc reuse the unchanged codegen
@@ -248,7 +249,8 @@ jobs:
     timeout-minutes: 6
     # nextest runs each test in its own process, so tests that hold TEST_ENV_LOCK no longer wait on each other,
     # and hash partitions split the tests over the shards by name, so a test keeps its shard as others come and
-    # go. hung_fetch_times_out waits 60 s by design, so more shards would not shorten the slowest one.
+    # go. Each shard's test step takes about 16 s, and parity, not rust-test, ends last, so more shards would not
+    # shorten a run.
     strategy:
       fail-fast: false
       matrix:
@@ -264,7 +266,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
       # As in rust-build, the newest incremental artifacts let rustc reuse the unchanged codegen units of the test
       # build. Only warm.yml saves them, from main: at about 200 MB a copy, a save per PR run would crowd main's
@@ -308,7 +310,7 @@ jobs:
         run: cargo fmt --check
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
       - name: Check darwin-arm64
         run: cargo check --locked --target aarch64-apple-darwin

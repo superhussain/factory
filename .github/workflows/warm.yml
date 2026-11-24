@@ -32,7 +32,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
       # A PR's first rust-build restores these by prefix, as it restores its own previous run's.
       - name: Restore incremental artifacts
@@ -65,7 +65,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
       - name: Build the factory binary
         run: CARGO_INCREMENTAL=1 cargo build --profile host --locked
@@ -84,7 +84,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
       - name: Restore incremental artifacts
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -117,7 +117,7 @@ jobs:
           rustup target add aarch64-apple-darwin x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
       - name: Check darwin-arm64
         run: cargo check --locked --target aarch64-apple-darwin
