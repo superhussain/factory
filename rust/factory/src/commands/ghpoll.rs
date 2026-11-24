@@ -40,8 +40,10 @@ const MAX_KEYS: usize = 200;
 const MAX_WAIT: f64 = 50.0;
 /// How young a cached answer must be for a command's first read of a key.
 const FIRST_READ: f64 = 5.0;
-/// The age a command accepts on later reads of a key it already holds: whatever the poller keeps.
-const TRUSTED: f64 = 24.0 * 3600.0;
+/// The age a command accepts on later reads of a key it already holds: whatever the poller keeps,
+/// up to three minutes.
+/// Capped, so answers stay bounded in age even if the poll thread stops.
+const TRUSTED: f64 = 180.0;
 /// How long a command waits for a gh reply: another caller's gh call may run first.
 const GH_REPLY: Duration = Duration::from_secs(150);
 /// Credentials and targets in a command's own environment that the daemon's gh would not see.
@@ -54,6 +56,17 @@ const OWN_GH_ENV: &[&str] = &[
     "GH_REPO",
     "GH_CONFIG_DIR",
     "GH_DEBUG",
+    "GH_FORCE_TTY",
+    "CLICOLOR_FORCE",
+];
+/// The `--jq` filters the wait commands send. Any other filter could read the daemon's
+/// environment (`env`, `$ENV`), so it is refused.
+const JQ_FILTERS: &[&str] = &[
+    ".state",
+    ".behind_by",
+    ".default_branch",
+    ".data.repository.object",
+    ".data.repository.pullRequest",
 ];
 
 type Key = Vec<String>;
@@ -64,7 +77,10 @@ pub(crate) type RunGh = Box<dyn Fn(&[&str]) -> Option<GhOut> + Send + Sync>;
 /// and a GraphQL call must carry one of the wait commands' own queries.
 pub(crate) fn cacheable(args: &[&str]) -> bool {
     let pairs = |rest: &[&str], flags: &[&str]| {
-        rest.len() % 2 == 0 && rest.chunks(2).all(|p| flags.contains(&p[0]))
+        rest.len() % 2 == 0
+            && rest
+                .chunks(2)
+                .all(|p| flags.contains(&p[0]) && (p[0] != "--jq" || JQ_FILTERS.contains(&p[1])))
     };
     let pr_url = |u: &str| u.starts_with("https://github.com/");
     match args {
@@ -80,11 +96,11 @@ pub(crate) fn cacheable(args: &[&str]) -> bool {
                     [HEAD_CHECKS_QUERY, PR_GRAPHQL_QUERY].contains(&f)
                         || ["o=", "r=", "n=", "sha="].iter().any(|n| {
                             f.strip_prefix(n)
-                                .is_some_and(|v| !v.is_empty() && !v.starts_with('@'))
+                                .is_some_and(|v| !v.is_empty() && !v.starts_with(['@', ':']))
                         })
                 })
         }
-        ["api", path, "--jq", _] => path.starts_with("repos/"),
+        ["api", path, "--jq", jq] => path.starts_with("repos/") && JQ_FILTERS.contains(jq),
         _ => false,
     }
 }
@@ -133,6 +149,12 @@ fn same(a: &GhOut, b: &GhOut) -> bool {
         GhCode::Timeout => None,
     };
     code(a) == code(b) && a.stdout == b.stdout && a.stderr == b.stderr
+}
+
+/// True when an environment, read through `set`, holds a gh credential or setting the other side
+/// of the socket might not share.
+fn own_gh_env(set: &dyn Fn(&str) -> bool) -> bool {
+    OWN_GH_ENV.iter().any(|k| set(k))
 }
 
 /// The environment that picks gh's account and config. A command whose values differ from the
@@ -349,6 +371,10 @@ impl Poller {
                 if !cacheable(&args) {
                     return refused("not a cached gh read");
                 }
+                // A daemon with its own gh identity would answer as another account.
+                if own_gh_env(&|k| std::env::var_os(k).is_some()) {
+                    return refused("the daemon has its own gh credentials or config");
+                }
                 if request["env"] != gh_env() {
                     return refused("gh runs under another HOME or config");
                 }
@@ -416,12 +442,15 @@ pub(crate) struct Cached {
     /// The keys read since the last sleep. Only these are waited on, so a key the command read
     /// once, like checks' first state read, leaves the daemon's poll list.
     read: HashSet<Key>,
+    /// Set once the command ran a gh call that may write, like update-branch. From then on the
+    /// first read of each key asks the daemon for a fresh answer.
+    wrote: bool,
 }
 
 impl Cached {
     /// A host for a command that re-reads the PR every `every` seconds.
     pub(crate) fn new(home: &Path, every: f64) -> Cached {
-        let own_env = OWN_GH_ENV.iter().any(|k| std::env::var_os(k).is_some());
+        let own_env = own_gh_env(&|k| std::env::var_os(k).is_some());
         Cached::with(home, every, Box::new(System::new()), !own_env)
     }
 
@@ -433,6 +462,7 @@ impl Cached {
             every,
             held: HashMap::new(),
             read: HashSet::new(),
+            wrote: false,
         }
     }
 
@@ -440,6 +470,8 @@ impl Cached {
         let key: Key = args.iter().map(|a| a.to_string()).collect();
         let max_age = if self.held.contains_key(&key) {
             TRUSTED
+        } else if self.wrote {
+            0.0
         } else {
             FIRST_READ
         };
@@ -480,6 +512,11 @@ impl Host for Cached {
                 return Some(out);
             }
             self.live = false;
+        } else if !cacheable(args) {
+            // A write may have moved the PR, so nothing read before it is trusted after it.
+            self.wrote = true;
+            self.held.clear();
+            self.read.clear();
         }
         self.direct.gh(args)
     }
@@ -594,10 +631,32 @@ mod tests {
             ],
             vec!["pr", "checks", PR, "--json", "name,bucket,link"],
             vec![
-                "api", "graphql", "-f", head, "-f", "o=a", "-f", "r=b", "-f", "sha=c", "--jq", ".d",
+                "api",
+                "graphql",
+                "-f",
+                head,
+                "-f",
+                "o=a",
+                "-f",
+                "r=b",
+                "-f",
+                "sha=c",
+                "--jq",
+                ".data.repository.object",
             ],
             vec![
-                "api", "graphql", "-f", pull, "-f", "o=a", "-f", "r=b", "-F", "n=1", "--jq", ".d",
+                "api",
+                "graphql",
+                "-f",
+                pull,
+                "-f",
+                "o=a",
+                "-f",
+                "r=b",
+                "-F",
+                "n=1",
+                "--jq",
+                ".data.repository.pullRequest",
             ],
             vec!["api", "repos/a/b/compare/main...abc", "--jq", ".behind_by"],
             vec!["api", "repos/a/b", "--jq", ".default_branch"],
@@ -629,6 +688,11 @@ mod tests {
             vec!["api", "graphql", "-f", head, "-F", "query=@mut.graphql"],
             vec!["api", "graphql", "-f", head, "-F", "n=@file"],
             vec!["api", "graphql", "-f", " query=mutation{x}"],
+            vec!["api", "graphql", "-f", head, "-F", "o=:owner", "-f", "r=b"],
+            vec!["api", "repos/cli/cli", "--jq", "env|keys"],
+            vec!["api", "repos/cli/cli", "--jq", "$ENV.HOME"],
+            vec!["pr", "view", PR, "--json", "state", "--jq", "env"],
+            vec!["api", "graphql", "-f", head, "-f", "o=a", "--jq", "input"],
             vec!["api", "repos/a/b/merges", "-f", "base=main"],
             vec!["api", "-X", "PUT", "repos/a/b"],
             vec!["api", "user", "--jq", ".login"],
@@ -842,6 +906,22 @@ mod tests {
     }
 
     #[test]
+    fn gh_credentials_on_either_side_mean_direct_gh() {
+        for k in [
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "GH_HOST",
+            "GH_REPO",
+            "GH_CONFIG_DIR",
+            "GH_FORCE_TTY",
+            "CLICOLOR_FORCE",
+        ] {
+            assert!(own_gh_env(&|v| v == k), "{k}");
+        }
+        assert!(!own_gh_env(&|v| v == "PATH"));
+    }
+
+    #[test]
     fn another_home_runs_gh_itself() {
         let (p, calls) = poller(vec![out(0, "OPEN\n", "")]);
         let env = json!({"HOME": "/elsewhere", "XDG_CONFIG_HOME": null});
@@ -960,9 +1040,21 @@ mod tests {
         assert_eq!(h.held.len(), 1);
         h.sleep(0.0);
         assert!(h.held.is_empty());
-        // A write never goes to the daemon.
+        // A write never goes to the daemon, and the next read of a key asks gh afresh even though
+        // the daemon's answer is young.
+        h.gh(&args);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "a young answer serves a first read"
+        );
         h.gh(&["pr", "update-branch", PR]);
         assert_eq!(direct_calls.load(Ordering::SeqCst), 1);
+        assert!(h.held.is_empty());
+        h.gh(&args);
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "fresh after the write");
+        h.gh(&args);
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "then held again");
         std::fs::remove_dir_all(home).unwrap();
     }
 }
