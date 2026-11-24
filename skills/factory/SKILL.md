@@ -95,6 +95,7 @@ Read [feature](references/commands/feature.md) before step 1 of any loop run. It
 ## Where things live
 
 Setup and diagnostics (home precedence, `adopt-home`, `doctor`) are in [init](references/commands/init.md).
+To move a host from the Python factory to the Rust binary, follow `docs/migrating-to-rust.md` in the factory checkout. Its agent checklist runs unattended.
 
 Resolve the paths once per command, from the installed skill (`factory.exe` on
 Windows):
