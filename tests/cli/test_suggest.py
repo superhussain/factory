@@ -505,6 +505,27 @@ class SuggestTest(SuggestCase):
         self.assertEqual({k: self.board["autonomy"][k] for k in ("paused", "projects", "self", "by")},
                          {"paused": True, "projects": [], "self": ["sample"], "by": "device"})
 
+    def test_agent_session_names(self):
+        self.assertEqual(factory.agent_session({"CLAUDECODE": "", "PASEO_AGENT_ID": "abc"}), "PASEO_AGENT_ID")
+        self.assertIsNone(factory.agent_session({"CLAUDECODE": "", "AI_AGENT": ""}))
+        self.assertIsNone(factory.agent_session({}))
+
+    def test_agent_refuses_loosening(self):
+        with patch.dict(factory.os.environ, {"CLAUDECODE": "1"}):
+            for args in (("resume",), ("allow", "sample"), ("restore", "sample", "visible"),
+                         ("promote", "sample", "visible")):
+                with self.subTest(args=args):
+                    calls = self.api.call_count
+                    code, err, asked = self.run_human(factory.autonomy_cmd, *args, typed="x")
+                    self.assertEqual(code, 2)
+                    self.assertEqual(err, f"factory.py: autonomy {args[0]} refuses to run in an agent session "
+                                          "(CLAUDECODE is set); a person types it in their own terminal. "
+                                          "Nothing was changed.\n")
+                    asked.assert_not_called()
+                    self.assertEqual(self.api.call_count, calls)
+            self.assertEqual(self.run_human(factory.autonomy_cmd, "pause")[0], 0)
+        self.assertIs(self.board["autonomy"]["paused"], True)
+
     def test_autonomy_status_defaults_and_usage(self):
         self.board.pop("autonomy")
         factory.autonomy_cmd("status")
