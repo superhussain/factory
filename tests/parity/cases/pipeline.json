@@ -7619,6 +7619,19 @@
                 "opened": "2999-01-01T00:00:00Z",
                 "status": "open",
                 "id": "factory-spec-v8"
+              },
+              {
+                "project": "café",
+                "stage": "spec",
+                "version": 8,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "2999-01-01T00:00:00Z",
+                "status": "open",
+                "id": "café-spec-v8"
               }
             ],
             "autonomy": {
