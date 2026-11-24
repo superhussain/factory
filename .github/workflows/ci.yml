@@ -45,12 +45,13 @@ jobs:
           path: .ci-pass
           key: ${{ steps.keys.outputs.rust }}
           lookup-only: true
-  # The local target's device flows run the binary rust-build uploads, so targets never builds it.
+  # The local target's device flows run the factory binary. targets restores the one rust-build cached under
+  # the rust key, and builds it only on a miss, so it never waits on rust-build.
   targets:
-    needs: [plan, rust-build]
+    needs: plan
     if: needs.plan.outputs.all != 'true'
     runs-on: ubuntu-22.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,11 +79,25 @@ jobs:
       - run: pnpm run format:check
       # Workflow-only changes select no Nx target; the workflow contracts always run.
       - run: pnpm run test:workflow
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Restore the factory binary
+        id: factory-bin
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          name: factory-linux-x64
-          path: rust/target/host
-      - run: chmod +x rust/target/host/factory
+          path: rust/target/host/factory
+          key: ${{ needs.plan.outputs.rust-key }}-bin
+      - name: Install the pinned toolchain
+        if: steps.factory-bin.outputs.cache-hit != 'true'
+        working-directory: rust
+        run: rustup toolchain install
+      - if: steps.factory-bin.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v1-rust
+          workspaces: rust
+      - name: Build the factory binary
+        if: steps.factory-bin.outputs.cache-hit != 'true'
+        working-directory: rust
+        run: cargo build --profile host --locked
       - name: Affected base and head
         run: |
           echo "NX_BASE=$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)" >> "$GITHUB_ENV"
@@ -165,6 +180,12 @@ jobs:
           workspaces: rust
       - name: Build linux-x64
         run: cargo build --profile host --locked
+      # The rust key covers every input of this binary; the -bin suffix keeps it apart from the pass marker.
+      - name: Cache the factory binary for targets
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/host/factory
+          key: ${{ needs.plan.outputs.rust-key }}-bin
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: factory-linux-x64
