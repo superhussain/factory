@@ -1,1 +1,1 @@
-factory.py: GET {api}/api/retro/2026-11-17 returned 404: 
+factory.py: GET {api}/api/retro/{today-6} returned 404: 

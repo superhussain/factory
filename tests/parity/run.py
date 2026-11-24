@@ -39,6 +39,9 @@ GOLDEN = HERE / "golden"
 REQUEST_HEADERS = ("content-type", "if-match", "if-none-match", "cf-access-client-id", "cf-access-client-secret",
                    "user-agent", "authorization")
 FIELDS = ("exit code", "stdout", "stderr", "home tree") + tuple(f"{tool} calls" for tool in TOOLS) + ("requests",)
+# A golden's dates relative to the run's UTC date. --record writes these placeholders, and a compare expands them.
+DAYS = {"{today}": 0, "{today-6}": 6}
+ELAPSED = re.compile(rb'"elapsed": \d+')
 STAMP = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
 
@@ -167,6 +170,10 @@ def request_lines(server, normalize):
     return lines
 
 
+def utc_date(days_back):
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() - days_back * 86400))
+
+
 def now_stamps(data, start, end):
     def stamp(match):
         try:
@@ -196,7 +203,7 @@ def run_side(case, command):
         home, bin_dir, stub_dir = root / "home", root / "bin", root / "stub"
         routes = {}
         with http_fixture(routes) if "routes" in case else contextlib.nullcontext() as server:
-            values = {"home": str(home), "tmp": str(root), "today": time.strftime("%Y-%m-%d"), "root": str(ROOT)}
+            values = {"home": str(home), "tmp": str(root), "today": utc_date(0), "root": str(ROOT)}
             if server:
                 values["api"] = server.origin
                 routes.update(routes_for(case, values))
@@ -221,6 +228,8 @@ def run_side(case, command):
             # A side gets only the fake token from home/.env, so a real one never reaches the fixture or a diff.
             env.pop("FACTORY_ACCESS_CLIENT_ID", None)
             env.pop("FACTORY_ACCESS_CLIENT_SECRET", None)
+            # The binary's local dates are UTC dates, so a golden holds the same dates in every zone.
+            env["TZ"] = "UTC"
             env.update(case.get("env", {}))
             env.update(PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""), FACTORY_STUB_DIR=str(stub_dir),
                        PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
@@ -249,7 +258,7 @@ def run_side(case, command):
             data = data.replace(os.path.dirname(os.path.dirname(runtime)).encode(), b"{skill}")
             data = data.replace(str(home).encode(), b"{home}").replace(str(root).encode(), b"{tmp}")
             data = data.replace(str(ROOT).encode(), b"{root}")
-            return now_stamps(data, start, end).replace(values["today"].encode(), b"{today}")
+            return ELAPSED.sub(rb'"elapsed": {n}', now_stamps(data, start, end))
 
         tree = [f"{path} {mode:o} {normalize(data)!r}" if data is not None else f"{path} {mode:o}"
                 for path, (mode, data) in snapshot(home).items()]
@@ -300,7 +309,10 @@ def write_golden(case, fields):
 
 def run_case(case, command, record):
     fields = run_side(case, command)
+    dates = {name: utc_date(back) for name, back in DAYS.items()}
     if record:
+        for name, date in dates.items():
+            fields = [(field, value.replace(date, name)) for field, value in fields]
         if ("routes" in case or "exit" in case) and fields[0][1] != str(case.get("exit")):
             return [f"FAIL {case['id']}: exit {fields[0][1]}, case expects {case.get('exit')}"]
         write_golden(case, fields)
@@ -309,6 +321,7 @@ def run_case(case, command, record):
     if golden is None:
         return [f"FAIL {case['id']}: no golden folder {GOLDEN / case['id']}; run with --record"]
     for (field, want), (_, got) in zip(golden, fields):
+        want = expand(want, {name[1:-1]: date for name, date in dates.items()})
         if want != got:
             diff = difflib.unified_diff(want.splitlines(), got.splitlines(), "golden", "bin", lineterm="")
             return [f"FAIL {case['id']}: {field} differs"] + list(diff)[:40]
