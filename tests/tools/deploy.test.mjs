@@ -21,10 +21,15 @@ const CONFIG = join(ROOT, ".build", "wrangler.production.json");
 const CONNECTION = join(ROOT, ".build", "connection.json");
 const base = () => JSON.parse(readFileSync(VALID, "utf8"));
 
+// Node warns on stderr when FORCE_COLOR and NO_COLOR are both set, as CI sets FORCE_COLOR, so
+// children run without either and stderr holds only the tool's own output.
+const { FORCE_COLOR: _forceColor, NO_COLOR: _noColor, ...CHILD_ENV } = process.env;
+
 const runCli = (args, cwd = ROOT) =>
   spawnSync(process.execPath, [join(ROOT, "tools", "deploy.mjs"), ...args], {
     cwd,
     encoding: "utf8",
+    env: CHILD_ENV,
   });
 
 const outputs = () =>

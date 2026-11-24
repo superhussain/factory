@@ -18,6 +18,9 @@ import test from "node:test";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const TOOL = join(ROOT, "tools", "secret-scan.mjs");
+// Node warns on stderr when FORCE_COLOR and NO_COLOR are both set, as CI sets FORCE_COLOR, so
+// children run without FORCE_COLOR; NO_COLOR stays for gitleaks.
+const { FORCE_COLOR: _forceColor, ...CHILD_ENV } = process.env;
 const GITLEAKS = !spawnSync("gitleaks", ["version"], { stdio: "ignore" }).error;
 const which = (name) =>
   spawnSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
@@ -42,7 +45,7 @@ function setup(t) {
       },
     );
   };
-  const scan = (args = [], env = process.env) =>
+  const scan = (args = [], env = CHILD_ENV) =>
     spawnSync(process.execPath, [TOOL, ...args], {
       cwd: repo,
       encoding: "utf8",
@@ -137,7 +140,7 @@ test("gitleaks missing exits 2", (t) => {
   const bin = join(tmp, "bin");
   mkdirSync(bin);
   symlinkSync(which("git"), join(bin, "git"));
-  const result = scan([], { ...process.env, PATH: bin });
+  const result = scan([], { ...CHILD_ENV, PATH: bin });
   assert.equal(result.status, 2);
   assert.match(result.stderr, /gitleaks not found/);
 });

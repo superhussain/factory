@@ -25,8 +25,12 @@ function view(review, build) {
   return JSON.stringify({ prompts });
 }
 
+// Node warns on stderr when FORCE_COLOR and NO_COLOR are both set, as CI sets FORCE_COLOR, so
+// children run without either and stderr holds only the tool's own output.
+const { FORCE_COLOR: _forceColor, NO_COLOR: _noColor, ...CHILD_ENV } = process.env;
+
 const run = (input, tool = TOOL) =>
-  spawnSync(process.execPath, [tool], { input, encoding: "utf8" });
+  spawnSync(process.execPath, [tool], { input, encoding: "utf8", env: CHILD_ENV });
 
 test("both match with a global envelope first", () => {
   const result = run(view(REVIEW, BUILD));
