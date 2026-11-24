@@ -170,10 +170,12 @@ class PipelineTest(IsolatedTestCase):
         self.assertIn('Immediately before every `pr-merge`, run `factory pipeline "$SLUG"` again', merge)
         self.assertIn("When `$PIPELINE.merge` is `human`, patch `automerge` false", merge)
         self.assertLess(merge.index("factory pipeline"), merge.index('pr-merge "$SLUG/<id>"'))
+        self.assertIn("under the same cap", merge)
         recover = " ".join((SKILL / "references/commands/recover.md").read_text(encoding="utf-8").split())
         row = recover.split("| pr-open, `automerge` true |")[1].split(" |")[0]
         self.assertIn('re-running `factory pipeline "$SLUG"` right before `pr-merge`', row)
         self.assertIn("`merge` `human` holds the PR for a person with `automerge` false", row)
+        self.assertIn("a second exit 3 in a row", row)
 
     def test_skill_pipes_the_board_patch(self):
         text = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
