@@ -12,7 +12,6 @@ import { fork, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   accessSync,
-  chmodSync,
   constants as fsConstants,
   copyFileSync,
   cpSync,
@@ -711,7 +710,7 @@ async function main(argv) {
   // Worker processes, each running one case at a time, so the harness's own file work overlaps too.
   // Processes, not threads: a thread's half-written copy of the binary can be open in another
   // thread's forked child, and exec then fails with ETXTBSY.
-  const results = new Array(cases.length);
+  const results = Array.from({ length: cases.length });
   let printed = 0;
   let failed = 0;
   let next = 0;
