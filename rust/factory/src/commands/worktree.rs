@@ -1464,7 +1464,6 @@ mod tests {
     /// `fetch_body` and passes every other call to the real git, so the parent's own git calls stay untouched.
     #[cfg(unix)]
     fn in_fake_git_child(name: &str, verb: &str, fetch_body: &str) {
-        use std::os::unix::fs::PermissionsExt;
         let path = std::env::var("PATH").unwrap();
         let real = path
             .split(':')
@@ -1475,16 +1474,13 @@ mod tests {
             "fake-git-{verb}-{}",
             name.rsplit("::").next().unwrap()
         ));
-        let script = dir.join("git");
-        fs::write(
-            &script,
-            format!(
-                "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = {verb} ]; then\n{fetch_body}\n  fi\ndone\nexec {} \"$@\"\n",
+        crate::shared::build::tests::script(
+            &dir.join("git"),
+            &format!(
+                "for a in \"$@\"; do\n  if [ \"$a\" = {verb} ]; then\n{fetch_body}\n  fi\ndone\nexec {} \"$@\"\n",
                 real.display()
             ),
-        )
-        .unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let out = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", name, "--nocapture"])
             .env(FAKE_GIT_CHILD, dir.display().to_string())
@@ -2067,8 +2063,7 @@ mod tests {
         assert_eq!(GIT_TIMEOUT, Duration::from_secs(20));
         let dir = temp_dir("wt-slow-git");
         let slow = dir.join("git");
-        fs::write(&slow, "#!/bin/sh\nsleep 5\n").unwrap();
-        chmod(&slow, 0o755);
+        crate::shared::build::tests::script(&slow, "sleep 5\n");
         let out = run_git_with(
             &text(&slow),
             ".",
