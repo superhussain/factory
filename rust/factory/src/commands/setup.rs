@@ -973,7 +973,7 @@ pub(crate) fn stamp_of(stamp: &Value) -> Option<Value> {
     .then(|| json!({"commit": map["commit"], "tree": map["tree"]}))
 }
 
-/// {commit, tree} from the bundle.json install.py writes beside the skill, or None.
+/// {commit, tree} from the bundle.json `factory install` writes beside the skill, or None.
 fn bundle_stamp() -> Option<Value> {
     stamp_shape(&read_text(&skill_root().ok()?.join("bundle.json")).ok()?)
 }
