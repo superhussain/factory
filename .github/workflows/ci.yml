@@ -95,10 +95,19 @@ jobs:
           prefix-key: v1-rust
           workspaces: rust
           save-if: false
+      # rust-build runs beside this job, so a PR that changes Rust always misses the binary above. rust-build's
+      # incremental artifacts, which this job only reads, cut that build from about 27 s to a few.
+      - name: Restore incremental artifacts
+        if: steps.factory-bin.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/host/incremental
+          key: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-
       - name: Build the factory binary
         if: steps.factory-bin.outputs.cache-hit != 'true'
         working-directory: rust
-        run: cargo build --profile host --locked
+        run: CARGO_INCREMENTAL=1 cargo build --profile host --locked
       - name: Affected base and head
         run: |
           echo "NX_BASE=$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)" >> "$GITHUB_ENV"

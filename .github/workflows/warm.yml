@@ -68,7 +68,7 @@ jobs:
           prefix-key: v1-rust
           workspaces: rust
       - name: Build the factory binary
-        run: cargo build --profile host --locked
+        run: CARGO_INCREMENTAL=1 cargo build --profile host --locked
   rust-test:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04

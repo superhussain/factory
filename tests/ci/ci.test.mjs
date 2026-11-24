@@ -185,10 +185,18 @@ test("rust-build caches the binary under the rust key, and targets restores it o
   const onMiss = targets.steps.filter((step) => step.if === miss);
   assert.deepEqual(
     onMiss.map((step) => step.run ?? action(step)),
-    ["rustup toolchain install", "Swatinem/rust-cache", "cargo build --profile host --locked"],
+    [
+      "rustup toolchain install",
+      "Swatinem/rust-cache",
+      "actions/cache/restore",
+      "CARGO_INCREMENTAL=1 cargo build --profile host --locked",
+    ],
   );
-  // The rust jobs save the shared rust/target cache; targets only reads it.
+  // The rust jobs save the shared rust/target cache and rust-build's incremental artifacts; targets only reads them.
   assert.equal(onMiss[1].with["save-if"], false);
+  const incremental = build.steps.find((step) => step.name === "Restore incremental artifacts");
+  assert.deepEqual(onMiss[2].with, incremental.with);
+  assert.ok(!targets.steps.some((step) => action(step) === "actions/cache/save"));
   const nx = targets.steps.findIndex((step) => step.name === "Nx affected");
   assert.ok(onMiss.every((step) => targets.steps.indexOf(step) > restore));
   assert.ok(onMiss.every((step) => targets.steps.indexOf(step) < nx));
