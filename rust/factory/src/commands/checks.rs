@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Value};
 
 use crate::cli::Call;
+use crate::commands::ghpoll::Cached;
 use crate::shared::board::{dump_board, escalated, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::SLUG;
@@ -747,7 +748,7 @@ pub fn checks_cmd(call: &Call) -> Res<()> {
     };
     let pr = board_pr(&home, &slug, &job_id, false)?;
     merge_hold(&home, &slug, &job_id, &pr)?;
-    let mut host = System::new();
+    let mut host = Cached::new(&home, CHECKS_INTERVAL);
     let state = gh_pr_view(&mut host, &pr, &["--json", "state", "--jq", ".state"])?;
     let state = strip(&state);
     if state != "OPEN" {
@@ -1427,7 +1428,7 @@ pub fn pr_state_cmd(call: &Call) -> Res<()> {
     };
     let pr = board_pr(&home, &slug, &job_id, true)?;
     let meta = project_meta(&home, &slug)?;
-    let mut host = System::new();
+    let mut host = Cached::new(&home, PR_STATE_INTERVAL);
     let base = pr_base(&mut host, &meta, &pr)?;
     let handled = job_handled(&home, &job_id)?;
     let org = fm_get(&meta, "buildkite_org").unwrap_or("");

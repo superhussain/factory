@@ -168,6 +168,7 @@ fn run(home: &Path) -> Res<()> {
         home.join("logs").join("daemon").display()
     );
     let terminal = io::stderr().is_terminal();
+    let gh_poller = crate::commands::ghpoll::start(signal_stop);
     let mut heart = crate::commands::heartbeat::Heart::default();
     serve(
         &url,
@@ -204,6 +205,7 @@ fn run(home: &Path) -> Res<()> {
         },
     );
     mirror::unlisten(&home);
+    let _ = gh_poller.join();
     Ok(())
 }
 
