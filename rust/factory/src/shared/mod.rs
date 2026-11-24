@@ -20,6 +20,8 @@ pub mod time;
 pub mod unicode;
 mod unicode_printable;
 
+// Temporary: a Rust source change to time CI's Rust jobs, reverted in the next commit.
+
 /// Held by every test that sets PATH, PASEO_HOME, PASEO_AGENT_ID, FACTORY_HOME or FACTORY_SESSION, and by
 /// fixtures that spawn git, since tests share one process environment.
 #[cfg(test)]
