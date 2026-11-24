@@ -625,8 +625,16 @@ pub(crate) mod tests {
             )
         );
         // The finished build holds no lock, so an installer started next can take it.
+        // Another test's child can share the lock file between fork and exec, so retry.
         let after = open_lock(&src.join(LOCK)).unwrap();
-        after.try_lock().unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        while after.try_lock().is_err() {
+            assert!(
+                Instant::now() < deadline,
+                "build lock still held 10 s after the build finished"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
