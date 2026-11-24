@@ -1542,6 +1542,97 @@ mod tests {
         assert_eq!(String::from_utf8(err).unwrap(), "daemon: running\n");
     }
 
+    #[cfg(unix)]
+    fn names(dir: &Path) -> Vec<String> {
+        let mut found: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_explore_snapshot() {
+        let root = temp_dir("setup-explore-snapshot");
+        let repo = root.join("repo");
+        fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        git(&["init", "-q"]);
+        fs::write(repo.join("a.txt"), "a\n").unwrap();
+        fs::write(repo.join(".env.example"), "KEY=\n").unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", repo.join("link")).unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "one"]);
+        fs::write(repo.join("b.txt"), "b\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "two"]);
+        let head = git(&["rev-parse", "HEAD"]);
+        let dest = root.join("explore/sample/run-1");
+        snapshot(&repo, &head, &dest).unwrap();
+        assert_eq!(names(&dest), [".env.example", "a.txt", "b.txt"]);
+        assert_eq!(fs::read_to_string(dest.join("a.txt")).unwrap(), "a\n");
+        assert!(!dest.join("link").exists() && fs::symlink_metadata(dest.join("link")).is_err());
+        assert!(!dest.join(".git").exists());
+        assert!(!root.join("explore/sample/run-1.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_explore_done_refuses_linked_parents() {
+        let _lock = crate::shared::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let root = temp_dir("setup-explore-linked");
+        let home = root.join("home");
+        let elsewhere = root.join("elsewhere");
+        fs::create_dir_all(elsewhere.join("sample/run-1")).unwrap();
+        fs::create_dir(&home).unwrap();
+        let saved = std::env::var_os("FACTORY_HOME");
+        std::env::set_var("FACTORY_HOME", &home);
+        let call = Call {
+            args: ["sample", "done", "run-1"].map(String::from).to_vec(),
+            agents: None,
+            connection: None,
+        };
+        let mut results = Vec::new();
+        for link in ["explore", "sample"] {
+            let (at, target) = if link == "explore" {
+                (home.join("explore"), elsewhere.clone())
+            } else {
+                fs::create_dir(home.join("explore")).unwrap();
+                (home.join("explore/sample"), elsewhere.join("sample"))
+            };
+            std::os::unix::fs::symlink(target, &at).unwrap();
+            results.push(explore(&call).unwrap_err());
+            fs::remove_file(&at).unwrap();
+        }
+        match saved {
+            Some(v) => std::env::set_var("FACTORY_HOME", v),
+            None => std::env::remove_var("FACTORY_HOME"),
+        }
+        for e in results {
+            assert_eq!(
+                (e.code, e.stderr.as_str()),
+                (4, "factory.py: no explorer checkout sample/run-1\n")
+            );
+        }
+        assert!(elsewhere.join("sample/run-1").is_dir());
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn set_api_url_keeps_crlf() {
         let text =

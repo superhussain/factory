@@ -364,6 +364,14 @@
       "from": "tests/cli/test_doctor.py::DoctorTest.test_redirect_auth_and_malformed_responses_do_not_leak_or_follow"
     },
     {
+      "id": "setup/doctor-unreachable-transport",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": "setup-doctor-unreachable-transport",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_timeout_uses_30_seconds_and_sanitizes_transport_diagnostics"
+    },
+    {
       "id": "setup/doctor-no-credentials",
       "argv": ["--home", "{home}", "doctor"],
       "home": "setup-configured",
