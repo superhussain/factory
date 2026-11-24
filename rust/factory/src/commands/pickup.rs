@@ -12561,20 +12561,18 @@ exit "$archive_code"
             assert!(tc.fx.job("042-sample-export").get("token_cap").is_none());
         }
 
-        /// The board command belongs to the claims slice and is not ported yet, so it writes
-        /// nothing at all; pickup stays the only writer of token_cap.
+        /// The board command refuses a token_cap patch; pickup stays its only writer.
         #[test]
         fn test_board_refuses_token_cap() {
             let tc = setup();
             export_job(&tc.fx, json!({}));
-            let home = tc.fx.home.display().to_string();
             assert_eq!(
-                crate::cli::main(vec![
-                    "board".into(),
-                    home.into(),
-                    "042-sample-export".into()
-                ]),
-                2
+                board_patch(&tc.fx, "042-sample-export", json!({"token_cap": {}})),
+                (
+                    2,
+                    "factory.py: only factory.py pickup sets token_cap. Nothing was written.\n"
+                        .into()
+                )
             );
             assert!(tc.fx.puts().is_empty());
         }
