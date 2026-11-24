@@ -599,6 +599,25 @@
       "from": "tests/cli/test_with_cloudflare.py::WithCloudflareTest.test_no_token"
     },
     {
+      "id": "setup/cloudflare-flags-after-separator",
+      "argv": [
+        "--home",
+        "{home}",
+        "with-cloudflare",
+        "--",
+        "printf",
+        "%s\\n",
+        "--home",
+        "/h",
+        "--session",
+        "x"
+      ],
+      "home": "setup-cloudflare-flags-after-separator",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_with_cloudflare.py::WithCloudflareTest.test_flags_after_separator"
+    },
+    {
       "id": "setup/explore-bad-slug",
       "argv": ["--home", "{home}", "explore", "bad slug"],
       "home": null,

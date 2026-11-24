@@ -2968,6 +2968,14 @@ mod tests {
     }
 
     #[test]
+    fn documented_command_not_flagged() {
+        let command = "python3 ~/.claude/skills/factory/runtime/factory.py with-cloudflare -- sh -c 'printf \"Authorization: Bearer %s\\n\" \"$CLOUDFLARE_API_TOKEN\" | curl -H @- https://api.cloudflare.com/client/v4/user/tokens/verify'";
+        let inp = json!({ "command": command });
+        let inp = inp.as_object().unwrap();
+        assert!(audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false).is_empty());
+    }
+
+    #[test]
     fn pr_merge_executed_only() {
         let flags = |command: &str| {
             let inp = json!({ "command": command });

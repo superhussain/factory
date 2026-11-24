@@ -2191,6 +2191,32 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn unsearchable_home() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("setup-cloudflare-unsearchable");
+        let env = dir.join(".env");
+        fs::write(&env, "CLOUDFLARE_API_TOKEN=tok\n").unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0)).unwrap();
+        // root can still search a mode 0 folder, so only assert when the OS refuses.
+        if fs::symlink_metadata(&env).is_err() {
+            let e = cloudflare_env(&env).unwrap_err();
+            assert_eq!(
+                (e.code, e.stderr),
+                (
+                    5,
+                    format!(
+                        "factory.py: cannot read {}: check its permissions and that it is UTF-8 text.\n",
+                        env.display()
+                    )
+                )
+            );
+        }
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn run_child_codes() {
         let argv = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         let code = |list: &[&str]| run_child(&argv(list), &[]).map_err(|e| (e.code, e.stderr));
