@@ -27,7 +27,7 @@ fn home_flag_beats_factory_home_and_creates_no_default() {
     assert_eq!(out.status.code(), Some(2), "{text}");
     let want = format!(
         "Set api_url in {}, then run /factory init again.",
-        explicit.join("config.md").display()
+        explicit.canonicalize().unwrap().join("config.md").display()
     );
     assert!(text.contains(&want), "{text}");
     assert!(!text.contains(&env_home.display().to_string()), "{text}");

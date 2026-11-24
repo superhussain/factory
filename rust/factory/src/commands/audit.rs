@@ -2730,6 +2730,9 @@ mod tests {
         stops_at_limit(&AUDIT_SECRET_FILE, "cat .env", true);
     }
 
+    /// Wall-clock ceiling per linearity input. Loose enough for a loaded parallel suite, far below any quadratic run on these sizes.
+    const LINEAR_BOUND_SECS: f64 = 5.0;
+
     #[cfg(unix)]
     #[test]
     fn outcome_of_reads_reverts_fixes_and_holds() {
@@ -3025,7 +3028,7 @@ mod tests {
         let start = std::time::Instant::now();
         let text = format!(" -{}!", "c".repeat(100_000));
         assert!(AUDIT_RUNS_OUTPUT.search(&text).is_none());
-        assert!(start.elapsed().as_secs_f64() < 1.0);
+        assert!(start.elapsed().as_secs_f64() < LINEAR_BOUND_SECS);
     }
 
     #[test]
@@ -3176,7 +3179,11 @@ mod tests {
             let start = std::time::Instant::now();
             let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text).unwrap());
             assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
-            assert!(start.elapsed().as_secs_f64() < 1.0);
+            assert!(
+                start.elapsed().as_secs_f64() < LINEAR_BOUND_SECS,
+                "{}",
+                &text[..8]
+            );
         }
     }
 

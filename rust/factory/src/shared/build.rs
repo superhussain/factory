@@ -70,7 +70,13 @@ impl Host {
 
 /// The cached host-profile binary built from checkout's rust/ folder, building it first when no
 /// cached one matches. stderr gets one line saying which. Err is the reason, without a prefix.
-pub fn rust_binary(checkout: &Path, host: &Host, err: &mut dyn Write) -> Result<PathBuf, String> {
+/// The bytes are the ones the sha check passed or that were stored, so a caller that copies the
+/// binary never reads a path another install may have replaced since.
+pub fn rust_binary(
+    checkout: &Path,
+    host: &Host,
+    err: &mut dyn Write,
+) -> Result<(PathBuf, Vec<u8>), String> {
     if !checkout.join("rust").join("Cargo.toml").is_file() {
         return Err(format!("{} has no rust/Cargo.toml", checkout.display()));
     }
@@ -103,7 +109,7 @@ fn build(
     host: &Host,
     cargo: &Path,
     err: &mut dyn Write,
-) -> Result<PathBuf, String> {
+) -> Result<(PathBuf, Vec<u8>), String> {
     let name = Path::new(BINARY).file_name().unwrap_or_default();
     let cache = if cfg!(windows) {
         let local = (host.var)("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
@@ -153,14 +159,14 @@ fn build(
         if sha(&bytes) == strip(&want) {
             executable_by_owner(&binary)?;
             let _ = writeln!(err, "install: Rust binary from cache {}", &key[..8]);
-            return Ok(binary);
+            return Ok((binary, bytes));
         }
     }
     if let Some(own) = own_build(checkout, host, &files) {
         let bytes = fs::read(&own).map_err(|e| os_error(&e, Some(&own)))?;
         store(&bins, &stored, &binary, &sum, &bytes)?;
         let _ = writeln!(err, "install: Rust binary from {}", own.display());
-        return Ok(binary);
+        return Ok((binary, bytes));
     }
     // A per-user target folder keeps dependencies compiled across catch-up's fresh source worktrees.
     // The binary is read back from it, so the default one must be private like bin and build-src.
@@ -217,7 +223,7 @@ fn build(
                 .as_secs_f64()
         )
     );
-    Ok(binary)
+    Ok((binary, built))
 }
 
 /// The running binary when it is this checkout's own rust/target host build and no input changed
@@ -544,8 +550,11 @@ pub(crate) mod tests {
             let cargo = fake_cargo(&root, stub);
             fs::write(&lib, text).unwrap();
             let mut err = Vec::new();
-            let path = rust_binary(&checkout, &host(&root, vars, Some(cargo)), &mut err).unwrap();
-            (fs::read(path).unwrap(), String::from_utf8(err).unwrap())
+            let (path, bytes) =
+                rust_binary(&checkout, &host(&root, vars, Some(cargo)), &mut err).unwrap();
+            // The returned bytes are the binary's: a build, a store or a cache hit.
+            assert_eq!(fs::read(path).unwrap(), bytes);
+            (bytes, String::from_utf8(err).unwrap())
         };
         assert_eq!(rust("one", "1", &[]).0, b"one");
         let (binary, err) = rust("other", "1", &[]);
@@ -641,7 +650,9 @@ pub(crate) mod tests {
         let (r, c) = (root.clone(), checkout.clone());
         let thread = std::thread::spawn(move || {
             let mut err = Vec::new();
-            let path = rust_binary(&c, &host(&r, &[], Some(cargo)), &mut err).unwrap();
+            let path = rust_binary(&c, &host(&r, &[], Some(cargo)), &mut err)
+                .unwrap()
+                .0;
             (fs::read(path).unwrap(), String::from_utf8(err).unwrap())
         });
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -705,7 +716,9 @@ pub(crate) mod tests {
         );
         fake_rustc(cargo.parent().unwrap(), "1.100.0");
         let mut err = Vec::new();
-        let path = rust_binary(&checkout, &host(&root, &[], None), &mut err).unwrap();
+        let path = rust_binary(&checkout, &host(&root, &[], None), &mut err)
+            .unwrap()
+            .0;
         assert_eq!(fs::read(path).unwrap(), b"home");
         assert_eq!(err, b"install: Rust binary built in 0 s\n");
         fs::remove_dir_all(root).unwrap();
@@ -811,8 +824,11 @@ pub(crate) mod tests {
         let mut machine = host(&root, &[], Some(cargo));
         machine.exe = Some(own.clone());
         let mut err = Vec::new();
-        let path = rust_binary(&checkout, &machine, &mut err).unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"own build");
+        let (path, bytes) = rust_binary(&checkout, &machine, &mut err).unwrap();
+        assert_eq!(
+            (fs::read(&path).unwrap(), bytes),
+            (b"own build".to_vec(), b"own build".to_vec())
+        );
         assert_eq!(
             String::from_utf8(err).unwrap(),
             format!("install: Rust binary from {}\n", own.display())
@@ -827,7 +843,7 @@ pub(crate) mod tests {
             .unwrap()
             .set_modified(later)
             .unwrap();
-        let path = rust_binary(&checkout, &machine, &mut Vec::new()).unwrap();
+        let path = rust_binary(&checkout, &machine, &mut Vec::new()).unwrap().0;
         assert_eq!(fs::read(path).unwrap(), b"rebuilt");
         fs::write(checkout.join("rust/lib.rs"), "// edited again\n").unwrap();
         machine.exe = Some(root.join("elsewhere/factory"));

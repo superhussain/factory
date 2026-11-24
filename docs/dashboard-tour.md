@@ -18,8 +18,9 @@ This page walks through every dashboard view with a made-up job, `051-sample-ret
 
 ## The job panel
 
-- The tabs are `idea`, `spec`, `build`, `Pre-review`, `R<n> security`, `R<n> ux`, `R<n> ui`, `R<n> code`, `rework <n>`, `decision`, `needs`, `answers`, `scratchpad` and `audit`.
-- `Pre-review` shows the base branch's checks. Its chip reads `FAIL`, `PASS` or `NONE` from the file's first line.
+- The tabs are `idea`, `spec`, `build`, `pre-review`, `security`, `ux`, `ui`, `code`, `grounding`, `rework <n>`, `decision`, `needs`, `answers`, `scratchpad` and `audit`.
+- Each reviewer and grounding has one tab with a `Round N` section per round, oldest first.
+- `pre-review` shows the base branch's checks. Its chip reads `FAIL`, `PASS` or `NONE` from the file's first line. Review, grounding and decision tabs carry a chip from their newest first line too.
 - A page with a walkthrough shows an "Interactive walkthrough" bar with Show and Expand.
 - The Star button stars the job. Stars stay in this browser.
 - Babysit PR sits in the header and in the Job actions menu. It shows only for a `pr-open` job with a PR that is not paused, closing or a batch rider. It asks you to confirm. Then it sets the note `babysitting PR #<n>`, clears needs and escalation, and prioritizes pickup.

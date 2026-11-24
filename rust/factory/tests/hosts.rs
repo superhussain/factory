@@ -13,7 +13,9 @@ fn host_lines() -> Vec<String> {
             }
             continue;
         }
-        if path.extension().is_none_or(|e| e != "rs") {
+        // pickup's test module is its own file.
+        if path.extension().is_none_or(|e| e != "rs") || path.ends_with("commands/pickup/tests.rs")
+        {
             continue;
         }
         let text = std::fs::read_to_string(&path).unwrap();
