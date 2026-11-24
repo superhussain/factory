@@ -20,8 +20,9 @@ output that does not match.
 - **A backup of what changes.** Before catch-up writes anything, it prints
   `backup: <home>/backups/catch-up-<stamp>`. That folder (mode 700) holds:
   - `skill/factory/`, the old installed skill;
-  - `crontab.txt` on cron hosts, `LaunchAgents/factory.*.plist` on macOS, and
-    `config/factory-*.cmd` on Windows;
+  - `crontab.txt` on cron hosts, `LaunchAgents/factory.*.plist` on macOS,
+    `systemd/factory-*.service` on systemd hosts, and `config/factory-*.cmd` on
+    Windows;
   - `home/`, with `config.md`, `paths.md`, `routes.md`, `launchers.json` and
     `.env`.
 
@@ -258,6 +259,8 @@ catch-up printed as `backup: <path>`:
    fresh install path, use `<home>/backups/pre-rust-skill` instead.
 3. Restore the timers. Run `crontab <backup>/crontab.txt`, or copy the plists back
    to `~/Library/LaunchAgents`, or the `.cmd` files back to `%USERPROFILE%\.config`.
+   On a systemd host, copy `<backup>/systemd/*` back to `~/.config/systemd/user`
+   and run `systemctl --user daemon-reload`.
 4. Copy the files in `<backup>/home/` back into the factory home.
 
 ## Agent checklist
