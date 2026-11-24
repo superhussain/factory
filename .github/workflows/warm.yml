@@ -1,4 +1,4 @@
-# Warms the Rust caches CI restores. CI runs only on pull requests, and a PR restores caches saved on main but
+# Warms the Rust and browser caches CI restores. CI runs only on pull requests, and a PR restores caches saved on main but
 # never another PR's, so without this every PR's first run compiled every dependency from scratch.
 # rust-cache keys on the job id, the toolchain, CARGO* and RUST* variables and the manifests. Each job here has
 # its ci.yml job's id, rust-cache inputs and environment, so it saves the exact key that job looks up; a PR
@@ -68,7 +68,7 @@ jobs:
           prefix-key: v1-rust
           workspaces: rust
       - name: Build the factory binary
-        run: cargo build --profile host --locked
+        run: CARGO_INCREMENTAL=1 cargo build --profile host --locked
   rust-test:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
@@ -86,9 +86,20 @@ jobs:
         with:
           prefix-key: v1-rust
           workspaces: rust
-      # The compiled test dependencies are the cache; CI runs the tests.
+      - name: Restore incremental artifacts
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/debug/incremental
+          key: v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-
+      # The compiled test dependencies and incremental artifacts are the cache; CI runs the tests.
       - name: Build the tests
-        run: cargo test --locked --no-run
+        run: CARGO_INCREMENTAL=1 cargo test --locked --no-run
+      - name: Save incremental artifacts
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/debug/incremental
+          key: v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
   rust-check:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
@@ -112,3 +123,19 @@ jobs:
         run: cargo check --locked --target aarch64-apple-darwin
       - name: Check windows-x64
         run: cargo check --locked --target x86_64-pc-windows-gnu
+  # CI's targets and browser jobs restore the provisioned Chrome for Testing and never save it.
+  browser:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/ci-setup
+      - name: Cache browser provision
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .context/browser
+          key: browser-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: node tests/browser/provision.mjs
