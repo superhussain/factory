@@ -134,7 +134,7 @@ fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String
         let (code, text) = pickup::launchd_reload(pickup::DAEMON.label, &plist, &mut launchctl);
         if code != 0 {
             return Err(format!(
-                "launchctl bootstrap: {}",
+                "launchctl bootstrap exited {code}: {}",
                 strip(&text).split('\n').next().unwrap_or("")
             ));
         }
@@ -174,7 +174,10 @@ fn reload_retro_push(binary: &Path) -> Option<Result<String, String>> {
     }
     let (code, out) = pickup::launchd_reload(label, &plist, &mut launchctl);
     Some(if code != 0 {
-        Err(strip(&out).split('\n').next().unwrap_or("").to_string())
+        Err(format!(
+            "launchctl bootstrap exited {code}: {}",
+            strip(&out).split('\n').next().unwrap_or("")
+        ))
     } else if launchctl(&["launchctl", "print", &target]).0 != 0 {
         Err(format!("{target} is not loaded after bootstrap"))
     } else {
@@ -2028,7 +2031,7 @@ mod tests {
         let (code, lines) = t.lines();
         assert_eq!(code, 1, "{lines:?}");
         assert!(
-            lines.contains(&"daemon: restart failed: launchctl bootstrap: Bootstrap failed: 5: Input/output error".to_string()),
+            lines.contains(&"daemon: restart failed: launchctl bootstrap exited 5: Bootstrap failed: 5: Input/output error".to_string()),
             "{lines:?}"
         );
     }
