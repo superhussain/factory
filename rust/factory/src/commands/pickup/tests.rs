@@ -6430,10 +6430,18 @@ mod gh_pr_test {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_gh_pr_reports_a_timeout() {
         let fx = Fx::new();
-        fx.set_env("PATH", fx.root.join("empty"));
+        fx.set_env(
+            "PATH",
+            crate::shared::path_without(
+                "gh",
+                &std::env::var_os("PATH").unwrap(),
+                &fx.root.join("path"),
+            ),
+        );
         assert_eq!(gh_cli(&["view", "x"]), None);
     }
 }
