@@ -310,6 +310,14 @@
       "from": "tests/cli/test_doctor.py::DoctorTest.test_redirect_auth_and_malformed_responses_do_not_leak_or_follow"
     },
     {
+      "id": "setup/doctor-transport-failure",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": "setup-doctor-closed",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_timeout_uses_30_seconds_and_sanitizes_transport_diagnostics"
+    },
+    {
       "id": "setup/doctor-projects-not-json",
       "argv": ["--home", "{home}", "doctor"],
       "home": null,
