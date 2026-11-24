@@ -3062,7 +3062,11 @@ mod tests {
             let start = std::time::Instant::now();
             let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text));
             assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
-            assert!(start.elapsed().as_secs_f64() < LINEAR_BOUND_SECS, "{}", &text[..8]);
+            assert!(
+                start.elapsed().as_secs_f64() < LINEAR_BOUND_SECS,
+                "{}",
+                &text[..8]
+            );
         }
     }
 
