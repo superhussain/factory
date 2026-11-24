@@ -15,7 +15,7 @@ exec "$binary" "$@"
 '''
 import os, subprocess, sys
 binary = os.path.join(os.path.dirname(os.path.abspath(__file__)), "factory.exe" if os.name == "nt" else "factory")
-if not os.path.isfile(binary):
+if not (os.path.isfile(binary) and os.access(binary, os.X_OK)):
     print(f"factory.py: no factory binary at {binary}; from a factory checkout run sh tools/install.sh <skills folder> "
           "(tools\\install.ps1 on Windows)", file=sys.stderr)
     sys.exit(127)

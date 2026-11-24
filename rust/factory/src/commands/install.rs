@@ -1136,31 +1136,40 @@ mod tests {
             );
             assert!(err.contains("FACTORY_RUNTIME=python is gone"), "{argv:?}");
         }
-        // Without the binary, one line names the installer and nothing runs.
-        fs::remove_file(runtime.join("factory")).unwrap();
-        fs::remove_file(runtime.join("factory.exe")).unwrap();
-        for argv in [
-            vec!["sh", &text, "a"],
-            vec!["python3", &text, "a"],
-            vec!["python3", "-c", &windows],
-        ] {
-            let p = std::process::Command::new(argv[0])
-                .args(&argv[1..])
-                .stdin(std::process::Stdio::null())
-                .output()
-                .unwrap();
-            let err = String::from_utf8(p.stderr).unwrap();
-            assert_eq!(
-                (p.status.code(), p.stdout.len()),
-                (Some(127), 0),
-                "{argv:?}"
-            );
-            assert_eq!(err.lines().count(), 1, "{argv:?}: {err}");
-            assert!(
-                err.starts_with("factory.py: no factory binary at ")
-                    && err.contains("sh tools/install.sh <skills folder>"),
-                "{argv:?}: {err}"
-            );
+        // With a binary that is not executable, then with none, one line names the installer and
+        // nothing runs.
+        for missing in [false, true] {
+            for name in ["factory", "factory.exe"] {
+                if missing {
+                    fs::remove_file(runtime.join(name)).unwrap();
+                } else {
+                    fs::set_permissions(runtime.join(name), fs::Permissions::from_mode(0o644))
+                        .unwrap();
+                }
+            }
+            for argv in [
+                vec!["sh", &text, "a"],
+                vec!["python3", &text, "a"],
+                vec!["python3", "-c", &windows],
+            ] {
+                let p = std::process::Command::new(argv[0])
+                    .args(&argv[1..])
+                    .stdin(std::process::Stdio::null())
+                    .output()
+                    .unwrap();
+                let err = String::from_utf8(p.stderr).unwrap();
+                assert_eq!(
+                    (p.status.code(), p.stdout.len()),
+                    (Some(127), 0),
+                    "{argv:?}"
+                );
+                assert_eq!(err.lines().count(), 1, "{argv:?}: {err}");
+                assert!(
+                    err.starts_with("factory.py: no factory binary at ")
+                        && err.contains("sh tools/install.sh <skills folder>"),
+                    "{argv:?}: {err}"
+                );
+            }
         }
         let _ = fs::remove_dir_all(&root);
     }
