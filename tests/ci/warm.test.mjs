@@ -73,13 +73,20 @@ test("each warm job installs the same toolchain and compiles what its ci.yml job
 });
 
 test("warm rust-build and rust-test save the incremental artifacts under the keys ci.yml restores", () => {
-  for (const id of ["rust-build", "rust-test"]) {
-    for (const name of ["Restore incremental artifacts", "Save incremental artifacts"]) {
-      const [w, c] = [named(warm.jobs[id], name), named(ci.jobs[id], name)];
-      assert.equal(w.uses, c.uses, `${id}: ${name}`);
-      assert.deepEqual(w.with, c.with, `${id}: ${name}`);
-    }
+  for (const name of ["Restore incremental artifacts", "Save incremental artifacts"]) {
+    const [w, c] = [named(warm.jobs["rust-build"], name), named(ci.jobs["rust-build"], name)];
+    assert.equal(w.uses, c.uses, name);
+    assert.deepEqual(w.with, c.with, name);
   }
+  // CI's rust-test only restores, under the key warm saves.
+  const restore = named(ci.jobs["rust-test"], "Restore incremental artifacts");
+  assert.deepEqual(
+    named(warm.jobs["rust-test"], "Restore incremental artifacts").with,
+    restore.with,
+  );
+  const save = named(warm.jobs["rust-test"], "Save incremental artifacts");
+  assert.equal(action(save), "actions/cache/save");
+  assert.deepEqual(save.with, { path: restore.with.path, key: restore.with.key });
 });
 
 test("warm browser saves the provision under the key ci.yml's browser and targets jobs restore", () => {

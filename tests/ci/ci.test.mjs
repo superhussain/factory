@@ -218,25 +218,23 @@ test("rust-build restores and saves this PR's incremental artifacts around an in
   assert.deepEqual(save.with, { path, key });
 });
 
-test("rust-test restores incremental artifacts, and one shard saves them between the build and the tests", () => {
+test("rust-test restores main's incremental artifacts before the build and never saves them", () => {
   const steps = workflow.jobs["rust-test"].steps;
   const at = (name) => steps.findIndex((step) => step.name === name);
   const cache = steps.findIndex((step) => action(step) === "Swatinem/rust-cache");
   const restore = steps[at("Restore incremental artifacts")];
-  const save = steps[at("Save incremental artifacts")];
   assert.equal(action(restore), "actions/cache/restore");
-  assert.equal(action(save), "actions/cache/save");
   assert.ok(cache < at("Restore incremental artifacts"));
   assert.ok(at("Restore incremental artifacts") < at("Build the tests"));
-  assert.ok(at("Build the tests") < at("Save incremental artifacts"));
-  assert.ok(at("Save incremental artifacts") < at("Test linux-x64"));
-  assert.equal(save.if, "matrix.shard == 1");
-  const path = "rust/target/debug/incremental";
+  assert.ok(at("Build the tests") < at("Test linux-x64"));
+  assert.ok(!steps.some((step) => action(step) === "actions/cache/save"));
   const prefix =
     "v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-";
-  const key = `${prefix}\${{ github.run_id }}-\${{ github.run_attempt }}`;
-  assert.deepEqual(restore.with, { path, key, "restore-keys": prefix });
-  assert.deepEqual(save.with, { path, key });
+  assert.deepEqual(restore.with, {
+    path: "rust/target/debug/incremental",
+    key: `${prefix}\${{ github.run_id }}-\${{ github.run_attempt }}`,
+    "restore-keys": prefix,
+  });
 });
 
 test("no job runs the Python CLI suites or sets up Python, and the workflow reads no secret", () => {

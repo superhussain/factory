@@ -246,8 +246,9 @@ jobs:
         with:
           prefix-key: v1-rust
           workspaces: rust
-      # As in rust-build: the newest incremental artifacts, from main or this PR, let rustc reuse the unchanged
-      # codegen units of the test build.
+      # As in rust-build, the newest incremental artifacts let rustc reuse the unchanged codegen units of the test
+      # build. Only warm.yml saves them, from main: at about 200 MB a copy, a save per PR run would crowd main's
+      # warm caches out of the repo's cache budget, and a PR's diff from main is what it recompiles either way.
       - name: Restore incremental artifacts
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -264,13 +265,6 @@ jobs:
       # nextest builds with cargo test --no-run, so this is the build it runs.
       - name: Build the tests
         run: CARGO_INCREMENTAL=1 cargo test --locked --no-run
-      # One shard saves; both built the same artifacts.
-      - name: Save incremental artifacts
-        if: matrix.shard == 1
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: rust/target/debug/incremental
-          key: v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Test linux-x64
         run: CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2
   # Type-checks the darwin-arm64 and windows-x64 targets.
