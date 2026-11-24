@@ -165,10 +165,41 @@ test("targets restores the browser cache read-only", () => {
   assert.ok(uses("browser").includes("actions/cache"));
 });
 
-test("no job runs the Python CLI suites and the workflow reads no secret", () => {
+test("rust-build caches the binary under the rust key, and targets restores it or builds it on a miss", () => {
+  const { targets, "rust-build": build } = workflow.jobs;
+  const key = "${{ needs.plan.outputs.rust-key }}-bin";
+  const binary = "rust/target/host/factory";
+  const save = build.steps.find((step) => action(step) === "actions/cache/save");
+  assert.deepEqual(save.with, { path: binary, key });
+  const buildStep = build.steps.findIndex((step) => step.name === "Build linux-x64");
+  assert.ok(build.steps.indexOf(save) > buildStep);
+  // targets never waits on rust-build, so it still runs when a rust hit skips rust-build.
+  assert.equal(targets.needs, "plan");
+  const restore = targets.steps.findIndex((step) => step.name === "Restore the factory binary");
+  assert.equal(action(targets.steps[restore]), "actions/cache/restore");
+  assert.deepEqual(targets.steps[restore].with, { path: binary, key });
+  const miss = "steps.factory-bin.outputs.cache-hit != 'true'";
+  const onMiss = targets.steps.filter((step) => step.if === miss);
+  assert.deepEqual(
+    onMiss.map((step) => step.run ?? action(step)),
+    ["rustup toolchain install", "Swatinem/rust-cache", "cargo build --profile host --locked"],
+  );
+  // The rust jobs save the shared rust/target cache; targets only reads it.
+  assert.equal(onMiss[1].with["save-if"], false);
+  const nx = targets.steps.findIndex((step) => step.name === "Nx affected");
+  assert.ok(onMiss.every((step) => targets.steps.indexOf(step) > restore));
+  assert.ok(onMiss.every((step) => targets.steps.indexOf(step) < nx));
+});
+
+test("no job runs the Python CLI suites or sets up Python, and the workflow reads no secret", () => {
   assert.equal(workflow.jobs.python, undefined);
   const raw = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
-  assert.doesNotMatch(raw, /secrets\./);
+  assert.doesNotMatch(raw, /secrets\.|setup-python|PYTHON/);
+  const setup = readFileSync(
+    new URL("../../.github/actions/ci-setup/action.yml", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(setup, /setup-python|python-version/);
 });
 
 test("the paseo-plugin job installs, typechecks and tests the plugin in order", () => {

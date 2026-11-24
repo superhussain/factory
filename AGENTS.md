@@ -17,7 +17,8 @@ node tests/parity/run.mjs --bin rust/target/host/factory --jobs 8
 The installed bundle is the factory binary, and its checks are `cargo test` and the parity
 harness; neither needs Node, pnpm or mise. The affected targets cache under the ignored
 `.nx/cache`; job 108 owns the lint and format targets. `local` binds
-`127.0.0.1:8220`/`8221`; `browser` binds owned ephemeral ports, so parallel
+`127.0.0.1:8220`/`8221` and runs its device flows on `rust/target/host/factory`, or `FACTORY_BIN`,
+so build the binary first; `browser` binds owned ephemeral ports, so parallel
 jobs can run it at once. `browser` has no Nx dependency on `local`, so the two run side by side.
 
 The parity harness compares the binary with the golden files in `tests/parity/golden/`. After an intended
