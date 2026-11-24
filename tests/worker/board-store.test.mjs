@@ -546,6 +546,9 @@ test("the room's slim body is byte for byte the Worker's slimBoard, across rando
         changes.push({ id: added?.id ?? `${++n}-x`, row: added, add: true });
       }
       if (!changes.length) continue;
+      // Half the pages lose their meta, as before the column, so the commit's update, delete and
+      // add each meet a page with none; the slim read after fills it in.
+      store.sql.exec("UPDATE board_pages SET meta = NULL WHERE page % 2 = ?", w % 2);
       const out = await store.commit({ base: store.state().etag, changes, updated: stamp() });
       assert.ok(out.etag, JSON.stringify(out));
       await check(s, `board ${b} write ${w}`);
