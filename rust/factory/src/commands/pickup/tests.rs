@@ -10439,12 +10439,19 @@ mod daemon_setup_test {
         assert!(!timer_installed("cron", &DAEMON).0);
     }
 
+    /// The task's `/ST` is the one time retro_push_times gives Task Scheduler, which the daemon
+    /// also pushes at.
     #[test]
     fn schtasks_retro_push_task_runs_daily_at_0830() {
+        let [(hour, minute)] = retro_push_times("schtasks") else {
+            panic!("Task Scheduler runs the retro push once a day");
+        };
+        let at = format!("{hour:02}:{minute:02}");
         assert_eq!(
             schtasks_schedule(&RETRO_PUSH),
-            ["/SC", "DAILY", "/ST", "08:30"]
+            ["/SC", "DAILY", "/ST", at.as_str()]
         );
+        assert_eq!(at, "08:30");
         assert_eq!(cron_detail(&RETRO_PUSH), "crontab runs retro-push daily");
     }
 
