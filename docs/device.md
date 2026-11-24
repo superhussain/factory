@@ -606,7 +606,10 @@ For each case, one at a time, it:
    `config.md`, or in `~/.claude/agents`, with a `description`; without it bench
    exits 4 before any case runs. `--setting-sources ""` loads no settings files,
    so their hooks and allow rules cannot widen the grant, and `--agents` passes
-   the agent file inline. `--permission-mode dontAsk` and `--allowedTools` allow
+   the agent file inline, with its `tools:` line as a list and its `model`.
+   `--strict-mcp-config` with no `--mcp-config` starts no MCP servers, so a
+   `.mcp.json` in the reviewed worktree cannot run.
+   `--permission-mode dontAsk` and `--allowedTools` allow
    only Read, Grep, Glob, Write and `git diff`, `git log`, `git show` and
    `git blame` in Bash. `--disallowedTools "Bash(git *--out*)"` stops
    `--output`. `--add-dir` names the scratch job folder, and `--model` is passed

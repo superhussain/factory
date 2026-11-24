@@ -2003,7 +2003,7 @@ const BENCH_REPLAY_TOOLS: [&str; 8] = [
 ];
 const BENCH_REPLAY_DENIED: [&str; 1] = ["Bash(git *--out*)"];
 
-/// The --agents JSON holding the factory-<role> agent file, which claude cannot find with no setting sources.
+/// The --agents JSON holding the factory-<role> agent file, with its tools and model, which claude cannot find with no setting sources.
 fn bench_replay_agents(home: &Path, role: &str) -> Res<String> {
     let config = home.join("config.md");
     let meta = if config.exists() {
@@ -2035,6 +2035,15 @@ fn bench_replay_agents(home: &Path, role: &str) -> Res<String> {
         ));
     };
     let mut entry = json!({"description": description, "prompt": body});
+    let tools: Vec<&str> = fm_get(&agent, "tools")
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+    if !tools.is_empty() {
+        entry["tools"] = json!(tools);
+    }
     if let Some(model) = fm_get(&agent, "model").filter(|m| !m.is_empty()) {
         entry["model"] = json!(model);
     }
@@ -2273,6 +2282,7 @@ fn bench_replay_case(
             &session,
             "--setting-sources",
             "",
+            "--strict-mcp-config",
             "--permission-mode",
             "dontAsk",
             "--allowedTools",
@@ -2959,7 +2969,7 @@ exit "${FAKE_EXIT:-0}"
     pub(super) const REVIEW: &str =
         "VERDICT: CHANGES\n\n- `worker/export.js:44` drops the header row.\n";
     pub(super) const RUNNING: &str = "1018-add-y: running review-code ...\n";
-    pub(super) const AGENTS: &str = r#"{"factory-review-code": {"description": "Code reviewer.", "prompt": "Review the diff.\n", "model": "opus"}}"#;
+    pub(super) const AGENTS: &str = r#"{"factory-review-code": {"description": "Code reviewer.", "prompt": "Review the diff.\n", "tools": ["Read", "Grep", "Glob", "Bash", "Write"], "model": "opus"}}"#;
 
     pub(super) fn summary(wrote: u32, skipped: u32, failed: u32) -> String {
         format!(
@@ -3044,7 +3054,7 @@ exit "${FAKE_EXIT:-0}"
             fs::create_dir(root.join("agents")).unwrap();
             fs::write(
                 &agent,
-                "---\ndescription: Code reviewer.\nmodel: opus\n---\nReview the diff.\n",
+                "---\ndescription: Code reviewer.\ntools: Read, Grep, Glob, Bash, Write\nmodel: opus\n---\nReview the diff.\n",
             )
             .unwrap();
             fs::write(
@@ -3298,6 +3308,7 @@ mod bench_replay_test {
                 &session,
                 "--setting-sources",
                 "",
+                "--strict-mcp-config",
                 "--permission-mode",
                 "dontAsk",
                 "--allowedTools",
@@ -3352,6 +3363,24 @@ mod bench_replay_test {
         assert!(!call.stdin.contains("Project documents"));
         assert_eq!(b.run_json()["model"], Value::Null);
         assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_agent_without_tools() {
+        let b = Bench::new("no-tools");
+        fs::write(
+            &b.agent,
+            "---\ndescription: Code reviewer.\nmodel: opus\n---\nReview the diff.\n",
+        )
+        .unwrap();
+        assert_eq!(b.replay(&["--role", "review-code"]).0, 0);
+        let argv = b.call().unwrap().argv;
+        let at = argv.iter().position(|a| a == "--agents").unwrap();
+        let agents: Value = serde_json::from_str(&argv[at + 1]).unwrap();
+        assert_eq!(
+            agents["factory-review-code"],
+            json!({"description": "Code reviewer.", "prompt": "Review the diff.\n", "model": "opus"})
+        );
     }
 
     #[test]

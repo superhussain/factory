@@ -13777,7 +13777,7 @@ def bench_replay_plan(home, cases):
 
 
 def bench_replay_agents(home, role):
-    """The --agents JSON holding the factory-<role> agent file, which claude cannot find with no setting sources."""
+    """The --agents JSON holding the factory-<role> agent file, with its tools and model, which claude cannot find with no setting sources."""
     config = home / "config.md"
     meta = frontmatter(config)[0] if config.exists() else {}
     path = Path(meta.get("claude_agents_dir") or Path.home() / ".claude/agents") / f"factory-{role}.md"
@@ -13785,6 +13785,9 @@ def bench_replay_agents(home, role):
     if not agent.get("description"):
         fail(f"bench: replay needs the factory-{role} agent at {path}", 4)
     entry = {"description": agent["description"], "prompt": body}
+    tools = [t.strip() for t in agent.get("tools", "").split(",") if t.strip()]
+    if tools:
+        entry["tools"] = tools
     if agent.get("model"):
         entry["model"] = agent["model"]
     return json.dumps({f"factory-{role}": entry})
@@ -13862,8 +13865,8 @@ def bench_replay_case(row, arm, role, model, agents):
                 shutil.copyfile(row["job"] / doc, tmp / "job" / doc)
         session = str(uuid.uuid4())
         argv = [shutil.which("claude"), "-p", "--agent", f"factory-{role}", "--agents", agents, "--session-id", session,
-                "--setting-sources", "", "--permission-mode", "dontAsk", "--allowedTools", *BENCH_REPLAY_TOOLS,
-                "--disallowedTools", *BENCH_REPLAY_DENIED, "--add-dir", str(tmp / "job")]
+                "--setting-sources", "", "--strict-mcp-config", "--permission-mode", "dontAsk", "--allowedTools",
+                *BENCH_REPLAY_TOOLS, "--disallowedTools", *BENCH_REPLAY_DENIED, "--add-dir", str(tmp / "job")]
         argv += ["--model", model] if model else []
         out.mkdir(parents=True, exist_ok=True)
         start, code = time.monotonic(), None
