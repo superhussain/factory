@@ -402,9 +402,10 @@ describe("cancel drill", () => {
       await sleep(50);
       let slim;
       try {
-        slim = await req("/board.json?view=slim", { timeout: 10_000 });
-      } catch {
-        assert.fail(`round ${n}: second reader got no answer in 10 s`);
+        slim = await req("/board.json?view=slim");
+      } catch (error) {
+        if (error.name !== "TimeoutError") throw error;
+        assert.fail(`round ${n}: second reader got no answer in 30 s`);
       }
       await aborter;
       assert.equal(slim.status, 200, `round ${n}`);

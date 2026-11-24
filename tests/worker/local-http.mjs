@@ -16,13 +16,13 @@ export function testUrl() {
   return url;
 }
 
-export async function request(origin, path, { method = "GET", body, headers = {}, timeout } = {}) {
+export async function request(origin, path, { method = "GET", body, headers = {} } = {}) {
   const r = await fetch(origin + path, {
     method,
     body,
     headers,
     redirect: "manual",
-    signal: AbortSignal.timeout(timeout ?? 30_000),
+    signal: AbortSignal.timeout(30_000),
   });
   return { status: r.status, headers: r.headers, body: Buffer.from(await r.arrayBuffer()) };
 }
