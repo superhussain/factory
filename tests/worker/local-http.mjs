@@ -54,8 +54,14 @@ export function makeHome(dir, name, origin, paths) {
 // of them have arrived: two devices' binaries meet at it as the Python suites' in-process barrier made
 // them meet. By default it forwards the held requests together; with `after` it forwards each one
 // first and holds its reply, so every device gets its answer before any of them can write. `calls`
-// lists every `method path` it saw, and `replies` each `method path status`, in order.
-export async function barrierProxy(origin, hold, { count = 2, after = false } = {}) {
+// lists every `method path` it saw, and `replies` each `method path status`, in order. A held request
+// whose partners don't arrive within `timeout` ms gets a 504 naming how many did, as Python's
+// gate.wait(timeout=10) failed, so one device failing early can't hang the test.
+export async function barrierProxy(
+  origin,
+  hold,
+  { count = 2, after = false, timeout = 10_000 } = {},
+) {
   const calls = [];
   const replies = [];
   const waiting = [];
@@ -65,9 +71,27 @@ export async function barrierProxy(origin, hold, { count = 2, after = false } = 
     if (call !== hold || waiting.length >= count) return;
     waiting.push(call);
     if (waiting.length === count) release();
-    await met;
+    let timer;
+    const late = new Promise((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`barrier timed out with ${waiting.length} of ${count} arrivals`)),
+        timeout,
+      );
+    });
+    try {
+      await Promise.race([met, late]);
+    } finally {
+      clearTimeout(timer);
+    }
   };
   const server = createServer(async (req, res) => {
+    try {
+      await forward(req, res);
+    } catch (error) {
+      res.writeHead(504).end(error.message);
+    }
+  });
+  async function forward(req, res) {
     const call = `${req.method} ${req.url}`;
     calls.push(call);
     const chunks = [];
@@ -93,7 +117,7 @@ export async function barrierProxy(origin, hold, { count = 2, after = false } = 
     replies.push(`${call} ${r.status}`);
     if (after) await meet(call);
     res.writeHead(r.status, out).end(body);
-  });
+  }
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   return {
     origin: `http://127.0.0.1:${server.address().port}`,

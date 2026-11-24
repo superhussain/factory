@@ -18,6 +18,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,6 +68,29 @@ test("the target guard refuses every other origin before any request", (t) => {
     assert.throws(testUrl, /owned loopback origin/, url);
   }
   assert.equal(globalThis.fetch.mock.callCount(), 0);
+});
+
+test("a barrier missing a partner answers 504 instead of hanging, in both modes", async () => {
+  const upstream = createServer((req, res) => res.end("ok"));
+  await new Promise((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    for (const after of [false, true]) {
+      const proxy = await barrierProxy(
+        `http://127.0.0.1:${upstream.address().port}`,
+        "GET /api/board",
+        { after, timeout: 200 },
+      );
+      try {
+        const r = await request(proxy.origin, "/api/board");
+        assert.equal(r.status, 504, `after: ${after}`);
+        assert.equal(r.body.toString(), "barrier timed out with 1 of 2 arrivals");
+      } finally {
+        await proxy.close();
+      }
+    }
+  } finally {
+    upstream.close();
+  }
 });
 
 const url = testUrl();
