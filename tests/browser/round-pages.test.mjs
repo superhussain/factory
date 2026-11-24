@@ -188,6 +188,34 @@ test(
           );
           assert.deepEqual(await tabs(page), [["spec.md", "spec", null], chip]);
         }
+
+        // On a phone moveMedia prepends the gallery and file list into the page. Round 1 still gets no rule.
+        await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
+        await page.goto(origin + "/#130-ground-export/review-code", {
+          waitUntil: "domcontentloaded",
+        });
+        await page.waitForFunction(() =>
+          document
+            .getElementById("d-doc")
+            .textContent.includes("The synthetic round 2 code review."),
+        );
+        assert.deepEqual(
+          await page.evaluate(() => {
+            const doc = document.getElementById("d-doc");
+            const gallery = document.getElementById("d-gallery");
+            gallery.hidden = false;
+            doc.prepend(gallery, document.getElementById("d-files"));
+            const heads = [...doc.querySelectorAll(".round-head")];
+            return [
+              doc.firstElementChild.id,
+              ...heads.map((h) => {
+                const s = getComputedStyle(h);
+                return [s.borderTopWidth, s.borderTopStyle, s.paddingTop, s.marginTop];
+              }),
+            ];
+          }),
+          ["d-gallery", ["0px", "none", "0px", "0px"], ["2px", "solid", "16px", "32px"]],
+        );
         assert.deepEqual(external, [], "no external requests");
         assert.deepEqual(errors, [], "no page errors");
       } finally {
