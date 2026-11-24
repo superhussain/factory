@@ -614,6 +614,78 @@
       "from": "tests/cli/test_prebuild.py::PrebuildTest.test_uncommitted_lockfile_skips"
     },
     {
+      "id": "worktree/prebuild-bad-json",
+      "argv": ["--home", "{home}", "worktree", "sample/001-test"],
+      "home": "worktree-prebuild-bad",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "1111111111111111111111111111111111111111\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-list",
+              "--max-parents=0",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "ls-remote", "origin", "refs/heads/factory/001-test"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "from": "tests/cli/test_prebuild.py::PrebuildTest.test_bad_json_says_the_format"
+    },
+    {
       "id": "worktree/cleanup-bad-target",
       "argv": ["--home", "{home}", "cleanup", "bad"],
       "home": "worktree",
