@@ -27,11 +27,12 @@ use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::pyval::{py_str, truthy};
 use crate::shared::time::{format_stamp, unix_now};
 
-const CATCH_UP_HOME_FILES: [&str; 5] = [
+const CATCH_UP_HOME_FILES: [&str; 6] = [
     "config.md",
     "paths.md",
     "routes.md",
     "launchers.json",
+    "stalls.json",
     ".env",
 ];
 static CHECKOUT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Flags::NONE);
@@ -2108,9 +2109,20 @@ mod tests {
                 Ok(())
             }));
         });
+        let stalls = r#"{"version": 1, "adapter": ["python3", "/old/runtime/paseo_stalls.py"]}"#;
+        fs::write(t.home.join("stalls.json"), stalls).unwrap();
         let (code, lines) = t.lines();
         assert_eq!(code, 0, "{lines:?}");
         let binary = t.skill.join("runtime").join("factory");
+        let backup = t.backups().pop().unwrap();
+        assert_eq!(
+            fs::read_to_string(backup.join("home").join("stalls.json")).unwrap(),
+            stalls,
+            "the stall adapter is backed up before its rewrite"
+        );
+        assert!(fs::read_to_string(t.home.join("stalls.json"))
+            .unwrap()
+            .contains("\"stalls\"]"));
         assert_eq!(
             *crontab.borrow(),
             format!("30 8 * * * {} retro push\n", binary.display()),

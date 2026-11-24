@@ -59,7 +59,7 @@ writes nothing.
 Before any local write it prints `backup: <home>/backups/catch-up-<stamp>`. That
 folder (mode 700) holds `skill/factory/`, `crontab.txt` on cron hosts,
 `LaunchAgents/factory.*.plist` on macOS, `config/factory-*.cmd` on Windows, and
-`home/` with `config.md`, `paths.md`, `routes.md`, `launchers.json` and `.env`.
+`home/` with `config.md`, `paths.md`, `routes.md`, `launchers.json`, `stalls.json` and `.env`.
 Catch-up never prunes these folders. To roll back:
 
 1. Copy `skill/factory` back over `factory` in the skills root.

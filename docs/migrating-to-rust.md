@@ -23,8 +23,8 @@ output that does not match.
   - `crontab.txt` on cron hosts, `LaunchAgents/factory.*.plist` on macOS,
     `systemd/factory-*.service` on systemd hosts, and `config/factory-*.cmd` on
     Windows;
-  - `home/`, with `config.md`, `paths.md`, `routes.md`, `launchers.json` and
-    `.env`.
+  - `home/`, with `config.md`, `paths.md`, `routes.md`, `launchers.json`,
+    `stalls.json` and `.env`.
 
   Catch-up never prunes these folders.
 
