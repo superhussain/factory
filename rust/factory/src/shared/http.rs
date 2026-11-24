@@ -538,12 +538,21 @@ pub(crate) mod tests {
     pub(crate) fn serve(
         replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>,
     ) -> (String, Arc<Mutex<Vec<Seen>>>) {
+        serve_hooked(replies, |_| {})
+    }
+
+    /// `serve`, running `before_reply` with the request's index after the request is read and before
+    /// its reply is sent, so a test can change a file while a request is in flight.
+    pub(crate) fn serve_hooked(
+        replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>,
+        before_reply: impl Fn(usize) + Send + 'static,
+    ) -> (String, Arc<Mutex<Vec<Seen>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = seen.clone();
         std::thread::spawn(move || {
-            for (status, body, extra) in replies {
+            for (index, (status, body, extra)) in replies.into_iter().enumerate() {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut line = String::new();
@@ -576,6 +585,7 @@ pub(crate) mod tests {
                     headers,
                     body: data,
                 });
+                before_reply(index);
                 let mut head = format!("HTTP/1.0 {status} X\r\n");
                 for (k, v) in extra {
                     head.push_str(&format!("{k}: {v}\r\n"));
@@ -718,6 +728,138 @@ pub(crate) mod tests {
             format!("factory.py: can't reach {origin}/projects.json: <urlopen error [Errno 111] Connection refused>\n")
         );
         assert!(!e.stderr.contains("test-secret"));
+    }
+
+    /// A TLS server with a self-signed certificate that no system store trusts, from `openssl s_server`.
+    /// None when openssl is not installed. The child is killed when the guard drops.
+    struct SelfSigned {
+        origin: String,
+        child: std::process::Child,
+    }
+
+    impl Drop for SelfSigned {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    fn self_signed_server(name: &str) -> Option<SelfSigned> {
+        use std::process::{Command, Stdio};
+        let dir = temp_dir(name);
+        let (key, cert) = (dir.join("key.pem"), dir.join("cert.pem"));
+        let made = Command::new("openssl")
+            .args([
+                "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+            ])
+            .args([
+                "-subj",
+                "/CN=127.0.0.1",
+                "-addext",
+                "subjectAltName=IP:127.0.0.1",
+            ])
+            .arg("-keyout")
+            .arg(&key)
+            .arg("-out")
+            .arg(&cert)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .ok()?;
+        if !made.success() {
+            return None;
+        }
+        let probe = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let child = Command::new("openssl")
+            .args(["s_server", "-www", "-accept", &port.to_string()])
+            .arg("-key")
+            .arg(&key)
+            .arg("-cert")
+            .arg(&cert)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .ok()?;
+        for _ in 0..100 {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        Some(SelfSigned {
+            origin: format!("https://127.0.0.1:{port}"),
+            child,
+        })
+    }
+
+    /// Runs one GET against an untrusted TLS server with the given CA env, and returns the error.
+    fn cert_failure(name: &str, ssl_file: &str, ssl_dir: &str) -> Option<Exit> {
+        let server = self_signed_server(name)?;
+        let home = home_for(name, &server.origin);
+        let _lock = crate::shared::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let old = (
+            std::env::var_os("SSL_CERT_FILE"),
+            std::env::var_os("SSL_CERT_DIR"),
+        );
+        std::env::set_var("SSL_CERT_FILE", ssl_file);
+        std::env::set_var("SSL_CERT_DIR", ssl_dir);
+        let result = api(&home, "GET", "/api/board", None, &[200], &[]);
+        for (key, value) in [("SSL_CERT_FILE", old.0), ("SSL_CERT_DIR", old.1)] {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        std::fs::remove_dir_all(home).unwrap();
+        Some(result.unwrap_err())
+    }
+
+    // The fallback bundle path is fixed at /etc/ssl/cert.pem, so these tests assert the failure a user
+    // sees when the system store rejects the certificate and no fallback retry can succeed. They hold
+    // on hosts with or without that file, because the bundle never trusts this throwaway certificate.
+    #[test]
+    fn cert_error_respects_ssl_cert_file() {
+        let Some(e) = cert_failure("http-cert-file", "/synthetic/ca.pem", "") else {
+            return;
+        };
+        assert_eq!(e.code, 5);
+        assert!(
+            e.stderr.contains("can't reach https://127.0.0.1:"),
+            "{}",
+            e.stderr
+        );
+    }
+
+    #[test]
+    fn cert_error_respects_ssl_cert_dir() {
+        let Some(e) = cert_failure("http-cert-dir", "", "/synthetic/certs") else {
+            return;
+        };
+        assert_eq!(e.code, 5);
+        assert!(
+            e.stderr.contains("can't reach https://127.0.0.1:"),
+            "{}",
+            e.stderr
+        );
+    }
+
+    #[test]
+    fn cert_error_without_fallback_file_explains() {
+        let Some(e) = cert_failure("http-cert-explains", "", "") else {
+            return;
+        };
+        assert_eq!(e.code, 5);
+        assert!(
+            e.stderr
+                .contains("Set SSL_CERT_FILE to your system CA bundle and retry."),
+            "{}",
+            e.stderr
+        );
     }
 
     #[test]

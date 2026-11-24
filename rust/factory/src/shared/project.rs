@@ -393,6 +393,43 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn link_nonregular_unreadable_and_junction_paths() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let (origin, seen) = serve(vec![]);
+        let home = home_for("project-nonregular", &origin);
+        let folder = home.join("projects");
+        let document = folder.join("sample.md");
+        let state = folder.join("sample.sync.json");
+        fs::create_dir_all(&folder).unwrap();
+        let refused = || {
+            let e = pull_project(&home, "sample").unwrap_err();
+            assert_eq!(e.code, 6, "{}", e.stderr);
+        };
+        symlink(home.join("outside"), &document).unwrap();
+        refused();
+        fs::remove_file(&document).unwrap();
+        fs::create_dir(&document).unwrap();
+        refused();
+        fs::remove_dir(&document).unwrap();
+        symlink(home.join("outside"), &state).unwrap();
+        refused();
+        fs::remove_file(&state).unwrap();
+        fs::write(&document, "x").unwrap();
+        fs::set_permissions(&document, fs::Permissions::from_mode(0)).unwrap();
+        if !readable(&document) {
+            refused();
+        }
+        fs::remove_file(&document).unwrap();
+        fs::remove_dir(&folder).unwrap();
+        symlink(&home, &folder).unwrap();
+        refused();
+        assert!(seen.lock().unwrap().is_empty());
+        fs::remove_file(&folder).unwrap();
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn job_folder_refuses_links() {
         let home = temp_dir("project-jobs");
         assert_eq!(
@@ -471,6 +508,62 @@ mod tests {
         }
         assert_eq!(
             fs::read_to_string(round.join("review-code.md")).unwrap(),
+            "VERDICT: PASS\n"
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    /// A factory home reached through a symlink is the user's own choice, so the job-folder check
+    /// trusts it and refuses only links below it.
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_factory_home_is_trusted() {
+        use std::os::unix::fs::symlink;
+        let real = temp_dir("project-real-home");
+        let alias = real.with_file_name(format!(
+            "{}-alias",
+            real.file_name().unwrap().to_string_lossy()
+        ));
+        symlink(&real, &alias).unwrap();
+        fs::create_dir_all(real.join("jobs/s/1-a")).unwrap();
+        assert_eq!(
+            safe_job_folder(&alias, "s", "1-a").unwrap(),
+            alias.join("jobs/s/1-a")
+        );
+        assert!(project_files(&alias, "sample").is_ok());
+        fs::remove_file(&alias).unwrap();
+        fs::remove_dir_all(real).unwrap();
+    }
+
+    /// A write-and-execute-only job folder lists as empty, so a symlinked round directory inside it
+    /// must fail the inspection rather than let pull write outside the job.
+    #[cfg(unix)]
+    #[test]
+    fn released_hold_fails_on_unreadable_job_folder_hiding_a_link() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let home = temp_dir("project-jobs-hidden-link");
+        let folder = home.join("jobs/s/1-a");
+        let outside = home.join("outside-round");
+        fs::create_dir_all(&folder).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("review-code.md"), "VERDICT: PASS\n").unwrap();
+        symlink(&outside, folder.join("round-1")).unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o333)).unwrap();
+        let listable = fs::read_dir(&folder).is_ok();
+        let result = safe_job_folder(&home, "s", "1-a");
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        if !listable {
+            let e = result.unwrap_err();
+            assert_eq!(e.code, 6);
+            assert!(
+                e.stderr.contains("cannot inspect job paths"),
+                "{}",
+                e.stderr
+            );
+        }
+        assert!(folder.join("round-1").is_symlink());
+        assert_eq!(
+            fs::read_to_string(outside.join("review-code.md")).unwrap(),
             "VERDICT: PASS\n"
         );
         fs::remove_dir_all(home).unwrap();
