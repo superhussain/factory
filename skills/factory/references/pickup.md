@@ -240,7 +240,10 @@ Each run, in order:
   records nothing.
 - Pushes this host's audit rows for each job at spec, build, review, approve or
   pr-open whose transcripts here changed since `<home>/audit-push.json` records;
-  a failed push prints one warning and the run goes on. When the push succeeds
+  a failed push prints one warning and the run goes on. A transcript a flag
+  pattern cannot finish reading pushes nothing for that job, prints
+  `audit push skipped <job-id> until its transcripts change: ...`, and the run
+  goes on. When the push succeeds
   and this host's token totals for the job changed, it also writes them to
   `tokens.<device>` and prints `recorded <device> tokens on <job-id>`.
 - Runs the read-only orphan scan on its first run of each local date that

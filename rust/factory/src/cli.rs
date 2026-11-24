@@ -205,9 +205,12 @@ fn run(args: Vec<OsString>) -> Res<()> {
     }
     let tag = session
         .clone()
-        .unwrap_or_else(|| std::env::var("FACTORY_SESSION").unwrap_or_default());
+        .unwrap_or_else(crate::shared::home::env_session);
     if !tag.is_empty() && !SLUG.is_full(&tag) {
-        return Err(fail("bad session tag: use letters, digits, - and _", 2));
+        return Err(fail(
+            "bad session tag in --session or FACTORY_SESSION: use letters, digits, - and _",
+            2,
+        ));
     }
     if let Some(home) = &home {
         set_override(resolve(Path::new(home)).map_err(|_| fail("cannot resolve --home", 2))?);
@@ -292,7 +295,7 @@ mod tests {
         );
         assert_eq!(
             msg(&["--session", "bad tag", "where"]),
-            "factory.py: bad session tag: use letters, digits, - and _\n"
+            "factory.py: bad session tag in --session or FACTORY_SESSION: use letters, digits, - and _\n"
         );
         assert_eq!(
             msg(&["init", "--agents", "emacs"]),

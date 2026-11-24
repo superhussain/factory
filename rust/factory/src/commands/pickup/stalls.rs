@@ -98,7 +98,10 @@ pub(super) fn check_untrusted(text: &str) -> Option<String> {
     if NOTE_LINK.search(text).is_some() {
         return Some("links are not allowed".into());
     }
-    if NOTE_SECRETS.iter().any(|p| p.search(text).is_some()) {
+    if NOTE_SECRETS
+        .iter()
+        .any(|p| p.search_or_stop(text).is_some())
+    {
         return Some("looks like a secret".into());
     }
     NOTE_PHRASES

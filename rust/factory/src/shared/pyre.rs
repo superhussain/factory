@@ -55,7 +55,19 @@ pub struct Pattern {
 
 const BACKTRACK_LIMIT: usize = 100_000_000;
 
+/// The words every backtrack-limit stop carries, so a caller can tell that stop from other failures.
+pub const LIMIT_HIT: &str = "hit the regex backtrack limit";
+
 static WARNED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+thread_local! {
+    /// A backtrack limit every pattern uses in this test thread instead of its own, when set, so a
+    /// test can reach the limit on short text.
+    pub(crate) static TEST_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// The one pattern TEST_LIMIT applies to, when set, so a test can stop one gate of several.
+    pub(crate) static TEST_LIMIT_ONLY: std::cell::Cell<Option<*const Pattern>> = const { std::cell::Cell::new(None) };
+}
 
 impl Pattern {
     pub const fn new(src: &'static str, flags: Flags) -> Pattern {
@@ -79,17 +91,27 @@ impl Pattern {
             "full" => (&self.full, "\\A(?:", ")\\z"),
             _ => (&self.search, "", ""),
         };
-        lock.get_or_init(|| {
+        let build = |limit| {
             let source = format!(
                 "{}{before}{}{after}",
                 prefix(self.flags),
                 body(self.src, self.flags)
             );
             RegexBuilder::new(&source)
-                .backtrack_limit(self.limit)
+                .backtrack_limit(limit)
                 .build()
                 .unwrap_or_else(|e| panic!("bad pattern {:?}: {e}", self.src))
-        })
+        };
+        #[cfg(test)]
+        if let Some(limit) = TEST_LIMIT.with(std::cell::Cell::get) {
+            if TEST_LIMIT_ONLY
+                .with(std::cell::Cell::get)
+                .is_none_or(|p| std::ptr::eq(p, self))
+            {
+                return Box::leak(Box::new(build(limit)));
+            }
+        }
+        lock.get_or_init(|| build(self.limit))
     }
 
     /// A search that hit the backtrack limit counts as no match, with one warning per process.
@@ -175,12 +197,24 @@ impl Pattern {
             .collect()
     }
 
-    /// Exit 1 so a redaction never writes text a pattern could not finish reading.
-    fn stop(&self) -> ! {
-        let msg = format!(
-            "factory.py: pattern {} hit the regex backtrack limit; stopping so unredacted text is never written",
+    /// `re.search` for a gate whose caller decides what a limit hit stops: Err holds the reason.
+    pub fn search_or_err<'t>(&self, s: &'t str) -> Result<Option<Captures<'t>>, String> {
+        self.compiled("search")
+            .captures(s)
+            .map_err(|_| self.limit_reason())
+    }
+
+    /// Why a search past the backtrack limit stopped, naming the pattern.
+    fn limit_reason(&self) -> String {
+        format!(
+            "pattern {} {LIMIT_HIT}; stopping rather than pass text it could not finish reading; shorten or split the text",
             repr(self.src)
-        );
+        )
+    }
+
+    /// Exit 1 so a redaction or refusal never passes text a pattern could not finish reading.
+    fn stop(&self) -> ! {
+        let msg = format!("factory.py: {}", self.limit_reason());
         #[cfg(test)]
         panic!("{msg}");
         #[cfg(not(test))]

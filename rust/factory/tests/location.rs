@@ -34,3 +34,28 @@ fn home_flag_beats_factory_home_and_creates_no_default() {
     assert!(!root.join(".config").exists());
     fs::remove_dir_all(&root).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_session_is_a_bad_tag() {
+    use std::os::unix::ffi::OsStrExt;
+    let root = std::env::temp_dir().join(format!("factory-session-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_factory"))
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", &root)
+        .env("FACTORY_SESSION", std::ffi::OsStr::from_bytes(b"tag\xff"))
+        .arg("where")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(
+        (out.status.code(), String::from_utf8_lossy(&out.stderr)),
+        (
+            Some(2),
+            "factory.py: bad session tag in --session or FACTORY_SESSION: use letters, digits, - and _\n".into()
+        )
+    );
+    fs::remove_dir_all(&root).unwrap();
+}

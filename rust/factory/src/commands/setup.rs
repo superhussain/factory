@@ -151,25 +151,9 @@ fn frontmatter_text(text: &str) -> (Vec<(String, String)>, String) {
     (Vec::new(), text.to_string())
 }
 
-/// `os.path.abspath`: p joined to the cwd, with `.`, `..` and repeated `/` folded lexically.
+/// `os.path.abspath` against the cwd, on this platform's separators and drives.
 fn abspath(p: &str) -> PathBuf {
-    let joined = if p.starts_with('/') {
-        p.to_string()
-    } else {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        format!("{}/{p}", cwd.display())
-    };
-    let mut parts: Vec<&str> = Vec::new();
-    for part in joined.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            _ => parts.push(part),
-        }
-    }
-    PathBuf::from(format!("/{}", parts.join("/")))
+    crate::shared::fs::abspath(p, &std::env::current_dir().unwrap_or_default())
 }
 
 fn load_connection(path: &Path) -> Res<String> {
@@ -1692,10 +1676,19 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn abspath_folds() {
         assert_eq!(abspath("/a/./b/../c//d"), PathBuf::from("/a/c/d"));
         assert_eq!(abspath("/.."), PathBuf::from("/"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn abspath_keeps_a_windows_drive() {
+        assert_eq!(abspath(r"C:\repo"), PathBuf::from(r"C:\repo"));
+        assert_eq!(abspath(r"C:\a\.\b\..\c"), PathBuf::from(r"C:\a\c"));
+        assert_eq!(abspath("C:/a/b"), PathBuf::from(r"C:\a\b"));
     }
 
     #[test]

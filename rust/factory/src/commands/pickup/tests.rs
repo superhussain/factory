@@ -6,6 +6,13 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
+#[test]
+#[should_panic(expected = "hit the regex backtrack limit; stopping")]
+fn secret_check_stops_at_the_backtrack_limit() {
+    crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
+    check_untrusted("ghp_ eyJ plain text");
+}
+
 /// Parity writes the host-status "os" field as {os}, so only this test catches a wrong label.
 #[test]
 fn host_os_labels_each_platform() {
@@ -4867,6 +4874,34 @@ mod audit_pickup_test {
             "{err}"
         );
         assert!(!fx.home.join(AUDIT_PUSH_FILE).exists());
+    }
+
+    #[test]
+    fn test_a_scan_past_the_backtrack_limit_skips_the_push() {
+        let fx = setup();
+        crate::commands::audit::limit_secret_file_for_test();
+        // audit_push reads its device from factory_home, which follows XDG_CONFIG_HOME before
+        // HOME, so name the fixture home outright. fx holds the env lock until it drops.
+        let saved = std::env::var_os("FACTORY_HOME");
+        std::env::set_var("FACTORY_HOME", &fx.home);
+        let (code, out, err) = fx.pickup(&[]);
+        match saved {
+            Some(v) => std::env::set_var("FACTORY_HOME", v),
+            None => std::env::remove_var("FACTORY_HOME"),
+        }
+        assert_eq!((code, out.as_str()), (0, ""));
+        assert!(
+            err.starts_with(
+                "factory.py: audit push skipped 1017-add-x until its transcripts change: "
+            ) && err.ends_with(&format!("{}\n", crate::shared::pyre::LIMIT_HIT))
+                && err.lines().count() == 1,
+            "{err}"
+        );
+        assert!(fx.calls().iter().all(|c| !c.1.contains("/api/audit/")));
+        assert_eq!(
+            record(&fx),
+            json!({"version": 1, "jobs": {"1017-add-x": stamp_now()}})
+        );
     }
 
     #[test]

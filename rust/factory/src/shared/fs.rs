@@ -67,13 +67,18 @@ pub fn seed(p: &Path, data: &[u8], mode: u32) -> io::Result<bool> {
     }
 }
 
-/// `p.mkdir(mode=0o700, exist_ok=True)`.
-pub fn mkdir_private(p: &Path) -> io::Result<()> {
+/// `p.mkdir(mode=0o700)`: fails when p already exists.
+pub fn create_dir_private(p: &Path) -> io::Result<()> {
     #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-    match builder.create(p) {
+    builder.create(p)
+}
+
+/// `p.mkdir(mode=0o700, exist_ok=True)`.
+pub fn mkdir_private(p: &Path) -> io::Result<()> {
+    match create_dir_private(p) {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists && p.is_dir() => Ok(()),
         other => other,
     }
