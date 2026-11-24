@@ -92,7 +92,7 @@ async function setup({ trials = [V10], jobs = [] } = {}) {
       "pipeline/projects/factory.json",
       JSON.stringify({ version: 10, stage_notes: { spec } }),
     );
-  return { bucket, board, put, settle, note };
+  return { bucket, board, put, settle, note, send };
 }
 
 const LABEL = '"factory-spec-v10"';
@@ -168,6 +168,30 @@ test("kept needs 5 finished jobs per arm and no b higher read", async () => {
   const kept = await settle({ status: "kept", ...SETTLED, reads: READS });
   assert.equal(kept.status, 200);
   assert.equal((await board()).doc.trials[0].status, "kept");
+});
+
+test("kept counts only rows already stored, and trusts the host that stored them", async () => {
+  const { board, settle, send } = await setup();
+  const write = async (trials) => {
+    const { etag, doc } = await board();
+    return send("PUT", "/api/board", {
+      body: JSON.stringify({ ...doc, jobs: FIVE_AND_FIVE, trials }),
+      headers: { ...json, "If-Match": etag },
+      principal: hostA,
+    });
+  };
+  const once = await write([{ ...V10, status: "kept", ...SETTLED, reads: READS }]);
+  assert.deepEqual(
+    [once.status, once.text],
+    [
+      400,
+      SETTLE("kept", "each arm needs 5 finished jobs on the board, and arm a has 0, arm b has 0"),
+    ],
+  );
+  const rows = await write([V10]);
+  assert.equal(rows.status, 200);
+  const kept = await settle({ status: "kept", ...SETTLED, reads: READS });
+  assert.equal(kept.status, 200);
 });
 
 test("inconclusive and revert-failed wait 28 days from opened", async () => {
