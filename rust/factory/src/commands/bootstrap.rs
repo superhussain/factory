@@ -201,27 +201,45 @@ pub(crate) fn run_bootstrap(
     }
 }
 
-/// The token from a hidden prompt, with echo off on a terminal; None at end of input.
+/// The token from a hidden prompt, with echo off on a terminal; None at end of input or on Ctrl-C.
+/// A `sh` child reads the line, so its trap turns echo back on when Ctrl-C arrives, as Python's
+/// getpass did; this process ignores that SIGINT while it waits, and reports a cancel.
+#[cfg(unix)]
 fn read_hidden() -> Option<String> {
-    #[cfg(unix)]
-    let echo_off = Command::new("stty")
-        .arg("-echo")
+    const SIGINT: i32 = 2;
+    const SIG_IGN: usize = 1;
+    extern "C" {
+        fn signal(signum: i32, handler: usize) -> usize;
+    }
+    const READ: &str = "stty -echo 2>/dev/null; trap 'stty echo 2>/dev/null; exit 130' INT; \
+        IFS= read -r t || { stty echo 2>/dev/null; exit 1; }; stty echo 2>/dev/null; printf '%s' \"$t\"";
+    // The child starts with SIGINT at its default, since sh cannot trap a signal ignored at entry.
+    let child = Command::new("sh")
+        .args(["-c", READ])
         .stdin(Stdio::inherit())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success());
-    #[cfg(windows)]
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .ok()?;
+    // SAFETY: signal swaps one process-wide disposition and returns the previous one, which is
+    // restored right after the child exits.
+    let previous = unsafe { signal(SIGINT, SIG_IGN) };
+    let output = child.wait_with_output();
+    // SAFETY: as above.
+    unsafe { signal(SIGINT, previous) };
+    let output = output.ok()?;
+    output.status.success().then(|| {
+        String::from_utf8_lossy(&output.stdout)
+            .trim_end_matches('\r')
+            .to_string()
+    })
+}
+
+#[cfg(windows)]
+fn read_hidden() -> Option<String> {
     let restore = windows_echo_off();
     let mut line = String::new();
     let read = io::stdin().lock().read_line(&mut line);
-    #[cfg(unix)]
-    if echo_off {
-        let _ = Command::new("stty")
-            .arg("echo")
-            .stdin(Stdio::inherit())
-            .status();
-    }
-    #[cfg(windows)]
     windows_echo_restore(restore);
     match read {
         Ok(0) | Err(_) => None,
@@ -235,6 +253,25 @@ extern "system" {
     fn GetStdHandle(which: u32) -> *mut std::ffi::c_void;
     fn GetConsoleMode(handle: *mut std::ffi::c_void, mode: *mut u32) -> i32;
     fn SetConsoleMode(handle: *mut std::ffi::c_void, mode: u32) -> i32;
+    fn SetConsoleCtrlHandler(handler: extern "system" fn(u32) -> i32, add: i32) -> i32;
+}
+
+/// The console input mode to put back if Ctrl-C ends the process at the token prompt.
+#[cfg(windows)]
+static SAVED_MODE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Ctrl-C at the prompt: turn echo back on, then let the default handler end the process.
+#[cfg(windows)]
+extern "system" fn echo_back_on(_event: u32) -> i32 {
+    const STD_INPUT_HANDLE: u32 = -10i32 as u32;
+    // SAFETY: the handle comes from GetStdHandle; the mode is one GetConsoleMode returned.
+    unsafe {
+        SetConsoleMode(
+            GetStdHandle(STD_INPUT_HANDLE),
+            SAVED_MODE.load(std::sync::atomic::Ordering::SeqCst),
+        );
+    }
+    0
 }
 
 /// The console input mode before echo went off, or None when stdin is not a console.
@@ -242,13 +279,16 @@ extern "system" {
 fn windows_echo_off() -> Option<u32> {
     const STD_INPUT_HANDLE: u32 = -10i32 as u32;
     const ENABLE_ECHO_INPUT: u32 = 0x4;
-    // SAFETY: the handle comes from GetStdHandle and mode is a valid out pointer.
+    // SAFETY: the handle comes from GetStdHandle and mode is a valid out pointer; the handler is
+    // a plain function that only resets the console mode.
     unsafe {
         let handle = GetStdHandle(STD_INPUT_HANDLE);
         let mut mode = 0;
         if GetConsoleMode(handle, &mut mode) == 0 {
             return None;
         }
+        SAVED_MODE.store(mode, std::sync::atomic::Ordering::SeqCst);
+        SetConsoleCtrlHandler(echo_back_on, 1);
         SetConsoleMode(handle, mode & !ENABLE_ECHO_INPUT);
         Some(mode)
     }
@@ -261,6 +301,7 @@ fn windows_echo_restore(mode: Option<u32>) {
         // SAFETY: the handle comes from GetStdHandle; mode is the one GetConsoleMode returned.
         unsafe {
             SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), mode);
+            SetConsoleCtrlHandler(echo_back_on, 0);
         }
     }
 }
