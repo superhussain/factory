@@ -727,6 +727,30 @@ mod tests {
     use crate::shared::fs::temp_dir;
     use crate::shared::http::tests::home_for;
 
+    fn job_home(name: &str, origin: &str, files: &[(&str, &[u8])]) -> PathBuf {
+        let home = home_for(name, origin);
+        let folder = home.join("jobs/alpha/042-sample-export");
+        fs::create_dir_all(&folder).unwrap();
+        for (rel, data) in files {
+            fs::write(folder.join(rel), data).unwrap();
+        }
+        home
+    }
+
+    fn push_with_home(home: &Path, target: &str) -> Res<()> {
+        let _lock = crate::shared::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let old = std::env::var_os("FACTORY_HOME");
+        std::env::set_var("FACTORY_HOME", home);
+        let result = push_target(target);
+        match old {
+            Some(v) => std::env::set_var("FACTORY_HOME", v),
+            None => std::env::remove_var("FACTORY_HOME"),
+        }
+        result
+    }
+
     #[test]
     fn walk_sorts_by_component() {
         let dir = temp_dir("sync-walk");
@@ -973,6 +997,116 @@ mod tests {
             String::from_utf8(out).unwrap(),
             "cleared the board decision: decision.md has no verdict line\n"
         );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    const DECISION: &[u8] = b"APPROVE\nA person approved this job with /factory approve.\n";
+
+    // `factory_home` prefers the process-wide `--home` override, which another
+    // test may already have set, so the push tests run in a fresh process.
+    fn in_child(test: &str) -> bool {
+        if std::env::var_os("FACTORY_PUSH_TARGET_CHILD").is_some() {
+            return true;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                &format!("commands::sync::tests::{test}"),
+                "--exact",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("FACTORY_PUSH_TARGET_CHILD", "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "{stdout}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        false
+    }
+
+    #[test]
+    fn push_target_records_decision() {
+        if !in_child("push_target_records_decision") {
+            return;
+        }
+        use crate::shared::http::tests::serve;
+        let board = r#"{"updated":"2026-11-23T14:00:00Z","jobs":[{"id":"042-sample-export","project":"alpha","stage":"needs-human"}]}"#;
+        let (origin, seen) = serve(vec![
+            (200, "[]", vec![]),
+            (200, "", vec![("ETag", "\"d1\"")]),
+            (200, board, vec![("ETag", "\"b1\"")]),
+            (200, "{}", vec![("ETag", "\"b2\"")]),
+        ]);
+        let home = job_home("sync-push-decision", &origin, &[("decision.md", DECISION)]);
+        push_with_home(&home, "alpha/042-sample-export").unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 4);
+        assert_eq!(
+            (
+                seen[1].method.as_str(),
+                seen[1].path.as_str(),
+                seen[1].header("If-None-Match")
+            ),
+            (
+                "PUT",
+                "/api/jobs/alpha/042-sample-export/decision.md",
+                Some("*")
+            )
+        );
+        assert_eq!(seen[1].body, DECISION);
+        assert_eq!(
+            (
+                seen[3].method.as_str(),
+                seen[3].path.as_str(),
+                seen[3].header("If-Match")
+            ),
+            ("PUT", "/api/board", Some("\"b1\""))
+        );
+        let put = loads(std::str::from_utf8(&seen[3].body).unwrap()).unwrap();
+        let decision = &put["jobs"][0]["decision"];
+        assert_eq!(
+            (&decision["verdict"], &decision["decider"]),
+            (&json!("APPROVE"), &json!("person"))
+        );
+        let manifest = read_text(&home.join("jobs/alpha/042-sample-export/.sync.json")).unwrap();
+        assert_eq!(loads(&manifest).unwrap()["decision.md"]["etag"], "\"d1\"");
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn push_target_skips_decision_on_conflict() {
+        if !in_child("push_target_skips_decision_on_conflict") {
+            return;
+        }
+        use crate::shared::http::tests::serve;
+        let (origin, seen) = serve(vec![
+            (200, r#"[{"name":"decision.md","etag":"\"d0\""}]"#, vec![]),
+            (412, "", vec![]),
+            (200, "CHANGES\nR2 copy\n", vec![("ETag", "\"d1\"")]),
+        ]);
+        let state = json!({"decision.md": {"etag": "\"d0\"", "sha256": sha(b"old\n")}});
+        let home = job_home(
+            "sync-push-conflict",
+            &origin,
+            &[
+                ("decision.md", DECISION),
+                (".sync.json", dumps(&state, INDENT2_SORTED).as_bytes()),
+            ],
+        );
+        let e = push_with_home(&home, "alpha/042-sample-export").unwrap_err();
+        assert_eq!(e.code, 6);
+        assert!(e.stderr.contains("conflict in decision.md"));
+        assert_eq!(
+            fs::read(home.join("jobs/alpha/042-sample-export/decision.md.remote")).unwrap(),
+            b"CHANGES\nR2 copy\n"
+        );
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 3);
+        assert_eq!(seen[1].header("If-Match"), Some("\"d0\""));
+        assert!(seen.iter().all(|s| s.path != "/api/board"));
         fs::remove_dir_all(home).unwrap();
     }
 
