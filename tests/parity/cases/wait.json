@@ -682,13 +682,7 @@
     {
       "id": "wait/watch-pr-archive",
       "from": "tests/cli/test_watch.py::WatchTest.test_archive_pr_event",
-      "argv": [
-        "--home",
-        "{home}",
-        "watch",
-        "sample/042-sample-export",
-        "--pr"
-      ],
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "--pr"],
       "home": "checks-archive",
       "stubs": {
         "gh": [
@@ -759,12 +753,7 @@
             "code": 0
           },
           {
-            "argv": [
-              "api",
-              "repos/example-upstream/sample",
-              "--jq",
-              ".default_branch"
-            ],
+            "argv": ["api", "repos/example-upstream/sample", "--jq", ".default_branch"],
             "stdout": "main\n",
             "stderr": "",
             "code": 0

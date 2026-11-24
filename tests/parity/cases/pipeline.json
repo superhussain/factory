@@ -5414,12 +5414,7 @@
     },
     {
       "id": "pipeline/trial-transient-refusal-409-after-28-days",
-      "argv": [
-        "--home",
-        "{home}",
-        "trial",
-        "settle"
-      ],
+      "argv": ["--home", "{home}", "trial", "settle"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -5606,17 +5601,12 @@
             ],
             "autonomy": {
               "paused": false,
-              "projects": [
-                "factory"
-              ],
+              "projects": ["factory"],
               "self": []
             }
           }
         ],
-        "PUT /api/board": [
-          200,
-          "ok"
-        ],
+        "PUT /api/board": [200, "ok"],
         "GET /api/pipeline/projects/factory": [
           200,
           {
@@ -5636,22 +5626,14 @@
             }
           }
         ],
-        "PUT /api/pipeline/retro/projects/factory": [
-          409,
-          "autonomy is paused; no retro edit"
-        ]
+        "PUT /api/pipeline/retro/projects/factory": [409, "autonomy is paused; no retro edit"]
       },
       "exit": 0,
       "from": "tests/cli/test_trial.py::TrialSettleTest.test_transient_refusal_after_28_days_stays_open"
     },
     {
       "id": "pipeline/trial-transient-refusal-412-after-28-days",
-      "argv": [
-        "--home",
-        "{home}",
-        "trial",
-        "settle"
-      ],
+      "argv": ["--home", "{home}", "trial", "settle"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -5838,17 +5820,12 @@
             ],
             "autonomy": {
               "paused": false,
-              "projects": [
-                "factory"
-              ],
+              "projects": ["factory"],
               "self": []
             }
           }
         ],
-        "PUT /api/board": [
-          200,
-          "ok"
-        ],
+        "PUT /api/board": [200, "ok"],
         "GET /api/pipeline/projects/factory": [
           200,
           {
@@ -5868,22 +5845,14 @@
             }
           }
         ],
-        "PUT /api/pipeline/retro/projects/factory": [
-          412,
-          "precondition failed"
-        ]
+        "PUT /api/pipeline/retro/projects/factory": [412, "precondition failed"]
       },
       "exit": 0,
       "from": "tests/cli/test_trial.py::TrialSettleTest.test_transient_refusal_after_28_days_stays_open"
     },
     {
       "id": "pipeline/trial-transient-refusal-429-after-28-days",
-      "argv": [
-        "--home",
-        "{home}",
-        "trial",
-        "settle"
-      ],
+      "argv": ["--home", "{home}", "trial", "settle"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -6070,17 +6039,12 @@
             ],
             "autonomy": {
               "paused": false,
-              "projects": [
-                "factory"
-              ],
+              "projects": ["factory"],
               "self": []
             }
           }
         ],
-        "PUT /api/board": [
-          200,
-          "ok"
-        ],
+        "PUT /api/board": [200, "ok"],
         "GET /api/pipeline/projects/factory": [
           200,
           {
@@ -6100,10 +6064,7 @@
             }
           }
         ],
-        "PUT /api/pipeline/retro/projects/factory": [
-          429,
-          "retro edit cap: 2 per scope per day"
-        ]
+        "PUT /api/pipeline/retro/projects/factory": [429, "retro edit cap: 2 per scope per day"]
       },
       "exit": 0,
       "from": "tests/cli/test_trial.py::TrialSettleTest.test_transient_refusal_after_28_days_stays_open"
@@ -6329,12 +6290,7 @@
     },
     {
       "id": "pipeline/trial-lasting-refusal-403-after-28-days",
-      "argv": [
-        "--home",
-        "{home}",
-        "trial",
-        "settle"
-      ],
+      "argv": ["--home", "{home}", "trial", "settle"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -6521,17 +6477,12 @@
             ],
             "autonomy": {
               "paused": false,
-              "projects": [
-                "factory"
-              ],
+              "projects": ["factory"],
               "self": []
             }
           }
         ],
-        "PUT /api/board": [
-          200,
-          "ok"
-        ],
+        "PUT /api/board": [200, "ok"],
         "GET /api/pipeline/projects/factory": [
           200,
           {
@@ -6551,22 +6502,14 @@
             }
           }
         ],
-        "PUT /api/pipeline/retro/projects/factory": [
-          403,
-          "refused"
-        ]
+        "PUT /api/pipeline/retro/projects/factory": [403, "refused"]
       },
       "exit": 0,
       "from": "tests/cli/test_trial.py::TrialSettleTest.test_lasting_refusal_after_28_days_is_revert_failed"
     },
     {
       "id": "pipeline/trial-lasting-refusal-404-after-28-days",
-      "argv": [
-        "--home",
-        "{home}",
-        "trial",
-        "settle"
-      ],
+      "argv": ["--home", "{home}", "trial", "settle"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -6753,17 +6696,12 @@
             ],
             "autonomy": {
               "paused": false,
-              "projects": [
-                "factory"
-              ],
+              "projects": ["factory"],
               "self": []
             }
           }
         ],
-        "PUT /api/board": [
-          200,
-          "ok"
-        ],
+        "PUT /api/board": [200, "ok"],
         "GET /api/pipeline/projects/factory": [
           200,
           {
@@ -6783,22 +6721,14 @@
             }
           }
         ],
-        "PUT /api/pipeline/retro/projects/factory": [
-          404,
-          "refused"
-        ]
+        "PUT /api/pipeline/retro/projects/factory": [404, "refused"]
       },
       "exit": 0,
       "from": "tests/cli/test_trial.py::TrialSettleTest.test_lasting_refusal_after_28_days_is_revert_failed"
     },
     {
       "id": "pipeline/trial-lasting-refusal-413-after-28-days",
-      "argv": [
-        "--home",
-        "{home}",
-        "trial",
-        "settle"
-      ],
+      "argv": ["--home", "{home}", "trial", "settle"],
       "home": null,
       "stubs": {},
       "routes": {
@@ -6985,17 +6915,12 @@
             ],
             "autonomy": {
               "paused": false,
-              "projects": [
-                "factory"
-              ],
+              "projects": ["factory"],
               "self": []
             }
           }
         ],
-        "PUT /api/board": [
-          200,
-          "ok"
-        ],
+        "PUT /api/board": [200, "ok"],
         "GET /api/pipeline/projects/factory": [
           200,
           {
@@ -7015,10 +6940,7 @@
             }
           }
         ],
-        "PUT /api/pipeline/retro/projects/factory": [
-          413,
-          "refused"
-        ]
+        "PUT /api/pipeline/retro/projects/factory": [413, "refused"]
       },
       "exit": 0,
       "from": "tests/cli/test_trial.py::TrialSettleTest.test_lasting_refusal_after_28_days_is_revert_failed"
