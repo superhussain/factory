@@ -778,14 +778,14 @@ pub(crate) fn stop_pids(wt: &Path) -> Option<Vec<u32>> {
     )
 }
 
-/// (exit code, stdout, stderr) of program -C repo args. A timeout or a git that cannot start gives (None, "",
-/// reason), so the caller keeps what it was about to remove.
 #[cfg(test)]
 thread_local! {
     // Each git call this thread made through run_git_with: its first argument and its timeout.
     static GIT_CALLS: std::cell::RefCell<Vec<(String, Option<Duration>)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// (exit code, stdout, stderr) of program -C repo args. A timeout or a git that cannot start gives (None, "",
+/// reason), so the caller keeps what it was about to remove.
 fn run_git_with(
     program: &str,
     repo: &str,

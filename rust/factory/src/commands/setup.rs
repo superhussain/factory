@@ -499,9 +499,12 @@ fn register_project(home: &Path, repo_path: &str) -> Res<()> {
 }
 
 pub fn init(call: &Call) -> Res<()> {
+    init_in(factory_home()?, call)
+}
+
+fn init_in(home: PathBuf, call: &Call) -> Res<()> {
     let repo_path = call.args.first().map_or(".", String::as_str);
     let agents = call.agents.as_deref().unwrap_or("none");
-    let home = factory_home()?;
     let config = home.join("config.md");
     let endpoint = match &call.connection {
         Some(connection) => Some(load_connection(Path::new(connection))?),
@@ -1560,6 +1563,63 @@ mod tests {
             set_api_url(text, "https://example.invalid").unwrap(),
             "---\r\n# retained\r\nunknown: legacy\r\napi_url: https://example.invalid\r\ndevice: local\r\n---\r\nBody\r\n"
         );
+    }
+
+    /// Ported from tests/cli/test_setup.py: init --connection seeds only api_url, leaves every other byte and
+    /// the .env file's bytes and mode alone, and a second run changes nothing.
+    #[cfg(unix)]
+    #[test]
+    fn init_connection_seeds_only_the_endpoint_and_is_idempotent() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = fs::canonicalize(temp_dir("setup-init-crlf")).unwrap();
+        let home = root.join("home");
+        fs::create_dir(&home).unwrap();
+        let (config, env) = (home.join("config.md"), home.join(".env"));
+        fs::write(
+            &config,
+            "---\r\n# retained\r\nunknown: legacy\r\napi_url:\r\ndevice: local\r\n---\r\nBody\r\n",
+        )
+        .unwrap();
+        fs::write(&env, "# retained\r\nUNRELATED=opaque\r\n").unwrap();
+        fs::set_permissions(&env, fs::Permissions::from_mode(0o640)).unwrap();
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o644)).unwrap();
+        let descriptor = root.join("good.json");
+        fs::write(
+            &descriptor,
+            r#"{"version":1,"api_url":"https://example.invalid/"}"#,
+        )
+        .unwrap();
+        let call = Call {
+            args: vec![],
+            agents: None,
+            connection: Some(descriptor.to_string_lossy().into_owned()),
+        };
+        let state = |home: &Path| {
+            ["config.md", ".env"].map(|name| {
+                let path = home.join(name);
+                (
+                    fs::read(&path).unwrap(),
+                    fs::metadata(&path).unwrap().permissions().mode() & 0o7777,
+                )
+            })
+        };
+        let first = init_in(home.clone(), &call);
+        let after_first = state(&home);
+        let second = init_in(home.clone(), &call);
+        let after_second = state(&home);
+        first.unwrap();
+        second.unwrap();
+        assert_eq!(
+            after_first[0].0,
+            b"---\r\n# retained\r\nunknown: legacy\r\napi_url: https://example.invalid\r\ndevice: local\r\n---\r\nBody\r\n"
+        );
+        assert_eq!(after_first[0].1, 0o644);
+        assert_eq!(
+            after_first[1],
+            (b"# retained\r\nUNRELATED=opaque\r\n".to_vec(), 0o640)
+        );
+        assert_eq!(after_first, after_second);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
