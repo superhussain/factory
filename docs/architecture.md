@@ -155,7 +155,7 @@ returns 404.
 | --- | --- | --- |
 | `GET /api/halt` | any verified principal | the stop record, or `{"halted":false}`; a service never sees a person's email |
 | `PUT /api/halt` | person: set or clear; service token: set only | writes `halt.json`; a repeat set writes nothing |
-| `POST /api/trials/resume/<slug>` | person with `{}` or `{instruction}`; bound host with `{instruction}` (1 to 500 characters) | sets `resumed` and `resumed_by` on the project's unresumed reverted `trials` and returns `{"resumed": n}`; writes nothing when `n` is 0. A board `PUT` or `PATCH` cannot change or drop an unresumed revert, set `resumed` or `resumed_by`, or settle or drop an open trial unless the write is settle-shaped (`checkTrialSettle`) |
+| `POST /api/trials/resume/<slug>` | person with `{}` or `{instruction}`; bound host with `{instruction}` (1 to 500 characters) | sets `resumed` and `resumed_by` on the project's unresumed reverted `trials` and returns `{"resumed": n}`; writes nothing when `n` is 0. A board `PUT` or `PATCH` cannot change or drop an unresumed revert, set `resumed` or `resumed_by`, or settle or drop a well-shaped open trial (`trialMisshapen`) unless the write is settle-shaped (`checkTrialSettle`) |
 
 Retro digest routes store one redacted JSON-lines file per host per day at
 `retro/<id>/<date>.jsonl`, where the date is the host's local date. The bound
