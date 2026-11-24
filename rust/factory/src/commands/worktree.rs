@@ -1463,7 +1463,7 @@ mod tests {
     /// Re-run this test in a child process whose PATH starts with a `git` wrapper that handles `fetch` with
     /// `fetch_body` and passes every other call to the real git, so the parent's own git calls stay untouched.
     #[cfg(unix)]
-    fn in_fake_git_child(name: &str, fetch_body: &str) {
+    fn in_fake_git_child(name: &str, verb: &str, fetch_body: &str) {
         use std::os::unix::fs::PermissionsExt;
         let path = std::env::var("PATH").unwrap();
         let real = path
@@ -1471,12 +1471,15 @@ mod tests {
             .map(|d| Path::new(d).join("git"))
             .find(|p| p.is_file())
             .unwrap();
-        let dir = temp_dir("fake-git");
+        let dir = temp_dir(&format!(
+            "fake-git-{verb}-{}",
+            name.rsplit("::").next().unwrap()
+        ));
         let script = dir.join("git");
         fs::write(
             &script,
             format!(
-                "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = fetch ]; then\n{fetch_body}\n  fi\ndone\nexec {} \"$@\"\n",
+                "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = {verb} ]; then\n{fetch_body}\n  fi\ndone\nexec {} \"$@\"\n",
                 real.display()
             ),
         )
@@ -1503,6 +1506,7 @@ mod tests {
         let Ok(dir) = std::env::var(FAKE_GIT_CHILD) else {
             in_fake_git_child(
                 name,
+                "fetch",
                 "    echo \"$GIT_TERMINAL_PROMPT\" > \"$(dirname \"$0\")/prompt\"",
             );
             return;
@@ -1518,7 +1522,7 @@ mod tests {
     fn hung_fetch_times_out() {
         let name = "commands::worktree::tests::hung_fetch_times_out";
         if std::env::var(FAKE_GIT_CHILD).is_err() {
-            in_fake_git_child(name, "    exec sleep 300");
+            in_fake_git_child(name, "fetch", "    exec sleep 300");
             return;
         }
         let t = Lineage::new("wt-hung-fetch");
@@ -2076,6 +2080,38 @@ mod tests {
                 "git merge-base timed out after 1 s".to_string()
             )
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Only `git worktree remove` runs without the 20 s cap: a wrapper that stalls it for 21 s still
+    /// lets the removal finish, where a capped call would leave the worktree.
+    #[cfg(unix)]
+    #[test]
+    fn only_worktree_remove_waits_without_a_cap() {
+        let name = "commands::worktree::tests::only_worktree_remove_waits_without_a_cap";
+        if std::env::var(FAKE_GIT_CHILD).is_err() {
+            in_fake_git_child(name, "remove", "    sleep 21");
+            return;
+        }
+        let t = Checkout::new("wt-no-cap");
+        t.merge();
+        let started = std::time::Instant::now();
+        assert_eq!(
+            t.clean(false, None),
+            (vec![t.shown_wt(), format!("branch {BRANCH}")], vec![])
+        );
+        assert!(started.elapsed() >= Duration::from_secs(21));
+    }
+
+    #[test]
+    fn bad_claim_minutes_still_reads_the_pr() {
+        let dir = temp_dir("wt-bad-claim");
+        fs::write(
+            dir.join("config.md"),
+            "---\ndevice: host-a\nclaim_stale_minutes: soon\n---\n",
+        )
+        .unwrap();
+        assert_eq!(device_name(&dir), "host-a");
         fs::remove_dir_all(dir).unwrap();
     }
 
