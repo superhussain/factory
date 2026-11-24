@@ -283,11 +283,12 @@ Use `factory.exe` and PowerShell paths on Windows.
    `--destination` your host uses. Expect a folder that holds `SKILL.md`. Set
    `$SKILL` to it. No folder means a fresh host. Pause intake from the dashboard,
    skip to step 4 and take the Fresh install path.
-2. **Pause intake.** `<runtime> halt status`. Expect `"halted": true`. If it is not, run
+2. **Read the bundle.** `cat $SKILL/bundle.json`. Pick the path from the table in
+   [Pick your upgrade path](#pick-your-upgrade-path). The `entry` key also sets
+   `<runtime>` for the next step.
+3. **Pause intake.** `<runtime> halt status`. Expect `"halted": true`. If it is not, run
    `<runtime> halt set --reason "migrating <host> to Rust"` and check again. Never
    clear the halt.
-3. **Read the bundle.** `cat $SKILL/bundle.json`. Pick the path from the table in
-   [Pick your upgrade path](#pick-your-upgrade-path).
 4. **Upgrade.**
    - Catch-up path: `$RT catch-up`. Expect exit 0 and a last line of
      `catch-up: done` or `catch-up: nothing new`. On a Mac older than `e137ba69`,
