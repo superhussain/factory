@@ -965,6 +965,147 @@ mod tests {
         fs::remove_dir_all(home).unwrap();
     }
 
+    /// A loopback Worker holding one board. GET /api/board answers it, PUT /api/board replaces it and
+    /// keeps the body, and any other GET answers an empty list.
+    fn board_server(
+        board: Value,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::Mutex<(Value, Vec<Value>)>>,
+    ) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let state = std::sync::Arc::new(std::sync::Mutex::new((board, Vec::new())));
+        let shared = state.clone();
+        thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut parts = line.split_whitespace();
+                let (method, path) = (parts.next().unwrap(), parts.next().unwrap());
+                let mut length = 0;
+                loop {
+                    let mut h = String::new();
+                    reader.read_line(&mut h).unwrap();
+                    if h.trim_end().is_empty() {
+                        break;
+                    }
+                    if let Some((k, v)) = h.split_once(':') {
+                        if k.eq_ignore_ascii_case("content-length") {
+                            length = v.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut raw = vec![0; length];
+                reader.read_exact(&mut raw).unwrap();
+                let mut state = shared.lock().unwrap();
+                let body = match (method, path) {
+                    ("GET", "/api/board") => state.0.to_string(),
+                    ("PUT", "/api/board") => {
+                        let put: Value = serde_json::from_slice(&raw).unwrap();
+                        state.0 = put.clone();
+                        state.1.push(put);
+                        String::new()
+                    }
+                    _ => "[]".to_string(),
+                };
+                let head = format!(
+                    "HTTP/1.1 200 X\r\nContent-Length: {}\r\nConnection: close\r\nETag: \"x\"\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(format!("{head}{body}").as_bytes());
+            }
+        });
+        (origin, state)
+    }
+
+    #[test]
+    fn round_wait_writes_as_verdicts_land() {
+        let round_1 = json!({"security": "PASS", "ux": "PASS", "ui": "SKIPPED", "code": "CHANGES"});
+        let round_2 =
+            json!({"security": "pending", "ux": "SKIPPED", "ui": "SKIPPED", "code": "pending"});
+        let job = json!({"id": "042-sample-export", "project": "sample", "title": "Sample export",
+                         "stage": "review", "round": 2, "rounds": [round_1, round_2]});
+        let (origin, state) = board_server(json!({"updated": "", "jobs": [job]}));
+        let (home, folder) = home("round-lands", "042-sample-export");
+        fs::create_dir_all(folder.join("round-2")).unwrap();
+        fs::write(
+            home.join("config.md"),
+            format!("---\napi_url: {origin}\ndevice: sample-device\n---\n"),
+        )
+        .unwrap();
+        for reviewer in ["ux", "ui"] {
+            fs::write(
+                folder.join(format!("round-2/review-{reviewer}.md")),
+                "VERDICT: SKIPPED\n",
+            )
+            .unwrap();
+        }
+        let review = |reviewer: &str, text: &str| {
+            fs::write(folder.join(format!("round-2/review-{reviewer}.md")), text).unwrap();
+        };
+        let clock = Cell::new(0.0);
+        let sleep = |s: f64| {
+            clock.set(clock.get() + s);
+            if clock.get() == 212.0 {
+                review("security", "VERDICT: CHANGES\n");
+            } else if clock.get() == 305.0 {
+                review("code", "VERDICT: PASS\n");
+            }
+        };
+        let holds = RefCell::new(Vec::new());
+        let hold = |target: &str| {
+            holds.borrow_mut().push(target.to_string());
+            Ok(())
+        };
+        let io = Io {
+            hold: &hold,
+            now: &|| clock.get(),
+            sleep: &sleep,
+        };
+        let out = round_wait_run(
+            &home,
+            "sample",
+            "042-sample-export",
+            "sample/042-sample-export",
+            &strings(&["2"]),
+            &io,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&out).unwrap(),
+            json!({
+                "event": "round", "round": 2,
+                "verdicts": {"security": "CHANGES", "ux": "SKIPPED", "ui": "SKIPPED", "code": "PASS"},
+                "files": {
+                    "round-2/review-security.md": "VERDICT: CHANGES",
+                    "round-2/review-ux.md": "VERDICT: SKIPPED",
+                    "round-2/review-ui.md": "VERDICT: SKIPPED",
+                    "round-2/review-code.md": "VERDICT: PASS"
+                },
+                "elapsed": 305
+            })
+        );
+        assert_eq!(*holds.borrow(), ["sample/042-sample-export"]);
+        let puts: Vec<Value> = state
+            .lock()
+            .unwrap()
+            .1
+            .iter()
+            .map(|put| put["jobs"][0]["rounds"].clone())
+            .collect();
+        assert_eq!(
+            puts,
+            [
+                json!([round_1, {"security": "CHANGES", "ux": "SKIPPED", "ui": "SKIPPED", "code": "pending"}]),
+                json!([round_1, {"security": "CHANGES", "ux": "SKIPPED", "ui": "SKIPPED", "code": "PASS"}]),
+            ]
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn watch_linked_file_exits_6() {
