@@ -165,10 +165,23 @@ test("targets restores the browser cache read-only", () => {
   assert.ok(uses("browser").includes("actions/cache"));
 });
 
-test("no job runs the Python CLI suites and the workflow reads no secret", () => {
+test("targets runs the binary rust-build uploads instead of building it", () => {
+  const { targets } = workflow.jobs;
+  assert.deepEqual(targets.needs, ["plan", "rust-build"]);
+  const download = targets.steps.find((step) => action(step) === "actions/download-artifact");
+  assert.deepEqual(download.with, { name: "factory-linux-x64", path: "rust/target/host" });
+  assert.ok(!targets.steps.some((step) => /cargo/.test(step.run ?? "")));
+});
+
+test("no job runs the Python CLI suites or sets up Python, and the workflow reads no secret", () => {
   assert.equal(workflow.jobs.python, undefined);
   const raw = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
-  assert.doesNotMatch(raw, /secrets\./);
+  assert.doesNotMatch(raw, /secrets\.|setup-python|PYTHON/);
+  const setup = readFileSync(
+    new URL("../../.github/actions/ci-setup/action.yml", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(setup, /setup-python|python-version/);
 });
 
 test("the paseo-plugin job installs, typechecks and tests the plugin in order", () => {
