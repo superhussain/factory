@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-/// Every non-comment line outside a test module or tests.rs file that names /api/hosts, across the crate's source.
+/// Every non-comment line outside a test module that names /api/hosts, across the crate's source.
 fn host_lines() -> Vec<String> {
     let mut files = vec![Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src")).to_path_buf()];
     let mut lines = Vec::new();
@@ -13,8 +13,9 @@ fn host_lines() -> Vec<String> {
             }
             continue;
         }
-        // A tests.rs file is a whole test module, as pickup/tests.rs is.
-        if path.extension().is_none_or(|e| e != "rs") || path.ends_with("tests.rs") {
+        // pickup's test module is its own file.
+        if path.extension().is_none_or(|e| e != "rs") || path.ends_with("commands/pickup/tests.rs")
+        {
             continue;
         }
         let text = std::fs::read_to_string(&path).unwrap();
