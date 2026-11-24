@@ -475,7 +475,15 @@ fn audit_flags(
 ) -> Vec<&'static str> {
     let mut flags: Vec<&'static str> = AUDIT_FLAGS
         .iter()
-        .filter(|(_, pattern)| name == "Bash" && pattern.search(raw).is_some())
+        .filter(|(flag, pattern)| {
+            // A force-push a pattern could not finish reading stops the audit rather than pass unflagged.
+            name == "Bash"
+                && if *flag == "force-push" {
+                    pattern.search_or_stop(raw).is_some()
+                } else {
+                    pattern.search(raw).is_some()
+                }
+        })
         .map(|(flag, _)| *flag)
         .collect();
     let stripped = (name == "Bash").then(|| audit_strip_data_heredocs(raw));
@@ -2626,6 +2634,13 @@ pub fn bench_cmd(call: &Call) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn force_push_flag_stops_at_the_backtrack_limit() {
+        crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
+        audit_flags("Bash", &Map::new(), "git push x --force", false, true);
+    }
 
     #[cfg(unix)]
     #[test]

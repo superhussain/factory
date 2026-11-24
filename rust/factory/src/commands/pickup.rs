@@ -6213,7 +6213,10 @@ fn check_untrusted(text: &str) -> Option<String> {
     if NOTE_LINK.search(text).is_some() {
         return Some("links are not allowed".into());
     }
-    if NOTE_SECRETS.iter().any(|p| p.search(text).is_some()) {
+    if NOTE_SECRETS
+        .iter()
+        .any(|p| p.search_or_stop(text).is_some())
+    {
         return Some("looks like a secret".into());
     }
     NOTE_PHRASES
@@ -9461,6 +9464,13 @@ fn autonomy_hold_pass(io: &mut Io, home: &Path, data: &mut Value, dry: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn secret_check_stops_at_the_backtrack_limit() {
+        crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
+        check_untrusted("ghp_ eyJ plain text");
+    }
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::ffi::OsString;

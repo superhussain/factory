@@ -57,6 +57,13 @@ const BACKTRACK_LIMIT: usize = 100_000_000;
 
 static WARNED: AtomicBool = AtomicBool::new(false);
 
+#[cfg(test)]
+thread_local! {
+    /// A backtrack limit every pattern uses in this test thread instead of its own, when set, so a
+    /// test can reach the limit on short text.
+    pub(crate) static TEST_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
 impl Pattern {
     pub const fn new(src: &'static str, flags: Flags) -> Pattern {
         Pattern::with_limit(src, flags, BACKTRACK_LIMIT)
@@ -79,17 +86,22 @@ impl Pattern {
             "full" => (&self.full, "\\A(?:", ")\\z"),
             _ => (&self.search, "", ""),
         };
-        lock.get_or_init(|| {
+        let build = |limit| {
             let source = format!(
                 "{}{before}{}{after}",
                 prefix(self.flags),
                 body(self.src, self.flags)
             );
             RegexBuilder::new(&source)
-                .backtrack_limit(self.limit)
+                .backtrack_limit(limit)
                 .build()
                 .unwrap_or_else(|e| panic!("bad pattern {:?}: {e}", self.src))
-        })
+        };
+        #[cfg(test)]
+        if let Some(limit) = TEST_LIMIT.with(std::cell::Cell::get) {
+            return Box::leak(Box::new(build(limit)));
+        }
+        lock.get_or_init(|| build(self.limit))
     }
 
     /// A search that hit the backtrack limit counts as no match, with one warning per process.
