@@ -363,6 +363,7 @@ admit nor counts toward the pause. A revert counts toward the daily retro cap. T
 open records, every unresumed revert and the newest 20 other settled ones. Settle drops an open
 record that is not well formed (`trial_valid`): a bad id, project, stage, version,
 champion_version or opened.
+A trial's project must match `[A-Za-z0-9_-]+`, the ASCII set the Worker's trialMalformed and project routes accept.
 Settle prints `dropped malformed open trial records: <n> (<ids>; bad id, project, stage, version, champion_version or opened)`, with each id quoted and escaped as Rust's `{:?}` writes it, and an unquoted `(no id)` for a record without one.
 It also drops non-dict entries from `trials`
 when it writes the board.
