@@ -32,6 +32,11 @@ use crate::shared::time::{now, parse_stamp, unix_now};
 
 const PARENT_AGENT: &str = "paseo.parent-agent-id";
 
+/// How long a job may go with no real board change, by its own `updated`, before the heartbeat
+/// stops refreshing its claim. A wedged agent that stays `running` then ages out, and `stuck`
+/// can resume the job.
+const QUIET_CAP_HOURS: i64 = 6;
+
 /// What the heartbeat asks Paseo: this host's whole agent list for None, or for Some(agent) only
 /// the agents labelled as that agent's children.
 pub(crate) type List<'a> = &'a dyn Fn(Option<&str>) -> Option<Value>;
@@ -87,7 +92,14 @@ pub(crate) fn beat_with(
     cas_via(home, None, api, |text| {
         let mut board = load_board(text)?;
         let cutoff = unix_now() - (CLAIM_REFRESH_MINUTES * 60.0) as i64;
-        let due = due_claims(&board, device, server, cutoff);
+        let mut due = due_claims(&board, device, server, cutoff);
+        let quiet_since = unix_now() - QUIET_CAP_HOURS * 3600;
+        due.retain(|(i, _)| {
+            board["jobs"][*i]["updated"]
+                .as_str()
+                .and_then(parse_stamp)
+                .is_some_and(|u| u >= quiet_since)
+        });
         if due.is_empty() {
             return Ok((None, Vec::new()));
         }
@@ -496,5 +508,44 @@ pub(crate) mod tests {
         assert_eq!(ids, ["001-a"]);
         assert_eq!(methods, ["GET", "PATCH"]);
         assert_eq!(fake.asked.borrow().len(), 1);
+    }
+
+    /// A job with no real board change for QUIET_CAP_HOURS, or with no readable updated stamp,
+    /// gets no refresh even while its agent runs.
+    #[test]
+    fn a_job_quiet_past_the_cap_ages_out() {
+        let old = minutes_ago(30);
+        let mut quiet = job(
+            "002-b",
+            "build",
+            claim("mac", "s2", &old),
+            Some((SERVER, "b")),
+        );
+        quiet["updated"] = minutes_ago(QUIET_CAP_HOURS * 60 + 1).into();
+        let mut odd = job(
+            "003-c",
+            "build",
+            claim("mac", "s3", &old),
+            Some((SERVER, "c")),
+        );
+        odd["updated"] = "garbage".into();
+        let mut near = job(
+            "001-a",
+            "build",
+            claim("mac", "s1", &old),
+            Some((SERVER, "a")),
+        );
+        near["updated"] = minutes_ago(QUIET_CAP_HOURS * 60 - 1).into();
+        let fake = Fake::new(
+            json!([
+                agent("a", "running", "factory 001-a"),
+                agent("b", "running", "factory 002-b"),
+                agent("c", "running", "factory 003-c"),
+            ]),
+            vec![],
+        );
+        let (ids, methods) = beat_on("heartbeat-cap", &board_of(vec![near, quiet, odd]), &fake);
+        assert_eq!(ids, ["001-a"]);
+        assert_eq!(methods, ["GET", "PATCH"]);
     }
 }
