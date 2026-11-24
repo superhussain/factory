@@ -496,12 +496,12 @@ async function boardRefusal(
   data,
   sameBase,
   principal,
-  names = storedNames(stored.jobs),
+  storedUploads = storedNames(stored.jobs),
 ) {
   return (
     checkGoals(data.jobs) ??
-    (await checkIdeaImages(env, data.jobs, names)) ??
-    (await checkIdeaFiles(env, data.jobs, names)) ??
+    (await checkIdeaImages(env, data.jobs, storedUploads)) ??
+    (await checkIdeaFiles(env, data.jobs, storedUploads)) ??
     (sameBase
       ? (checkRowIds(stored.jobs, data.jobs) ??
         checkArchived(stored, data) ??
@@ -810,8 +810,8 @@ async function boardPatch(request, env, principal, ctx) {
         : base.updated;
     const stored = { etag: snap.etag, jobs: storedJobs, archived: snap.head?.archived, doc };
     const data = { ...base, jobs, updated };
-    const names = new Set([...snap.names, ...storedNames(storedJobs)]);
-    const bad = await boardRefusal(env, stored, data, true, principal, names);
+    const storedUploads = new Set([...snap.names, ...storedNames(storedJobs)]);
+    const bad = await boardRefusal(env, stored, data, true, principal, storedUploads);
     if (bad) return reply(bad, 400);
     const changes = rows.map((e) => ({ id: e.id, row: e.row, add: e.expect === null }));
     const out = await store.commit({ base: snap.etag, changes, updated, max: MAX_BOARD });
@@ -2755,11 +2755,14 @@ const IDEA_REF_FRESH_MS = DAY_MS;
 async function pruneIdeaUploads(env, now) {
   const named = new Set();
   for (const key of ["board.json", ARCHIVE_KEY]) {
-    const object = key === "board.json" ? await boardStore(env).read() : await env.BUCKET.get(key);
-    if (!object && key === ARCHIVE_KEY) continue;
+    const text =
+      key === "board.json"
+        ? ((await boardStore(env).read())?.text ?? null)
+        : ((await (await env.BUCKET.get(key))?.text()) ?? null);
+    if (text === null && key === ARCHIVE_KEY) continue;
     let jobs;
     try {
-      jobs = JSON.parse(typeof object.text === "string" ? object.text : await object.text()).jobs;
+      jobs = JSON.parse(text).jobs;
     } catch {}
     if (!Array.isArray(jobs)) {
       console.warn(`idea upload sweep skipped: ${key} is unreadable`);
@@ -3426,7 +3429,7 @@ function checkBatchRefs(storedJobs, jobs) {
 // Only references the stored board doesn't already carry, by its upload names, are looked
 // up: an image is immutable once uploaded, so one the stored board names was checked when
 // it was saved.
-async function checkIdeaImages(env, jobs, names) {
+async function checkIdeaImages(env, jobs, storedUploads) {
   const wanted = new Set();
   for (const j of jobs) {
     if (typeof j !== "object" || j === null) continue;
@@ -3444,7 +3447,7 @@ async function checkIdeaImages(env, jobs, names) {
     }
     names.forEach((n) => wanted.add(n));
   }
-  for (const n of names) wanted.delete(n);
+  for (const n of storedUploads) wanted.delete(n);
   if (!wanted.size) return null;
   if (wanted.size > MAX_NEW_REFS) return "too many new idea images in one board write";
   for (const name of wanted) {
@@ -3459,7 +3462,7 @@ async function checkIdeaImages(env, jobs, names) {
 
 // An error message, or null, for the idea_files field of a board write, checked like
 // idea_images: only names the stored board doesn't already carry are looked up.
-async function checkIdeaFiles(env, jobs, names) {
+async function checkIdeaFiles(env, jobs, storedUploads) {
   const wanted = new Set();
   for (const j of jobs) {
     if (typeof j !== "object" || j === null || !("idea_files" in j)) continue;
@@ -3475,7 +3478,7 @@ async function checkIdeaFiles(env, jobs, names) {
     }
     names.forEach((n) => wanted.add(n));
   }
-  for (const n of names) wanted.delete(n);
+  for (const n of storedUploads) wanted.delete(n);
   if (!wanted.size) return null;
   if (wanted.size > MAX_NEW_REFS) return "too many new idea files in one board write";
   for (const name of wanted) {
