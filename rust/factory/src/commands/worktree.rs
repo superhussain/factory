@@ -722,7 +722,22 @@ fn proc_alive(pid: u32) -> bool {
 
 /// `stop_pids` with the proc folder and lsof given.
 fn stop_pids_with(wt: &Path, proc_root: &Path, lsof: Option<PathBuf>) -> Option<Vec<u32>> {
-    let real = resolve(wt).unwrap_or_else(|_| wt.to_path_buf());
+    // A link at wt or its parent would point the signals at another folder, and an empty or
+    // unresolved wt would match every process.
+    let linked = [Some(wt), wt.parent()]
+        .into_iter()
+        .flatten()
+        .any(|p| !p.as_os_str().is_empty() && is_link(p).unwrap_or(true));
+    let real = match resolve(wt) {
+        Ok(real) if !wt.as_os_str().is_empty() && !linked => real,
+        _ => {
+            eprintln!(
+                "factory.py: refusing to stop processes in {}: not a real folder path",
+                wt.display()
+            );
+            return None;
+        }
+    };
     if !cfg!(windows) && !proc_root.is_dir() && lsof.is_none() {
         eprintln!(
             "factory.py: lsof not found, so processes in {} were not checked",
@@ -2235,6 +2250,35 @@ mod tests {
         chmod(&lsof, 0o755);
         let alive = stop_pids_with(&dir, &dir.join("no-proc"), Some(lsof));
         assert_eq!(alive, Some(vec![0, 4294967295]));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_pids_refuses_a_linked_or_empty_worktree() {
+        let dir = temp_dir("wt-linked-stop");
+        let real = dir.join("real/001-test");
+        fs::create_dir_all(&real).unwrap();
+        let lsof = dir.join("lsof");
+        let cwd = std::env::current_dir().unwrap();
+        // Unsignallable pids, so a call that was not refused lists them as alive.
+        fs::write(
+            &lsof,
+            format!(
+                "#!/bin/sh\nprintf 'p4294967295\\nn{}\\np4294967294\\nn{}\\n'\n",
+                real.display(),
+                cwd.display()
+            ),
+        )
+        .unwrap();
+        chmod(&lsof, 0o755);
+        let stop = |wt: &Path| stop_pids_with(wt, &dir.join("no-proc"), Some(lsof.clone()));
+        assert_eq!(stop(&real), Some(vec![4294967295]));
+        std::os::unix::fs::symlink(&real, dir.join("link")).unwrap();
+        std::os::unix::fs::symlink(dir.join("real"), dir.join("slug")).unwrap();
+        assert_eq!(stop(&dir.join("link")), None);
+        assert_eq!(stop(&dir.join("slug/001-test")), None);
+        assert_eq!(stop(Path::new("")), None);
         fs::remove_dir_all(dir).unwrap();
     }
 
