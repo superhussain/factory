@@ -1364,7 +1364,7 @@ fn trial_whole(v: Option<&Value>) -> Option<i64> {
             .filter(|f| f.fract() == 0.0 && f.abs() <= MAX as f64)?;
         f as i64
     };
-    (n.abs() <= MAX).then_some(n)
+    (n.unsigned_abs() <= MAX as u64).then_some(n)
 }
 
 /// The Worker's BOARD_STAMP.
@@ -5876,6 +5876,7 @@ mod tests {
             assert!(!trial_valid(&trial(
                 json!({"version": 9007199254740992u64})
             )));
+            assert!(!trial_valid(&trial(json!({"version": i64::MIN}))));
             assert!(!trial_valid(&trial(json!({"champion_version": 1.5}))));
         }
 
