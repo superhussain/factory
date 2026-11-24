@@ -1112,6 +1112,26 @@ mod tests {
         assert_eq!(methods.len(), 8);
     }
 
+    /// A 503 on the direct read after a 503 write retries the read, and the pending landed check
+    /// still returns once that read shows the write, without a second run.
+    #[test]
+    fn a_503_reread_keeps_the_landed_check() {
+        let build = leak(json!([{"id": "1999-a", "stage": "build"}]));
+        let review = leak(json!([{"id": "1999-a", "stage": "review"}]));
+        let (result, runs, methods) = cas_review(
+            "board-client-503-reread",
+            vec![
+                (200, build, patchable()),
+                (503, BUSY, vec![]),
+                (503, BUSY, vec![]),
+                (200, review, patchable()),
+            ],
+        );
+        result.unwrap();
+        assert_eq!(runs, 1);
+        assert_eq!(methods, ["GET", "PATCH", "GET", "GET"]);
+    }
+
     /// A daemon that takes a board write and closes without a reply fails the write, and the
     /// change never runs twice, since the write may have landed.
     #[cfg(unix)]
