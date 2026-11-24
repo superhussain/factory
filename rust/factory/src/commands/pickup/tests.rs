@@ -4879,12 +4879,16 @@ mod audit_pickup_test {
     #[test]
     fn test_a_scan_past_the_backtrack_limit_skips_the_push() {
         let fx = setup();
-        // audit_push reads device from the home factory_home names.
-        let home = fx.root.join(".config/factory");
-        fs::create_dir_all(&home).unwrap();
-        fs::write(home.join("config.md"), "---\ndevice: box\n---\n").unwrap();
         crate::commands::audit::limit_secret_file_for_test();
+        // audit_push reads its device from factory_home, which follows XDG_CONFIG_HOME before
+        // HOME, so name the fixture home outright. fx holds the env lock until it drops.
+        let saved = std::env::var_os("FACTORY_HOME");
+        std::env::set_var("FACTORY_HOME", &fx.home);
         let (code, out, err) = fx.pickup(&[]);
+        match saved {
+            Some(v) => std::env::set_var("FACTORY_HOME", v),
+            None => std::env::remove_var("FACTORY_HOME"),
+        }
         assert_eq!((code, out.as_str()), (0, ""));
         assert!(
             err.starts_with(
