@@ -4,9 +4,10 @@
 // Usage: secret-scan.mjs [--private-patterns FILE] [--history OUT]
 // Default: copies `git ls-files` to a temp dir and runs `gitleaks dir` on it with
 // <repo>/.gitleaks.toml. Exit 0 clean, 1 findings, 2 gitleaks missing.
-// --private-patterns FILE: one regex per line; prints `<file>:<line>: private
-// pattern <n>` per hit, never the match. A leading (?i) makes a line case-insensitive.
-// Keep FILE outside the tree.
+// --private-patterns FILE: one JavaScript regex per line (the u flag is on); prints
+// `<file>:<line>: private pattern <n>` per hit, never the match. A leading (?i) makes a
+// line case-insensitive. Python-only syntax such as (?P<name>...) or \Z, or a line that is
+// not a valid regex, exits 2 naming the line. Keep FILE outside the tree.
 // --history OUT: runs `gitleaks git` over all history into the JSON report OUT
 // and prints `history: <n> findings`.
 import { spawnSync } from "node:child_process";
@@ -35,16 +36,32 @@ function tracked(repo) {
   });
 }
 
+// Python re syntax that JavaScript reads differently or not at all: named groups and
+// backreferences, comments, \A and \Z, and inline flags other than a leading (?i).
+const PYTHON_ONLY = /\(\?P[<=>]|\(\?#|\\[AZ]|\(\?[aiLmsux]+[):]/;
+
 function privateScan(repo, patternsFile) {
   const patterns = [];
+  let bad = null;
   lines(readFileSync(patternsFile, "utf8")).forEach((line, i) => {
-    if (!line.trim()) return;
+    if (!line.trim() || bad) return;
     const insensitive = line.startsWith("(?i)");
-    patterns.push([
-      i + 1,
-      new RegExp(insensitive ? line.slice(4) : line, insensitive ? "iu" : "u"),
-    ]);
+    const source = insensitive ? line.slice(4) : line;
+    // The message names the line, never the pattern, which may itself be private.
+    if (PYTHON_ONLY.test(source)) {
+      bad = `private pattern ${i + 1} uses Python-only regex syntax; write it as a JavaScript regex`;
+      return;
+    }
+    try {
+      patterns.push([i + 1, new RegExp(source, insensitive ? "iu" : "u")]);
+    } catch {
+      bad = `private pattern ${i + 1} is not a valid JavaScript regex`;
+    }
   });
+  if (bad) {
+    console.error(bad);
+    return 2;
+  }
   let hits = 0;
   for (const name of tracked(repo)) {
     lines(readFileSync(join(repo, name)).toString("utf8")).forEach((line, i) => {

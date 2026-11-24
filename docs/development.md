@@ -117,6 +117,17 @@ ports, so the two never contend for a port. Their inputs cover
 lists the three projects. The `rust/` crate is not an Nx project: CI builds and tests it
 in its own jobs, and `tools/verify.mjs device` runs its `cargo test`. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
 
+## Secret scan
+
+`node tools/secret-scan.mjs` runs gitleaks over a copy of the tracked files, as CI's
+`Secret scan` step does; `--history <report.json>` scans all history instead.
+`--private-patterns <file>` checks the tracked files against your own identifiers, one
+JavaScript regular expression per line (read with the `u` flag), and prints only
+`<file>:<line>: private pattern <n>`. A leading `(?i)` makes a line case-insensitive.
+Python-only syntax, such as `(?P<name>...)`, `(?P=name)`, `\A`, `\Z` or an inline flag
+other than a leading `(?i)`, exits 2 and names the line, as does a line that is not a
+valid regex. Keep the pattern file outside the checkout.
+
 ## Parity harness
 
 The parity harness proves a `factory` binary against golden files, one argv at a time. The goldens were recorded from the Python CLI before it was removed, so they keep its behavior as the oracle. It runs on POSIX hosts only.

@@ -74,6 +74,34 @@ test("private patterns on a clean tree", (t) => {
   assert.equal(scan(["--private-patterns", patterns]).status, 0);
 });
 
+test("Python-only or invalid patterns exit 2 naming the line, not the pattern", (t) => {
+  const { patterns, commit, scan } = setup(t);
+  commit();
+  for (const [line, message] of [
+    [
+      "(?P<owner>synthetic-owner)",
+      "private pattern 2 uses Python-only regex syntax; write it as a JavaScript regex",
+    ],
+    [
+      "synthetic-owner\\Z",
+      "private pattern 2 uses Python-only regex syntax; write it as a JavaScript regex",
+    ],
+    [
+      "synthetic(?i)-owner",
+      "private pattern 2 uses Python-only regex syntax; write it as a JavaScript regex",
+    ],
+    ["synthetic-owner(", "private pattern 2 is not a valid JavaScript regex"],
+  ]) {
+    writeFileSync(patterns, `acme-internal\n${line}\n`);
+    const result = scan(["--private-patterns", patterns]);
+    assert.equal(result.status, 2, line);
+    assert.equal(result.stderr, `${message}\n`);
+    assert.ok(!(result.stdout + result.stderr).includes("synthetic"));
+  }
+  writeFileSync(patterns, "(?<owner>synthetic-owner)\n(?:acme)\n(?i)ACME\n");
+  assert.equal(scan(["--private-patterns", patterns]).status, 0);
+});
+
 test(
   "gitleaks finds a planted token and redacts it",
   { skip: !GITLEAKS && "gitleaks not installed" },
