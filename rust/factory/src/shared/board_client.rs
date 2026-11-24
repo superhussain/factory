@@ -465,6 +465,63 @@ pub fn row_patch(old: &str, new: &str, reads: Reads) -> Option<String> {
     (body.len() <= MAX_PATCH_BYTES).then_some(body)
 }
 
+/// Whether the board `now` already holds the write that turned `old` into `new`: every changed
+/// top-level key but `jobs` and `updated` has its new value, every changed or added row is `new`'s
+/// row, and every removed row is gone. Rows match by the first row with each id, and an absent
+/// `old` counts as an empty board. False when `now` is absent, nothing changed, or JSON fails.
+fn landed(old: Option<&str>, new: &str, now: Option<&str>) -> bool {
+    let parse = |text: &str| match loads(text) {
+        Ok(Value::Object(doc)) => Some(doc),
+        _ => None,
+    };
+    let old = match old {
+        Some(text) => parse(text),
+        None => Some(Map::from_iter([("jobs".to_string(), json!([]))])),
+    };
+    let (Some(old), Some(new), Some(now)) = (old, parse(new), now.and_then(parse)) else {
+        return false;
+    };
+    let mut changed = false;
+    for key in old.keys().chain(new.keys()) {
+        if key != "jobs" && key != "updated" && old.get(key) != new.get(key) {
+            if now.get(key) != new.get(key) {
+                return false;
+            }
+            changed = true;
+        }
+    }
+    let rows = |doc: &Map<String, Value>| {
+        let mut rows = HashMap::new();
+        for j in doc
+            .get("jobs")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(id) = j.get("id").and_then(Value::as_str) {
+                rows.entry(id.to_string()).or_insert_with(|| j.clone());
+            }
+        }
+        rows
+    };
+    let (was, will, is) = (rows(&old), rows(&new), rows(&now));
+    for (id, row) in &will {
+        if was.get(id) != Some(row) {
+            if is.get(id) != Some(row) {
+                return false;
+            }
+            changed = true;
+        }
+    }
+    for id in was.keys().filter(|id| !will.contains_key(*id)) {
+        if is.contains_key(id) {
+            return false;
+        }
+        changed = true;
+    }
+    changed
+}
+
 /// Sends a row PATCH, through the daemon when the read came from its mirror, else, or when no
 /// daemon takes it, straight to the Worker. True once the Worker committed it, false on a 409
 /// conflict, so the caller reads again. A request the daemon took but never answered fails,
@@ -830,6 +887,35 @@ mod tests {
         let old = board(json!([{"id": "1999-a"}]));
         let big = board(json!([{"id": "1999-a", "note": "x".repeat(MAX_PATCH_BYTES)}]));
         assert_eq!(row_patch(&old, &big, None), None);
+    }
+
+    #[test]
+    fn landed_sees_rows_and_top_level_keys() {
+        let old = board(json!([{"id": "1999-a", "stage": "build"}, {"id": "2000-b"}]));
+        let changed = board(json!([{"id": "1999-a", "stage": "review"}, {"id": "2000-b"}]));
+        let added =
+            board(json!([{"id": "1999-a", "stage": "build"}, {"id": "2000-b"}, {"id": "2001-c"}]));
+        let removed = board(json!([{"id": "1999-a", "stage": "build"}]));
+        let autonomy = dumps(
+            &json!({"updated": "2026-11-23T10:00:00Z", "jobs": [{"id": "1999-a", "stage": "build"}, {"id": "2000-b"}], "autonomy": {"paused": true}}),
+            COMPACT,
+        );
+        for new in [&changed, &added, &removed, &autonomy] {
+            assert!(landed(Some(&old), new, Some(new)), "{new}");
+            assert!(!landed(Some(&old), new, Some(&old)), "{new}");
+            assert!(!landed(Some(&old), new, None), "{new}");
+        }
+        // Another writer's later edit to the same row is not this write.
+        let other = board(json!([{"id": "1999-a", "stage": "merged"}, {"id": "2000-b"}]));
+        assert!(!landed(Some(&old), &changed, Some(&other)));
+        // An unrelated row changing too does not hide a landed write.
+        let both = board(json!([{"id": "1999-a", "stage": "review"}, {"id": "2000-b", "x": 1}]));
+        assert!(landed(Some(&old), &changed, Some(&both)));
+        // No board yet, then the first row.
+        let first = board(json!([{"id": "1999-a"}]));
+        assert!(landed(None, &first, Some(&first)));
+        assert!(!landed(Some(&old), &old, Some(&old)));
+        assert!(!landed(Some(&old), "not json", Some(&old)));
     }
 
     use crate::shared::http::tests::{home_for, serve};
