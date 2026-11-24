@@ -18,8 +18,8 @@ use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::{
     tag_lookalike, BABYSIT_SENTENCE, BACKLOG_LINE, BACKLOG_PICK, BATCH_REF, IDEA, JOB_ID, JOB_REL,
     MAX_CANDIDATES, MAX_RIDERS, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG,
-    PASEO_ID, PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE, REVIEW_ROUTE_KEYS,
-    ROUTE_EFFORTS, ROUTE_MODEL, SLUG, TERMINAL,
+    PASEO_ID, PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE, PROJECT_SLUG,
+    REVIEW_ROUTE_KEYS, ROUTE_EFFORTS, ROUTE_MODEL, SLUG, TERMINAL,
 };
 use crate::shared::exit::{fail, Res};
 use crate::shared::fs::{
@@ -1345,7 +1345,7 @@ fn trial_valid(t: &Value) -> bool {
     let Some(version) = trial_whole(map.get("version")) else {
         return false;
     };
-    SLUG.is_full(project)
+    PROJECT_SLUG.is_full(project)
         && PIPELINE_STAGES.contains(&stage)
         && trial_whole(map.get("champion_version")).is_some_and(|v| v >= 0)
         && str_of(t, "id") == Some(&format!("{project}-{stage}-v{version}"))
@@ -5878,6 +5878,7 @@ mod tests {
             )));
             assert!(!trial_valid(&trial(json!({"version": i64::MIN}))));
             assert!(!trial_valid(&trial(json!({"champion_version": 1.5}))));
+            assert!(trial_droppable(&trial(json!({"project": "café"}))));
         }
 
         #[test]

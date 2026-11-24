@@ -65,6 +65,11 @@ const FIELDS = [
 const DAYS = { "{today}": 0, "{today-6}": 6 };
 // The host's OS label (host_os in the binary) in host-status.json and its PUT body, raw or JSON-escaped.
 const HOST_OS = /(\\?"os\\?": \\?")(?:Linux \(WSL\)|Linux|macOS|Windows|Other)(?=\\?")/g;
+// The binary's PICKUP_SCHEDULER on this host, and its value in a "scheduler" field, raw or JSON-escaped.
+const PICKUP_SCHEDULER = process.platform === "darwin" ? "launchd" : "cron";
+const SCHEDULER = new RegExp(`(\\\\?"scheduler\\\\?": \\\\?")${PICKUP_SCHEDULER}(?=\\\\?")`, "g");
+// This host's ECONNREFUSED message, which reads as Linux's 111 because the goldens came from Linux.
+const REFUSED = new RegExp(`\\[Errno ${osConstants.errno.ECONNREFUSED}\\] Connection refused`, "g");
 // This host's name, where a device name falls back to it, as a whole word so a short name never matches inside a path.
 const HOST = hostname()
   ? new RegExp(
@@ -535,7 +540,9 @@ async function runSide(c, command) {
       for (const [from, to] of swaps) data = data.replaceAll(bytes(from), to);
       data = nowStamps(data, start, end)
         .replace(ELAPSED, '"elapsed": {n}')
-        .replace(HOST_OS, "$1{os}");
+        .replace(HOST_OS, "$1{os}")
+        .replace(REFUSED, "[Errno 111] Connection refused");
+      if (c.host_scheduler) data = data.replace(SCHEDULER, "$1{scheduler}");
       return HOST ? data.replace(HOST, "{host}") : data;
     };
 
@@ -622,6 +629,10 @@ function diff(want, got) {
 
 async function runCase(c, command, record) {
   let fields = await runSide(c, command);
+  if (c.host_scheduler && PICKUP_SCHEDULER !== "cron") {
+    const i = FIELDS.indexOf("crontab calls");
+    fields[i][1] = readGolden(c)?.[i][1] ?? "";
+  }
   const dates = Object.fromEntries(
     Object.entries(DAYS).map(([name, back]) => [name, utcDate(back)]),
   );

@@ -23,7 +23,7 @@ use crate::shared::board_client;
 use crate::shared::conf::{fm_get, frontmatter, read_env_ordered};
 use crate::shared::consts::{
     tag_lookalike, IDEA, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG,
-    PIPELINE_STAGES, RETRO_STAGES, SLUG,
+    PIPELINE_STAGES, PROJECT_SLUG, RETRO_STAGES,
 };
 use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{is_link, read_text, write_atomic};
@@ -2022,7 +2022,7 @@ fn trial_valid(t: &Value) -> bool {
     let Some(project) = t
         .get("project")
         .and_then(Value::as_str)
-        .filter(|p| SLUG.is_full(p))
+        .filter(|p| PROJECT_SLUG.is_full(p))
     else {
         return false;
     };
@@ -3617,6 +3617,15 @@ mod tests {
     use std::time::{Duration, Instant};
 
     const SLUG: &str = "-home-u--paseo-worktrees-ab12-factory-1017-add-x";
+
+    #[test]
+    fn trial_project_is_ascii() {
+        let mut t = json!({"id": "café-spec-v8", "project": "café", "stage": "spec", "version": 8, "champion_version": 7, "opened": "2026-01-01T00:00:00Z", "status": "open"});
+        assert!(!trial_valid(&t));
+        t["id"] = json!("factory-spec-v8");
+        t["project"] = json!("factory");
+        assert!(trial_valid(&t));
+    }
 
     fn copy_dir(from: &Path, to: &Path) {
         fs::create_dir_all(to).unwrap();

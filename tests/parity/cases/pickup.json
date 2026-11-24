@@ -73,6 +73,7 @@
     },
     {
       "id": "pickup/halt",
+      "host_scheduler": true,
       "argv": ["--home", "{home}", "pickup"],
       "home": "pickup-bare",
       "stubs": {},
@@ -570,6 +571,7 @@
     },
     {
       "id": "pickup/empty-board",
+      "host_scheduler": true,
       "argv": ["--home", "{home}", "pickup"],
       "home": "pickup-bare",
       "stubs": {

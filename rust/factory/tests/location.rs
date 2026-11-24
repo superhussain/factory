@@ -6,6 +6,8 @@ use std::process::Command;
 #[test]
 fn home_flag_beats_factory_home_and_creates_no_default() {
     let root = std::env::temp_dir().join(format!("factory-location-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let root = fs::canonicalize(&root).unwrap();
     let (explicit, env_home) = (root.join("explicit"), root.join("environment"));
     fs::create_dir_all(&explicit).unwrap();
     fs::create_dir_all(&env_home).unwrap();
