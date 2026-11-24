@@ -1352,6 +1352,27 @@ fn trial_valid(t: &Value) -> bool {
         && stamp_of(map.get("opened")).is_some()
 }
 
+/// The Worker's BOARD_STAMP.
+static TRIAL_STAMP: Pattern = Pattern::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", Flags::ASCII);
+
+/// True when a trial's opened is not a board stamp or its version is not a whole number, the
+/// Worker's trialMisshapen.
+fn trial_misshapen(t: &Value) -> bool {
+    let whole = match t.get("version") {
+        Some(v) if v.is_i64() || v.is_u64() => true,
+        Some(v) => v
+            .as_f64()
+            .is_some_and(|f| f.is_finite() && f.fract() == 0.0),
+        None => false,
+    };
+    !whole || !str_of(t, "opened").is_some_and(|s| TRIAL_STAMP.is_full(s))
+}
+
+/// True for an open trial record trial settle drops: not well formed, and misshapen.
+fn trial_droppable(t: &Value) -> bool {
+    t.is_object() && str_of(t, "status") == Some("open") && !trial_valid(t) && trial_misshapen(t)
+}
+
 /// The board's open, well-formed trial for slug's stage note, or None.
 #[allow(dead_code)]
 fn open_trial_for<'a>(data: &'a Value, slug: &str, stage: &str) -> Option<&'a Value> {
@@ -1471,7 +1492,11 @@ fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
         .filter(|t| trial_valid(t) && str_of(t, "status") == Some("open"))
         .cloned()
         .collect();
-    if trials.is_empty() {
+    let any_droppable = data
+        .get("trials")
+        .and_then(Value::as_array)
+        .is_some_and(|ts| ts.iter().any(trial_droppable));
+    if trials.is_empty() && !any_droppable {
         o.out.push_str("no open trials\n");
         return Ok(());
     }
@@ -1597,16 +1622,18 @@ fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
         }
         updates.push((tid.to_string(), update));
     }
+    let mut dropped = 0;
     let data = cas(home, "/api/board", |text| {
         let mut data = load_board(text)?;
-        let mut records: Vec<Value> = data
+        let (gone, mut records): (Vec<Value>, Vec<Value>) = data
             .get("trials")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
             .filter(|t| t.is_object())
             .cloned()
-            .collect();
+            .partition(trial_droppable);
+        dropped = gone.len();
         for t in records.iter_mut() {
             if str_of(t, "status") != Some("open") {
                 continue;
@@ -1643,6 +1670,14 @@ fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
         data["updated"] = json!(now());
         Ok((Some(dump_board(&data)), data))
     })?;
+    if dropped > 0 {
+        writeln!(
+            o.out,
+            "dropped malformed open trial records: {dropped} \
+             (opened is not a board timestamp or version is not a whole number)"
+        )
+        .unwrap();
+    }
     let mut reverted: Vec<&str> = trials
         .iter()
         .filter(|t| {

@@ -3221,6 +3221,9 @@ function checkTrials(storedDoc, data) {
 }
 
 const BOARD_STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+// An open trial trial settle drops: its opened is not a board stamp or its version is not a whole number.
+const trialMisshapen = (t) =>
+  !Number.isInteger(t.version) || typeof t.opened !== "string" || !BOARD_STAMP.test(t.opened);
 const TRIAL_SETTLED = ["kept", "reverted", "superseded", "inconclusive", "revert-failed"];
 const TRIAL_SETTLE_KEYS = ["status", "settled", "arms", "reads", "revert_version"];
 const TRIAL_MAX_DAYS = 28;
@@ -3248,7 +3251,8 @@ async function checkTrialSettle(env, stored, data) {
   const written = trials(data);
   const seen = new Set();
   for (const s of trials(stored.doc)) {
-    if (s.status !== "open" || typeof s.id !== "string" || seen.has(s.id)) continue;
+    if (s.status !== "open" || typeof s.id !== "string" || trialMisshapen(s) || seen.has(s.id))
+      continue;
     seen.add(s.id);
     const label = quoteIdCut(s.id, QUOTED_ID_MAX);
     const w = written.find((t) => t.id === s.id);
