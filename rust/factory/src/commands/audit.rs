@@ -4188,6 +4188,7 @@ mod bench_replay_error_test {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_no_claude() {
         // Empties PATH, so it runs alone: parallel tests need PATH to find git.
@@ -4195,9 +4196,14 @@ mod bench_replay_error_test {
             return;
         }
         let b = Bench::new("no-claude");
-        let empty = b.root.join("empty");
-        fs::create_dir(&empty).unwrap();
-        std::env::set_var("PATH", &empty);
+        std::env::set_var(
+            "PATH",
+            crate::shared::path_without(
+                "claude",
+                &std::env::var_os("PATH").unwrap(),
+                &b.root.join("path"),
+            ),
+        );
         assert_fails(
             &b,
             None,

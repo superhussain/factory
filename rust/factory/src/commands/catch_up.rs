@@ -56,6 +56,8 @@ struct Fakes {
     daemon_service: Option<Option<&'static str>>,
     daemon_drift: Option<bool>,
     remove_timer: Option<Rc<dyn Fn(&str) -> Result<(), String>>>,
+    retro_left: Option<bool>,
+    remove_retro: Option<Rc<dyn Fn(&str) -> Result<(), String>>>,
     gh: Option<Rc<dyn Fn(&str, &[&str]) -> (i32, String)>>,
     setup_run: Option<Rc<dyn Fn(&[&str]) -> (i32, String)>>,
     backup: Option<Rc<dyn Fn() -> Result<PathBuf, String>>>,
@@ -108,6 +110,31 @@ fn timer_drift(scheduler: &str, home: &Path) -> bool {
     }
     pickup::timer_drift(scheduler, &pickup::timer_values(home, &pickup::PICKUP))
         .is_some_and(|s| !s.is_empty())
+}
+
+/// Whether a retro-push timer, loaded or not, is left beside the daemon, which pushes the digest
+/// itself.
+#[cfg_attr(test, allow(unused_variables))]
+fn retro_left(scheduler: &str) -> bool {
+    #[cfg(test)]
+    return fake!(retro_left).unwrap_or(false);
+    #[cfg_attr(test, allow(unreachable_code))]
+    pickup::timer_left(scheduler, &pickup::RETRO_PUSH)
+}
+
+/// Removes the retro-push timer, through the same code `daemon setup --install` uses.
+#[cfg_attr(test, allow(unused_variables))]
+fn remove_retro(scheduler: &str, home: &Path) -> Result<(), String> {
+    #[cfg(test)]
+    if let Some(f) = fake!(remove_retro) {
+        return f(scheduler);
+    }
+    #[cfg(test)]
+    panic!("a test removed a real retro-push timer");
+    #[cfg_attr(test, allow(unreachable_code))]
+    pickup::uninstall_timer(home, scheduler, &pickup::RETRO_PUSH)
+        .map(|_| ())
+        .map_err(|e| strip(e.stderr.trim_start_matches("factory.py: ")).to_string())
 }
 
 /// Removes the pickup timer, through the same code `daemon setup --install` uses.
@@ -919,11 +946,12 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
         "factory"
     });
     // One crontab read serves every check, so a host without a daemon reads it as before.
-    let (timer, daemon, legacy) = pickup::with_crontab_memo(|| {
+    let (timer, daemon, retro, legacy) = pickup::with_crontab_memo(|| {
         let daemon = daemon_service();
         (
             timer_installed(scheduler, daemon.is_some()),
             daemon,
+            daemon.is_some() && retro_left(scheduler),
             legacy_scan(home, scheduler, &binary.to_string_lossy()),
         )
     });
@@ -940,7 +968,7 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
         let have = installed.map_or_else(|| "unknown".to_string(), |c| short(&c));
         outln!(out, "skill: {have} installed, {h7} on origin/{base}");
     }
-    if current && !stale && !daemon_stale && legacy.is_empty() {
+    if current && !stale && !daemon_stale && !retro && legacy.is_empty() {
         if timer {
             outln!(out, "pickup timer: current");
         } else {
@@ -1082,6 +1110,18 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             } else {
                 failed += 1;
                 outln!(out, "pickup timer: {text}");
+            }
+        }
+        // The daemon pushes the retro digest, so a retro-push timer beside it goes too.
+        if retro && !ok {
+            outln!(out, "retro-push timer: skipped, skill install failed");
+        } else if retro {
+            match remove_retro(scheduler, home) {
+                Ok(()) => outln!(out, "retro-push timer: replaced by the daemon"),
+                Err(e) => {
+                    failed += 1;
+                    outln!(out, "retro-push timer: {e}");
+                }
             }
         }
         if daemon.is_some() {
@@ -2619,6 +2659,60 @@ mod tests {
         assert_eq!(code, 1);
         assert!(
             lines.contains(&"pickup timer: could not remove the cron timer: synthetic".to_string()),
+            "{lines:?}"
+        );
+    }
+
+    /// The daemon pushes the retro digest, so a retro-push timer beside it is removed after the
+    /// backup; a host without the daemon keeps its timer.
+    #[test]
+    fn daemon_host_removes_a_leftover_retro_push_timer() {
+        let t = T::new("leftover-retro");
+        t.timer(false);
+        t.drift(None);
+        let removed: Calls = Rc::default();
+        let seen = removed.clone();
+        FAKES.with(|f| {
+            let mut f = f.borrow_mut();
+            f.retro_left = Some(true);
+            f.remove_retro = Some(Rc::new(move |scheduler| {
+                seen.borrow_mut().push(vec![scheduler.to_string()]);
+                Ok(())
+            }));
+        });
+        t.lines();
+        let backups = t.backups().len();
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            !lines.iter().any(|l| l.starts_with("retro-push")),
+            "{lines:?}"
+        );
+        assert!(removed.borrow().is_empty());
+        assert_eq!(t.backups().len(), backups);
+
+        t.daemon(Some("cron"), false);
+        t.service_calls(0, "", false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"retro-push timer: replaced by the daemon".to_string()),
+            "{lines:?}"
+        );
+        assert_eq!(t.backups().len(), backups + 1, "backed up first");
+        assert_eq!(*removed.borrow(), [vec!["cron".to_string()]]);
+
+        FAKES.with(|f| {
+            f.borrow_mut().remove_retro = Some(Rc::new(|_| {
+                Err("could not remove the cron timer: synthetic".into())
+            }))
+        });
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1);
+        assert!(
+            lines.contains(
+                &"retro-push timer: could not remove the cron timer: synthetic".to_string()
+            ),
             "{lines:?}"
         );
     }

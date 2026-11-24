@@ -2,7 +2,8 @@
 //! scheduler where it is installed. A pass runs per burst of board or backlog writes, when a local
 //! factory agent stops running, right after a pass that launched a job, and after 5 minutes with
 //! no pass. It also keeps the board mirror (`mirror.rs`) current from the socket's rows frames and
-//! serves it to this host's commands.
+//! serves it to this host's commands, sends the host status heartbeat every 5 minutes, and pushes
+//! the retro digest at the retro-push timer's times, in place of that timer.
 
 use std::collections::hash_map::RandomState;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -30,7 +31,7 @@ use crate::shared::fs::is_link;
 use crate::shared::home::factory_home;
 use crate::shared::http::{access_message, api_url, token_message};
 use crate::shared::py::os_error;
-use crate::shared::time::now;
+use crate::shared::time::{format_stamp, now, unix_now};
 
 const HOST_EVENTS_PATH: &str = "/events/host";
 const HOST_403: &str = "HTTP 403: no paired or active host is bound to this service token; pair this host, or check its record under Settings, Hosts";
@@ -71,6 +72,9 @@ enum Event {
     Note(String),
     Closed(String),
 }
+
+/// How often the daemon sends the host status heartbeat.
+const HEARTBEAT: Duration = Duration::from_secs(300);
 
 /// How long after a failed board fetch the reader tries again.
 const REFETCH: Duration = Duration::from_secs(10);
@@ -163,6 +167,11 @@ fn run(home: &Path) -> Res<()> {
             &format!("mirror endpoint failed: {}", os_error(&e, None)),
         );
     }
+    // Tests that run the whole daemon never send this host's status or push its digest.
+    if !cfg!(test) {
+        let (exe, home) = (exe.clone(), home.clone());
+        std::thread::spawn(move || timers(&exe, &home));
+    }
     println!(
         "factory daemon: watching {url}; log {}",
         home.join("logs").join("daemon").display()
@@ -207,6 +216,71 @@ fn run(home: &Path) -> Res<()> {
     mirror::unlisten(&home);
     let _ = gh_poller.join();
     Ok(())
+}
+
+/// Sends the heartbeat at start and every HEARTBEAT, and runs `retro push` once at each of the
+/// retro-push timer's local times, or at the first check after one, as launchd runs a time a
+/// sleeping Mac missed. A time that passed before the daemon started is left to pickup's push on
+/// its first run of the day. Runs until a stop signal.
+fn timers(exe: &Path, home: &Path) {
+    let times =
+        crate::commands::pickup::retro_push_times(crate::commands::pickup::pickup_scheduler());
+    let local = || {
+        let utc = unix_now();
+        format_stamp(utc + crate::commands::pickup::local_offset(utc))
+    };
+    let mut pushed = retro_slot(&local(), times);
+    let mut beat: Option<Instant> = None;
+    while signal_stop().is_none() {
+        if beat.is_none_or(|at| at.elapsed() >= HEARTBEAT) {
+            beat = Some(Instant::now());
+            crate::commands::pickup::daemon_heartbeat(home);
+        }
+        let slot = retro_slot(&local(), times);
+        if slot.is_some() && slot != pushed {
+            pushed = slot;
+            log_line(home, "retro push");
+            log_line(
+                home,
+                &format!("retro push exited {}", run_retro_push(exe, home)),
+            );
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
+/// The latest of times at or before the local stamp `YYYY-MM-DDTHH:MM:SSZ`, as `YYYY-MM-DD HH:MM`,
+/// or None before the first of the day.
+fn retro_slot(local: &str, times: &[(u32, u32)]) -> Option<String> {
+    let (date, clock) = (&local[..10], &local[11..16]);
+    times
+        .iter()
+        .map(|(hour, minute)| format!("{hour:02}:{minute:02}"))
+        .filter(|at| at.as_str() <= clock)
+        .last()
+        .map(|at| format!("{date} {at}"))
+}
+
+/// Runs `exe --home <home> retro push` with its output appended to the day log, and returns its
+/// exit code.
+fn run_retro_push(exe: &Path, home: &Path) -> i32 {
+    let status = day_log(home).and_then(|(log, _)| {
+        Command::new(exe)
+            .arg("--home")
+            .arg(home)
+            .args(["retro", "push"])
+            .stdin(Stdio::null())
+            .stdout(log.try_clone()?)
+            .stderr(log)
+            .status()
+    });
+    match status {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(e) => {
+            log_line(home, &os_error(&e, Some(exe)));
+            1
+        }
+    }
 }
 
 /// The size past which a pass trims daemon.log, and the tail it keeps.
@@ -1251,6 +1325,26 @@ mod tests {
         )
         .unwrap();
         assert_eq!(last_pass(&home).as_deref(), Some("2026-11-23T10:00:00Z"));
+    }
+
+    /// The latest retro-push time passed today names the slot; a new slot is a push due.
+    #[test]
+    fn retro_slot_names_the_latest_time_passed() {
+        let mac = [(6, 30), (7, 30), (8, 30)];
+        assert_eq!(retro_slot("2026-11-24T06:29:59Z", &mac), None);
+        assert_eq!(
+            retro_slot("2026-11-24T06:30:00Z", &mac).as_deref(),
+            Some("2026-11-24 06:30")
+        );
+        assert_eq!(
+            retro_slot("2026-11-24T23:59:00Z", &mac).as_deref(),
+            Some("2026-11-24 08:30")
+        );
+        assert_eq!(retro_slot("2026-11-24T08:29:00Z", &[(8, 30)]), None);
+        assert_eq!(
+            retro_slot("2026-11-24T10:00:00Z", &[(8, 30)]).as_deref(),
+            Some("2026-11-24 08:30")
+        );
     }
 
     #[test]
