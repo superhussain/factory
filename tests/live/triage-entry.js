@@ -3,7 +3,7 @@
 // x-triage-live response header, and every call's latency and tokens in x-triage-calls. No deployment profile can select this file.
 import local from "../support/local-entry.js";
 
-export { BoardEvents } from "../../worker/events.js";
+export { BoardEvents } from "../../worker/room.js";
 
 export default {
   async fetch(request, env) {

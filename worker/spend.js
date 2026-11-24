@@ -1,6 +1,7 @@
 // GET /api/spend: finished jobs rolled up by project and UTC week into tokens per merged
 // PR and a revert count. Read only, from board.json plus archive rows not on the board.
 import { ARCHIVE_KEY, jobsOf, readJson, reply, terminal } from "./archive.js";
+import { readBoardJson } from "./board-store.js";
 
 export const SPEND_WEEKS = 8;
 export const SPEND_SCHEMA = "factory.spend/1";
@@ -79,7 +80,7 @@ const weekOf = (now) => new Date(weekStart(now.getTime())).toISOString().slice(0
 
 /** Spend rows from board.json plus archive rows not on the board, at Date `now`. */
 export async function readSpendRows(env, now) {
-  const board = jobsOf(await readJson(env, "board.json")) ?? [];
+  const board = jobsOf(await readBoardJson(env)) ?? [];
   const boardIds = new Set(board.map((j) => j?.id));
   const archive = (jobsOf(await readJson(env, ARCHIVE_KEY)) ?? []).filter(
     (j) => !boardIds.has(j?.id),
