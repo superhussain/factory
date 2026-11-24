@@ -1,0 +1,23 @@
+{
+  "id": "008-fix-the-parser",
+  "project": "sample",
+  "stage": "closed",
+  "updated": "{now}",
+  "origin": {
+    "by": "explorer",
+    "gate": "human",
+    "run": "run-1",
+    "fingerprint": "9d1b1349fb996b1f",
+    "options": [
+      {
+        "key": "A",
+        "label": "Patch the parser"
+      },
+      {
+        "key": "B",
+        "label": "Patch and dedupe"
+      }
+    ]
+  },
+  "done": "{now}"
+}

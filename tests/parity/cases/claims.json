@@ -239,12 +239,166 @@
       "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_stacked_patch"
     },
     {
+      "id": "claims/refuses-origin",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"origin\": {\"gate\": \"human\", \"approved\": {\"option\": \"A\"}}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_origin"
+    },
+    {
+      "id": "claims/refuses-started",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"started\": \"2026-10-30T00:00:00Z\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_started"
+    },
+    {
+      "id": "claims/refuses-goal",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"goal\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_goal"
+    },
+    {
+      "id": "claims/refuses-promoting-gated-spec",
+      "argv": ["--home", "{home}", "board", "{home}", "008-fix-the-parser"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"spec\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"008-fix-the-parser\",\"project\":\"sample\",\"stage\":\"idea\",\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"by\":\"explorer\",\"gate\":\"human\",\"run\":\"run-1\",\"fingerprint\":\"9d1b1349fb996b1f\",\"options\":[{\"key\":\"A\",\"label\":\"Patch the parser\"},{\"key\":\"B\",\"label\":\"Patch and dedupe\"}]}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/refuses-promoting-gated-build",
+      "argv": ["--home", "{home}", "board", "{home}", "008-fix-the-parser"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"build\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"008-fix-the-parser\",\"project\":\"sample\",\"stage\":\"idea\",\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"by\":\"explorer\",\"gate\":\"human\",\"run\":\"run-1\",\"fingerprint\":\"9d1b1349fb996b1f\",\"options\":[{\"key\":\"A\",\"label\":\"Patch the parser\"},{\"key\":\"B\",\"label\":\"Patch and dedupe\"}]}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/refuses-promoting-gated-needs-human",
+      "argv": ["--home", "{home}", "board", "{home}", "008-fix-the-parser"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"008-fix-the-parser\",\"project\":\"sample\",\"stage\":\"idea\",\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"by\":\"explorer\",\"gate\":\"human\",\"run\":\"run-1\",\"fingerprint\":\"9d1b1349fb996b1f\",\"options\":[{\"key\":\"A\",\"label\":\"Patch the parser\"},{\"key\":\"B\",\"label\":\"Patch and dedupe\"}]}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/refuses-promoting-gated-null",
+      "argv": ["--home", "{home}", "board", "{home}", "008-fix-the-parser"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": null, \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"008-fix-the-parser\",\"project\":\"sample\",\"stage\":\"idea\",\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"by\":\"explorer\",\"gate\":\"human\",\"run\":\"run-1\",\"fingerprint\":\"9d1b1349fb996b1f\",\"options\":[{\"key\":\"A\",\"label\":\"Patch the parser\"},{\"key\":\"B\",\"label\":\"Patch and dedupe\"}]}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/gated-idea-closes",
+      "argv": ["--home", "{home}", "board", "{home}", "008-fix-the-parser"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"closed\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"008-fix-the-parser\",\"project\":\"sample\",\"stage\":\"idea\",\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"by\":\"explorer\",\"gate\":\"human\",\"run\":\"run-1\",\"fingerprint\":\"9d1b1349fb996b1f\",\"options\":[{\"key\":\"A\",\"label\":\"Patch the parser\"},{\"key\":\"B\",\"label\":\"Patch and dedupe\"}]}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
       "id": "claims/tracer-follow-true",
       "argv": ["--home", "{home}", "board", "{home}", "001-test"],
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"follow\": true}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -261,7 +415,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"follow\": null}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -278,7 +434,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": null}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -295,7 +453,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"url\": \"x\"}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -312,7 +472,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"feature\": \"f\"}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -329,7 +491,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"follow\": false}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -346,7 +510,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"follow\": true, \"url\": \"x\"}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -363,7 +529,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"building\": true}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -380,7 +548,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"tasks\": []}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -397,7 +567,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": \"yes\"}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -414,7 +586,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": []}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -431,7 +605,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"follow\": true, \"gather\": true}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -448,7 +624,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"gather\": false}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -465,7 +643,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"scope\": \"approved\"}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -482,7 +662,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"tracer\": {\"stopped\": true}}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1392,7 +1574,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: tracer-scope\", \"needs\": \"approve\"}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1415,7 +1599,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: tracer-scope\", \"needs\": \"approve\"}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1432,7 +1618,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: spec-approval\", \"needs\": \"approve\"}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1449,7 +1637,9 @@
       "home": "claims",
       "stubs": {},
       "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: spec-approval\", \"needs\": \"approve\"}",
-      "env": { "FACTORY_SESSION": "sender" },
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1504,7 +1694,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1520,7 +1712,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1699,7 +1893,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1715,7 +1911,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test", "take"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1731,7 +1929,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1747,7 +1947,9 @@
       "argv": ["--home", "{home}", "hold", "sample/002-gone"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1763,7 +1965,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test", "nope"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1779,7 +1983,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1795,7 +2001,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1811,7 +2019,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1846,7 +2056,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1862,7 +2074,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1878,7 +2092,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -1946,7 +2162,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -2059,7 +2277,9 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -2075,7 +2295,10 @@
       "argv": ["--home", "{home}", "hold", "sample/001-test"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1", "PASEO_AGENT_ID": "agent-1" },
+      "env": {
+        "FACTORY_SESSION": "s1",
+        "PASEO_AGENT_ID": "agent-1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -2091,7 +2314,9 @@
       "argv": ["--home", "{home}", "handoff", "sample/001-test"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -2164,7 +2389,9 @@
       "argv": ["--home", "{home}", "handoff", "sample/001-test"],
       "home": "claims-hold",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -2180,7 +2407,9 @@
       "argv": ["--home", "{home}", "handoff", "sample/001-test"],
       "home": "claims",
       "stubs": {},
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -2224,7 +2453,9 @@
           }
         ]
       },
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -2255,7 +2486,9 @@
           }
         ]
       },
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -2304,7 +2537,9 @@
           }
         ]
       },
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -2405,7 +2640,9 @@
           }
         ]
       },
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           200,
@@ -3006,7 +3243,9 @@
           }
         ]
       },
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           [
@@ -3078,7 +3317,9 @@
           }
         ]
       },
-      "env": { "FACTORY_SESSION": "s1" },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
       "routes": {
         "GET /api/board": [
           [
@@ -3133,7 +3374,15 @@
           }
         ],
         "PUT /api/board": [200, ""],
-        "GET /api/pipeline/global": [200, { "schema": 1, "tracer": { "enabled": true } }],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ],
         "GET /api/features/plan-1234": [404, "{\"detail\": \"no feature\"}"],
         "POST /api/features": [
           201,
@@ -3195,7 +3444,15 @@
           }
         ],
         "PUT /api/board": [200, ""],
-        "GET /api/pipeline/global": [200, { "schema": 1, "tracer": { "enabled": true } }],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ],
         "GET /api/features/plan-1234": [404, "{\"detail\": \"no feature\"}"],
         "POST /api/features": [
           201,
@@ -3257,7 +3514,15 @@
           }
         ],
         "PUT /api/board": [200, ""],
-        "GET /api/pipeline/global": [200, { "schema": 1, "tracer": { "enabled": true } }]
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
       },
       "exit": 0
     },
@@ -3286,7 +3551,15 @@
           }
         ],
         "PUT /api/board": [200, ""],
-        "GET /api/pipeline/global": [200, { "schema": 1, "tracer": { "enabled": true } }],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ],
         "GET /api/features/plan-1234": [401, "{\"detail\": \"bad token\"}"]
       },
       "exit": 0
@@ -3316,7 +3589,15 @@
           }
         ],
         "PUT /api/board": [200, ""],
-        "GET /api/pipeline/global": [200, { "schema": 1, "tracer": { "enabled": true } }]
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
       },
       "exit": 0
     },
@@ -3346,7 +3627,7 @@
               "close",
               "https://github.com/example/sample/pull/2",
               "--comment",
-              "> \ud83e\udd16 **Agent-authored report** \u2014 written by factory.py on the owner's behalf, posted automatically. Tests not run.\n\nThis pull request was stacked on factory job `001-lead`, which closed without merging, so this pull request will not merge. Factory job `002-rider` went back to the ideas column."
+              "> 🤖 **Agent-authored report** — written by factory.py on the owner's behalf, posted automatically. Tests not run.\n\nThis pull request was stacked on factory job `001-lead`, which closed without merging, so this pull request will not merge. Factory job `002-rider` went back to the ideas column."
             ],
             "stdout": "",
             "stderr": "",
@@ -3374,7 +3655,12 @@
                   "stage": "build",
                   "stacked": true,
                   "pr": "https://github.com/example/sample/pull/2",
-                  "refs": [{ "id": "001-lead", "kind": "batched-into" }],
+                  "refs": [
+                    {
+                      "id": "001-lead",
+                      "kind": "batched-into"
+                    }
+                  ],
                   "updated": "2026-11-01T00:00:00Z"
                 }
               ]
@@ -3397,7 +3683,12 @@
                   "stage": "build",
                   "stacked": true,
                   "pr": "https://github.com/example/sample/pull/2",
-                  "refs": [{ "id": "001-lead", "kind": "batched-into" }],
+                  "refs": [
+                    {
+                      "id": "001-lead",
+                      "kind": "batched-into"
+                    }
+                  ],
                   "updated": "2026-11-01T00:00:00Z",
                   "note": "unbatched: 001-lead closed; stacked PR https://github.com/example/sample/pull/2 is still open"
                 }
@@ -3451,7 +3742,12 @@
                   "stage": "build",
                   "stacked": true,
                   "pr": "https://github.com/example/sample/pull/2",
-                  "refs": [{ "id": "001-lead", "kind": "batched-into" }],
+                  "refs": [
+                    {
+                      "id": "001-lead",
+                      "kind": "batched-into"
+                    }
+                  ],
                   "updated": "2026-11-01T00:00:00Z"
                 }
               ]
@@ -3474,7 +3770,12 @@
                   "stage": "build",
                   "stacked": true,
                   "pr": "https://github.com/example/sample/pull/2",
-                  "refs": [{ "id": "001-lead", "kind": "batched-into" }],
+                  "refs": [
+                    {
+                      "id": "001-lead",
+                      "kind": "batched-into"
+                    }
+                  ],
                   "updated": "2026-11-01T00:00:00Z",
                   "note": "unbatched: 001-lead closed; stacked PR https://github.com/example/sample/pull/2 is still open"
                 }
@@ -3528,7 +3829,12 @@
                   "stage": "build",
                   "stacked": true,
                   "pr": "https://github.com/example/sample/pull/2",
-                  "refs": [{ "id": "001-lead", "kind": "batched-into" }],
+                  "refs": [
+                    {
+                      "id": "001-lead",
+                      "kind": "batched-into"
+                    }
+                  ],
                   "updated": "2026-11-01T00:00:00Z"
                 }
               ]
@@ -3551,7 +3857,12 @@
                   "stage": "build",
                   "stacked": true,
                   "pr": "https://github.com/example/sample/pull/2",
-                  "refs": [{ "id": "001-lead", "kind": "batched-into" }],
+                  "refs": [
+                    {
+                      "id": "001-lead",
+                      "kind": "batched-into"
+                    }
+                  ],
                   "updated": "2026-11-01T00:00:00Z",
                   "note": "unbatched: 001-lead closed; stacked PR https://github.com/example/sample/pull/2 is still open"
                 }
@@ -3605,7 +3916,12 @@
                   "stage": "build",
                   "stacked": true,
                   "pr": "https://github.com/example/sample/pull/2",
-                  "refs": [{ "id": "001-lead", "kind": "batched-into" }],
+                  "refs": [
+                    {
+                      "id": "001-lead",
+                      "kind": "batched-into"
+                    }
+                  ],
                   "updated": "2026-11-01T00:00:00Z"
                 }
               ]
@@ -3628,7 +3944,12 @@
                   "stage": "build",
                   "stacked": true,
                   "pr": "https://github.com/example/sample/pull/2",
-                  "refs": [{ "id": "001-lead", "kind": "batched-into" }],
+                  "refs": [
+                    {
+                      "id": "001-lead",
+                      "kind": "batched-into"
+                    }
+                  ],
                   "updated": "2026-11-01T00:00:00Z",
                   "note": "unbatched: 001-lead closed; stacked PR https://github.com/example/sample/pull/2 is still open"
                 }

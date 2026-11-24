@@ -1,0 +1,11 @@
+wrote {home}/retro/card-red-flag-again/findings.md
+{
+  "admitted": [],
+  "skipped": [
+    {
+      "title": "Red flag: pipe-to-shell via Bash",
+      "reason": "duplicate in backlog"
+    }
+  ]
+}
+uploaded retro run card-red-flag-again

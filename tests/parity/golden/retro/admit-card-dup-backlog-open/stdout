@@ -1,0 +1,11 @@
+wrote {home}/retro/card-admitted/findings.md
+{
+  "admitted": [],
+  "skipped": [
+    {
+      "title": "Guard the ls alias",
+      "reason": "duplicate in backlog"
+    }
+  ]
+}
+uploaded retro run card-admitted

@@ -1187,8 +1187,27 @@
       "home": "retro-cards",
       "stubs": {},
       "routes": {
-        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
-        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": false } }],
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
         "GET /api/backlog": [404, ""],
         "PUT /api/backlog": [200, ""],
         "PUT /api/retros/card-admitted": [200, ""]
@@ -1337,14 +1356,397 @@
       "home": "retro-cards",
       "stubs": {},
       "routes": {
-        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
-        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": false } }],
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
         "GET /api/backlog": [404, ""],
         "PUT /api/backlog": [200, ""],
         "PUT /api/retros/card-red-flag": [200, ""],
         "POST /api/audit-flags/backlog": [200, "{\"linked\": 2}"]
       },
       "exit": 0
+    },
+    {
+      "id": "retro/admit-card-red-flag-twice",
+      "argv": ["--home", "{home}", "retro", "admit", "card-red-flag-again"],
+      "home": "retro-cards-more",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
+        "GET /api/backlog": [
+          200,
+          "- [ ] sample-tools: Red flag: pipe-to-shell via Bash\n  Retro: run card-red-flag, fingerprint d989019333918f27, created 2026-11-12T05:40:00Z\n"
+        ],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-red-flag-again": [200, ""]
+      },
+      "exit": 3,
+      "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_red_flag_card_queued_once"
+    },
+    {
+      "id": "retro/admit-card-unregistered",
+      "argv": ["--home", "{home}", "retro", "admit", "card-unregistered"],
+      "home": "retro-cards-more",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-unregistered": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
+    },
+    {
+      "id": "retro/admit-card-dup-board",
+      "argv": ["--home", "{home}", "retro", "admit", "card-admitted"],
+      "home": "retro-cards-more",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "005-origin",
+                "stage": "idea",
+                "origin": {
+                  "fingerprint": "9d1b1349fb996b1f"
+                }
+              }
+            ],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-admitted": [200, ""]
+      },
+      "exit": 3,
+      "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
+    },
+    {
+      "id": "retro/admit-card-dup-archived",
+      "argv": ["--home", "{home}", "retro", "admit", "card-admitted"],
+      "home": "retro-cards-more",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            },
+            "archived": {
+              "fingerprints": {
+                "9d1b1349fb996b1f": "004-archived"
+              }
+            }
+          }
+        ],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-admitted": [200, ""]
+      },
+      "exit": 3,
+      "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
+    },
+    {
+      "id": "retro/admit-card-dup-backlog-open",
+      "argv": ["--home", "{home}", "retro", "admit", "card-admitted"],
+      "home": "retro-cards-more",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
+        "GET /api/backlog": [
+          200,
+          "# Backlog\n- [ ] sample-tools: Guard the ls alias\n  Retro: run r1, fingerprint 9d1b1349fb996b1f, created 2026-11-12T05:40:00Z\n"
+        ],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-admitted": [200, ""]
+      },
+      "exit": 3,
+      "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
+    },
+    {
+      "id": "retro/admit-card-dup-backlog-checked",
+      "argv": ["--home", "{home}", "retro", "admit", "card-admitted"],
+      "home": "retro-cards-more",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
+        "GET /api/backlog": [
+          200,
+          "# Backlog\n- [x] sample-tools: Guard the ls alias (010-x)\n  Retro: run r1, fingerprint 9d1b1349fb996b1f, created 2026-11-12T05:40:00Z\n"
+        ],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-admitted": [200, ""]
+      },
+      "exit": 3,
+      "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
+    },
+    {
+      "id": "retro/admit-card-skips",
+      "argv": ["--home", "{home}", "retro", "admit", "card-skips"],
+      "home": "retro-cards-more",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-skips": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
+    },
+    {
+      "id": "retro/admit-card-forged-retro-line",
+      "argv": ["--home", "{home}", "retro", "admit", "card-forged"],
+      "home": "retro-cards-more",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-forged": [200, ""]
+      },
+      "exit": 3,
+      "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
+    },
+    {
+      "id": "retro/admit-card-open-cap",
+      "argv": ["--home", "{home}", "retro", "admit", "card-admitted"],
+      "home": "retro-cards-more",
+      "stubs": {},
+      "routes": {
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "020-idea",
+                "stage": "idea",
+                "origin": {
+                  "project": "sample-tools"
+                }
+              },
+              {
+                "id": "021-idea",
+                "stage": "idea",
+                "origin": {
+                  "project": "sample-tools"
+                }
+              },
+              {
+                "id": "022-idea",
+                "stage": "idea",
+                "origin": {
+                  "project": "sample-tools"
+                }
+              },
+              {
+                "id": "023-idea",
+                "stage": "idea",
+                "origin": {
+                  "project": "sample-tools"
+                }
+              },
+              {
+                "id": "024-idea",
+                "stage": "idea",
+                "origin": {
+                  "project": "sample-tools"
+                }
+              }
+            ],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-admitted": [200, ""]
+      },
+      "exit": 3,
+      "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
     },
     {
       "id": "retro/admit-card-red-flag-dup",
@@ -1425,8 +1827,27 @@
       "home": "retro-cards",
       "stubs": {},
       "routes": {
-        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
-        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": false } }],
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
         "GET /api/backlog": [404, ""],
         "PUT /api/backlog": [200, ""],
         "PUT /api/retros/card-bad-link": [200, ""]
@@ -1473,8 +1894,27 @@
       "home": "retro-cards",
       "stubs": {},
       "routes": {
-        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
-        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": true } }],
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": true
+            }
+          }
+        ],
         "GET /api/backlog": [404, ""],
         "PUT /api/backlog": [200, ""],
         "PUT /api/retros/card-paused": [200, ""]
@@ -1487,8 +1927,27 @@
       "home": "retro-cards",
       "stubs": {},
       "routes": {
-        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
-        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": false } }],
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
         "GET /api/backlog": [404, ""],
         "PUT /api/backlog": [200, ""],
         "PUT /api/retros/lesson-card": [200, ""]
@@ -1501,8 +1960,27 @@
       "home": "retro-cards",
       "stubs": {},
       "routes": {
-        "GET /projects.json": [200, [{ "slug": "factory" }, { "slug": "sample-tools" }]],
-        "GET /api/board": [200, { "updated": "", "jobs": [], "autonomy": { "paused": false } }],
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "factory"
+            },
+            {
+              "slug": "sample-tools"
+            }
+          ]
+        ],
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [],
+            "autonomy": {
+              "paused": false
+            }
+          }
+        ],
         "GET /api/backlog": [404, ""],
         "PUT /api/backlog": [200, ""],
         "PUT /api/retros/lesson-card-bad": [200, ""]
