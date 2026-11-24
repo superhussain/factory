@@ -625,14 +625,50 @@ test("a slim read is one room fetch the Worker passes through, at 2,300 and 4,60
   assert.ok(doubled.miss <= 60, JSON.stringify(doubled));
 });
 
-test("a room whose pages table predates the meta column gains it and serves slim", async () => {
-  const s = setup();
-  await s.send("/board.json");
-  s.room.object.board().sql.exec("ALTER TABLE board_pages DROP COLUMN meta");
-  s.room.restart();
+// The live board keeps its unfinished rows and its most recently finished ones in its last few
+// pages, so a slim miss takes the bytes of those pages, not every page's.
+test("a slim miss takes the bytes of only the pages holding a row it keeps", async () => {
+  const board = syntheticBoard(2300);
+  for (const [n, j] of board.jobs.entries())
+    if (n >= 2240) {
+      j.stage = "build";
+      delete j.done;
+    } else {
+      if (j.stage !== "closed") j.stage = "merged";
+      j.done = new Date(Date.UTC(2026, 0, 1) + n * 3600000).toISOString();
+    }
+  const s = setup(board);
   const full = await (await s.send("/board.json")).text();
+  const store = s.room.object.board();
+  const exec = store.sql.exec;
+  let taken = 0;
+  store.sql.exec = (...args) => {
+    const out = exec(...args);
+    for (const row of out.toArray()) taken += row.json?.length ?? 0;
+    return out;
+  };
   assert.equal(await (await s.send("/board.json?view=slim")).text(), await workerSlim(full));
-  // The next room over the same table finds the column and leaves it be.
-  s.room.restart();
-  assert.equal((await s.send("/board.json?view=slim")).status, 200);
+  assert.ok(taken > 0 && taken < full.length / 4, `${taken} of ${full.length} bytes`);
+});
+
+test("a pages table from before meta, or with meta after json, is rebuilt meta first", async () => {
+  for (const columns of ["page, json", "page, json, meta"]) {
+    const s = setup();
+    await s.send("/board.json");
+    const sql = (query) => s.room.object.board().sql.exec(query).toArray();
+    const types = columns.replace("page", "page INTEGER PRIMARY KEY").replace("json", "json TEXT");
+    sql(`CREATE TABLE old_pages (${types.replace("meta", "meta TEXT")})`);
+    sql(`INSERT INTO old_pages SELECT ${columns} FROM board_pages`);
+    sql("DROP TABLE board_pages");
+    sql("ALTER TABLE old_pages RENAME TO board_pages");
+    s.room.restart();
+    const full = await (await s.send("/board.json")).text();
+    assert.equal(await (await s.send("/board.json?view=slim")).text(), await workerSlim(full));
+    const order = () => sql("PRAGMA table_info(board_pages)").map((c) => c.name);
+    assert.deepEqual(order(), ["page", "meta", "json"], columns);
+    // The next room over the same table finds it in order and leaves it be.
+    s.room.restart();
+    assert.equal((await s.send("/board.json?view=slim")).status, 200);
+    assert.deepEqual(order(), ["page", "meta", "json"]);
+  }
 });

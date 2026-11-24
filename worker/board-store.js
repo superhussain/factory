@@ -14,7 +14,8 @@
 //
 // GET /board.json?view=slim is joined from the same pages: each page keeps a meta column with
 // every row's byte length, and for a finished row its stage, project, rank time and id, so the
-// slim body takes its rows' bytes without decoding one. It is cached per version in memory too.
+// slim body takes its rows' bytes without decoding one. Only pages holding a row the slim body
+// keeps leave SQLite. It is cached per version in memory too.
 //
 // boardStore(env) is the Worker's handle. Without a room binding (unit tests that give the Worker
 // a memory bucket alone, or a room stub with fetch alone) it reads and writes R2's board.json
@@ -152,8 +153,9 @@ function boardText(pairs, rows) {
 }
 
 const SCHEMA = [
-  // meta is each row's rowMeta in page order, as JSON, or null on a page from before it.
-  "CREATE TABLE IF NOT EXISTS board_pages (page INTEGER PRIMARY KEY, json TEXT NOT NULL, meta TEXT)",
+  // meta is each row's rowMeta in page order, as JSON, or null on a page from before it. It sits
+  // before json, so SQLite reads it without walking json's overflow pages.
+  "CREATE TABLE IF NOT EXISTS board_pages (page INTEGER PRIMARY KEY, meta TEXT, json TEXT NOT NULL)",
   // One row per board row: its page and the columns a PATCH looks up. Rows sit in page order,
   // and in order within a page.
   `CREATE TABLE IF NOT EXISTS board_index (id TEXT, page INTEGER NOT NULL, num REAL, capture TEXT,
@@ -194,15 +196,24 @@ export class BoardRows {
     this.inflight = undefined;
     this.replacing = undefined;
     for (const statement of SCHEMA) this.sql.exec(statement);
-    // A room from before the meta column gains it; its pages fill in their meta on the first
-    // slim read.
-    if (
-      !this.sql
-        .exec("PRAGMA table_info(board_pages)")
-        .toArray()
-        .some((column) => column.name === "meta")
-    )
-      this.sql.exec("ALTER TABLE board_pages ADD COLUMN meta TEXT");
+    // A room from before meta came first, or before the meta column, rebuilds the table once in
+    // that order. A page without meta fills it in on the first slim read.
+    const columns = this.sql
+      .exec("PRAGMA table_info(board_pages)")
+      .toArray()
+      .map((column) => column.name);
+    if (columns.join() !== "page,meta,json")
+      storage.transactionSync(() => {
+        this.sql.exec(
+          "CREATE TABLE board_pages_next (page INTEGER PRIMARY KEY, meta TEXT, json TEXT NOT NULL)",
+        );
+        this.sql.exec(
+          `INSERT INTO board_pages_next (page, meta, json)
+            SELECT page, ${columns.includes("meta") ? "meta" : "NULL"}, json FROM board_pages`,
+        );
+        this.sql.exec("DROP TABLE board_pages");
+        this.sql.exec("ALTER TABLE board_pages_next RENAME TO board_pages");
+      });
   }
 
   // The store's state: null before the first seed. etag is the board version clients see,
@@ -737,28 +748,39 @@ export class BoardRows {
   }
 
   // slimBoard over the pages: the pages' meta picks the rows and counts as slimBoard does, in
-  // board order, and each kept row's bytes are cut from its page without decoding it, in one
-  // read of every page: a second query for only the pages holding kept rows would cost more SQL
-  // rows than the Free plan's daily read budget allows. A page from before the meta column is
-  // decoded once to fill its meta in.
+  // board order, and each kept row's bytes are cut from its page without decoding it. One read
+  // of every page's meta also takes the bytes of each page holding an unfinished row; a page
+  // holding only a recent finished row is read again after, which costs few SQL rows where a
+  // second read of every page would pass the Free plan's daily read budget. A page from before
+  // the meta column is decoded once to fill its meta in.
   buildSlim(state) {
     const counts = Object.create(null);
     const counted = { merged: new Set(), closed: new Set() };
-    // The rows that go out, as [board position, page bytes, start, end]: every unfinished row,
-    // and the SLIM_RECENT rows of each finished stage with the highest rank, an earlier row
-    // first on a tie, as slimBoard's stable sort picks them. Only these get an array, since one
-    // per row costs more than the rest of the loop.
+    // The rows that go out, as [board position, page, start, end]: every unfinished row, and
+    // the SLIM_RECENT rows of each finished stage with the highest rank, an earlier row first on
+    // a tie, as slimBoard's stable sort picks them. Only these get an array, since one per row
+    // costs more than the rest of the loop.
     const kept = [];
     const top = { merged: [], closed: [] };
+    // Each read page's bytes. workerd gives an ArrayBuffer, which this views; Node's SQLite a
+    // Uint8Array.
+    const bytes = new Map();
     let i = 0;
+    // An unfinished row's meta is a bare length, so the first of a run of them opens the meta
+    // array or follows a finished row's closing bracket. The match is on the text, since
+    // json_each counts its elements as SQL rows read. A project or id string holding "],1" only
+    // reads a page it did not need.
     for (const p of this.sql
-      .exec("SELECT page, meta, CAST(json AS BLOB) AS json FROM board_pages ORDER BY page")
+      .exec(
+        `SELECT page, meta, CASE WHEN meta IS NULL OR meta GLOB '[[][0-9]*'
+            OR meta GLOB '*],[0-9]*' THEN CAST(json AS BLOB) END AS json
+          FROM board_pages ORDER BY page`,
+      )
       .toArray()) {
-      // workerd gives an ArrayBuffer, which this views; Node's SQLite a Uint8Array.
-      const bytes = new Uint8Array(p.json);
+      if (p.json !== null) bytes.set(p.page, new Uint8Array(p.json));
       let metas = p.meta === null ? null : JSON.parse(p.meta);
       if (metas === null) {
-        metas = JSON.parse(new TextDecoder().decode(bytes)).map((row) =>
+        metas = JSON.parse(new TextDecoder().decode(bytes.get(p.page))).map((row) =>
           rowMeta(row, JSON.stringify(row)),
         );
         this.sql.exec(
@@ -772,7 +794,7 @@ export class BoardRows {
         const start = at;
         if (typeof meta === "number") {
           at += meta + 1;
-          kept.push([i++, bytes, start, start + meta]);
+          kept.push([i++, p.page, start, start + meta]);
           continue;
         }
         const length = meta[0],
@@ -784,7 +806,7 @@ export class BoardRows {
         if (t.length < SLIM_RECENT || rank > t[t.length - 1][0]) {
           let j = t.length;
           while (j > 0 && t[j - 1][0] < rank) j--;
-          t.splice(j, 0, [rank, [i, bytes, start, start + length]]);
+          t.splice(j, 0, [rank, [i, p.page, start, start + length]]);
           if (t.length > SLIM_RECENT) t.pop();
         }
         i++;
@@ -797,12 +819,22 @@ export class BoardRows {
     }
     for (const t of Object.values(top)) for (const [, span] of t) kept.push(span);
     kept.sort((a, b) => a[0] - b[0]);
+    const unread = [...new Set(kept.map((span) => span[1]).filter((page) => !bytes.has(page)))];
+    if (unread.length)
+      for (const p of this.sql
+        .exec(
+          `SELECT p.page, CAST(p.json AS BLOB) AS json FROM json_each(?) j
+            CROSS JOIN board_pages p ON p.page = j.value`,
+          JSON.stringify(unread),
+        )
+        .toArray())
+        bytes.set(p.page, new Uint8Array(p.json));
     const head = setPair(state.head, "slim", JSON.stringify({ recent: SLIM_RECENT, counts }));
     const [open, close] = boardText(head, "\0").split("\0");
     const parts = [open];
-    for (const [, bytes, start, end] of kept) {
+    for (const [, page, start, end] of kept) {
       if (parts.length > 1) parts.push(",");
-      parts.push(bytes.subarray(start, end));
+      parts.push(bytes.get(page).subarray(start, end));
     }
     parts.push(close);
     return new Blob(parts);
