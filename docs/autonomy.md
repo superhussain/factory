@@ -29,7 +29,7 @@ Loosening (`resume`, `allow`, `approve`) needs an interactive terminal and a typ
 confirmation, or for `approve` a relayed chat message (`suggest approve --chat-file`), as
 [chat decisions](../skills/factory/references/chat-decisions.md) says. Tightening never does.
 The terminal check stops a script, not an agent, which can fake a terminal with
-`script -qc`. So the Rust runtime also refuses `resume`, `allow`, `restore` and `promote`
+`script -qc`. So both runtimes, `factory.py` and the Rust binary, also refuse `resume`, `allow`, `restore` and `promote`
 when `CLAUDECODE`, `AI_AGENT`, `PASEO_AGENT_ID` or `OPENCODE_TERMINAL` is set, and exits 2.
 An agent can still unset them, so the installed SKILL.md rule stays: no agent runs these
 commands.
