@@ -2,9 +2,9 @@
 // ids and fingerprints from coming back. Rows are the made-up running example.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { loadProduction, memoryBucket } from "../support/worker.mjs";
+import { loadProduction, memoryBucket, memoryRoom } from "../support/worker.mjs";
 
-const { serveFactory, default: worker } = await loadProduction();
+const { serveFactory, default: worker, BoardEvents } = await loadProduction();
 const person = { verified: true, kind: "user", email: "person@example.test" };
 const device = { verified: true, kind: "service" };
 const NOW = new Date("2026-11-09T10:17:00Z");
@@ -52,9 +52,22 @@ const ROWS = [
   },
 ];
 
+// Each test runs twice: on the room's row store, which copies a full write to R2 before it
+// answers, and on R2's board.json alone.
+let store = "room";
+const each = (name, fn) => {
+  for (const s of ["room", "r2"])
+    test(`${name} (${s})`, async (t) => {
+      store = s;
+      await fn(t);
+    });
+};
+
 function setup({ archive = { mode: "age", n: 30 }, jobs = ROWS, extra = {}, tracer = null } = {}) {
   const bucket = memoryBucket();
   const env = { BUCKET: bucket };
+  const room = store === "room" ? memoryRoom(BoardEvents, env) : null;
+  if (room) env.BoardEvents = room.namespace;
   const seed = (key, value) =>
     bucket.objects.set(key, {
       key,
@@ -85,12 +98,14 @@ function setup({ archive = { mode: "age", n: 30 }, jobs = ROWS, extra = {}, trac
     worker.scheduled({ scheduledTime: NOW.getTime() }, env, { waitUntil: (p) => (pass ??= p) });
     return pass;
   };
-  return { bucket, env, seed, read, send, run };
+  // The board version a client reads, which the room keeps apart from R2's copy.
+  const etag = () => room?.etag() ?? bucket.objects.get("board.json").httpEtag;
+  return { bucket, env, seed, read, send, run, etag };
 }
 
 const ids = (jobs) => jobs.map((j) => j.id);
 
-test("an age pass moves 412, 413 and 416, archive first, and leaves a floor", async () => {
+each("an age pass moves 412, 413 and 416, archive first, and leaves a floor", async () => {
   const s = setup();
   assert.deepEqual(await s.run(), {
     status: "archived",
@@ -110,7 +125,9 @@ test("an age pass moves 412, 413 and 416, archive first, and leaves a floor", as
     fingerprints: { "fp-7c1e": "413-old-suggestion" },
   });
   assert.equal(board.updated, "2026-11-09T09:00:00Z");
-  assert.ok(s.bucket.objects.get("board.json").bytes.toString().endsWith("}\n"));
+  // The room's copy is the board's JSON text, without the pass's trailing newline.
+  if (store === "r2")
+    assert.ok(s.bucket.objects.get("board.json").bytes.toString().endsWith("}\n"));
   assert.ok(!s.bucket.objects.get("board.json").bytes.toString().includes("\n  "));
   // A second pass has nothing to move and writes nothing.
   const before = s.bucket.calls.length;
@@ -118,7 +135,7 @@ test("an age pass moves 412, 413 and 416, archive first, and leaves a floor", as
   assert.equal(s.bucket.calls.slice(before).filter(([op]) => op === "put").length, 0);
 });
 
-test("an archive pass deletes the triage record of each moved row only", async () => {
+each("an archive pass deletes the triage record of each moved row only", async () => {
   const s = setup();
   s.seed("needs-triage/sample/412-fix-login.json", { done: true });
   s.seed("needs-triage/sample/415-add-export.json", { done: true });
@@ -131,7 +148,7 @@ test("an archive pass deletes the triage record of each moved row only", async (
   assert.equal(s.bucket.objects.has("needs-triage/sample/415-add-export.json"), true);
 });
 
-test("Off, an invalid setting and every keep rule leave the board alone", async (t) => {
+each("Off, an invalid setting and every keep rule leave the board alone", async (t) => {
   const warn = t.mock.method(console, "warn", () => {});
   for (const archive of [null, { mode: "age" }, { mode: "weeks", n: 3 }]) {
     const s = setup({ archive });
@@ -181,7 +198,7 @@ test("Off, an invalid setting and every keep rule leave the board alone", async 
   assert.equal(warn.mock.calls.length, 0);
 });
 
-test("a stale automerge keeps no finished row, and an open one stays", async () => {
+each("a stale automerge keeps no finished row, and an open one stays", async () => {
   const old = { project: "sample", done: "2026-01-01T00:00:00Z", automerge: true };
   const s = setup({
     jobs: [
@@ -194,7 +211,7 @@ test("a stale automerge keeps no finished row, and an open one stays", async () 
   assert.deepEqual(ids(s.read("board.json").jobs), ["523-open-automerge"]);
 });
 
-test("Tracer off lets a pending mirror go", async () => {
+each("Tracer off lets a pending mirror go", async () => {
   const old = { project: "sample", stage: "merged", done: "2026-01-01T00:00:00Z" };
   const s = setup({ jobs: [{ ...old, id: "511-tracer", tracer: { follow: true } }] });
   s.seed("pipeline/global.json", {
@@ -205,13 +222,13 @@ test("Tracer off lets a pending mirror go", async () => {
   assert.deepEqual(await s.run(), { status: "archived", moved: ["511-tracer"] });
 });
 
-test("Tracer unset lets a pending mirror go", async () => {
+each("Tracer unset lets a pending mirror go", async () => {
   const old = { project: "sample", stage: "merged", done: "2026-01-01T00:00:00Z" };
   const s = setup({ jobs: [{ ...old, id: "511-tracer", tracer: { follow: true } }] });
   assert.deepEqual(await s.run(), { status: "archived", moved: ["511-tracer"] });
 });
 
-test("a count pass keeps the N newest finished rows", async () => {
+each("a count pass keeps the N newest finished rows", async () => {
   const s = setup({ archive: { mode: "count", n: 2 } });
   // Newest finished: 415, 416 stay. 412 and 413 move; 414 is kept by its unread notes.
   assert.deepEqual((await s.run()).moved, ["412-fix-login", "413-old-suggestion"]);
@@ -223,7 +240,9 @@ test("a count pass keeps the N newest finished rows", async () => {
   assert.equal(s.read("board.json").archived.max_id, 413);
 });
 
-test("a lost board race loses nothing, reads hide board ids, and the next pass reconciles", async (t) => {
+// An R2 race. The room's version moving under a pass is in board-store.test.mjs.
+test("a lost board race loses nothing, reads hide board ids, and the next pass reconciles (r2)", async (t) => {
+  store = "r2";
   const warn = t.mock.method(console, "warn", () => {});
   const s = setup();
   const put = s.bucket.put;
@@ -267,7 +286,7 @@ test("a lost board race loses nothing, reads hide board ids, and the next pass r
   assert.equal(warn.mock.calls.length, 1);
 });
 
-test("a refused archive write warns with its cause and moves nothing", async (t) => {
+each("a refused archive write warns with its cause and moves nothing", async (t) => {
   const warn = t.mock.method(console, "warn", () => {});
   const bad = setup();
   bad.seed("board-archive.json", "{not json");
@@ -301,7 +320,7 @@ test("a refused archive write warns with its cause and moves nothing", async (t)
   );
 });
 
-test("the archive API serves id, page and q, and rejects bad queries", async () => {
+each("the archive API serves id, page and q, and rejects bad queries", async () => {
   const s = setup();
   await s.run();
   for (const principal of [person, device]) {
@@ -363,59 +382,62 @@ test("the archive API serves id, page and q, and rejects bad queries", async () 
   assert.deepEqual([second.page, second.pages, second.total, second.jobs.length], [3, 3, 120, 20]);
 });
 
-test("board writes cannot change archived or reuse an archived id; a fresh write passes", async () => {
-  const s = setup();
-  await s.run();
-  const board = s.read("board.json");
-  const etag = s.bucket.objects.get("board.json").httpEtag;
-  const write = (data) =>
-    s.send("/api/board", {
+each(
+  "board writes cannot change archived or reuse an archived id; a fresh write passes",
+  async () => {
+    const s = setup();
+    await s.run();
+    const board = s.read("board.json");
+    const etag = s.etag();
+    const write = (data) =>
+      s.send("/api/board", {
+        method: "PUT",
+        body: JSON.stringify(data),
+        headers: { "If-Match": etag },
+        principal: device,
+      });
+    const snapshot = () => s.etag();
+    for (const [data, text] of [
+      [
+        { updated: board.updated, jobs: board.jobs },
+        "a board write cannot change the archived field. Nothing was written. Upgrade the factory skill.",
+      ],
+      [
+        { ...board, archived: { ...board.archived, max_id: 0 } },
+        "a board write cannot change the archived field. Nothing was written. Upgrade the factory skill.",
+      ],
+      [
+        { ...board, jobs: [...board.jobs, { id: "416-x", project: "sample" }] },
+        'a board write cannot add "416-x": ids up to 416 belong to archived jobs. Nothing was written. Upgrade the factory skill.',
+      ],
+    ]) {
+      const response = await write(data);
+      assert.equal(response.status, 400);
+      assert.equal(await response.text(), text);
+      assert.equal(snapshot(), etag);
+    }
+    const fresh = await write({
+      ...board,
+      jobs: [...board.jobs, { id: "417-new", project: "sample" }],
+    });
+    assert.equal(fresh.status, 200);
+    assert.deepEqual(s.read("board.json").archived, board.archived);
+    // A stale etag skips the guards and gets the usual 412 for the device to re-read.
+    const stale = await s.send("/api/board", {
       method: "PUT",
-      body: JSON.stringify(data),
+      body: JSON.stringify({ jobs: [{ id: "416-x" }] }),
       headers: { "If-Match": etag },
       principal: device,
     });
-  const snapshot = () => s.bucket.objects.get("board.json").httpEtag;
-  for (const [data, text] of [
-    [
-      { updated: board.updated, jobs: board.jobs },
-      "a board write cannot change the archived field. Nothing was written. Upgrade the factory skill.",
-    ],
-    [
-      { ...board, archived: { ...board.archived, max_id: 0 } },
-      "a board write cannot change the archived field. Nothing was written. Upgrade the factory skill.",
-    ],
-    [
-      { ...board, jobs: [...board.jobs, { id: "416-x", project: "sample" }] },
-      'a board write cannot add "416-x": ids up to 416 belong to archived jobs. Nothing was written. Upgrade the factory skill.',
-    ],
-  ]) {
-    const response = await write(data);
-    assert.equal(response.status, 400);
-    assert.equal(await response.text(), text);
-    assert.equal(snapshot(), etag);
-  }
-  const fresh = await write({
-    ...board,
-    jobs: [...board.jobs, { id: "417-new", project: "sample" }],
-  });
-  assert.equal(fresh.status, 200);
-  assert.deepEqual(s.read("board.json").archived, board.archived);
-  // A stale etag skips the guards and gets the usual 412 for the device to re-read.
-  const stale = await s.send("/api/board", {
-    method: "PUT",
-    body: JSON.stringify({ jobs: [{ id: "416-x" }] }),
-    headers: { "If-Match": etag },
-    principal: device,
-  });
-  assert.equal(stale.status, 412);
-});
+    assert.equal(stale.status, 412);
+  },
+);
 
-test("an empty jobs write keeps the archived field and its floor", async () => {
+each("an empty jobs write keeps the archived field and its floor", async () => {
   const s = setup();
   await s.run();
   const board = s.read("board.json");
-  const etag = s.bucket.objects.get("board.json").httpEtag;
+  const etag = s.etag();
   const write = (data) =>
     s.send("/api/board", {
       method: "PUT",
@@ -429,14 +451,14 @@ test("an empty jobs write keeps the archived field and its floor", async () => {
     await dropped.text(),
     "a board write cannot change the archived field. Nothing was written. Upgrade the factory skill.",
   );
-  assert.equal(s.bucket.objects.get("board.json").httpEtag, etag);
+  assert.equal(s.etag(), etag);
   const kept = await write({ ...board, jobs: [] });
   assert.equal(kept.status, 200);
   assert.deepEqual(s.read("board.json").archived, board.archived);
   assert.equal(s.read("board.json").archived.max_id, 416);
 });
 
-test("the scheduled handler runs the pass through waitUntil", async () => {
+each("the scheduled handler runs the pass through waitUntil", async () => {
   const s = setup();
   const pending = [];
   worker.scheduled({ scheduledTime: NOW.getTime() }, s.env, { waitUntil: (p) => pending.push(p) });

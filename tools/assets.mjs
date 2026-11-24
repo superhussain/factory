@@ -11,6 +11,8 @@ const CEILING = 3_000_000;
 const SOURCES = [
   "worker/index.js",
   "worker/events.js",
+  "worker/room.js",
+  "worker/board-store.js",
   "worker/access.ts",
   "worker/assets.js",
   "worker/pwa.js",

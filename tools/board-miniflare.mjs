@@ -75,6 +75,7 @@ async function bundle(dir) {
     platform: "neutral",
     conditions: ["workerd", "worker", "browser"],
     mainFields: ["module", "main"],
+    external: ["cloudflare:workers"],
     loader: { ".html": "text", ".txt": "text", ".md": "text" },
   });
   return result.outputFiles[0].text;

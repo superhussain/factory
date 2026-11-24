@@ -1,6 +1,9 @@
 import { build } from "esbuild";
 import { createHash } from "node:crypto";
 
+// Node has no cloudflare:workers module, so the Worker's DurableObject base comes from a stand-in.
+export const CLOUDFLARE_WORKERS = new URL("./cloudflare-workers.mjs", import.meta.url).pathname;
+
 async function bundle(entry) {
   const result = await build({
     entryPoints: [new URL(entry, import.meta.url).pathname],
@@ -10,6 +13,7 @@ async function bundle(entry) {
     platform: "neutral",
     target: "es2022",
     loader: { ".html": "text", ".txt": "text", ".md": "text" },
+    alias: { "cloudflare:workers": CLOUDFLARE_WORKERS },
   });
   return import(
     "data:text/javascript;base64," + Buffer.from(result.outputFiles[0].contents).toString("base64")
@@ -95,3 +99,71 @@ export const serverEnv = {
   ACCESS_ISSUER: "https://example-team.cloudflareaccess.com",
   ACCESS_AUDIENCE: "example-application-audience",
 };
+
+// The board room as a real BoardEvents object over Node's SQLite, for Worker tests in Node.
+// Its stub copies every argument and result as RPC does and hands fetches, the room's notify
+// calls, to fetch. Alarms wait for runAlarm(), so a test decides when R2's copy is written.
+export function memoryRoom(
+  BoardEvents,
+  env,
+  fetch = async () => new Response(null, { status: 204 }),
+) {
+  // Loaded here, so only the tests that use a room import node:sqlite.
+  const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
+  const db = new DatabaseSync(":memory:");
+  let alarm = null;
+  const storage = {
+    sql: {
+      exec(query, ...bindings) {
+        const rows = db.prepare(query).all(...bindings);
+        return { toArray: () => rows };
+      },
+    },
+    transactionSync(fn) {
+      db.exec("BEGIN");
+      try {
+        const out = fn();
+        db.exec("COMMIT");
+        return out;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+    getAlarm: async () => alarm,
+    setAlarm: async (at) => {
+      alarm = at;
+    },
+  };
+  globalThis.WebSocketRequestResponsePair ??= class {};
+  const ctx = { storage, setWebSocketAutoResponse() {}, getWebSockets: () => [] };
+  const object = new BoardEvents(ctx, env);
+  const calls = [];
+  const rpc =
+    (name) =>
+    async (...args) => {
+      calls.push(name);
+      return structuredClone(await object[name](...structuredClone(args)));
+    };
+  const stub = {
+    fetch,
+    boardHead: rpc("boardHead"),
+    boardRead: rpc("boardRead"),
+    boardRows: rpc("boardRows"),
+    boardCommit: rpc("boardCommit"),
+    boardReplace: rpc("boardReplace"),
+  };
+  return {
+    namespace: { idFromName: (name) => ({ name }), get: () => stub },
+    object,
+    calls,
+    alarm: () => alarm,
+    async runAlarm() {
+      alarm = null;
+      await object.alarm();
+    },
+    // The board the room holds, read without a request: its version and parsed document.
+    etag: () => object.board().state()?.etag ?? null,
+    stored: () => JSON.parse(object.board().text(object.board().state())),
+  };
+}
