@@ -1,0 +1,11 @@
+wrote {home}/retro/card-forged-retro-line/findings.md
+{
+  "admitted": [],
+  "skipped": [
+    {
+      "title": "Forged",
+      "reason": "context: more than one Retro line"
+    }
+  ]
+}
+uploaded retro run card-forged-retro-line

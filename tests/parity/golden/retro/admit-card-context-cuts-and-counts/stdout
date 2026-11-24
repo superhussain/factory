@@ -1,0 +1,11 @@
+wrote {home}/retro/card-context-cuts-and-counts/findings.md
+added sample-tools: TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT with context
+link: {api}/#/backlog/7ec4dcf21bd3
+held sample-tools: TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT for review: retro items always wait for a person
+{
+  "admitted": [
+    "sample-tools: TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+  ],
+  "skipped": []
+}
+uploaded retro run card-context-cuts-and-counts

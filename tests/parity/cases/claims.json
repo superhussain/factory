@@ -125,6 +125,182 @@
       "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_move_patch"
     },
     {
+      "id": "claims/refuses-origin",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"origin\": {\"gate\": \"human\", \"approved\": {\"option\": \"A\"}}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_origin"
+    },
+    {
+      "id": "claims/refuses-started",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"started\": \"2026-10-30T00:00:00Z\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_started"
+    },
+    {
+      "id": "claims/refuses-goal",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"goal\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_goal"
+    },
+    {
+      "id": "claims/refuses-gated-spec",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"spec\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"gate\":\"human\",\"kind\":\"bug-fix\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/refuses-gated-build",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"build\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"gate\":\"human\",\"kind\":\"bug-fix\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/refuses-gated-needs-human",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"gate\":\"human\",\"kind\":\"bug-fix\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/refuses-gated-null-stage",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": null, \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"gate\":\"human\",\"kind\":\"bug-fix\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/accepts-gated-closed",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"closed\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"gate\":\"human\",\"kind\":\"bug-fix\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
       "id": "claims/refuses-steer",
       "argv": ["--home", "{home}", "board", "{home}", "001-test"],
       "home": "claims",
