@@ -115,9 +115,15 @@ fn held_by(row: &Value, device: &str, stale_minutes: u32) -> bool {
             .is_some_and(|age| age < i64::from(stale_minutes) * 60)
 }
 
-/// A job folder the sync may read: a real directory, never a symlink or junction.
+/// A job folder the sync may read: a real directory, with no symlink or junction at it or at
+/// `jobs/` or `jobs/<slug>` above it, the nodes `safe_job_folder` checks.
 fn real_dir(folder: &Path) -> bool {
-    !is_link(folder).unwrap_or(true) && folder.is_dir()
+    let slug_dir = folder.parent();
+    let jobs_dir = slug_dir.and_then(Path::parent);
+    [Some(folder), slug_dir, jobs_dir]
+        .into_iter()
+        .all(|node| node.is_some_and(|n| !is_link(n).unwrap_or(true)))
+        && folder.is_dir()
 }
 
 fn stamp(folder: &Path) -> Stamp {
@@ -617,6 +623,28 @@ mod tests {
         // Refused is settled by a person, so it isn't retried until the folder changes.
         assert_eq!(sync.jobs.values().next().unwrap().push_at, None);
         fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_project_or_jobs_folder_is_never_watched() {
+        for linked in ["jobs/alpha", "jobs"] {
+            let home = home_for("job-sync-parent-link", "http://127.0.0.1:9");
+            fs::create_dir_all(home.join("elsewhere").join(JOB)).unwrap();
+            let target = if linked == "jobs" {
+                fs::create_dir_all(home.join("real/alpha").join(JOB)).unwrap();
+                home.join("real")
+            } else {
+                fs::create_dir_all(home.join("jobs")).unwrap();
+                home.join("elsewhere")
+            };
+            std::os::unix::fs::symlink(target, home.join(linked)).unwrap();
+            assert!(folder(&home).is_dir());
+            let mut sync = JobSync::new(&home);
+            sync.rows(&[row("build", "t1")], Instant::now());
+            assert!(sync.jobs.is_empty(), "{linked}");
+            fs::remove_dir_all(home).unwrap();
+        }
     }
 
     #[cfg(unix)]
