@@ -12,6 +12,20 @@
       "argv": ["autonomy", "report", "a", "b"],
       "home": null,
       "stubs": {}
+    },
+    {
+      "id": "autonomy/resume-in-agent",
+      "argv": ["autonomy", "resume"],
+      "home": null,
+      "stubs": {},
+      "env": {"CLAUDECODE": "1"}
+    },
+    {
+      "id": "autonomy/promote-in-agent",
+      "argv": ["autonomy", "promote", "alpha", "visible"],
+      "home": null,
+      "stubs": {},
+      "env": {"OPENCODE_TERMINAL": "1"}
     }
   ]
 }
