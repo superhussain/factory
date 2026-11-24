@@ -142,6 +142,20 @@ test(
         );
         assert.equal(new URL(page.url()).hash, "#130-ground-export/grounding");
 
+        // An old round link followed while the job is already open still scrolls to its round.
+        await page.evaluate(() => {
+          location.hash = "#130-ground-export/round-2/review-code";
+        });
+        await page.waitForFunction(
+          () =>
+            document.querySelector("#d-tabs .tab.active")?.dataset.name === "review-code.md" &&
+            location.hash === "#130-ground-export/review-code",
+        );
+        assert.ok(
+          await page.$eval("#d-doc", (doc) => doc.scrollTop > 0),
+          "scrolled to Round 2 in an open job",
+        );
+
         for (const [id, chip] of [
           ["141-round-escalate", ["decision.md", "decision ESCALATE", "chip CHANGES"]],
           ["142-round-closed", ["decision.md", "decision CLOSED", "chip SKIPPED"]],

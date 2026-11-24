@@ -6214,7 +6214,7 @@ async function openJob(id) {
   else if (first && needsFile && !hashFile() && waitsOnYou(j)) activeFile = 'needs.md';
   else if (!files.find((f) => f.name === activeFile)) activeFile = (files.find((f) => f.name !== 'idea.md') || files[0])?.name ?? null;
   renderDetail();
-  if (first && want && hashRound()) $('d-doc').querySelector('.round-head[data-round="' + hashRound() + '"]')?.scrollIntoView();
+  if (want && hashRound()) $('d-doc').querySelector('.round-head[data-round="' + hashRound() + '"]')?.scrollIntoView();
   refreshPicker();
   if (needsFile && !needsFile.triage) loadNeedsTriage(j, needsFile.sha).then((triage) => {
     if (!triage || openId !== id || !files.includes(needsFile)) return;
