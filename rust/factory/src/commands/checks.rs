@@ -1467,13 +1467,28 @@ fn pr_status(
     }
 }
 
+/// Why pr-merge will not merge head: no head checks passed is on the board, or it is another head.
+fn unchecked_detail(number: &str, head: &str, checked: Option<&str>) -> String {
+    match checked {
+        None => {
+            format!("PR #{number} has no head that checks passed on the board: run checks again")
+        }
+        Some(c) => format!(
+            "PR #{number} head {} is not the head checks passed, {}: run checks again",
+            &head[..12],
+            &c[..12]
+        ),
+    }
+}
+
 /// Queue the PR with the enqueuePullRequest mutation, else through merge-async, and print one JSON line once
-/// GitHub says enqueued or failed.
+/// GitHub says enqueued or failed. With expect, a head other than expect exits 3 before any mutation.
 fn pr_queue_run(
     h: &mut dyn Host,
     pr: &str,
     base: &str,
     number: &str,
+    expect: Option<&str>,
     out: &mut dyn Write,
 ) -> Res<()> {
     let view = loads(&gh_pr_view(
@@ -1490,6 +1505,10 @@ fn pr_queue_run(
     else {
         return Err(fail("gh pr view printed no usable headRefOid", 5));
     };
+    if expect.is_some_and(|e| e != sha) {
+        let detail = unchecked_detail(number, &sha, expect);
+        return pr_status(out, number, "unchecked", detail, 3);
+    }
     if view.get("baseRefName").and_then(Value::as_str) != Some(base) {
         let target = printable_line(
             &py_str(view.get("baseRefName").unwrap_or(&Value::Null)),
@@ -1607,12 +1626,25 @@ pub fn pr_queue_cmd(call: &Call) -> Res<()> {
         .filter(|b| !b.is_empty())
         .unwrap_or("main");
     let number = pr.split('/').nth(6).unwrap();
-    pr_queue_run(&mut System::new(), &pr, base, number, &mut io::stdout())
+    pr_queue_run(
+        &mut System::new(),
+        &pr,
+        base,
+        number,
+        None,
+        &mut io::stdout(),
+    )
 }
 
-/// Read the PR's mergeability, again while GitHub still computes it, then merge pinned to the head it read,
-/// hand a merge-queue repo to pr_queue_run, or print why it cannot merge.
-fn pr_merge_run(h: &mut dyn Host, pr: &str, base: &str, out: &mut dyn Write) -> Res<()> {
+/// Read the PR's mergeability, again while GitHub still computes it, then merge pinned to the head checks
+/// passed, hand a merge-queue repo to pr_queue_run, or print why it cannot merge.
+fn pr_merge_run(
+    h: &mut dyn Host,
+    pr: &str,
+    base: &str,
+    checked: Option<&str>,
+    out: &mut dyn Write,
+) -> Res<()> {
     let parts: Vec<&str> = pr.split('/').collect();
     let number = parts[6];
     let (o, r, n) = (
@@ -1668,6 +1700,13 @@ fn pr_merge_run(h: &mut dyn Host, pr: &str, base: &str, out: &mut dyn Write) -> 
     let done = |out: &mut dyn Write, status: &str, detail: String, code: i32| {
         pr_status(out, number, status, detail, code)
     };
+    let sha = field("headRefOid");
+    if !COMMIT.is_full(&sha) {
+        return Err(fail("gh api graphql printed no usable headRefOid", 5));
+    }
+    if checked != Some(sha.as_str()) {
+        return done(out, "unchecked", unchecked_detail(number, &sha, checked), 3);
+    }
     if view.get("isDraft") == Some(&Value::Bool(true)) || status == "DRAFT" {
         return done(out, "draft", format!("PR #{number} is a draft"), 1);
     }
@@ -1677,7 +1716,7 @@ fn pr_merge_run(h: &mut dyn Host, pr: &str, base: &str, out: &mut dyn Write) -> 
         return done(out, "conflict", detail, 6);
     }
     if view.get("isMergeQueueEnabled") == Some(&Value::Bool(true)) {
-        return pr_queue_run(h, pr, base, number, out);
+        return pr_queue_run(h, pr, base, number, checked, out);
     }
     if unknown {
         let detail =
@@ -1692,10 +1731,6 @@ fn pr_merge_run(h: &mut dyn Host, pr: &str, base: &str, out: &mut dyn Write) -> 
     if status == "BLOCKED" {
         let detail = "GitHub blocks the merge: a required review or check is missing".to_string();
         return done(out, "blocked", detail, 1);
-    }
-    let sha = field("headRefOid");
-    if !COMMIT.is_full(&sha) {
-        return Err(fail("gh api graphql printed no usable headRefOid", 5));
     }
     let merge = [
         "pr",
@@ -1743,7 +1778,12 @@ pub fn pr_merge_cmd(call: &Call) -> Res<()> {
     let base = fm_get(&meta, "base")
         .filter(|b| !b.is_empty())
         .unwrap_or("main");
-    pr_merge_run(&mut System::new(), &pr, base, &mut io::stdout())
+    let data = read_board(&home)?;
+    let checked = find_job(&data, &job_id)
+        .and_then(|j| j.get("checked_head"))
+        .and_then(Value::as_str)
+        .filter(|s| COMMIT.is_full(s));
+    pr_merge_run(&mut System::new(), &pr, base, checked, &mut io::stdout())
 }
 
 const CI_FAILED: &[&str] = &[
@@ -3405,7 +3445,7 @@ mod tests {
     /// (exit code, stdout, stderr) of pr_queue_run.
     fn run_queue(fake: &mut Fake) -> (i32, String, String) {
         let mut out = Vec::new();
-        let (code, err) = match pr_queue_run(fake, SPR, "main", "44", &mut out) {
+        let (code, err) = match pr_queue_run(fake, SPR, "main", "44", None, &mut out) {
             Ok(()) => (0, String::new()),
             Err(e) => (e.code, e.stderr),
         };
@@ -3523,6 +3563,7 @@ mod tests {
     }
 
     const MERGE_HEAD: &str = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+    const MOVED_HEAD: &str = "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2";
 
     #[test]
     fn checks_record_the_passed_head() {
@@ -3565,10 +3606,14 @@ mod tests {
             .on(&["pr", "merge"], vec![merge])
     }
 
-    /// (exit code, stdout, stderr) of pr_merge_run.
+    /// (exit code, stdout, stderr) of pr_merge_run with checks passed on MERGE_HEAD.
     fn run_merge(fake: &mut Fake) -> (i32, String, String) {
+        run_merge_checked(fake, Some(MERGE_HEAD))
+    }
+
+    fn run_merge_checked(fake: &mut Fake, checked: Option<&str>) -> (i32, String, String) {
         let mut out = Vec::new();
-        let (code, err) = match pr_merge_run(fake, PR, "main", &mut out) {
+        let (code, err) = match pr_merge_run(fake, PR, "main", checked, &mut out) {
             Ok(()) => (0, String::new()),
             Err(e) => (e.code, e.stderr),
         };
@@ -3744,6 +3789,50 @@ mod tests {
             got(0, &line("enqueued", "position 1"), "")
         );
         assert_eq!(merges(&fake), 0);
+    }
+
+    #[test]
+    fn merge_unchecked_missing_exits_3() {
+        let mut fake = merge_fake(vec![mergeability("MERGEABLE", "CLEAN")], ok(""));
+        let detail = "PR #42 has no head that checks passed on the board: run checks again";
+        assert_eq!(
+            run_merge_checked(&mut fake, None),
+            got(3, &line("unchecked", detail), "")
+        );
+        assert_eq!(merges(&fake), 0);
+    }
+
+    #[test]
+    fn merge_unchecked_moved_exits_3() {
+        let read = with(
+            mergeability("MERGEABLE", "CLEAN"),
+            "headRefOid",
+            MOVED_HEAD.into(),
+        );
+        let mut fake = merge_fake(vec![read], ok(""));
+        let detail =
+            "PR #42 head b2b2b2b2b2b2 is not the head checks passed, a1a1a1a1a1a1: run checks again";
+        assert_eq!(run_merge(&mut fake), got(3, &line("unchecked", detail), ""));
+        assert_eq!(merges(&fake), 0);
+    }
+
+    #[test]
+    fn merge_queue_moved_head_exits_3() {
+        let read = with(
+            mergeability("MERGEABLE", "BLOCKED"),
+            "isMergeQueueEnabled",
+            true.into(),
+        );
+        let view =
+            json!({"headRefOid": MOVED_HEAD, "baseRefName": "main", "id": "PR_node42"}).to_string();
+        let mut fake = merge_fake(vec![read], ok("")).on(&["pr", "view"], vec![ok(&view)]);
+        let detail =
+            "PR #42 head b2b2b2b2b2b2 is not the head checks passed, a1a1a1a1a1a1: run checks again";
+        assert_eq!(run_merge(&mut fake), got(3, &line("unchecked", detail), ""));
+        assert_eq!(
+            (fake.count("graphql"), merges(&fake), fake.calls.len()),
+            (1, 0, 2)
+        );
     }
 
     #[test]
