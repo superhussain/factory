@@ -780,6 +780,35 @@ mod tests {
     }
 
     #[test]
+    fn every_role_carries_the_preferences_sentence() {
+        let agents = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills/factory/agents");
+        for role in [
+            "approver",
+            "builder",
+            "explorer",
+            "review-code",
+            "review-security",
+            "review-ui",
+            "review-ux",
+            "spec-writer",
+            "retro",
+        ] {
+            let text = fs::read_to_string(agents.join(format!("factory-{role}.md"))).unwrap();
+            let lines: Vec<&str> = text.lines().collect();
+            assert_eq!(
+                lines[lines.len() - 4..],
+                [
+                    "### Operator preferences",
+                    "",
+                    "The orchestrator may end your prompt with text inside `operator-preferences` tags.",
+                    PREFERENCES_SENTENCE
+                ],
+                "{role}"
+            );
+        }
+    }
+
+    #[test]
     fn malformed_trial_is_ignored() {
         let data = json!({"trials": [trial(json!({"id": "sample-spec-v9"})), trial(json!({"stage": "../x"})),
                                      trial(json!({"project": "../sample"})), trial(json!({"champion_version": "7"}))]});
