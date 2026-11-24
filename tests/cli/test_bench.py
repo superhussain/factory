@@ -269,7 +269,7 @@ MODELS = {"claude-opus-5-5": {"input": 200000, "output": 20000, "cache_write": 3
 SUMMARY = "replayed {}, skipped {}, failed {} of 1 cases into opus-medium\n"
 RUNNING = "1018-add-y: running review-code ...\n"
 AGENTS = json.dumps({"factory-review-code": {"description": "Code reviewer.", "prompt": "Review the diff.\n",
-                                             "model": "opus"}})
+                                             "tools": ["Read", "Grep", "Glob", "Bash", "Write"], "model": "opus"}})
 
 
 class BenchReviewRuleTest(BenchCase):
@@ -311,7 +311,8 @@ class BenchReplayCase(BenchCase):
                                              encoding="utf-8")
         self.agent = self.root / "agents/factory-review-code.md"
         self.agent.parent.mkdir()
-        self.agent.write_text("---\ndescription: Code reviewer.\nmodel: opus\n---\nReview the diff.\n", encoding="utf-8")
+        self.agent.write_text("---\ndescription: Code reviewer.\ntools: Read, Grep, Glob, Bash, Write\nmodel: opus\n---\n"
+                              "Review the diff.\n", encoding="utf-8")
         (self.home / "paths.md").write_text(f"---\nalpha: {self.repo}\n---\n", encoding="utf-8")
         self.job = self.home / "jobs/alpha/1018-add-y"
         self.job.mkdir(parents=True)
@@ -381,8 +382,8 @@ class BenchReplayTest(BenchReplayCase):
         session = call["argv"][call["argv"].index("--session-id") + 1]
         self.assertEqual(call["argv"], [
             "-p", "--agent", "factory-review-code", "--agents", AGENTS, "--session-id", session,
-            "--setting-sources", "", "--permission-mode", "dontAsk", "--allowedTools", "Read", "Grep", "Glob",
-            "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)",
+            "--setting-sources", "", "--strict-mcp-config", "--permission-mode", "dontAsk", "--allowedTools", "Read",
+            "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)",
             f"Edit(/{tmp / 'job' / 'round-1' / 'review-code.md'})",
             "--disallowedTools", "Bash(git *--out*)", "--add-dir", str(tmp / "job"), "--model", "claude-opus-5-5"])
         self.assertEqual(call["ceiling"], "0")
@@ -410,6 +411,14 @@ class BenchReplayTest(BenchReplayCase):
         self.assertNotIn("Project documents", call["stdin"])
         run_json = json.loads((self.arm / "1018-add-y/run.json").read_text(encoding="utf-8"))
         self.assertIsNone(run_json["model"])
+
+    def test_agent_without_tools(self):
+        self.agent.write_text("---\ndescription: Code reviewer.\nmodel: opus\n---\nReview the diff.\n", encoding="utf-8")
+        self.assertEqual(self.replay("--role", "review-code")[0], 0)
+        [call] = self.calls()
+        argv = call["argv"]
+        self.assertEqual(json.loads(argv[argv.index("--agents") + 1])["factory-review-code"],
+                         {"description": "Code reviewer.", "prompt": "Review the diff.\n", "model": "opus"})
 
     def test_temp_root_resolved(self):
         real, link = self.root / "real-tmp", self.root / "tmp-link"
