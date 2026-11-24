@@ -1053,9 +1053,7 @@ mod tests {
     #[test]
     fn archive_git_times_out() {
         use std::os::unix::fs::PermissionsExt;
-        let _lock = crate::shared::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::shared::test_env_lock();
         let home = temp_dir("archive-git-times-out");
         let hung = home.join("hung");
         fs::create_dir_all(&hung).unwrap();

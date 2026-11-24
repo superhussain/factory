@@ -738,9 +738,7 @@ mod tests {
     }
 
     fn push_with_home(home: &Path, target: &str) -> Res<()> {
-        let _lock = crate::shared::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::shared::test_env_lock();
         let old = std::env::var_os("FACTORY_HOME");
         std::env::set_var("FACTORY_HOME", home);
         let result = push_target(target);

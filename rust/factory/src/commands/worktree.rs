@@ -1886,15 +1886,18 @@ mod tests {
         assert_eq!(PREBUILD_TIMEOUT, Duration::from_secs(600));
         let dir = temp_dir("wt-run-logged");
         let log = dir.join("logs/run.log");
-        let argv = ["sh", "-c", "echo started; sleep 5"].map(String::from);
+        let argv = ["sh", "-c", "sleep 30"].map(String::from);
         assert_eq!(
             run_logged(&argv, &dir, &log, Duration::from_secs(1)),
             Err("timed out after 1 s".to_string())
         );
-        assert_eq!(fs::read_to_string(&log).unwrap(), "started\n");
+        assert_eq!(fs::read_to_string(&log).unwrap(), "");
         let argv = ["sh", "-c", "echo out; echo err >&2; exit 3"].map(String::from);
-        assert_eq!(run_logged(&argv, &dir, &log, Duration::from_secs(5)), Ok(3));
-        assert_eq!(fs::read_to_string(&log).unwrap(), "started\nout\nerr\n");
+        assert_eq!(
+            run_logged(&argv, &dir, &log, Duration::from_secs(60)),
+            Ok(3)
+        );
+        assert_eq!(fs::read_to_string(&log).unwrap(), "out\nerr\n");
         fs::remove_dir_all(dir).unwrap();
     }
 

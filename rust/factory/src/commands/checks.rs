@@ -2186,9 +2186,7 @@ mod tests {
 
     #[test]
     fn gh_failure() {
-        let _lock = crate::shared::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::shared::test_env_lock();
         let empty =
             std::env::temp_dir().join(format!("factory-test-gh-failure-{}", std::process::id()));
         std::fs::create_dir_all(&empty).unwrap();

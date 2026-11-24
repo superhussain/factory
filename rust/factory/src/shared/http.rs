@@ -900,9 +900,7 @@ pub(crate) mod tests {
                 .into_owned()
         };
         FALLBACK_CA_OVERRIDE.with(|o| *o.borrow_mut() = Some(fallback));
-        let _lock = crate::shared::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::shared::test_env_lock();
         let old = (
             std::env::var_os("SSL_CERT_FILE"),
             std::env::var_os("SSL_CERT_DIR"),

@@ -9404,7 +9404,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Mutex, MutexGuard};
 
-    use crate::shared::TEST_ENV_LOCK as ENV_LOCK;
     /// Parity writes the host-status "os" field as {os}, so only this test catches a wrong label.
     #[test]
     fn host_os_labels_each_platform() {
@@ -9641,7 +9640,7 @@ exit "$code"
 
     impl Fx {
         pub fn new() -> Fx {
-            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = crate::shared::test_env_lock();
             let tmp = TempHome::new();
             let root = tmp.0.clone();
             let home = root.join("home");
@@ -12770,20 +12769,18 @@ exit "$archive_code"
             assert!(tc.fx.job("042-sample-export").get("token_cap").is_none());
         }
 
-        /// The board command belongs to the claims slice and is not ported yet, so it writes
-        /// nothing at all; pickup stays the only writer of token_cap.
+        /// The board command refuses a token_cap patch; pickup stays its only writer.
         #[test]
         fn test_board_refuses_token_cap() {
             let tc = setup();
             export_job(&tc.fx, json!({}));
-            let home = tc.fx.home.display().to_string();
             assert_eq!(
-                crate::cli::main(vec![
-                    "board".into(),
-                    home.into(),
-                    "042-sample-export".into()
-                ]),
-                2
+                board_patch(&tc.fx, "042-sample-export", json!({"token_cap": {}})),
+                (
+                    2,
+                    "factory.py: only factory.py pickup sets token_cap. Nothing was written.\n"
+                        .into()
+                )
             );
             assert!(tc.fx.puts().is_empty());
         }
@@ -13439,23 +13436,6 @@ exit "$archive_code"
                 launch_reason(&format!("exit\t3\n\u{200b}{}", "x".repeat(300))),
                 format!("exit 3 {}", "x".repeat(193))
             );
-        }
-
-        /// The board command belongs to the claims slice and is not ported yet, so it writes nothing.
-        #[test]
-        fn test_board_refuses_the_field() {
-            let fx = Fx::new();
-            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
-            let home = fx.home.display().to_string();
-            assert_eq!(
-                crate::cli::main(vec![
-                    "board".into(),
-                    home.into(),
-                    "120-sample-digest".into()
-                ]),
-                2
-            );
-            assert!(fx.puts().is_empty());
         }
     }
 

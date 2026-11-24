@@ -44,6 +44,8 @@ pub struct Host {
     pub cargo: Option<PathBuf>,
     /// The running binary.
     pub exe: Option<PathBuf>,
+    /// When now is. Tests freeze it so build times read 0 s.
+    pub clock: Box<dyn Fn() -> Instant>,
 }
 
 impl Host {
@@ -57,6 +59,7 @@ impl Host {
             var: Box::new(|name| std::env::var_os(name).filter(|v| !v.is_empty())),
             cargo: which("cargo"),
             exe: std::env::current_exe().ok(),
+            clock: Box::new(Instant::now),
         })
     }
 
@@ -170,7 +173,7 @@ fn build(
     let lock = open_lock(&lock_path).map_err(|e| os_error(&e, Some(&lock_path)))?;
     lock.lock().map_err(|e| os_error(&e, Some(&lock_path)))?;
     sync(&files, &src).map_err(|e| os_error(&e, None))?;
-    let start = Instant::now();
+    let start = (host.clock)();
     let manifest = src.join("rust").join("Cargo.toml");
     let target_text = target.to_string_lossy();
     // cwd is the workspace so rustup reads its rust-toolchain.toml.
@@ -194,7 +197,11 @@ fn build(
     let _ = writeln!(
         err,
         "install: Rust binary built in {} s",
-        round_int(start.elapsed().as_secs_f64())
+        round_int(
+            (host.clock)()
+                .saturating_duration_since(start)
+                .as_secs_f64()
+        )
     );
     Ok(binary)
 }
@@ -419,11 +426,13 @@ pub(crate) mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), OsString::from(v)))
             .collect();
+        let frozen = Instant::now();
         Host {
             home: root.to_path_buf(),
             var: Box::new(move |name| vars.get(name).cloned()),
             cargo,
             exe: None,
+            clock: Box::new(move || frozen),
         }
     }
 
@@ -616,8 +625,16 @@ pub(crate) mod tests {
             )
         );
         // The finished build holds no lock, so an installer started next can take it.
+        // Another test's child can share the lock file between fork and exec, so retry.
         let after = open_lock(&src.join(LOCK)).unwrap();
-        after.try_lock().unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(10);
+        while after.try_lock().is_err() {
+            assert!(
+                Instant::now() < deadline,
+                "build lock still held 10 s after the build finished"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

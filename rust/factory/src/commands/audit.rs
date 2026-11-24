@@ -3149,9 +3149,7 @@ mod tests {
     #[test]
     fn test_sweep_session_counts_each_subagent_once() {
         const OPUS: &str = "claude-opus-5-5";
-        let _lock = crate::shared::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::shared::test_env_lock();
         let root = std::env::temp_dir().join(format!("audit-sweep-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let projects = root.join("claude/projects");
@@ -3392,9 +3390,7 @@ exit "${FAKE_EXIT:-0}"
 
     impl Bench {
         pub fn new(name: &str) -> Bench {
-            let env = crate::shared::TEST_ENV_LOCK
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let env = crate::shared::test_env_lock();
             let root = temp_dir(&format!("bench-{name}"));
             let repo = root.join("alpha");
             fs::create_dir(&repo).unwrap();
