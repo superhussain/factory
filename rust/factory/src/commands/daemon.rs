@@ -178,13 +178,16 @@ fn run(home: &Path) -> Res<()> {
         "factory daemon: watching {url}; log {}",
         home.join("logs").join("daemon").display()
     );
+    // Job sync runs only on Unix, where sync.rs can lock a job folder against a manual push.
     let sync_home = home.clone();
-    let syncer = job_sync::spawn(
-        &home,
-        board.clone(),
-        signal_stop,
-        Arc::new(move |msg: &str| log_line(&sync_home, msg)),
-    );
+    let syncer = cfg!(unix).then(|| {
+        job_sync::spawn(
+            &home,
+            board.clone(),
+            signal_stop,
+            Arc::new(move |msg: &str| log_line(&sync_home, msg)),
+        )
+    });
     let terminal = io::stderr().is_terminal();
     let mut heart = crate::commands::heartbeat::Heart::default();
     serve(
@@ -222,7 +225,9 @@ fn run(home: &Path) -> Res<()> {
         },
     );
     mirror::unlisten(&home);
-    let _ = syncer.join();
+    if let Some(syncer) = syncer {
+        let _ = syncer.join();
+    }
     Ok(())
 }
 

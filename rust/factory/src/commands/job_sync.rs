@@ -5,6 +5,13 @@
 //! whose board row changes is pulled through `pull_job`. A conflict keeps the local file, saves
 //! R2's copy beside it as `<file>.remote` and is logged; nothing is overwritten.
 //!
+//! A job a live session on this host holds (its claim names this device and is not stale) is
+//! never pulled automatically. That session may hold a file it read before R2 moved; if the daemon
+//! replaced the file under it, the manifest would take R2's new ETag and the session's later save
+//! would push over the other host's work. Leaving such a job alone keeps today's protection: its
+//! stale save meets a 412 and both copies are kept. The session pulls when it chooses to. Its
+//! pushes still go up automatically. A job folder that is a symlink or junction is never followed.
+//!
 //! The folders are scanned for size and mtime every SCAN rather than watched through OS events:
 //! a handful of small folders costs microseconds a scan and needs no platform code. Job file
 //! writes reach the Worker with no announcement, so a pull follows a row change, not a file one.
@@ -18,9 +25,12 @@ use std::time::{Duration, Instant, SystemTime};
 use serde_json::Value;
 
 use crate::commands::mirror::Mirror;
-use crate::commands::sync::{locally_synced, pull_job, push_job, walk};
+use crate::commands::sync::{locally_synced, pull_job_files, push_job, walk};
 use crate::shared::consts::{IDEA, JOB_REL, TERMINAL};
+use crate::shared::fs::is_link;
+use crate::shared::home::{device_name, holder};
 use crate::shared::project::valid_job_target;
+use crate::shared::time::elapsed_seconds;
 
 /// How often the watched folders are scanned for changes.
 const SCAN: Duration = Duration::from_secs(2);
@@ -44,6 +54,8 @@ struct Job {
     /// Whether the job is still active on the board. An inactive job is dropped once it has
     /// nothing left to push.
     active: bool,
+    /// Whether a live session on this host holds the job, so it is not pulled automatically.
+    held: bool,
     push_at: Option<Instant>,
     pull_at: Option<Instant>,
     /// Failed pushes and pulls in a row, for the retry backoff.
@@ -93,6 +105,21 @@ fn active(row: &Value) -> Option<(&str, &str)> {
     valid_job_target(slug, id).then_some((slug, id))
 }
 
+/// Whether a row's claim names device and was seen within stale_minutes.
+fn held_by(row: &Value, device: &str, stale_minutes: u32) -> bool {
+    let claim = &row["claim"];
+    claim["device"].as_str() == Some(device)
+        && claim["seen"]
+            .as_str()
+            .and_then(elapsed_seconds)
+            .is_some_and(|age| age < i64::from(stale_minutes) * 60)
+}
+
+/// A job folder the sync may read: a real directory, never a symlink or junction.
+fn real_dir(folder: &Path) -> bool {
+    !is_link(folder).unwrap_or(true) && folder.is_dir()
+}
+
 fn stamp(folder: &Path) -> Stamp {
     walk(folder)
         .unwrap_or_default()
@@ -123,6 +150,8 @@ impl JobSync {
     /// Takes a board version's rows. Watches each active job with a folder here and queues a pull
     /// for each one first seen or whose row changed.
     fn rows(&mut self, rows: &[Value], now: Instant) {
+        let device = device_name(&self.home);
+        let stale_minutes = holder(&self.home).map_or(120, |(_, _, minutes)| minutes);
         for job in self.jobs.values_mut() {
             job.active = false;
         }
@@ -131,12 +160,14 @@ impl JobSync {
                 continue;
             };
             let key = format!("{slug}/{id}");
-            if !self.folder(&key).is_dir() {
+            if !real_dir(&self.folder(&key)) {
                 continue;
             }
+            let held = held_by(row, &device, stale_minutes);
             let row = row_key(row);
             let job = self.jobs.entry(key).or_default();
             job.active = true;
+            job.held = held;
             if job.row != row {
                 job.row = row;
                 job.pull_at.get_or_insert(now);
@@ -150,7 +181,12 @@ impl JobSync {
     fn scan(&mut self, now: Instant) {
         let keys: Vec<String> = self.jobs.keys().cloned().collect();
         for key in keys {
-            let stamp = stamp(&self.folder(&key));
+            let folder = self.folder(&key);
+            if !real_dir(&folder) {
+                self.jobs.remove(&key);
+                continue;
+            }
+            let stamp = stamp(&folder);
             let job = self.jobs.get_mut(&key).unwrap();
             if job.stamp.as_ref() != Some(&stamp) {
                 job.stamp = Some(stamp);
@@ -168,11 +204,16 @@ impl JobSync {
                 return;
             }
             let (slug, id) = key.split_once('/').unwrap();
-            if job.pull_at.is_some_and(|at| at <= now) {
-                job.pull_at = match pull_job(&self.home, slug, id) {
-                    Ok((line, _)) => {
-                        if line != "pulled 0 files" {
-                            log(&format!("job sync {key}: {line}"));
+            // A held job's pull stays queued until no live session here holds it.
+            if !job.held && job.pull_at.is_some_and(|at| at <= now) {
+                job.pull_at = match pull_job_files(&self.home, slug, id) {
+                    Ok((line, _, got)) => {
+                        if !got.is_empty() {
+                            log(&format!("job sync {key}: pulled {}", got.join(", ")));
+                        }
+                        // The rest of the summary: unpushed files and conflicts.
+                        if let Some((_, rest)) = line.split_once(", ") {
+                            log(&format!("job sync {key}: {rest}"));
                         }
                         job.fails = 0;
                         None
@@ -190,19 +231,23 @@ impl JobSync {
                 continue;
             }
             let folder = self.home.join("jobs").join(slug).join(id);
-            if locally_synced(&folder) {
+            if !real_dir(&folder) || locally_synced(&folder) {
                 job.push_at = None;
                 continue;
             }
             let mut out = Vec::new();
             let result = push_job(&self.home, slug, id, &mut out);
             for line in String::from_utf8_lossy(&out).lines() {
-                if line != "pushed 0 files" {
+                // The count line is replaced by the names logged below.
+                if !(line.starts_with("pushed ") && line.ends_with(" files")) {
                     log(&format!("job sync {key}: {line}"));
                 }
             }
             job.push_at = match result {
-                Ok(_) => {
+                Ok(pushed) => {
+                    if !pushed.is_empty() {
+                        log(&format!("job sync {key}: pushed {}", pushed.join(", ")));
+                    }
                     job.fails = 0;
                     None
                 }
@@ -361,7 +406,7 @@ mod tests {
         assert_eq!(seen[1].body, b"Built\n");
         assert_eq!(
             *lines.lock().unwrap(),
-            [format!("job sync alpha/{JOB}: pushed 1 files")]
+            [format!("job sync alpha/{JOB}: pushed build.md")]
         );
         assert!(locally_synced(&folder(&home)));
         assert_eq!(sync.jobs.values().next().unwrap().push_at, None);
@@ -421,7 +466,7 @@ mod tests {
         assert_eq!(seen.lock().unwrap().len(), 2);
         assert_eq!(
             *lines.lock().unwrap(),
-            [format!("job sync alpha/{JOB}: pulled 1 files")]
+            [format!("job sync alpha/{JOB}: pulled spec.md")]
         );
         // The pulled file matches its sync, so the scan that sees it pushes nothing.
         sync.scan(t0 + SCAN);
@@ -465,7 +510,7 @@ mod tests {
         );
         let home = with_job("job-sync-pull-race", &origin);
         *target.lock().unwrap() = folder(&home).join("build.md");
-        let (line, conflicts) = pull_job(&home, "alpha", JOB).unwrap();
+        let (line, conflicts) = crate::commands::sync::pull_job(&home, "alpha", JOB).unwrap();
         assert_eq!(conflicts, ["build.md"], "{line}");
         assert_eq!(
             fs::read(folder(&home).join("build.md")).unwrap(),
@@ -475,6 +520,115 @@ mod tests {
             fs::read(folder(&home).join("build.md.remote")).unwrap(),
             b"Remote\n"
         );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    /// A row whose claim names this home's device, seen `seen`.
+    fn claimed(home: &Path, stage: &str, seen: &str) -> Value {
+        json!({"id": JOB, "project": "alpha", "stage": stage,
+               "claim": {"device": device_name(home), "session": "s1", "seen": seen}})
+    }
+
+    #[test]
+    fn held_job_is_not_pulled_so_a_stale_save_meets_a_412() {
+        // R2 moved build.md to b2 on another host. A session here read b1 and saves over it.
+        let (origin, seen) = serve(vec![
+            (200, r#"[{"name":"build.md","etag":"\"b2\""}]"#, vec![]),
+            (412, "", vec![]),
+            (200, "Other host\n", vec![("ETag", "\"b2\"")]),
+        ]);
+        let home = with_job("job-sync-held", &origin);
+        let f = folder(&home);
+        fs::write(f.join("build.md"), "Read here\n").unwrap();
+        let state = json!({"build.md": {"etag": "\"b1\"", "sha256": sha(b"Read here\n")}});
+        fs::write(f.join(".sync.json"), state.to_string()).unwrap();
+        let mut sync = JobSync::new(&home);
+        let (lines, log) = logger();
+        let t0 = Instant::now();
+        sync.rows(&[claimed(&home, "build", &crate::shared::time::now())], t0);
+        sync.scan(t0);
+        sync.run_due(t0 + QUIET, &log, &|| false);
+        assert!(seen.lock().unwrap().is_empty(), "a held job was pulled");
+        assert!(sync.jobs.values().next().unwrap().pull_at.is_some());
+        // The session saves its stale copy; the daemon pushes it with the old ETag.
+        fs::write(f.join("build.md"), "Stale save\n").unwrap();
+        sync.scan(t0 + SCAN);
+        sync.run_due(t0 + SCAN + QUIET, &log, &|| false);
+        assert_eq!(seen.lock().unwrap()[1].header("If-Match"), Some("\"b1\""));
+        assert_eq!(fs::read(f.join("build.md")).unwrap(), b"Stale save\n");
+        assert_eq!(
+            fs::read(f.join("build.md.remote")).unwrap(),
+            b"Other host\n"
+        );
+        assert!(lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.contains("conflict in build.md")));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn stale_claim_or_other_device_still_pulls() {
+        let home = with_job("job-sync-stale-claim", "http://127.0.0.1:9");
+        let mut sync = JobSync::new(&home);
+        let t0 = Instant::now();
+        sync.rows(&[claimed(&home, "build", "2020-01-01T00:00:00Z")], t0);
+        assert!(!sync.jobs.values().next().unwrap().held);
+        sync.rows(&[row("build", &crate::shared::time::now())], t0);
+        assert!(!sync.jobs.values().next().unwrap().held);
+        sync.rows(&[claimed(&home, "build", &crate::shared::time::now())], t0);
+        assert!(sync.jobs.values().next().unwrap().held);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_secret_is_never_uploaded() {
+        let (origin, seen) = serve(vec![
+            (200, "[]", vec![]),
+            (200, "", vec![("ETag", "\"b1\"")]),
+        ]);
+        let home = with_job("job-sync-secret", &origin);
+        let f = folder(&home);
+        fs::write(f.join("build.md"), "Built\n").unwrap();
+        let token = format!("token ghp_{}\n", "a".repeat(30));
+        fs::write(f.join("notes.md"), &token).unwrap();
+        let mut sync = JobSync::new(&home);
+        let (lines, log) = logger();
+        let t0 = Instant::now();
+        sync.rows(&[row("build", "t1")], t0);
+        sync.jobs.values_mut().next().unwrap().pull_at = None;
+        sync.scan(t0);
+        sync.run_due(t0 + QUIET, &log, &|| false);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert!(seen.iter().all(|r| !r.path.ends_with("notes.md")));
+        let lines = lines.lock().unwrap();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("notes.md: not uploaded: it looks like it holds a secret")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("refused notes.md")),
+            "{lines:?}"
+        );
+        // Refused is settled by a person, so it isn't retried until the folder changes.
+        assert_eq!(sync.jobs.values().next().unwrap().push_at, None);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_job_folder_is_never_watched() {
+        let home = home_for("job-sync-link", "http://127.0.0.1:9");
+        fs::create_dir_all(home.join("jobs/alpha")).unwrap();
+        fs::create_dir_all(home.join("elsewhere")).unwrap();
+        std::os::unix::fs::symlink(home.join("elsewhere"), folder(&home)).unwrap();
+        let mut sync = JobSync::new(&home);
+        sync.rows(&[row("build", "t1")], Instant::now());
+        assert!(sync.jobs.is_empty());
         fs::remove_dir_all(home).unwrap();
     }
 
