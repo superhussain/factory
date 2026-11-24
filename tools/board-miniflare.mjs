@@ -254,7 +254,7 @@ export async function roomWork(rows, script) {
     const claimed = active[1];
     const open = active.filter((j) => j !== claimed);
     const project = board.jobs.filter((j) => j.project === claimed.project && !active.includes(j));
-    await measure(`PATCH claim with ${open.length} digest and ${project.length} stage reads`, () =>
+    await measure("PATCH claim, open rows by digest and the project by stage", () =>
       patch({
         rows: [
           {
