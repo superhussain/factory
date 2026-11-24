@@ -66,12 +66,12 @@ the parent of the result as the skills root.
 
 Take the first row that matches.
 
-| What `bundle.json` shows | Path |
-| --- | --- |
-| No `entry` key, or no `bundle.json` at all | [Fresh install](#fresh-install-or-a-python-only-bundle) |
+| What `bundle.json` shows                     | Path                                                    |
+| -------------------------------------------- | ------------------------------------------------------- |
+| No `entry` key, or no `bundle.json` at all   | [Fresh install](#fresh-install-or-a-python-only-bundle) |
 | On Windows, a `commit` older than `7568c536` | [Fresh install](#fresh-install-or-a-python-only-bundle) |
-| On a Mac, a `commit` older than `e137ba69` | [Catch-up](#catch-up), once with `TMPDIR` |
-| `"entry": ["runtime/factory"]` | [Catch-up](#catch-up) |
+| On a Mac, a `commit` older than `e137ba69`   | [Catch-up](#catch-up), once with `TMPDIR`               |
+| `"entry": ["runtime/factory"]`               | [Catch-up](#catch-up)                                   |
 
 To test a commit, run
 `git -C <checkout> merge-base --is-ancestor <fix> <commit>`, where `<commit>` is
@@ -138,12 +138,12 @@ catch-up once. It rewrites a pickup timer that still runs Python, after a backup
 
 ## Check the host
 
-| Check | Command | Expect |
-| --- | --- | --- |
-| The bundle names the binary | `cat <installed-skill>/bundle.json` | `"entry": ["runtime/factory"]` and a 64-character `binary_sha256` |
-| Nothing is left to do | `<installed-skill>/runtime/factory catch-up` | the last line is `catch-up: nothing new`, in about a second |
-| Pickup runs | `<installed-skill>/runtime/factory pickup --dry-run` | exit 0; it launches nothing while intake is paused |
-| The daemon mirror answers | `time <installed-skill>/runtime/factory job <id>` | the job's JSON in milliseconds, once the daemon runs |
+| Check                       | Command                                              | Expect                                                            |
+| --------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
+| The bundle names the binary | `cat <installed-skill>/bundle.json`                  | `"entry": ["runtime/factory"]` and a 64-character `binary_sha256` |
+| Nothing is left to do       | `<installed-skill>/runtime/factory catch-up`         | the last line is `catch-up: nothing new`, in about a second       |
+| Pickup runs                 | `<installed-skill>/runtime/factory pickup --dry-run` | exit 0; it launches nothing while intake is paused                |
+| The daemon mirror answers   | `time <installed-skill>/runtime/factory job <id>`    | the job's JSON in milliseconds, once the daemon runs              |
 
 Without the daemon, `job <id>` reads from the Worker and takes about a second.
 Measured on 2026-11-23, the mirror answered in under 10 ms on WSL and in 50 to
@@ -161,12 +161,12 @@ It installs the daemon as a service and removes the pickup timer. It exits 0
 and prints `daemon setup (<os>, <scheduler>): running`. Run `daemon setup` with no flag to
 see its state, its last pass and its log, `<home>/logs/daemon.log`.
 
-| Host | Service |
-| --- | --- |
-| macOS | launchd agent `~/Library/LaunchAgents/factory.daemon.plist`, with `KeepAlive` and `RunAtLoad` |
-| Linux or WSL with systemd | user unit `~/.config/systemd/user/factory-daemon.service` |
-| Linux or WSL without systemd | two crontab lines: `@reboot` and a `*/5` line that restarts a dead daemon |
-| Windows | Task Scheduler task `factory-daemon` at logon, running `%USERPROFILE%\.config\factory-daemon.cmd`, a loop that restarts the daemon |
+| Host                         | Service                                                                                                                            |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| macOS                        | launchd agent `~/Library/LaunchAgents/factory.daemon.plist`, with `KeepAlive` and `RunAtLoad`                                      |
+| Linux or WSL with systemd    | user unit `~/.config/systemd/user/factory-daemon.service`                                                                          |
+| Linux or WSL without systemd | two crontab lines: `@reboot` and a `*/5` line that restarts a dead daemon                                                          |
+| Windows                      | Task Scheduler task `factory-daemon` at logon, running `%USERPROFILE%\.config\factory-daemon.cmd`, a loop that restarts the daemon |
 
 What the daemon does:
 
@@ -226,12 +226,12 @@ the stub goes.
 
 Find them:
 
-| Where | Find with |
-| --- | --- |
-| crontab | `crontab -l \| grep factory.py` |
-| launchd | `grep -l factory.py ~/Library/LaunchAgents/*.plist` |
-| Windows wrappers | `findstr /m factory.py %USERPROFILE%\.config\*.cmd` |
-| Windows tasks | `schtasks /Query /FO LIST /V \| findstr factory.py` |
+| Where                            | Find with                                                                                                 |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| crontab                          | `crontab -l \| grep factory.py`                                                                           |
+| launchd                          | `grep -l factory.py ~/Library/LaunchAgents/*.plist`                                                       |
+| Windows wrappers                 | `findstr /m factory.py %USERPROFILE%\.config\*.cmd`                                                       |
+| Windows tasks                    | `schtasks /Query /FO LIST /V \| findstr factory.py`                                                       |
 | Home config and schedule prompts | `grep -l factory.py <home>/*.md <home>/*.json`, then the same in any folder that holds your agent prompts |
 
 Fix them:
