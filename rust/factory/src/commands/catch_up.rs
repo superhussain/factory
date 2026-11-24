@@ -163,7 +163,12 @@ fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String
     if scheduler == "cron" {
         spawn_daemon().map_err(|e| format!("could not start the daemon: {e}"))?;
     }
-    let pid = pickup::daemon_pid(home, &mut || locked_pid(home))?;
+    // The pid in the kill argv: `kill <pid>` or `taskkill /PID <pid> ...`.
+    let killed = argvs
+        .iter()
+        .filter(|a| a[0] == "kill" || a[0] == "taskkill")
+        .find_map(|a| a.iter().find_map(|w| w.parse().ok()));
+    let pid = pickup::daemon_pid(home, killed, &mut || locked_pid(home))?;
     Ok(Some(format!("restarted (pid {pid})")))
 }
 
@@ -1260,6 +1265,8 @@ mod tests {
         static DAEMON_LOCK: RefCell<Option<fs::File>> = const { RefCell::new(None) };
         /// Whether a fake daemon runs, as the restart's polls see it.
         static UP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// How many fake daemons have started since the first; each takes the next pid.
+        static RESTARTS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
         /// False when a restarted fake daemon never comes up.
         static STARTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     }
@@ -1567,13 +1574,20 @@ mod tests {
             let calls: Calls = Rc::default();
             let prev = FAKES.with(|f| f.borrow().run.clone());
             let (seen, out) = (calls.clone(), out.to_string());
-            let start = || UP.set(STARTS.get());
+            let start = || {
+                if STARTS.get() {
+                    UP.set(true);
+                    RESTARTS.set(RESTARTS.get() + 1);
+                }
+            };
             FAKES.with(|f| {
                 f.borrow_mut().spawn = Some(Rc::new(move || {
                     start();
                     Ok(())
                 }));
-                f.borrow_mut().locked_pid = Some(Rc::new(|| Ok(UP.get().then(std::process::id))));
+                f.borrow_mut().locked_pid = Some(Rc::new(|| {
+                    Ok(UP.get().then(|| std::process::id() + RESTARTS.get()))
+                }));
                 f.borrow_mut().run = Some(Rc::new(move |argv, timeout| {
                     let tools = ["launchctl", "systemctl", "schtasks", "kill", "taskkill"];
                     if !tools.contains(&argv[0].as_str()) {
@@ -2040,7 +2054,7 @@ mod tests {
             daemon_lines(&lines),
             [
                 "daemon service: current",
-                &format!("daemon: restarted (pid {})", std::process::id())
+                &format!("daemon: restarted (pid {})", std::process::id() + 1)
             ]
         );
         assert_eq!(
@@ -2234,7 +2248,10 @@ mod tests {
         assert_eq!(code, 0, "{lines:?}");
         let pid = std::process::id().to_string();
         assert!(
-            lines.contains(&format!("daemon: restarted (pid {pid})")),
+            lines.contains(&format!(
+                "daemon: restarted (pid {})",
+                std::process::id() + 1
+            )),
             "{lines:?}"
         );
         assert_eq!(
@@ -2303,7 +2320,10 @@ mod tests {
         let (code, lines) = t.lines();
         assert_eq!(code, 0, "{lines:?}");
         assert!(
-            lines.contains(&format!("daemon: restarted (pid {})", std::process::id())),
+            lines.contains(&format!(
+                "daemon: restarted (pid {})",
+                std::process::id() + 1
+            )),
             "{lines:?}"
         );
     }
@@ -2334,7 +2354,10 @@ mod tests {
         assert_eq!(code, 0);
         let pid = std::process::id().to_string();
         assert!(
-            lines.contains(&format!("daemon: restarted (pid {pid})")),
+            lines.contains(&format!(
+                "daemon: restarted (pid {})",
+                std::process::id() + 1
+            )),
             "{lines:?}"
         );
         assert_eq!(*calls.borrow(), argvs(&[&["kill", &pid]]));

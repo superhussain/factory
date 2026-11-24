@@ -2858,17 +2858,21 @@ pub(crate) fn daemon_stopped(
 }
 
 /// The pid of the daemon that holds the lock once one does, polled for about 5 s. locked is
-/// daemon::locked_pid for home.
+/// daemon::locked_pid for home. A new daemon writes its pid file just after it takes the lock,
+/// truncating it first, so an unreadable pid or the killed one means not yet.
 pub(crate) fn daemon_pid(
     home: &Path,
+    killed: Option<u32>,
     locked: &mut dyn FnMut() -> Result<Option<u32>, String>,
 ) -> Result<u32, String> {
     for i in 0..RUNNING_POLLS {
         if i > 0 {
             pause(Duration::from_millis(250));
         }
-        if let Some(pid) = locked()? {
-            return Ok(pid);
+        if let Ok(Some(pid)) = locked() {
+            if Some(pid) != killed {
+                return Ok(pid);
+            }
         }
     }
     Err(format!(
@@ -19905,6 +19909,25 @@ exit "$archive_code"
             let out = uninstall_timer(&ds.fx.home, "launchd", &PICKUP).unwrap();
             assert_eq!(out, format!("removed launchd timer: {}", timer.display()));
             assert!(!timer_left("launchd", &PICKUP));
+        }
+
+        /// While the new daemon's pid file is empty or still names the killed daemon, the poll
+        /// keeps going instead of reporting it.
+        #[test]
+        fn daemon_pid_waits_past_a_stale_or_empty_pid_file() {
+            let home = Path::new("/synthetic");
+            let mut reads = vec![
+                Ok(Some(9)),
+                Err("a daemon runs, but its pid file holds no valid pid".to_string()),
+                Ok(Some(7)),
+                Ok(None),
+            ];
+            assert_eq!(
+                daemon_pid(home, Some(7), &mut || reads.pop().unwrap()),
+                Ok(9)
+            );
+            let mut stale = || Ok(Some(7));
+            assert!(daemon_pid(home, Some(7), &mut stale).is_err());
         }
 
         /// spawn_daemon runs the */5 daemon line's command, the installed binary it names, and
