@@ -2316,9 +2316,7 @@ pub(crate) fn uninstall_timer(home: &Path, scheduler: &str, unit: &Unit) -> Res<
     }
     if unit.keep_alive {
         // /End can leave the .cmd loop running; the marker makes it exit instead of restarting.
-        let marker = daemon::stop_marker(home);
-        mkdirs(marker.parent().unwrap())?;
-        write_file(&marker, "")?;
+        write_stop_marker(home)?;
     }
     setup_run(&["schtasks", "/End", "/TN", unit.task], None);
     let (code, out) = setup_run(&["schtasks", "/Delete", "/TN", unit.task, "/F"], None);
@@ -2734,8 +2732,15 @@ pub(crate) fn test_uid() -> u32 {
     getuid()
 }
 
+/// Writes the Windows stop marker, so the restart loop exits instead of starting the daemon again.
+fn write_stop_marker(home: &Path) -> Res<()> {
+    let marker = daemon::stop_marker(home);
+    mkdirs(marker.parent().unwrap())?;
+    write_file(&marker, "")
+}
+
 /// Removes the Windows stop marker, so the restart loop runs the daemon again.
-fn clear_stop_marker(home: &Path) -> Res<()> {
+pub(crate) fn clear_stop_marker(home: &Path) -> Res<()> {
     let marker = daemon::stop_marker(home);
     match fs::remove_file(&marker) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(fail(os_error(&e, Some(&marker)), 1)),
@@ -2770,8 +2775,9 @@ fn locked_kill(home: &Path) -> Result<Option<Vec<String>>, String> {
 
 /// The commands that restart an installed daemon service so it runs a newly installed binary, in
 /// order; empty when there is nothing to restart. Cron has no service, so it ends the daemon that
-/// holds the lock and the */5 line starts the new binary. On Windows /End can leave the .cmd loop
-/// and its daemon running, so the daemon is ended by pid before /Run starts the task again.
+/// holds the lock and the caller starts the new binary with spawn_daemon. On Windows /End can
+/// leave the .cmd loop and its daemon running, so the stop marker is written first, the daemon is
+/// ended by pid, and the caller clears the marker before /Run starts the task again.
 pub(crate) fn daemon_restart_argvs(
     scheduler: &str,
     home: &Path,
@@ -2787,7 +2793,7 @@ pub(crate) fn daemon_restart_argvs(
             &format!("{}.service", DAEMON.task),
         ])],
         "schtasks" => {
-            clear_stop_marker(home).map_err(|e| message(&e))?;
+            write_stop_marker(home).map_err(|e| message(&e))?;
             let mut argvs = vec![argv(&["schtasks", "/End", "/TN", DAEMON.task])];
             argvs.extend(locked_kill(home)?);
             argvs.push(argv(&["schtasks", "/Run", "/TN", DAEMON.task]));
@@ -2795,6 +2801,64 @@ pub(crate) fn daemon_restart_argvs(
         }
         _ => locked_kill(home)?.into_iter().collect(),
     })
+}
+
+/// Starts the daemon as its crontab line does: detached, with the line's PATH, and its output
+/// appended to its log.
+pub(crate) fn spawn_daemon(home: &Path) -> io::Result<()> {
+    let values = timer_values(home, &DAEMON);
+    let log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&values.log)?;
+    let mut cmd = Command::new(&values.argv[0]);
+    cmd.args(&values.argv[1..])
+        .env("PATH", &values.path)
+        .stdin(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log);
+    detach(&mut cmd);
+    cmd.spawn().map(drop)
+}
+
+/// How many times a restart polls for the old daemon to let go of the lock, 250 ms apart: about
+/// 35 s, since a stopping daemon gives a running pickup child 30 s.
+const STOP_POLLS: u32 = 140;
+
+/// Waits for the daemon that held the lock to let go of it after its kill. locked is
+/// daemon::locked_pid for this home.
+pub(crate) fn daemon_stopped(
+    locked: &mut dyn FnMut() -> Result<Option<u32>, String>,
+) -> Result<(), String> {
+    for i in 0..STOP_POLLS {
+        if i > 0 {
+            pause(Duration::from_millis(250));
+        }
+        if locked()?.is_none() {
+            return Ok(());
+        }
+    }
+    Err("the old daemon still holds its lock 35 s after the kill".into())
+}
+
+/// The pid of the daemon that holds the lock once one does, polled for about 5 s. locked is
+/// daemon::locked_pid for home.
+pub(crate) fn daemon_pid(
+    home: &Path,
+    locked: &mut dyn FnMut() -> Result<Option<u32>, String>,
+) -> Result<u32, String> {
+    for i in 0..RUNNING_POLLS {
+        if i > 0 {
+            pause(Duration::from_millis(250));
+        }
+        if let Some(pid) = locked()? {
+            return Ok(pid);
+        }
+    }
+    Err(format!(
+        "no daemon holds the lock 5 s after the restart; see {}",
+        home.join("logs").join("daemon.log").display()
+    ))
 }
 
 /// Ends the daemon that holds the lock, for schedulers that do not stop it themselves.
