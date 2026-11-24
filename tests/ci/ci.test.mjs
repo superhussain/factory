@@ -292,10 +292,10 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
   assert.match(unitRuns[1], /cargo-nextest-0\.9\.152-x86_64-unknown-linux-gnu\.tar\.gz/);
   assert.match(unitRuns[1], /sha256sum -c/);
   assert.equal(unitRuns[2], "CARGO_INCREMENTAL=1 cargo test --locked --no-run");
-  // Every shard runs its count partition of every test, and the shards together cover all of them.
+  // Every shard runs its hash partition of every test, and the shards together cover all of them.
   assert.equal(
     unitRuns[3],
-    "CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.shard }}/2",
+    "CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2",
   );
   assert.equal(unitRuns.length, 4);
   assert.deepEqual(unit.strategy.matrix.shard, [1, 2]);

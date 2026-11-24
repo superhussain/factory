@@ -227,8 +227,8 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 6
     # nextest runs each test in its own process, so tests that hold TEST_ENV_LOCK no longer wait on each other,
-    # and count partitions split the tests over the shards. hung_fetch_times_out waits 60 s by design, so more
-    # shards would not shorten the slowest one.
+    # and hash partitions split the tests over the shards by name, so a test keeps its shard as others come and
+    # go. hung_fetch_times_out waits 60 s by design, so more shards would not shorten the slowest one.
     strategy:
       fail-fast: false
       matrix:
@@ -272,7 +272,7 @@ jobs:
           path: rust/target/debug/incremental
           key: v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Test linux-x64
-        run: CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.shard }}/2
+        run: CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2
   # Type-checks the darwin-arm64 and windows-x64 targets.
   rust-check:
     needs: plan
