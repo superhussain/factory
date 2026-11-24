@@ -218,11 +218,13 @@ Point it at the binary as the next section shows.
 
 ## Update old automations
 
-Anything that still calls `python3 <installed-skill>/runtime/factory.py` or
-`py -3 ...\factory.py` keeps working for one release. The installed `factory.py`
-is now a small stub. It runs `runtime/factory` beside it with the same arguments
-and prints a deprecation line on stderr. Move every caller to the binary before
-the stub goes.
+On macOS and Linux, anything that still calls
+`python3 <installed-skill>/runtime/factory.py` keeps working for one release. The
+installed `factory.py` is now a small stub. It runs `runtime/factory` beside it
+with the same arguments and prints a deprecation line on stderr. Move every caller
+to the binary before the stub goes.
+
+On Windows, move `py -3` callers to `factory.exe` now.
 
 Find them:
 
