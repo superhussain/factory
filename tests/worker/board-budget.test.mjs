@@ -27,7 +27,14 @@ function projection(work, rate) {
     [n("patch"), op(work, "PATCH 1 row")],
     [n("claim"), op(work, "PATCH claim")],
     [n("get"), op(work, "GET /board.json, new version")],
-    [Math.min(DAY.copy, n("patch")), op(work, "R2 copy")],
+    // The bench's copy ran on text a GET had built; a copy that builds it adds a GET's reads.
+    [
+      Math.min(DAY.copy, n("patch")),
+      {
+        read: op(work, "R2 copy").read + op(work, "GET /board.json, new version").read,
+        written: op(work, "R2 copy").written,
+      },
+    ],
     // Each copy's setAlarm writes the room's alarm, which no cursor counts: one row written.
     [Math.min(DAY.copy, n("patch")), { read: 0, written: 1 }],
     [n("archive"), op(work, "full PUT, archive pass")],
