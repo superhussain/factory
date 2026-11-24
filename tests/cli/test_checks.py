@@ -305,7 +305,8 @@ class ChecksTest(IsolatedTestCase):
     def test_skill_uses_checks(self):
         skill = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
         self.assertIn('Wait for checks with `"$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0: '
-                      "they passed, or the repo has none. On a PR behind `$BASE`, it runs "
+                      "they passed, or the repo has none. It records that head as `checked_head`, and "
+                      "`pr-merge` merges only that head. On a PR behind `$BASE`, it runs "
                       "`gh pr update-branch` and rechecks the new head. Exit 3: still pending; run it again. "
                       "Exit 1 names failing checks. Exit 4: no open PR. Exit 5: no usable gh reply. "
                       "Exit 6: `gh pr update-branch` failed; treat it as a merge conflict. Exit 7 means the approver escalated the job: the board marks it escalated or its decision.md "

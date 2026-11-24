@@ -103,12 +103,12 @@
                                             failed or refused 1, pending after 120 seconds 3, a bad or
                                             stacked pr 4, a gh problem 5
   factory.py pr-merge <project-slug>/<job-id>
-                                            check the job PR can merge, then merge it pinned to the checked
-                                            head, or queue it when the repo has a merge queue: one JSON line
-                                            of pr, status and detail; merged or enqueued exits 0, blocked,
-                                            draft or refused 1, behind or unknown 3, a bad or stacked pr 4,
-                                            a gh problem 5, a conflict 6, an escalated job 7, an autonomy
-                                            hold 8
+                                            check the job PR can merge, then merge it pinned to the head
+                                            checks passed, or queue it when the repo has a merge queue: one
+                                            JSON line of pr, status and detail; merged or enqueued exits 0,
+                                            blocked, draft or refused 1, behind, unknown or a head checks
+                                            did not pass 3, a bad or stacked pr 4, a gh problem 5, a
+                                            conflict 6, an escalated job 7, an autonomy hold 8
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
