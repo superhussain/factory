@@ -61,7 +61,7 @@ When you review a Dependabot PR that bumps an action, check that the new SHA is 
 
 ## Pipeline stage notes
 
-This repository is public, so the `factory` project pipeline adds a review note and a build note. Agents read them inside the operator-preferences envelope described in [trust.md](trust.md). `tests/worker/public-repo-notes.test.mjs` checks that both notes pass `validatePipeline`. `tools/stage-notes-check.py` compares the live notes with this file.
+This repository is public, so the `factory` project pipeline adds a review note and a build note. Agents read them inside the operator-preferences envelope described in [trust.md](trust.md). `tests/worker/public-repo-notes.test.mjs` checks that both notes pass `validatePipeline`. `tools/stage-notes-check.mjs` compares the live notes with this file.
 
 ### Review stage note
 

@@ -44,15 +44,15 @@ The dashboard loads at the origin root `/`. Historical `/dashboard.html` links r
 
 ## Affected checks
 
-The four concerns are declared as Nx projects, so a change can run only what it touches:
+The three concerns are declared as Nx projects, so a change can run only what it touches:
 
 ```sh
 mise exec -- pnpm exec nx affected -t auth protocol assets deploy local browser \
   --base="$(git merge-base origin/main HEAD)" --head=HEAD
-mise exec -- pnpm exec nx run-many -t cli install verify
+mise exec -- pnpm exec nx run-many -t verify
 ```
 
-`worker-hosted` owns `auth` and `protocol`, `web-dashboard` owns `assets`, `tooling` owns `deploy`, `local`, `browser` and `verify`, and `skills/factory` is declared as `device-bundle`, whose Python suites run as the cached `cli`/`install` targets (and `tooling:verify`) through `nx run-many`; `tools/verify.py` still runs them directly with no Node. `worker-hosted`'s suites depend on `web-dashboard:assets` because they import the `.build` artifacts it writes, so a clean checkout builds assets first. Only `local` binds the fixed ports 8220/8221; `browser` uses owned ephemeral ports, so the two run side by side.
+`worker-hosted` owns `auth` and `protocol`, `web-dashboard` owns `assets`, and `tooling` owns `deploy`, `local`, `browser` and `verify`. The `rust/` crate is not an Nx project: `node tools/verify.mjs device` runs its `cargo test`, and a host without Node runs `cargo test --locked --manifest-path rust/Cargo.toml` directly. `worker-hosted`'s suites depend on `web-dashboard:assets` because they import the `.build` artifacts it writes, so a clean checkout builds assets first. Only `local` binds the fixed ports 8220/8221; `browser` uses owned ephemeral ports, so the two run side by side.
 
 `nx` is a pinned devDependency; task results cache locally under the ignored `.nx/cache` (`pnpm exec nx reset` clears them), and `pnpm exec nx show projects` lists the four projects. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
 
