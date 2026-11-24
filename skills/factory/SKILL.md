@@ -135,7 +135,13 @@ A command that needs Cloudflare credentials runs as `<skill>/runtime/factory wit
 
 R2 holds the board (one for every project, each job carrying `project`), the
 backlog, the project files, and a copy of every job folder's markdown and images. `factory`
-reads and writes them, and job folders go up by hand:
+reads and writes them. Job folders go up through `push`, which the daemon also runs
+on its own where it is installed:
+
+- Anything written to a job folder can reach R2 within seconds on a daemon host.
+  Never put a secret, token or private note there, even in a draft. `push`
+  refuses a markdown or HTML file that looks like it holds a secret and exits 6
+  naming it.
 
 - After writing any job file, run `"$RUNTIME" push "$SLUG/<id>"`. It uploads
   the job's changed markdown, images (PNG, JPEG, GIF, WebP, up to 5 MiB each) and
@@ -148,8 +154,9 @@ reads and writes them, and job folders go up by hand:
   `sync "$SLUG"` does that for every job of the project that is not `merged` or
   `closed`. Pull a finished job by id.
 - Where the daemon runs, it pushes a changed job folder about 3 s after its
-  last write and pulls a job when its board row changes, with the same rules.
-  Still run `push` after writing; with the daemon synced it returns at once.
+  last write, with the same rules. It pulls a job when its board row changes,
+  unless a live session on this host holds the job; that session runs `pull`
+  itself. Still run `push` after writing; with the daemon synced it returns at once.
 - When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
   the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
   each file. `push` never uploads a `.remote`, and refuses the file until a human

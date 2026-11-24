@@ -423,7 +423,10 @@ daemon is the host's only pickup scheduler and no pickup timer exists.
   closed) that exist on this host. It scans them every 2 s and pushes a folder
   through `push`'s own code once it has been still for 3 s and differs from its
   last sync. It pulls a job when its board row changes, ignoring the claim
-  heartbeat. A conflict keeps the local file, saves `<file>.remote` and goes to
+  heartbeat, but never while a live session on this host holds the job (claim
+  device is this host and not stale). It never follows a symlinked job folder,
+  never uploads a file that looks like it holds a secret, and logs each file it
+  pushes or pulls by name. A conflict keeps the local file, saves `<file>.remote` and goes to
   the daemon log. A failed push or pull retries after 60 s, doubling to 30
   minutes, and stops once the job is merged or closed. The daemon and a manual
   `push` or `pull` take a lock on the job folder in turn. `factory push` on a folder
