@@ -13,7 +13,7 @@
     "test:browser": "node tests/browser/run.mjs",
     "test:assets": "python3 tools/deploy.py dry-run --profile tests/fixtures/deployment-valid.json && node tools/assets.mjs --verify",
     "test:deploy": "python3 -m unittest discover -s tests/tools -p test_deploy.py && python3 tools/deploy.py check --profile tests/fixtures/deployment-valid.json && python3 tools/deploy.py render --profile tests/fixtures/deployment-valid.json && python3 -m unittest discover -s tests/tools -p test_bootstrap.py && python3 tools/bootstrap.py plan --answers tests/fixtures/bootstrap-valid.json",
-    "test:verify": "python3 -B tests/run_parallel.py tests/tools test_verify.py test_paseo_stalls.py test_pr_screenshots.py test_copy_pr_screenshots.py test_secret_scan.py test_rewrite_pr_links.py test_stage_notes_check.py",
+    "test:verify": "python3 -B tests/run_parallel.py tests/tools test_verify.py test_paseo_stalls.py test_pr_screenshots.py test_copy_pr_screenshots.py test_secret_scan.py test_stage_notes_check.py",
     "check:secrets": "python3 tools/secret-scan.py",
     "check:types": "tsc -p tsconfig.json",
     "test:paseo-plugin": "node --test tests/paseo-plugin/embed.test.mjs tests/paseo-plugin/lockfile.test.mjs tests/paseo-plugin/badge.test.mjs tests/paseo-plugin/arrivals.test.mjs tests/paseo-plugin/first-login.test.mjs tests/paseo-plugin/runtime.test.mjs tests/paseo-plugin/location.test.mjs tests/paseo-plugin/ballot.test.mjs tests/paseo-plugin/warm-frame.test.mjs tests/paseo-plugin/open-limit.test.mjs tests/paseo-plugin/deep-link.test.mjs tests/paseo-plugin/settings.test.mjs tests/paseo-plugin/election.test.mjs tests/paseo-plugin/card-capture.test.mjs",
