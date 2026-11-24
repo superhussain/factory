@@ -38,7 +38,8 @@ output that does not match.
   - Use the GNU toolchain. Run `rustup-init.exe --default-host x86_64-pc-windows-gnu`,
     or `rustup set default-host x86_64-pc-windows-gnu` on an existing install.
   - Install MSYS2 and its mingw-w64 binutils (`pacman -S mingw-w64-x86_64-binutils`).
-    Put `C:\msys64\mingw64\bin` on your user `PATH`, then open a new shell.
+    Append `C:\msys64\mingw64\bin` to the end of your user `PATH`, then open a new
+    shell.
   - Pull a main that has the root `.gitattributes`. It forces LF line endings, so a
     checkout with `core.autocrlf=true` installs the same files as everyone else.
 - **Git, gh and a clean factory checkout.** `paths.md` names the checkout under
@@ -266,7 +267,9 @@ catch-up printed as `backup: <path>`:
    to `~/Library/LaunchAgents`, or the `.cmd` files back to `%USERPROFILE%\.config`.
    On a systemd host, copy `<backup>/systemd/*` back to `~/.config/systemd/user`
    and run `systemctl --user daemon-reload`.
-4. Copy the files in `<backup>/home/` back into the factory home.
+4. Copy the files in `<backup>/home/` that differ back into the factory home with
+   `cp -p`, which keeps their modes. Leave `.env` alone unless it changed, so a
+   rotated token does not come back.
 
 ## Agent checklist
 
@@ -327,7 +330,8 @@ wait for the unload and retry once.
 ### The Windows build cannot find `dlltool`
 
 The GNU Rust toolchain needs binutils from MSYS2. Install
-`mingw-w64-x86_64-binutils`, add `C:\msys64\mingw64\bin` to your user `PATH`, and
+`mingw-w64-x86_64-binutils`, append `C:\msys64\mingw64\bin` to the end of your
+user `PATH`, and
 open a new shell before you build again.
 
 ### CRLF files in a Windows checkout
