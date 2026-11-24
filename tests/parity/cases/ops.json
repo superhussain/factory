@@ -1095,13 +1095,30 @@
             "stderr": ""
           },
           {
-            "argv": ["-C", "/work/factory-042-dark-mode", "reflog", "show", "--format=%H %gs", "refs/heads/factory/042-dark-mode"],
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/042-dark-mode"
+            ],
             "code": 0,
             "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa commit: local\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit: inherited\n",
             "stderr": ""
           },
           {
-            "argv": ["-C", "/work/factory-042-dark-mode", "log", "--format=%h %s", "HEAD", "--not", "--remotes", "--exclude=factory/042-dark-mode", "--branches"],
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--exclude=factory/042-dark-mode",
+              "--branches"
+            ],
             "code": 0,
             "stdout": "abc1234 local\ndef5678 inherited\n",
             "stderr": ""
@@ -1178,13 +1195,30 @@
             "stderr": ""
           },
           {
-            "argv": ["-C", "/work/factory-042-dark-mode", "reflog", "show", "--format=%H %gs", "refs/heads/factory/042-dark-mode"],
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/042-dark-mode"
+            ],
             "code": 1,
             "stdout": "",
             "stderr": ""
           },
           {
-            "argv": ["-C", "/work/factory-042-dark-mode", "log", "--format=%h %s", "HEAD", "--not", "--remotes", "--exclude=factory/042-dark-mode", "--branches"],
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--exclude=factory/042-dark-mode",
+              "--branches"
+            ],
             "code": 0,
             "stdout": "abc1234 local\ndef5678 inherited\n",
             "stderr": ""
@@ -1814,7 +1848,16 @@
             "stderr": ""
           },
           {
-            "argv": ["-C", "/work/factory-042-dark-mode", "log", "--format=%h %s", "HEAD", "--not", "--remotes", "--branches"],
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--branches"
+            ],
             "code": 0,
             "stdout": "",
             "stderr": ""
@@ -1891,7 +1934,16 @@
             "stderr": ""
           },
           {
-            "argv": ["-C", "/work/factory-042-dark-mode", "log", "--format=%h %s", "HEAD", "--not", "--remotes", "--branches"],
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--branches"
+            ],
             "code": 0,
             "stdout": "abc1234 detached\n",
             "stderr": ""
@@ -1968,13 +2020,29 @@
             "stderr": ""
           },
           {
-            "argv": ["-C", "/work/factory-042-dark-mode", "reflog", "show", "--format=%H %gs", "refs/heads/factory/042-dark-mode"],
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/042-dark-mode"
+            ],
             "code": 1,
             "stdout": "",
             "stderr": ""
           },
           {
-            "argv": ["-C", "/work/factory-042-dark-mode", "log", "--format=%h %s", "HEAD", "--not", "--remotes", "--branches"],
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--branches"
+            ],
             "code": 0,
             "stdout": "",
             "stderr": ""

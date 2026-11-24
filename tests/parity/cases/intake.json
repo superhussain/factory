@@ -12067,11 +12067,7 @@
     },
     {
       "id": "intake/stuck-skips-a-stale-batched-rider",
-      "argv": [
-        "--home",
-        "{home}",
-        "stuck"
-      ],
+      "argv": ["--home", "{home}", "stuck"],
       "home": "intake",
       "stubs": {},
       "env": {
@@ -12082,10 +12078,7 @@
           200,
           "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"090-sample-export-csv\",\"project\":\"sample\",\"stage\":\"build\",\"round\":1,\"updated\":\"2020-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"tag\",\"since\":\"2020-01-01T00:00:00Z\",\"seen\":\"2020-01-01T00:00:00Z\"}},{\"id\":\"091-sample-typo\",\"project\":\"sample\",\"stage\":\"build\",\"round\":1,\"updated\":\"2020-01-01T00:00:00Z\",\"refs\":[{\"id\":\"090-sample-export-csv\",\"kind\":\"batched-into\"}]}]}\n"
         ],
-        "PUT /api/board": [
-          200,
-          ""
-        ]
+        "PUT /api/board": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_batch.py::BatchTest.test_stuck_and_inflight_skip_riders"
@@ -17211,12 +17204,7 @@
     },
     {
       "id": "intake/idea-images-retry-after-partial-push",
-      "argv": [
-        "--home",
-        "{home}",
-        "idea-images",
-        "sample/001-idea"
-      ],
+      "argv": ["--home", "{home}", "idea-images", "sample/001-idea"],
       "home": "idea-images-retry-after-partial-push",
       "stubs": {},
       "routes": {
@@ -17233,10 +17221,7 @@
           "fake png two\n"
         ],
         "GET /api/jobs/sample/001-idea/?etags=1": [
-          [
-            200,
-            []
-          ],
+          [200, []],
           [
             200,
             [
@@ -17263,22 +17248,14 @@
           200,
           ""
         ],
-        "PUT /api/jobs/sample/001-idea/idea-images.md": [
-          200,
-          ""
-        ]
+        "PUT /api/jobs/sample/001-idea/idea-images.md": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_factory.py::IdeaImagesTest.test_import_retries_after_a_partial_push"
     },
     {
       "id": "intake/idea-images-another-device-pulls-identical-bytes-and-links",
-      "argv": [
-        "--home",
-        "{home}",
-        "pull",
-        "sample/001-idea"
-      ],
+      "argv": ["--home", "{home}", "pull", "sample/001-idea"],
       "home": null,
       "stubs": {},
       "routes": {

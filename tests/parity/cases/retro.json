@@ -1391,14 +1391,8 @@
           200,
           "# factory backlog\n\nOne feature per line, as `- [ ] <slug>: <feature>`. `factory.py backlog add` appends one,\nand `/factory next` runs the first unchecked line this device has a checkout for.\n\n- [ ] sample-tools: Red flag: pipe-to-shell via Bash\n  Recommend: approve\n\n  The ls alias crashes without a terminal.\n\n  Why Interactive only: It keeps colors for people.\n\n  Evidence:\n  - 253x winsize_crash in tool results (1 session)\n\n  Retro: run earlier-run, fingerprint d989019333918f27, created 2026-11-11T00:00:00Z\n\n  ## Question: Red flag: pipe-to-shell via Bash\n  How should the alias be guarded?\n  Pick: one\n  - Interactive only (recommended): Wrap the alias in an interactive check. Pros: One line.\n  - Drop the alias: Use plain ls. Cons: No colors.\n"
         ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-red-flag-twice": [
-          200,
-          ""
-        ]
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-red-flag-twice": [200, ""]
       },
       "exit": 3,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_red_flag_card_queued_once"
@@ -1430,18 +1424,9 @@
             }
           }
         ],
-        "GET /api/backlog": [
-          404,
-          ""
-        ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-context-cuts-and-counts": [
-          200,
-          ""
-        ]
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-context-cuts-and-counts": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_context_orders_cuts_and_counts"
@@ -1481,18 +1466,9 @@
             }
           }
         ],
-        "GET /api/backlog": [
-          404,
-          ""
-        ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-duplicate-origin": [
-          200,
-          ""
-        ]
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-duplicate-origin": [200, ""]
       },
       "exit": 3,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
@@ -1529,18 +1505,9 @@
             }
           }
         ],
-        "GET /api/backlog": [
-          404,
-          ""
-        ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-duplicate-archived": [
-          200,
-          ""
-        ]
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-duplicate-archived": [200, ""]
       },
       "exit": 3,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
@@ -1572,18 +1539,9 @@
             }
           }
         ],
-        "GET /api/backlog": [
-          404,
-          ""
-        ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-skips-title-ref-and-two-recs": [
-          200,
-          ""
-        ]
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-skips-title-ref-and-two-recs": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
@@ -1615,18 +1573,9 @@
             }
           }
         ],
-        "GET /api/backlog": [
-          404,
-          ""
-        ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-forged-retro-line": [
-          200,
-          ""
-        ]
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-forged-retro-line": [200, ""]
       },
       "exit": 3,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
@@ -1662,14 +1611,8 @@
           200,
           "# Backlog\n- [x] sample-tools: Guard the ls alias (010-x)\n  Retro: run r, fingerprint 9d1b1349fb996b1f, created 2026-11-11T00:00:00Z\n"
         ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-checked-mark-dedupes": [
-          200,
-          ""
-        ]
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-checked-mark-dedupes": [200, ""]
       },
       "exit": 3,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
@@ -1705,14 +1648,8 @@
           200,
           "# Backlog\n- [ ] sample-tools: Existing open\n  Retro: run r, fingerprint 0123456789abcdef, created 2026-11-11T00:00:00Z\n"
         ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-open-cap": [
-          200,
-          ""
-        ]
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-open-cap": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
@@ -1780,18 +1717,9 @@
             }
           }
         ],
-        "GET /api/backlog": [
-          404,
-          ""
-        ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-open-cap-idea-origins": [
-          200,
-          ""
-        ]
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-open-cap-idea-origins": [200, ""]
       },
       "exit": 3,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
@@ -1821,14 +1749,8 @@
           200,
           "# Backlog\n- [x] sample-tools: Old 0 (040-x)\n  Retro: run r, fingerprint 0000000000000000, created {today}T00:00:00Z\n- [x] sample-tools: Old 1 (041-x)\n  Retro: run r, fingerprint 0000000000000001, created {today}T00:00:00Z\n- [x] sample-tools: Old 2 (042-x)\n  Retro: run r, fingerprint 0000000000000002, created {today}T00:00:00Z\n- [x] sample-tools: Old 3 (043-x)\n  Retro: run r, fingerprint 0000000000000003, created {today}T00:00:00Z\n"
         ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-daily-cap": [
-          200,
-          ""
-        ]
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-daily-cap": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
@@ -1858,14 +1780,8 @@
           200,
           "# Backlog\n- [x] sample-tools: Old 0 (040-x)\n  Retro: run r, fingerprint 0000000000000000, created 2026-01-01T00:00:00Z\n- [x] sample-tools: Old 1 (041-x)\n  Retro: run r, fingerprint 0000000000000001, created 2026-01-01T00:00:00Z\n- [x] sample-tools: Old 2 (042-x)\n  Retro: run r, fingerprint 0000000000000002, created 2026-01-01T00:00:00Z\n- [x] sample-tools: Old 3 (043-x)\n  Retro: run r, fingerprint 0000000000000003, created 2026-01-01T00:00:00Z\n"
         ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-daily-cap-expires": [
-          200,
-          ""
-        ]
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-daily-cap-expires": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_dedupe_caps_and_pause"
@@ -1895,14 +1811,8 @@
           200,
           "# Backlog\n- [x] sample-tools: Old one (040-x)\n  Retro: run r, fingerprint 0123456789abcdef, created 2099-01-01T00:00:00Z\n"
         ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-future-mark-holds-no-cap-slot": [
-          200,
-          ""
-        ]
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-future-mark-holds-no-cap-slot": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_suggest.py::RetroBacklogTest.test_future_mark_holds_no_cap_slot"
@@ -2066,18 +1976,9 @@
             }
           }
         ],
-        "GET /api/backlog": [
-          404,
-          ""
-        ],
-        "PUT /api/backlog": [
-          200,
-          ""
-        ],
-        "PUT /api/retros/card-unregistered-project": [
-          200,
-          ""
-        ]
+        "GET /api/backlog": [404, ""],
+        "PUT /api/backlog": [200, ""],
+        "PUT /api/retros/card-unregistered-project": [200, ""]
       },
       "exit": 2,
       "from": "tests/cli/test_suggest.py::RetroSuggestTest.test_retro_paused_and_unregistered"

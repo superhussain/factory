@@ -564,34 +564,18 @@
     },
     {
       "id": "outcomes/riders-share-the-lead-result",
-      "argv": [
-        "--home",
-        "{home}",
-        "outcomes",
-        "alpha"
-      ],
+      "argv": ["--home", "{home}", "outcomes", "alpha"],
       "home": "audit-outcomes-checkout",
       "stubs": {
         "git": [
           {
-            "argv": [
-              "-C",
-              "{home}/alpha",
-              "rev-parse",
-              "--show-toplevel"
-            ],
+            "argv": ["-C", "{home}/alpha", "rev-parse", "--show-toplevel"],
             "stdout": "{home}/alpha\n",
             "stderr": "",
             "code": 0
           },
           {
-            "argv": [
-              "-C",
-              "{home}/alpha",
-              "config",
-              "--bool",
-              "extensions.worktreeConfig"
-            ],
+            "argv": ["-C", "{home}/alpha", "config", "--bool", "extensions.worktreeConfig"],
             "stdout": "",
             "stderr": "",
             "code": 1
@@ -736,21 +720,14 @@
             ]
           }
         ],
-        "PUT /api/board": [
-          200,
-          "ok"
-        ]
+        "PUT /api/board": [200, "ok"]
       },
       "exit": 0,
       "from": "tests/cli/test_outcomes.py::OutcomesClassifyTest.test_riders_share_the_lead_result"
     },
     {
       "id": "outcomes/other-project-still-judged",
-      "argv": [
-        "--home",
-        "{home}",
-        "outcomes"
-      ],
+      "argv": ["--home", "{home}", "outcomes"],
       "home": "outcomes-other-project-still-judged",
       "stubs": {
         "gh": [
@@ -768,24 +745,13 @@
         ],
         "git": [
           {
-            "argv": [
-              "-C",
-              "{home}/alpha",
-              "rev-parse",
-              "--show-toplevel"
-            ],
+            "argv": ["-C", "{home}/alpha", "rev-parse", "--show-toplevel"],
             "stdout": "{home}/alpha\n",
             "stderr": "",
             "code": 0
           },
           {
-            "argv": [
-              "-C",
-              "{home}/alpha",
-              "config",
-              "--bool",
-              "extensions.worktreeConfig"
-            ],
+            "argv": ["-C", "{home}/alpha", "config", "--bool", "extensions.worktreeConfig"],
             "stdout": "",
             "stderr": "",
             "code": 1
@@ -899,22 +865,14 @@
             ]
           }
         ],
-        "PUT /api/board": [
-          200,
-          "ok"
-        ]
+        "PUT /api/board": [200, "ok"]
       },
       "exit": 0,
       "from": "tests/cli/test_outcomes.py::OutcomesUnknownTest.test_other_project_still_judged"
     },
     {
       "id": "outcomes/bad-oid",
-      "argv": [
-        "--home",
-        "{home}",
-        "outcomes",
-        "alpha"
-      ],
+      "argv": ["--home", "{home}", "outcomes", "alpha"],
       "home": "audit-outcomes-checkout",
       "stubs": {
         "gh": [
@@ -932,24 +890,13 @@
         ],
         "git": [
           {
-            "argv": [
-              "-C",
-              "{home}/alpha",
-              "rev-parse",
-              "--show-toplevel"
-            ],
+            "argv": ["-C", "{home}/alpha", "rev-parse", "--show-toplevel"],
             "stdout": "{home}/alpha\n",
             "stderr": "",
             "code": 0
           },
           {
-            "argv": [
-              "-C",
-              "{home}/alpha",
-              "config",
-              "--bool",
-              "extensions.worktreeConfig"
-            ],
+            "argv": ["-C", "{home}/alpha", "config", "--bool", "extensions.worktreeConfig"],
             "stdout": "",
             "stderr": "",
             "code": 1
@@ -1000,22 +947,14 @@
             ]
           }
         ],
-        "PUT /api/board": [
-          200,
-          "ok"
-        ]
+        "PUT /api/board": [200, "ok"]
       },
       "exit": 0,
       "from": "tests/cli/test_outcomes.py::OutcomesUnknownTest.test_bad_oid"
     },
     {
       "id": "outcomes/merge-commits-query-chunks-at-fifty",
-      "argv": [
-        "--home",
-        "{home}",
-        "outcomes",
-        "alpha"
-      ],
+      "argv": ["--home", "{home}", "outcomes", "alpha"],
       "home": "audit-outcomes-checkout",
       "stubs": {
         "gh": [
@@ -1044,24 +983,13 @@
         ],
         "git": [
           {
-            "argv": [
-              "-C",
-              "{home}/alpha",
-              "rev-parse",
-              "--show-toplevel"
-            ],
+            "argv": ["-C", "{home}/alpha", "rev-parse", "--show-toplevel"],
             "stdout": "{home}/alpha\n",
             "stderr": "",
             "code": 0
           },
           {
-            "argv": [
-              "-C",
-              "{home}/alpha",
-              "config",
-              "--bool",
-              "extensions.worktreeConfig"
-            ],
+            "argv": ["-C", "{home}/alpha", "config", "--bool", "extensions.worktreeConfig"],
             "stdout": "",
             "stderr": "",
             "code": 1
@@ -1887,10 +1815,7 @@
             ]
           }
         ],
-        "PUT /api/board": [
-          200,
-          "ok"
-        ]
+        "PUT /api/board": [200, "ok"]
       },
       "exit": 0,
       "from": "tests/cli/test_outcomes.py::OutcomesUnknownTest.test_merge_commits_query"

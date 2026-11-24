@@ -681,15 +681,7 @@
     },
     {
       "id": "wait/watch-pr-pending-times-out",
-      "argv": [
-        "--home",
-        "{home}",
-        "watch",
-        "sample/042-sample-export",
-        "--pr",
-        "--timeout",
-        "1"
-      ],
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "--pr", "--timeout", "1"],
       "home": "wait-pr",
       "stubs": {
         "gh": [
@@ -760,12 +752,7 @@
             "code": 0
           },
           {
-            "argv": [
-              "api",
-              "repos/example/sample",
-              "--jq",
-              ".default_branch"
-            ],
+            "argv": ["api", "repos/example/sample", "--jq", ".default_branch"],
             "stdout": "main\n",
             "stderr": "",
             "code": 0
@@ -789,23 +776,14 @@
             ]
           }
         ],
-        "PUT /api/board": [
-          200,
-          ""
-        ]
+        "PUT /api/board": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_watch.py::WatchTest.test_pr_event"
     },
     {
       "id": "wait/watch-pr-archive",
-      "argv": [
-        "--home",
-        "{home}",
-        "watch",
-        "sample/042-sample-export",
-        "--pr"
-      ],
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "--pr"],
       "home": "wait-watch-pr-archive",
       "stubs": {
         "gh": [
@@ -876,12 +854,7 @@
             "code": 0
           },
           {
-            "argv": [
-              "api",
-              "repos/example-upstream/sample",
-              "--jq",
-              ".default_branch"
-            ],
+            "argv": ["api", "repos/example-upstream/sample", "--jq", ".default_branch"],
             "stdout": "main\n",
             "stderr": "",
             "code": 0
@@ -905,10 +878,7 @@
             ]
           }
         ],
-        "PUT /api/board": [
-          200,
-          ""
-        ]
+        "PUT /api/board": [200, ""]
       },
       "exit": 0,
       "from": "tests/cli/test_watch.py::WatchTest.test_archive_pr_event"
