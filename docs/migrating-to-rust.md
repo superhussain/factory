@@ -246,6 +246,11 @@ Fix them:
 
 - **Pickup and daemon units.** Don't edit them by hand. Run
   `daemon setup --install`, which writes the units for the binary.
+- **Catch-up does the timers for you.** From the release after job 2251, catch-up
+  rewrites a crontab line, `factory.*.plist`, `factory-*.service` or
+  `factory-*.cmd` that runs `runtime/factory.py`, and a `stalls.json` adapter that
+  runs `runtime/paseo_stalls.py`, to the binary. It reloads launchd and systemd and
+  prints one `timers:` line each. The steps below are for anything else.
 - **Retro push and other lines.** Replace `python3 <installed-skill>/runtime/factory.py`
   with `<installed-skill>/runtime/factory`, and `py -3 <installed-skill>\runtime\factory.py`
   with `<installed-skill>\runtime\factory.exe`. Keep the arguments. On macOS, load
