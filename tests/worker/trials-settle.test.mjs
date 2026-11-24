@@ -147,8 +147,9 @@ test("a malformed open trial can be dropped", async () => {
   const V14 = { ...V10, id: "../x-spec-v14", project: "../x", version: 14 };
   const V15 = { ...V10, id: "factory-spec-v15", version: 15, opened: "0000-01-01T00:00:00Z" };
   const V16 = { ...V10, id: "factory-spec-v16", version: 16, opened: "2026-13-01T00:00:00Z" };
-  const { put } = await setup({ trials: [V10, V11, V12, V13, V14, V15, V16] });
-  for (const t of [V11, V12, V13, V14, V15, V16]) {
+  const V17 = { ...V10, id: "café-spec-v17", project: "café", version: 17 };
+  const { put } = await setup({ trials: [V10, V11, V12, V13, V14, V15, V16, V17] });
+  for (const t of [V11, V12, V13, V14, V15, V16, V17]) {
     const dropped = await put((ts) => ts.filter((s) => s.id !== t.id));
     assert.equal(dropped.status, 200, dropped.text);
   }
