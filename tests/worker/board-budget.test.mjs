@@ -28,6 +28,8 @@ function projection(work, rate) {
     [n("claim"), op(work, "PATCH claim")],
     [n("get"), op(work, "GET /board.json, new version")],
     [Math.min(DAY.copy, n("patch")), op(work, "R2 copy")],
+    // Each copy's setAlarm writes the room's alarm, which no cursor counts: one row written.
+    [Math.min(DAY.copy, n("patch")), { read: 0, written: 1 }],
     [n("archive"), op(work, "full PUT, archive pass")],
     // One seed a day, as on a deploy day.
     [1, op(work, "seed")],
