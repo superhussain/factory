@@ -109,7 +109,9 @@ describe("HTTP v1", () => {
     );
 
   test("concurrent board claims", { skip }, async () => {
-    const proxy = await barrierProxy(url, "GET /api/board");
+    // Both devices get their board read back before either writes, as the Python barrier after
+    // real_api did, so both pick the same next id and the Worker must refuse one write.
+    const proxy = await barrierProxy(url, "GET /api/board", { after: true });
     let ids;
     try {
       const homes = ["claim-a", "claim-b"].map((name) => makeHome(dir, name, proxy.origin));
@@ -119,6 +121,12 @@ describe("HTTP v1", () => {
       for (const run of runs) assert.equal(run.code, 0, run.stderr);
       ids = runs.map((run) => run.stdout.trim());
       assert.equal(new Set(ids).size, 2, "concurrent claims get distinct ids");
+      const refused = proxy.replies.filter((r) => /^(PATCH|PUT) \/api\/board (409|412)$/.test(r));
+      assert.equal(
+        refused.length,
+        1,
+        `one board write loses the race: ${proxy.replies.join(", ")}`,
+      );
       for (const [i, h] of homes.entries())
         assert.ok(statSync(join(h, "jobs", "sample", ids[i])).isDirectory());
     } finally {
