@@ -63,7 +63,7 @@ struct Fakes {
     run: Option<Rc<dyn Fn(&[String], Option<Duration>) -> Option<io::Result<Out>>>>,
     build: Option<Rc<dyn Fn(&Path, &mut dyn Write) -> Result<PathBuf, String>>>,
     install: Option<Rc<dyn Fn(&[String]) -> Out>>,
-    spawn: Option<Rc<dyn Fn() -> io::Result<()>>>,
+    spawn: Option<Rc<dyn Fn() -> Result<(), String>>>,
     locked_pid: Option<Rc<dyn Fn() -> Result<Option<u32>, String>>>,
 }
 
@@ -173,7 +173,7 @@ fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String
         }
     }
     if scheduler == "cron" {
-        spawn_daemon(home).map_err(|e| format!("could not start the daemon: {e}"))?;
+        spawn_daemon().map_err(|e| format!("could not start the daemon: {e}"))?;
     }
     let pid = pickup::daemon_pid(home, &mut || locked_pid(home))?;
     Ok(Some(format!("restarted (pid {pid})")))
@@ -190,7 +190,7 @@ fn locked_pid(home: &Path) -> Result<Option<u32>, String> {
 }
 
 /// Starts the cron daemon detached, through a fake in tests.
-fn spawn_daemon(home: &Path) -> io::Result<()> {
+fn spawn_daemon() -> Result<(), String> {
     #[cfg(test)]
     if let Some(f) = fake!(spawn) {
         return f();
@@ -198,7 +198,7 @@ fn spawn_daemon(home: &Path) -> io::Result<()> {
     #[cfg(test)]
     panic!("a test started a real daemon");
     #[cfg_attr(test, allow(unreachable_code))]
-    pickup::spawn_daemon(home)
+    pickup::spawn_daemon()
 }
 
 /// Reloads the launchd retro-push timer when it runs this binary, so launchd takes the new

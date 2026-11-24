@@ -2818,22 +2818,23 @@ pub(crate) fn daemon_restart_argvs(
     })
 }
 
-/// Starts the daemon as its crontab line does: detached, with the line's PATH, and its output
-/// appended to its log.
-pub(crate) fn spawn_daemon(home: &Path) -> io::Result<()> {
-    let values = timer_values(home, &DAEMON);
-    let log = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&values.log)?;
-    let mut cmd = Command::new(&values.argv[0]);
-    cmd.args(&values.argv[1..])
-        .env("PATH", &values.path)
+/// Starts the daemon now, detached, by running the command of its `*/5` crontab line through sh,
+/// as cron would. The line names the installed binary; this process's own path may be gone once
+/// catch-up has replaced the binary.
+pub(crate) fn spawn_daemon() -> Result<(), String> {
+    let lines = crontab_lines().map_err(|e| message(&e))?;
+    let command = lines
+        .iter()
+        .filter(|l| unit_line(l, &DAEMON))
+        .find_map(|l| l.strip_prefix("*/5 * * * * "))
+        .ok_or("no */5 daemon line in the crontab")?;
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", command])
         .stdin(Stdio::null())
-        .stdout(log.try_clone()?)
-        .stderr(log);
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     detach(&mut cmd);
-    cmd.spawn().map(drop)
+    cmd.spawn().map(drop).map_err(|e| os_error(&e, None))
 }
 
 /// How many times a restart polls for the old daemon to let go of the lock, 250 ms apart: about
@@ -19904,6 +19905,38 @@ exit "$archive_code"
             let out = uninstall_timer(&ds.fx.home, "launchd", &PICKUP).unwrap();
             assert_eq!(out, format!("removed launchd timer: {}", timer.display()));
             assert!(!timer_left("launchd", &PICKUP));
+        }
+
+        /// spawn_daemon runs the */5 daemon line's command, the installed binary it names, and
+        /// fails plainly when the crontab has no such line.
+        #[cfg(unix)]
+        #[test]
+        fn spawn_daemon_runs_the_cron_line() {
+            use std::os::unix::fs::PermissionsExt;
+            let ds = Ds::new("cron");
+            assert_eq!(
+                spawn_daemon(),
+                Err("no */5 daemon line in the crontab".to_string())
+            );
+            let bin = ds.fx.root.join("factory");
+            let marker = ds.fx.root.join("started");
+            fs::write(
+                &bin,
+                format!("#!/bin/sh\necho \"$@\" > '{}'\n", marker.display()),
+            )
+            .unwrap();
+            fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+            ds.sched.borrow_mut().crontab = format!(
+                "@reboot {0} --home /h daemon\n*/5 * * * * {0} --home /h daemon\n",
+                bin.display()
+            );
+            assert_eq!(spawn_daemon(), Ok(()));
+            let start = Instant::now();
+            while !marker.exists() && start.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            assert_eq!(fs::read_to_string(&marker).unwrap(), "--home /h daemon\n");
         }
 
         #[cfg(unix)]
