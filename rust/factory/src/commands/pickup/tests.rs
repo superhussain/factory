@@ -6467,6 +6467,10 @@ mod gh_pr_test {
 
     #[test]
     fn test_gh_pr_reports_a_timeout() {
+        // Empties PATH, so it runs alone: parallel tests need PATH to find git.
+        if !crate::shared::in_own_process(module_path!(), "test_gh_pr_reports_a_timeout") {
+            return;
+        }
         let fx = Fx::new();
         fx.set_env("PATH", fx.root.join("empty"));
         assert_eq!(gh_cli(&["view", "x"]), None);
@@ -10459,7 +10463,6 @@ mod daemon_setup_test {
     #[cfg(unix)]
     #[test]
     fn spawn_daemon_runs_the_cron_line() {
-        use std::os::unix::fs::PermissionsExt;
         let ds = Ds::new("cron");
         assert_eq!(
             spawn_daemon(),
@@ -10470,16 +10473,14 @@ mod daemon_setup_test {
         let bin = ds.fx.root.join("factory");
         let marker = ds.fx.root.join("started");
         let part = ds.fx.root.join("started.part");
-        fs::write(
+        crate::shared::build::tests::script(
             &bin,
-            format!(
-                "#!/bin/sh\n{{ echo \"$@\"; pwd; env | cut -d= -f1 | sort; }} > '{0}'\nmv '{0}' '{1}'\n",
+            &format!(
+                "{{ echo \"$@\"; pwd; env | cut -d= -f1 | sort; }} > '{0}'\nmv '{0}' '{1}'\n",
                 part.display(),
                 marker.display()
             ),
-        )
-        .unwrap();
-        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         ds.sched.borrow_mut().crontab = format!(
             "@reboot {0} --home /h daemon\n*/5 * * * * {0} --home /h daemon\n",
             bin.display()
@@ -10900,8 +10901,14 @@ mod daemon_setup_test {
         );
     }
 
+    /// Runs in its own test process. A child that a parallel test forks keeps a copy of each
+    /// daemon lock this test takes until that child execs, so in a shared process the lock can
+    /// still look held after this test drops it.
     #[test]
     fn kill_refuses_pids_kill_would_misread() {
+        if !crate::shared::in_own_process(module_path!(), "kill_refuses_pids_kill_would_misread") {
+            return;
+        }
         assert_eq!(kill_argv(0), None);
         assert_eq!(kill_argv(i32::MAX as u32 + 1), None);
         assert_eq!(kill_argv(u32::MAX), None);

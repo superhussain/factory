@@ -3213,8 +3213,13 @@ Nothing.
             "factory-1",
             json!({"scope_approved_at": APPROVED_AT, "scope_receipt": signed}),
         );
+        // One pinned clock for the pass, so its stamps cannot straddle a second boundary.
+        let pinned = crate::shared::time::unix_now();
+        crate::shared::time::PINNED_NOW.with(|p| p.set(Some(pinned)));
         follow(&t);
+        crate::shared::time::PINNED_NOW.with(|p| p.set(None));
         let job = fake.job();
+        assert_eq!(job["updated"], crate::shared::time::format_stamp(pinned));
         assert_eq!(
             (
                 &job["stage"],

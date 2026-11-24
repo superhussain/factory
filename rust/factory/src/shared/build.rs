@@ -444,9 +444,18 @@ pub(crate) mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
 
+    /// Writes an executable script through a child /bin/sh, so this process never holds a writable
+    /// descriptor for it. A child that a parallel test forks would inherit one until its exec, and
+    /// running the script meanwhile fails with ETXTBSY ("Text file busy").
     pub(crate) fn script(path: &Path, body: &str) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, format!("#!/bin/sh\n{body}")).unwrap();
+        let written = Command::new("/bin/sh")
+            .args(["-c", "printf '%s' \"$1\" > \"$2\"", "sh"])
+            .arg(format!("#!/bin/sh\n{body}"))
+            .arg(path)
+            .status()
+            .unwrap();
+        assert!(written.success(), "could not write {}", path.display());
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
 

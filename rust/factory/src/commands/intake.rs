@@ -7228,16 +7228,11 @@ mod tests {
 
     #[test]
     fn neutralize_chat_long_token_is_fast() {
-        let start = std::time::Instant::now();
-        assert_eq!(
-            super::neutralize_chat(&format!("{}x.test/a", "-".repeat(20000))),
-            "(link: x.test)"
-        );
-        assert_eq!(
-            super::neutralize_chat(&format!("{}@x.test/a", "-".repeat(20000))),
-            "(link: x.test)"
-        );
-        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        for suffix in ["x.test/a", "@x.test/a"] {
+            crate::shared::assert_linear("", "-", suffix, 20000, |text| {
+                assert_eq!(super::neutralize_chat(text), "(link: x.test)")
+            });
+        }
     }
 }
 
