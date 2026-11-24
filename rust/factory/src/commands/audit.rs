@@ -2917,35 +2917,9 @@ mod tests {
         );
     }
 
-    /// Asserts check runs in linear time on prefix + count units + suffix, by comparing one run on
-    /// it with eight runs on an eighth of the units, not with a wall-clock bound. Linear time makes
-    /// the two about equal, quadratic makes the one run 8 times longer. Both samples last about as
-    /// long, so machine load slows them alike, and each keeps its fastest of three interleaved tries.
-    fn assert_linear(prefix: &str, unit: &str, suffix: &str, count: usize, check: impl Fn(&str)) {
-        let small = format!("{prefix}{}{suffix}", unit.repeat(count / 8));
-        let large = format!("{prefix}{}{suffix}", unit.repeat(count));
-        let time = |text: &str, runs: usize| {
-            let start = std::time::Instant::now();
-            for _ in 0..runs {
-                check(text);
-            }
-            start.elapsed()
-        };
-        let (mut eight_small, mut one_large) = (std::time::Duration::MAX, std::time::Duration::MAX);
-        for _ in 0..3 {
-            eight_small = eight_small.min(time(&small, 8));
-            one_large = one_large.min(time(&large, 1));
-        }
-        assert!(
-            one_large < eight_small * 4,
-            "{prefix}{unit}: {eight_small:?} for 8 runs on {} units, {one_large:?} for one on {count}",
-            count / 8
-        );
-    }
-
     #[test]
     fn runs_output_is_linear() {
-        assert_linear(" -", "c", "!", 100_000, |text| {
+        crate::shared::assert_linear(" -", "c", "!", 100_000, |text| {
             assert!(AUDIT_RUNS_OUTPUT.search(text).is_none())
         });
     }
@@ -3081,7 +3055,7 @@ mod tests {
             ("", "gh api pulls/$", 15_000),
             ("", "($a/", 30_000),
         ] {
-            assert_linear(prefix, unit, "", count, |text| {
+            crate::shared::assert_linear(prefix, unit, "", count, |text| {
                 let stripped = audit_strip_quotes(&audit_strip_data_heredocs(text));
                 assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
             });
