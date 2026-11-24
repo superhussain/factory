@@ -1,1 +1,1 @@
-no open trials
+dropped malformed open trial records: 4 (bad id, project, stage, version, champion_version or opened)
