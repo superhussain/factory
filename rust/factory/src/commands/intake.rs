@@ -6264,6 +6264,19 @@ mod tests {
         }
     }
 
+    /// Ported from tests/cli/test_batch.py BatchTest.test_stuck_and_inflight_skip_riders: a fresh batched
+    /// rider never counts as in flight next to its lead.
+    #[test]
+    fn inflight_count_skips_batched_riders() {
+        let fresh = now();
+        let board = json!({"updated": "", "jobs": [
+            {"id": "090-sample-export-csv", "project": "sample", "stage": "spec", "updated": fresh},
+            {"id": "091-sample-typo", "project": "sample", "stage": "spec", "updated": fresh,
+             "refs": [{"id": "090-sample-export-csv", "kind": "batched-into"}]}]});
+        assert_eq!(inflight_count(&board, Some("sample"), 120).unwrap(), 1);
+        assert_eq!(inflight_count(&board, None, 120).unwrap(), 1);
+    }
+
     #[test]
     fn malformed_claims_stop_ideas_before_a_write() {
         let next = json!({"id": "006-b", "project": "sample", "stage": "idea"});

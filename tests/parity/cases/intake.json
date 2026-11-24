@@ -11179,6 +11179,24 @@
       "from": "tests/cli/test_factory.py::MoveFenceTest.test_stuck_skips_a_stale_paused_job"
     },
     {
+      "id": "intake/stuck-skips-a-stale-batched-rider",
+      "argv": ["--home", "{home}", "stuck", "--limit", "5"],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":1,\"rounds\":[{\"code\":\"CHANGES\"}],\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-01-01T00:00:00Z\",\"seen\":\"2020-01-01T00:00:00Z\"}},{\"id\":\"002-rider\",\"project\":\"sample\",\"stage\":\"spec\",\"updated\":\"2020-01-01T00:00:00Z\",\"refs\":[{\"id\":\"001-test\",\"kind\":\"batched-into\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_batch.py::BatchTest.test_stuck_and_inflight_skip_riders"
+    },
+    {
       "id": "intake/stuck-skips-a-stale-job-before-not-before",
       "argv": ["--home", "{home}", "stuck"],
       "home": "intake",
