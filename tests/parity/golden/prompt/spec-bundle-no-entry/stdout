@@ -5,7 +5,7 @@ Project file: {home}/projects/sample.md
 Project documents: {home}/projects/sample.documents.md
 Visuals reference: {skill}/references/visuals.md
 Walkthrough template: {skill}/references/walkthrough.html
-Runtime: {runtime}
+Runtime: {bin}
 Temp folder: {home}/tmp/factory-sample-001-sample-job
 
 Feature text:

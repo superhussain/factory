@@ -1,6 +1,6 @@
 {
   "factory": "{home}",
-  "runtime": "{runtime}",
+  "runtime": "{bin}",
   "project_file": "{home}/projects/sample.md",
   "repo_path": "/srv/sample",
   "repo": "octo/sample",

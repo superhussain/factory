@@ -1,6 +1,6 @@
 //! `install --source <checkout> --destination <skills root> [--replace]`: copy the checkout's
-//! factory skill, with the Rust binary built from that checkout, into the skills root. A port of
-//! `tools/install.py` that keeps its checks, messages and atomic swap.
+//! factory skill, with the Rust binary built from that checkout, into the skills root, behind an
+//! atomic swap.
 
 #[cfg(test)]
 use std::cell::RefCell;
@@ -283,7 +283,7 @@ fn drop_legacy(destination: &Path, out: &mut dyn Write, err: &mut dyn Write) -> 
     if !linked(&path)? {
         let _ = writeln!(
             err,
-            "install.py: {} is a folder, not a link; remove it by hand so agents load only factory",
+            "install: {} is a folder, not a link; remove it by hand so agents load only factory",
             path.display()
         );
         return Ok(());
@@ -325,9 +325,9 @@ pub(crate) fn install_skill(
     let result = attempt_install(&mut attempt, &source, destination, replace, build, out, err);
     let mut stderr = match &result {
         Ok(_) => String::new(),
-        Err(Why::Fail(m)) => format!("install.py: {m}\n"),
+        Err(Why::Fail(m)) => format!("install: {m}\n"),
         Err(Why::Unsafe) => format!(
-            "install.py: {}: cannot safely install factory\n",
+            "install: {}: cannot safely install factory\n",
             attempt.current.display()
         ),
         Err(Why::Exit(e)) => e.stderr.clone(),
@@ -347,7 +347,7 @@ pub(crate) fn install_skill(
     })();
     if cleaned.is_err() {
         stderr.push_str(&format!(
-            "install.py: {}: cannot clean this installation attempt\n",
+            "install: {}: cannot clean this installation attempt\n",
             destination.display()
         ));
     }
@@ -502,7 +502,7 @@ fn attempt_install(
             Err(_) => {
                 let _ = writeln!(
                     err,
-                    "install.py: could not remove {}; remove it by hand",
+                    "install: could not remove {}; remove it by hand",
                     backup.display()
                 );
             }
@@ -745,7 +745,7 @@ mod tests {
         assert_eq!(
             t.refused(&t.checkout, &t.destination, false),
             format!(
-                "install.py: {}: existing install differs; use --replace explicitly\n",
+                "install: {}: existing install differs; use --replace explicitly\n",
                 t.target().display()
             )
         );
@@ -781,7 +781,7 @@ mod tests {
         assert_eq!(
             err,
             format!(
-                "install.py: could not remove {}; remove it by hand\n",
+                "install: could not remove {}; remove it by hand\n",
                 backups[0].display()
             )
         );
@@ -806,7 +806,7 @@ mod tests {
         assert_eq!(
             t.refused(&t.checkout, &t.destination, false),
             format!(
-                "install.py: {}: cannot safely install factory\n",
+                "install: {}: cannot safely install factory\n",
                 lock.display()
             )
         );
@@ -966,7 +966,7 @@ mod tests {
         assert_eq!(
             err,
             format!(
-                "install.py: {} is a folder, not a link; remove it by hand so agents load only factory\n",
+                "install: {} is a folder, not a link; remove it by hand so agents load only factory\n",
                 folder.display()
             )
         );
@@ -979,7 +979,7 @@ mod tests {
         assert_eq!(
             t.refused(&t.checkout, &t.destination, false),
             format!(
-                "install.py: {}: cannot safely install factory\n",
+                "install: {}: cannot safely install factory\n",
                 folder.display()
             )
         );
@@ -1087,5 +1087,55 @@ mod tests {
         ] {
             assert_eq!(parse(&args(bad)), None, "{bad:?}");
         }
+    }
+
+    /// The deprecated runtime/factory.py stub runs the binary beside it under sh and under Python,
+    /// and picks factory.exe when Python reports Windows: argv, stdin and the exit code pass through.
+    #[test]
+    fn factory_py_stub_runs_the_binary_beside_it() {
+        let root = temp_dir("factory-py-stub");
+        let runtime = root.join("runtime");
+        fs::create_dir_all(&runtime).unwrap();
+        let stub = runtime.join("factory.py");
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        fs::copy(repo.join("skills/factory/runtime/factory.py"), &stub).unwrap();
+        for name in ["factory", "factory.exe"] {
+            script(
+                &runtime.join(name),
+                &format!("printf '{name}:%s|' \"$@\"; cat; exit 7\n"),
+            );
+        }
+        let text = stub.to_string_lossy().into_owned();
+        let windows = format!(
+            "import os, runpy, sys; os.name = 'nt'; sys.argv = [{text:?}, 'a', 'b c']; runpy.run_path({text:?}, run_name='__main__')"
+        );
+        for (argv, binary) in [
+            (vec!["sh", &text, "a", "b c"], "factory"),
+            (vec!["python3", &text, "a", "b c"], "factory"),
+            (vec!["python3", "-c", &windows], "factory.exe"),
+        ] {
+            let mut child = std::process::Command::new(argv[0])
+                .args(&argv[1..])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            child.stdin.take().unwrap().write_all(b"piped").unwrap();
+            let p = child.wait_with_output().unwrap();
+            let err = String::from_utf8(p.stderr).unwrap();
+            assert_eq!(p.status.code(), Some(7), "{argv:?}");
+            assert_eq!(
+                String::from_utf8(p.stdout).unwrap(),
+                format!("{binary}:a|{binary}:b c|piped"),
+                "{argv:?}"
+            );
+            assert!(
+                err.starts_with("factory.py is deprecated and runs "),
+                "{argv:?}"
+            );
+            assert!(err.contains("FACTORY_RUNTIME=python is gone"), "{argv:?}");
+        }
+        let _ = fs::remove_dir_all(&root);
     }
 }

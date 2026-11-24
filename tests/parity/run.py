@@ -1,6 +1,6 @@
 """Parity runner: run each parity case on a factory binary and compare it with the case's golden files.
 
-python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N] [--record]
+python3 tests/parity/run.py --bin PATH [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N] [--record]
 
 Each case runs in its own temp root with its own home, stub folder and HTTP port, so cases run in a process pool.
 Results print in case order. --shard K/N keeps every Nth case starting at the Kth, for a CI matrix. --record writes
@@ -32,9 +32,7 @@ sys.path.insert(0, str(HERE))
 import stub
 
 ROOT = HERE.parents[1]
-SKILL = ROOT / "skills" / "factory"
 FACTORY_BIN = os.environ.get("FACTORY_BIN", "")
-PYTHON = [sys.executable, "-B", str(SKILL / "runtime/factory.py")]
 TOOLS = ("gh", "paseo", "git", "crontab")
 CASES = HERE / "cases"
 GOLDEN = HERE / "golden"
@@ -185,13 +183,8 @@ def place_skill(case, command, values):
         return command
     skill = Path(expand(case["skill"], values))
     (skill / "runtime").mkdir(parents=True)
-    if command == PYTHON:
-        for path in (SKILL / "runtime").glob("*.py"):
-            shutil.copy2(path, skill / "runtime")
-        command = PYTHON[:2] + [str(skill / "runtime" / "factory.py")]
-    else:
-        shutil.copy2(command[0], skill / "runtime" / "factory")
-        command = [str(skill / "runtime" / "factory")]
+    shutil.copy2(command[0], skill / "runtime" / "factory")
+    command = [str(skill / "runtime" / "factory")]
     if "bundle" in case:
         (skill / "bundle.json").write_text(expand(case["bundle"], values), encoding="utf-8")
     return command
@@ -245,12 +238,12 @@ def run_side(case, command):
         def normalize(data):
             if server:
                 data = data.replace(server.origin.encode(), b"{api}")
-            # Python prints factory.py's path and the binary its own or the factory.py beside it; the
-            # skill root is two folders up.
+            # The goldens came from Python, which printed factory.py's path where the binary prints its own;
+            # both read {runtime}. The skill root is two folders up.
             runtime = os.path.realpath(command[-1])
             data = data.replace(os.path.join(os.path.dirname(runtime), "factory.py").encode(), b"{runtime}")
             if "skill" in case:
-                # In a skill folder both sides sit in runtime/, so the binary beside factory.py reads {bin}.
+                # In a skill folder the binary sits in runtime/ and reads {bin}.
                 data = data.replace(os.path.join(os.path.dirname(runtime), "factory").encode(), b"{bin}")
             data = data.replace(runtime.encode(), b"{runtime}").replace(os.path.abspath(command[-1]).encode(), b"{runtime}")
             data = data.replace(os.path.dirname(os.path.dirname(runtime)).encode(), b"{skill}")
@@ -358,10 +351,10 @@ def main(argv):
     if patterns:
         cases = [case for case in cases if any(fnmatch.fnmatchcase(case["id"], p) for p in patterns)]
     cases = cases[int(shard[1]) - 1::int(shard[2])]
-    command = PYTHON if args.record else [os.path.abspath(binary)]
-    if not args.record and not binary:
+    if not binary:
         print("parity: --bin or FACTORY_BIN required", file=sys.stderr)
         return 2
+    command = [os.path.abspath(binary)]
     failed = 0
     # Processes, not threads: each case's harness work holds the GIL, so threads barely overlap.
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs) as pool:

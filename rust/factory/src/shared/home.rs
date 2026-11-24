@@ -162,7 +162,7 @@ pub fn bundle_entry(skill: &Path) -> Option<Vec<String>> {
 }
 
 /// What `where` and prompts name as the runtime: the bundle's binary when the skill's bundle.json
-/// has an entry, else the `factory.py` beside this binary.
+/// has an entry, else this binary.
 pub fn runtime_path() -> Res<PathBuf> {
     let exe = std::env::current_exe()
         .and_then(|p| resolve(&p))
@@ -170,7 +170,7 @@ pub fn runtime_path() -> Res<PathBuf> {
     if let Some(entry) = exe.parent().and_then(Path::parent).and_then(bundle_entry) {
         return Ok(PathBuf::from(&entry[0]));
     }
-    Ok(exe.with_file_name("factory.py"))
+    Ok(exe)
 }
 
 fn valid_manifest(path: &Path) -> Option<()> {
@@ -373,12 +373,9 @@ mod tests {
     }
 
     #[test]
-    fn runtime_is_the_factory_py_beside_the_binary() {
+    fn runtime_is_this_binary_without_a_bundle_entry() {
         let exe = resolve(&std::env::current_exe().unwrap()).unwrap();
-        assert_eq!(
-            runtime_path().unwrap(),
-            exe.parent().unwrap().join("factory.py")
-        );
+        assert_eq!(runtime_path().unwrap(), exe);
     }
 
     #[test]
