@@ -88,7 +88,7 @@ static AUDIT_FLAGS: [(&str, Pattern); 8] = [
 ];
 static AUDIT_SECRET_FILE: Pattern = Pattern::new(r#"(?:^|[\s/'\"=])\.env(?![\w.-])"#, Flags::NONE);
 static AUDIT_PR_MERGE: Pattern = Pattern::new(
-    r#"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo)[ \t]+|[A-Za-z_]\w*=[^\s;&|(){}`]*[ \t]+)*(?:gh\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/\d+/merge\b)|(?:""|''|\$\{?[A-Za-z_]\w*\}?|(?:[^\s;&|(){}`'"]*/)?factory)[ \t]+pr-merge(?![\w-]))"#,
+    r#"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo|xargs)(?:[ \t]+-[^\s;&|(){}`]*)*[ \t]+|[A-Za-z_]\w*=(?:"\$\([^()\n`"]*\)"|[^\s;&|(){}`]*)[ \t]+)*(?:gh(?:[ \t]+(?:-R|--repo)(?:[ \t]+|=)[^\s;&|(){}`]+)?\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/(?:\d+|\$\{?[A-Za-z_]\w*\}?)/merge\b)|(?:""|''|\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_])[^\s;&|(){}`'"]*|(?:[^\s;&|(){}`'"]*/)?factory)[ \t]+pr-merge(?![\w-]))"#,
     Flags::NONE,
 );
 static AUDIT_HEREDOC_OPEN: Pattern = Pattern::new(
@@ -422,7 +422,7 @@ fn audit_strip_data_heredocs(command: &str) -> String {
     out.join("\n")
 }
 
-/// command with quoted text blanked, unless a double-quoted span runs $( or a backtick.
+/// command with quoted text blanked, unless a double-quoted span runs $( or a backtick; a quoted word with no space or separator loses only its quotes.
 fn audit_strip_quotes(command: &str) -> String {
     let mut out = String::with_capacity(command.len());
     let mut chars = command.char_indices();
@@ -450,6 +450,10 @@ fn audit_strip_quotes(command: &str) -> String {
                 let body = &command[start + 1..end];
                 if c == '"' && (body.contains("$(") || body.contains('`')) {
                     out.push_str(&command[start..=end]);
+                } else if !body.is_empty()
+                    && !body.contains(|b: char| b.is_whitespace() || ";&|()<>`".contains(b))
+                {
+                    out.push_str(body);
                 } else {
                     out.push(c);
                     out.push(c);
@@ -2853,6 +2857,8 @@ mod tests {
             "factory pr-merge factory/1017-add-x",
             "cd x && \"$RUNTIME\" pr-merge factory/1017-add-x",
             "exec \"$RUNTIME\" pr-merge factory/1017-add-x",
+            "\"$HOME/bin/runtime\" pr-merge factory/1017-add-x",
+            "\"$R/factory.py\" pr-merge x",
         ] {
             assert_eq!(flags(command), ["pr-merge"], "{command}");
         }
@@ -2880,6 +2886,8 @@ mod tests {
             "echo 'gh pr merge 7'",
             "git commit -m \"say gh pr merge\"",
             "gh api repos/o/r/pulls/7/merge",
+            "gh api \"repos/o/r/pulls/$N/merge\"",
+            "grep -n \"pr-merge\" f",
         ] {
             assert!(flags(command).is_empty(), "{command}");
         }
@@ -2893,6 +2901,16 @@ mod tests {
             "{ gh pr merge 7; }",
             "x=`gh pr merge 7`",
             "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge",
+            "gh api -X PUT \"repos/o/r/pulls/7/merge\"",
+            "gh api -X PUT repos/o/r/pulls/$N/merge",
+            "gh \"pr\" merge 7",
+            "xargs gh pr merge",
+            "gh -R o/r pr merge 7",
+            "GH_TOKEN=\"$(cat t)\" gh pr merge 7",
+            "gh api -X PUT repos/o/r/pulls/${N}/merge",
+            "gh api -X PUT \"repos/{owner}/{repo}/pulls/7/merge\"",
+            "echo 7 | xargs -n1 gh pr merge",
+            "gh --repo=o/r pr merge 7",
         ] {
             assert_eq!(flags(command), ["pr-merge"], "{command}");
         }
@@ -2904,6 +2922,7 @@ mod tests {
             flags("gh pr merge 7 && git push --force"),
             ["force-push", "pr-merge"]
         );
+        assert_eq!(flags("sudo -E gh pr merge 7"), ["sudo", "pr-merge"]);
     }
 
     #[test]
@@ -2921,6 +2940,13 @@ mod tests {
             format!("({}", "a/".repeat(50_000)),
             "(a/".repeat(33_000),
             "($a ".repeat(25_000),
+            "sudo -E ".repeat(25_000),
+            "xargs -n1 ".repeat(20_000),
+            ";a=\"$(".repeat(25_000),
+            "a=\"$(x)\" ".repeat(20_000),
+            "gh -R ".repeat(25_000),
+            "gh api pulls/$".repeat(15_000),
+            "($a/".repeat(30_000),
         ] {
             let start = std::time::Instant::now();
             let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text));
