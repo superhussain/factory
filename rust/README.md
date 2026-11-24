@@ -4,7 +4,7 @@
 
 ```sh
 cd rust && cargo build --profile host --locked && cargo test --locked
-python3 tests/parity/run.py --bin rust/target/host/factory
+node tests/parity/run.mjs --bin rust/target/host/factory
 ```
 
 ## Build speed

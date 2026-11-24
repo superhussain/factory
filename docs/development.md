@@ -122,9 +122,9 @@ in its own jobs, and `tools/verify.mjs device` runs its `cargo test`. Lint and f
 The parity harness proves a `factory` binary against golden files, one argv at a time. The goldens were recorded from the Python CLI before it was removed, so they keep its behavior as the oracle. It runs on POSIX hosts only.
 
 ```sh
-python3 tests/parity/run.py --bin PATH [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N]
-python3 tests/parity/run.py --bin rust/target/host/factory --jobs 8
-python3 tests/parity/run.py --bin rust/target/host/factory --record --case 'prompt/*'
+node tests/parity/run.mjs --bin PATH [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N]
+node tests/parity/run.mjs --bin rust/target/host/factory --jobs 8
+node tests/parity/run.mjs --bin rust/target/host/factory --record --case 'prompt/*'
 ```
 
 - `tests/parity/cases/<subsystem>.json` holds the hand-written cases as `{"version": 1, "cases": [...]}`. A case id is `<subsystem>/<name>` and lives in its subsystem's file; a misplaced or duplicate id exits 2. The runner adds an `arity/<command>/<n>` case for each argument count just outside a command's range in `tests/fixtures/cli-v1.json`.
@@ -132,7 +132,7 @@ python3 tests/parity/run.py --bin rust/target/host/factory --record --case 'prom
 - `routes` maps `"METHOD /path"` to `[status, body]`, `[status, body, headers]`, or a list of those served in order, the last one repeating. A string body is sent as its UTF-8 bytes; any other body as JSON. Each run gets its own loopback Worker, a `config.md` pointing at it and a `.env` with a fake Access token. A case with `routes` must set `exit`, and `--record` refuses a run that exits otherwise.
 - Each case runs in its own temp root with `home/`, `bin/` and `stub/`. `home/` starts as a copy of `tests/parity/homes/<home>`, or empty. The runner compares the exit code, stdout, stderr, the home tree, each stub's call log and the Worker requests with `tests/parity/golden/<case-id>/`, one file per nonempty field. The home tree is gzipped as `home-tree.gz`; a missing file is an empty field. The Worker origin, home path and temp root are written as `{api}`, `{home}` and `{tmp}`, the binary's path as `{runtime}` (`{bin}` in a skill folder), and the folder two levels above it as `{skill}`. A `YYYY-MM-DDTHH:MM:SSZ` stamp inside the run window becomes `{now}`, today's UTC date `{today}` (the binary runs with `TZ=UTC`), today minus six days `{today-6}`, an `"elapsed"` count `{n}`, the host's OS label in an `"os"` field `{os}`, and the host's name as a whole word `{host}`. A request is one JSON line of method, path, body and the `content-type`, `if-match`, `if-none-match`, `cf-access-client-id`, `cf-access-client-secret` and `user-agent` headers.
 - The binary is `--bin`, else `FACTORY_BIN`. `--record` writes the selected cases' goldens from that binary instead of comparing. Use it only for an intended output change, then review the golden diff before committing it.
-- `bin/gh`, `bin/paseo`, `bin/git`, `bin/crontab` and `bin/claude` run `tests/parity/stub.py`, which replays the first entry in the case's `stubs` map whose `argv` matches, logs every call, and exits 127 with `stub: no recorded response for ...` otherwise.
+- `bin/gh`, `bin/paseo`, `bin/git`, `bin/crontab` and `bin/claude` run `tests/parity/stub.mjs`, which replays the first entry in the case's `stubs` map whose `argv` matches, logs every call, and exits 127 with `stub: no recorded response for ...` otherwise.
 - `--ids` reads one `fnmatch` pattern per line, with `#` comments, from a file or from every `*.txt` in a folder. `rust/parity/<subsystem>.txt` lists the cases CI runs, which today is every case. In a folder, each pattern must start with its file's `<subsystem>/`. A pattern that matches nothing exits 2.
 - `rust/factory/src/usage.txt` is the binary's no-argument stderr, frozen from the Python runtime's docstring.
 
