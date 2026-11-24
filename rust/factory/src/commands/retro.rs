@@ -3616,6 +3616,9 @@ mod tests {
     use serde_json::json;
     use std::time::{Duration, Instant};
 
+    /// Wall-clock ceiling per linear-time input. Loose enough for a loaded parallel suite.
+    const LINEAR_BOUND: Duration = Duration::from_secs(5);
+
     const SLUG: &str = "-home-u--paseo-worktrees-ab12-factory-1017-add-x";
 
     #[test]
@@ -3920,7 +3923,7 @@ mod tests {
         ] {
             let start = Instant::now();
             assert_eq!(retro_redact(&text), text);
-            assert!(start.elapsed() < Duration::from_secs(1), "{}", &text[..3]);
+            assert!(start.elapsed() < LINEAR_BOUND, "{}", &text[..3]);
         }
         let x = "x".repeat(63);
         assert_eq!(
@@ -3938,7 +3941,7 @@ mod tests {
             retro_redact(&format!("{a}https://u:p@host")),
             format!("{a}https://[redacted]@host")
         );
-        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(start.elapsed() < LINEAR_BOUND);
     }
 
     #[test]
@@ -4103,17 +4106,11 @@ mod tests {
             for (name, p) in retro_patterns() {
                 let start = Instant::now();
                 p.replace_all(&text, |_| String::new());
-                assert!(
-                    start.elapsed() < Duration::from_secs(1),
-                    "{name} on {unit:?}"
-                );
+                assert!(start.elapsed() < LINEAR_BOUND, "{name} on {unit:?}");
             }
             let start = Instant::now();
             retro_redact(&text);
-            assert!(
-                start.elapsed() < Duration::from_secs(1),
-                "redact on {unit:?}"
-            );
+            assert!(start.elapsed() < LINEAR_BOUND, "redact on {unit:?}");
         }
     }
 

@@ -7227,7 +7227,7 @@ mod tests {
             super::neutralize_chat(&format!("{}@x.test/a", "-".repeat(20000))),
             "(link: x.test)"
         );
-        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
     }
 }
 

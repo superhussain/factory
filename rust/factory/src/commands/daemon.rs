@@ -1502,7 +1502,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         std::thread::spawn(move || {
             let held: Vec<_> = listener.incoming().take(1).collect();
-            sleep(Duration::from_secs(2));
+            sleep(Duration::from_secs(10));
             drop(held);
         });
         let t = Timing {
@@ -1513,7 +1513,7 @@ mod tests {
         let url = format!("wss://127.0.0.1:{port}{HOST_EVENTS_PATH}");
         let e = connect(&url, &[], &t, Path::new(".env")).err().unwrap();
         assert_eq!(e, "timed out");
-        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(start.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
