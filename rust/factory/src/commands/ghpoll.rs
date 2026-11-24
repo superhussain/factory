@@ -16,6 +16,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -95,12 +96,18 @@ pub(crate) fn cacheable(args: &[&str]) -> bool {
                 && fields().all(|f| {
                     [HEAD_CHECKS_QUERY, PR_GRAPHQL_QUERY].contains(&f)
                         || ["o=", "r=", "n=", "sha="].iter().any(|n| {
-                            f.strip_prefix(n)
-                                .is_some_and(|v| !v.is_empty() && !v.starts_with(['@', ':']))
+                            f.strip_prefix(n).is_some_and(|v| {
+                                !v.is_empty()
+                                    && v.bytes()
+                                        .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                            })
                         })
                 })
         }
-        ["api", path, "--jq", jq] => path.starts_with("repos/") && JQ_FILTERS.contains(jq),
+        // gh fills `{owner}` and `:owner` placeholders from the daemon's working directory.
+        ["api", path, "--jq", jq] => {
+            path.starts_with("repos/") && !path.contains(['{', ':']) && JQ_FILTERS.contains(jq)
+        }
         _ => false,
     }
 }
@@ -191,6 +198,10 @@ pub struct Poller {
 }
 
 static POLLER: OnceLock<Arc<Poller>> = OnceLock::new();
+/// The daemon's log, and whether it already holds the line about the daemon's own gh environment.
+type Log = Box<dyn Fn(&str) + Send + Sync>;
+static LOG: OnceLock<Log> = OnceLock::new();
+static WARNED: AtomicBool = AtomicBool::new(false);
 
 impl Poller {
     pub fn new(gh: RunGh) -> Arc<Poller> {
@@ -373,6 +384,11 @@ impl Poller {
                 }
                 // A daemon with its own gh identity would answer as another account.
                 if own_gh_env(&|k| std::env::var_os(k).is_some()) {
+                    if !WARNED.swap(true, Ordering::Relaxed) {
+                        if let Some(log) = LOG.get() {
+                            log("gh poller: not proxying, the daemon's environment sets a gh credential or setting; commands run gh themselves");
+                        }
+                    }
                     return refused("the daemon has its own gh credentials or config");
                 }
                 if request["env"] != gh_env() {
@@ -417,7 +433,8 @@ pub fn answer(request: &Value) -> Value {
 }
 
 /// Starts the daemon's poll loop on its own thread. It returns once stop reports a signal.
-pub fn start(stop: fn() -> Option<&'static str>) -> std::thread::JoinHandle<()> {
+pub fn start(stop: fn() -> Option<&'static str>, log: Log) -> std::thread::JoinHandle<()> {
+    let _ = LOG.set(log);
     let poller = POLLER
         .get_or_init(|| Poller::new(Box::new(|args| System::new().gh(args))))
         .clone();
@@ -689,6 +706,10 @@ mod tests {
             vec!["api", "graphql", "-f", head, "-F", "n=@file"],
             vec!["api", "graphql", "-f", " query=mutation{x}"],
             vec!["api", "graphql", "-f", head, "-F", "o=:owner", "-f", "r=b"],
+            vec!["api", "graphql", "-f", head, "-F", "o={owner}", "-f", "r=b"],
+            vec!["api", "graphql", "-f", head, "-F", "o=x:owner", "-f", "r=b"],
+            vec!["api", "repos/{owner}/{repo}", "--jq", ".default_branch"],
+            vec!["api", "repos/:owner/:repo", "--jq", ".default_branch"],
             vec!["api", "repos/cli/cli", "--jq", "env|keys"],
             vec!["api", "repos/cli/cli", "--jq", "$ENV.HOME"],
             vec!["pr", "view", PR, "--json", "state", "--jq", "env"],
