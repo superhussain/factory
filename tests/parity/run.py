@@ -311,8 +311,11 @@ def run_case(case, command, record):
     fields = run_side(case, command)
     dates = {name: utc_date(back) for name, back in DAYS.items()}
     if record:
+        # A date the case itself spells out is fixture data, not today's date, so it stays literal.
+        written = json.dumps(case)
         for name, date in dates.items():
-            fields = [(field, value.replace(date, name)) for field, value in fields]
+            if date not in written:
+                fields = [(field, value.replace(date, name)) for field, value in fields]
         if ("routes" in case or "exit" in case) and fields[0][1] != str(case.get("exit")):
             return [f"FAIL {case['id']}: exit {fields[0][1]}, case expects {case.get('exit')}"]
         write_golden(case, fields)
