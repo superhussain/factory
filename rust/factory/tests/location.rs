@@ -22,7 +22,12 @@ fn home_flag_beats_factory_home_and_creates_no_default() {
         .unwrap();
     let text =
         String::from_utf8_lossy(&out.stderr).into_owned() + &String::from_utf8_lossy(&out.stdout);
-    assert!(text.contains(&explicit.display().to_string()), "{text}");
+    assert_eq!(out.status.code(), Some(2), "{text}");
+    let want = format!(
+        "Set api_url in {}, then run /factory init again.",
+        explicit.join("config.md").display()
+    );
+    assert!(text.contains(&want), "{text}");
     assert!(!text.contains(&env_home.display().to_string()), "{text}");
     assert!(!root.join(".config").exists());
     fs::remove_dir_all(&root).unwrap();
