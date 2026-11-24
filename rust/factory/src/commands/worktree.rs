@@ -1819,8 +1819,7 @@ mod tests {
         let t = Prebuild::new("wt-prebuild-fails");
         t.config(r#"["sample"]"#);
         let failing = t.root.join("failing-pnpm");
-        fs::write(&failing, "#!/bin/sh\nexit 1\n").unwrap();
-        chmod(&failing, 0o755);
+        crate::shared::build::tests::script(&failing, "exit 1\n");
         assert_eq!(t.run(None, Some(&failing)), [t.failed("exit 1")]);
         chmod(&t.pnpm, 0o644);
         let out = t.run(None, Some(&t.pnpm));
@@ -2222,12 +2221,10 @@ mod tests {
         let dir = temp_dir("wt-bad-lsof");
         let lsof = dir.join("lsof");
         let wt = dir.display();
-        fs::write(
+        crate::shared::build::tests::script(
             &lsof,
-            format!("#!/bin/sh\nprintf 'p4294967295\\nn{wt}\\np0\\nn{wt}\\n'\n"),
-        )
-        .unwrap();
-        chmod(&lsof, 0o755);
+            &format!("printf 'p4294967295\\nn{wt}\\np0\\nn{wt}\\n'\n"),
+        );
         let alive = stop_pids_with(&dir, &dir.join("no-proc"), Some(lsof));
         assert_eq!(alive, Some(vec![0, 4294967295]));
         fs::remove_dir_all(dir).unwrap();
