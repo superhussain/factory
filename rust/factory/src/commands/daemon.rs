@@ -533,7 +533,8 @@ fn serve(
     let mut last_start: Option<Instant> = None;
     // The factory agents the last read saw running. The list is read at start and after a pass
     // that launched (watch), and again while it holds an agent: every agent_poll, doubling up to
-    // agent_poll_max while it stays the same. A read that finds none stops the reads.
+    // agent_poll_max while it stays the same or the read fails. A read that finds none stops the
+    // reads.
     let mut running: Vec<String> = Vec::new();
     let mut watch = true;
     let mut polled: Option<Instant> = None;
@@ -595,6 +596,8 @@ fn serve(
                         t.agent_poll
                     };
                     running = now_running;
+                } else {
+                    gap = (gap * 2).min(t.agent_poll_max);
                 }
             }
             if pending.is_none() && last_start.is_some_and(|at| at.elapsed() >= t.fallback) {
@@ -1097,6 +1100,31 @@ mod tests {
         let agents = || {
             reads.set(reads.get() + 1);
             Some(vec!["a1".to_string()])
+        };
+        let seen = run_with(&home, &origin, 2, &t, &agents, &[]);
+        assert_eq!(seen, ["connect", "fallback"]);
+        // Reads at 0, 50, 150, 350 ms, then every 200 ms: about 8 in 1 s, not 20.
+        assert!((5..=10).contains(&reads.get()), "{}", reads.get());
+    }
+
+    /// A paseo ls that keeps failing backs off the same way, so a broken paseo is not run every
+    /// agent_poll.
+    #[test]
+    fn failed_agent_reads_back_off() {
+        let origin = quiet();
+        let home = home("agent-fails", &origin);
+        let t = Timing {
+            fallback: Duration::from_millis(1000),
+            ..TEST
+        };
+        let reads = std::cell::Cell::new(0);
+        let agents = || {
+            reads.set(reads.get() + 1);
+            if reads.get() == 1 {
+                Some(vec!["a1".to_string()])
+            } else {
+                None
+            }
         };
         let seen = run_with(&home, &origin, 2, &t, &agents, &[]);
         assert_eq!(seen, ["connect", "fallback"]);
