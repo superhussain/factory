@@ -3643,8 +3643,21 @@ fn audit_pickup_push(io: &mut Io, home: &Path, data: Option<&Value>) -> Res<()> 
                 .and_then(Number::as_i128)
                 != Some(stamp)
             {
-                audit_push(job_id)?;
-                usage_pickup_record(io, home, job)?;
+                match audit_push(job_id) {
+                    // A transcript a flag pattern could not finish reading pushes nothing, and
+                    // only changed transcripts retry it, so one oversized call cannot stop pickup.
+                    Err(e) if e.stderr.contains(crate::shared::pyre::LIMIT_HIT) => {
+                        let why = e.stderr.trim_end().trim_start_matches("factory.py: ");
+                        errln!(
+                            io,
+                            "factory.py: audit push skipped {job_id} until its transcripts change: {why}"
+                        );
+                    }
+                    pushed => {
+                        pushed?;
+                        usage_pickup_record(io, home, job)?;
+                    }
+                }
             }
             kept.insert(job_id.to_string(), Value::from(stamp));
         }
@@ -14296,6 +14309,30 @@ exit "$archive_code"
                 "{err}"
             );
             assert!(!fx.home.join(AUDIT_PUSH_FILE).exists());
+        }
+
+        #[test]
+        fn test_a_scan_past_the_backtrack_limit_skips_the_push() {
+            let fx = setup();
+            // audit_push reads device from the home factory_home names.
+            let home = fx.root.join(".config/factory");
+            fs::create_dir_all(&home).unwrap();
+            fs::write(home.join("config.md"), "---\ndevice: box\n---\n").unwrap();
+            crate::commands::audit::limit_secret_file_for_test();
+            let (code, out, err) = fx.pickup(&[]);
+            assert_eq!((code, out.as_str()), (0, ""));
+            assert!(
+                err.starts_with(
+                    "factory.py: audit push skipped 1017-add-x until its transcripts change: "
+                ) && err.contains(crate::shared::pyre::LIMIT_HIT)
+                    && err.lines().count() == 1,
+                "{err}"
+            );
+            assert!(fx.calls().iter().all(|c| !c.1.contains("/api/audit/")));
+            assert_eq!(
+                record(&fx),
+                json!({"version": 1, "jobs": {"1017-add-x": stamp_now()}})
+            );
         }
 
         #[test]

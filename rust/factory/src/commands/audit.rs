@@ -87,6 +87,14 @@ static AUDIT_FLAGS: [(&str, Pattern); 8] = [
     ),
 ];
 static AUDIT_SECRET_FILE: Pattern = Pattern::new(r#"(?:^|[\s/'\"=])\.env(?![\w.-])"#, Flags::NONE);
+
+/// Put only the secret-file flag pattern at a zero backtrack limit in this test thread, so a
+/// test outside this module can make a transcript scan hit the limit.
+#[cfg(test)]
+pub(crate) fn limit_secret_file_for_test() {
+    crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
+    crate::shared::pyre::TEST_LIMIT_ONLY.with(|l| l.set(Some(&AUDIT_SECRET_FILE)));
+}
 static AUDIT_PR_MERGE: Pattern = Pattern::new(
     r#"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo|xargs)(?:[ \t]+-[^\s;&|(){}`]*)*[ \t]+|[A-Za-z_]\w*=(?:"\$\([^()\n`"]*\)"|[^\s;&|(){}`]*)[ \t]+)*(?:gh(?:[ \t]+(?:-R|--repo)(?:[ \t]+|=)[^\s;&|(){}`]+)?\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/(?:\d+|\$\{?[A-Za-z_]\w*\}?)/merge\b)|(?:""|''|\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_])[^\s;&|(){}`'"]*|(?:[^\s;&|(){}`'"]*/)?factory)[ \t]+pr-merge(?![\w-]))"#,
     Flags::NONE,
@@ -466,28 +474,32 @@ fn audit_strip_quotes(command: &str) -> String {
 }
 
 /// The names of the risky shapes one call matches. pr-merge needs a merge that runs, by gh or the runtime; main drops it.
+/// Err holds why a pattern could not finish reading the call, so no row passes unflagged.
 fn audit_flags(
     name: &str,
     inp: &Map<String, Value>,
     raw: &str,
     denied: bool,
     main: bool,
-) -> Vec<&'static str> {
-    let mut flags: Vec<&'static str> = AUDIT_FLAGS
-        .iter()
-        // A call a flag pattern could not finish reading stops the audit rather than pass unflagged.
-        .filter(|(_, pattern)| name == "Bash" && pattern.search_or_stop(raw).is_some())
-        .map(|(flag, _)| *flag)
-        .collect();
+) -> Result<Vec<&'static str>, String> {
+    let mut flags: Vec<&'static str> = Vec::new();
+    if name == "Bash" {
+        for (flag, pattern) in &AUDIT_FLAGS {
+            if pattern.search_or_err(raw)?.is_some() {
+                flags.push(flag);
+            }
+        }
+    }
     let stripped = (name == "Bash").then(|| audit_strip_data_heredocs(raw));
-    if !main
-        && stripped.as_ref().is_some_and(|s| {
-            AUDIT_PR_MERGE
-                .search_or_stop(&audit_strip_quotes(s))
+    if !main {
+        if let Some(s) = &stripped {
+            if AUDIT_PR_MERGE
+                .search_or_err(&audit_strip_quotes(s))?
                 .is_some()
-        })
-    {
-        flags.push("pr-merge");
+            {
+                flags.push("pr-merge");
+            }
+        }
     }
     if name == "Bash" && inp.get("dangerouslyDisableSandbox") == Some(&Value::Bool(true)) {
         flags.push("sandbox-off");
@@ -498,13 +510,15 @@ fn audit_flags(
         _ if AUDIT_FILE_TOOLS.contains(&name) => Some(raw.to_string()),
         _ => None,
     };
-    if path.is_some_and(|p| AUDIT_SECRET_FILE.search_or_stop(&p).is_some()) {
-        flags.push("secret-file");
+    if let Some(p) = path {
+        if AUDIT_SECRET_FILE.search_or_err(&p)?.is_some() {
+            flags.push("secret-file");
+        }
     }
     if denied {
         flags.push("denied");
     }
-    flags
+    Ok(flags)
 }
 
 /// {time, tool, flags, target} for every tool_use block in one transcript. main skips isSidechain lines.
@@ -551,11 +565,12 @@ fn audit_scan(path: &Path, main: bool) -> Res<Vec<Map<String, Value>>> {
         }
     }
     let home = user_home();
-    Ok(calls
+    calls
         .into_iter()
         .map(|(id, stamp, name, inp)| {
             let raw = audit_target_raw(&name, &inp);
-            let flags = audit_flags(&name, &inp, &raw, denied.contains(&id), main);
+            let flags = audit_flags(&name, &inp, &raw, denied.contains(&id), main)
+                .map_err(|why| fail(format!("{}: {why}", path.display()), 1))?;
             let target = audit_target(&raw, &home);
             let target = if target.is_empty() {
                 "-".into()
@@ -563,9 +578,9 @@ fn audit_scan(path: &Path, main: bool) -> Res<Vec<Map<String, Value>>> {
                 target
             };
             let row = json!({"time": stamp, "tool": name, "flags": flags, "target": target});
-            row.as_object().unwrap().clone()
+            Ok(row.as_object().unwrap().clone())
         })
-        .collect())
+        .collect()
 }
 
 /// {Claude session id: Paseo agent id} from the agent files on this host. Skips files it cannot read.
@@ -2631,10 +2646,20 @@ mod tests {
     use super::*;
 
     /// Run audit_flags on command with only pattern at a zero backtrack limit.
-    fn flags_at_limit(pattern: &'static Pattern, command: &str, main: bool) -> Vec<&'static str> {
+    fn flags_at_limit(
+        pattern: &'static Pattern,
+        command: &str,
+        main: bool,
+    ) -> Result<Vec<&'static str>, String> {
         crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
         crate::shared::pyre::TEST_LIMIT_ONLY.with(|l| l.set(Some(pattern)));
         audit_flags("Bash", &Map::new(), command, false, main)
+    }
+
+    /// audit_flags on command gives the limit reason when only pattern is at a zero limit.
+    fn stops_at_limit(pattern: &'static Pattern, command: &str, main: bool) {
+        let why = flags_at_limit(pattern, command, main).unwrap_err();
+        assert!(why.contains(crate::shared::pyre::LIMIT_HIT), "{why}");
     }
 
     /// The AUDIT_FLAGS pattern named flag.
@@ -2643,33 +2668,28 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
     fn force_push_flag_stops_at_the_backtrack_limit() {
-        flags_at_limit(flag_pattern("force-push"), "git push x --force", true);
+        stops_at_limit(flag_pattern("force-push"), "git push x --force", true);
     }
 
     #[test]
-    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
     fn hard_reset_flag_stops_at_the_backtrack_limit() {
-        flags_at_limit(flag_pattern("hard-reset"), "git reset --hard", true);
+        stops_at_limit(flag_pattern("hard-reset"), "git reset --hard", true);
     }
 
     #[test]
-    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
     fn branch_delete_flag_stops_at_the_backtrack_limit() {
-        flags_at_limit(flag_pattern("branch-delete"), "git branch -D x", true);
+        stops_at_limit(flag_pattern("branch-delete"), "git branch -D x", true);
     }
 
     #[test]
-    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
     fn recursive_delete_flag_stops_at_the_backtrack_limit() {
-        flags_at_limit(flag_pattern("recursive-delete"), "rm -rf x", true);
+        stops_at_limit(flag_pattern("recursive-delete"), "rm -rf x", true);
     }
 
     #[test]
-    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
     fn no_verify_flag_stops_at_the_backtrack_limit() {
-        flags_at_limit(flag_pattern("no-verify"), "git commit --no-verify", true);
+        stops_at_limit(flag_pattern("no-verify"), "git commit --no-verify", true);
     }
 
     /// sudo has no lookaround, so it runs on the linear engine and never reaches the limit.
@@ -2677,32 +2697,28 @@ mod tests {
     fn sudo_flag_never_reaches_the_backtrack_limit() {
         assert_eq!(
             flags_at_limit(flag_pattern("sudo"), "sudo ls", true),
-            ["sudo"]
+            Ok(vec!["sudo"])
         );
     }
 
     #[test]
-    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
     fn pipe_to_shell_flag_stops_at_the_backtrack_limit() {
-        flags_at_limit(flag_pattern("pipe-to-shell"), "curl x | sh", true);
+        stops_at_limit(flag_pattern("pipe-to-shell"), "curl x | sh", true);
     }
 
     #[test]
-    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
     fn deploy_flag_stops_at_the_backtrack_limit() {
-        flags_at_limit(flag_pattern("deploy"), "wrangler deploy", true);
+        stops_at_limit(flag_pattern("deploy"), "wrangler deploy", true);
     }
 
     #[test]
-    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
     fn pr_merge_flag_stops_at_the_backtrack_limit() {
-        flags_at_limit(&AUDIT_PR_MERGE, "gh pr merge 7", false);
+        stops_at_limit(&AUDIT_PR_MERGE, "gh pr merge 7", false);
     }
 
     #[test]
-    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
     fn secret_file_flag_stops_at_the_backtrack_limit() {
-        flags_at_limit(&AUDIT_SECRET_FILE, "cat .env", true);
+        stops_at_limit(&AUDIT_SECRET_FILE, "cat .env", true);
     }
 
     #[cfg(unix)]
@@ -3008,16 +3024,26 @@ mod tests {
         let merge = json!({"command": "gh pr merge 7"});
         let merge = merge.as_object().unwrap();
         let raw = audit_target_raw("Bash", merge);
-        assert!(audit_flags("Bash", merge, &raw, false, true).is_empty());
-        assert_eq!(audit_flags("Bash", merge, &raw, false, false), ["pr-merge"]);
+        assert!(audit_flags("Bash", merge, &raw, false, true)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            audit_flags("Bash", merge, &raw, false, false).unwrap(),
+            ["pr-merge"]
+        );
         let push = json!({"command": "gh pr merge 7 && git push --force"});
         let push = push.as_object().unwrap();
         let raw = audit_target_raw("Bash", push);
-        assert_eq!(audit_flags("Bash", push, &raw, false, true), ["force-push"]);
+        assert_eq!(
+            audit_flags("Bash", push, &raw, false, true).unwrap(),
+            ["force-push"]
+        );
         let runtime = json!({"command": "\"$RUNTIME\" pr-merge factory/1017-add-x"});
         let runtime = runtime.as_object().unwrap();
         let raw = audit_target_raw("Bash", runtime);
-        assert!(audit_flags("Bash", runtime, &raw, false, true).is_empty());
+        assert!(audit_flags("Bash", runtime, &raw, false, true)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -3025,7 +3051,7 @@ mod tests {
         let flags = |command: &str| {
             let inp = json!({ "command": command });
             let inp = inp.as_object().unwrap();
-            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false)
+            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false).unwrap()
         };
         for command in [
             "\"$RUNTIME\" pr-merge factory/1017-add-x",
@@ -3056,7 +3082,11 @@ mod tests {
         let command = "python3 ~/.claude/skills/factory/runtime/factory.py with-cloudflare -- sh -c 'printf \"Authorization: Bearer %s\\n\" \"$CLOUDFLARE_API_TOKEN\" | curl -H @- https://api.cloudflare.com/client/v4/user/tokens/verify'";
         let inp = json!({ "command": command });
         let inp = inp.as_object().unwrap();
-        assert!(audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false).is_empty());
+        assert!(
+            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -3064,7 +3094,7 @@ mod tests {
         let flags = |command: &str| {
             let inp = json!({ "command": command });
             let inp = inp.as_object().unwrap();
-            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false)
+            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false).unwrap()
         };
         for command in [
             "cat >> build.md <<'EOF'\nNext: orchestrator runs gh pr merge 7\nEOF",

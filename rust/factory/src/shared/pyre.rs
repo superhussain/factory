@@ -55,6 +55,9 @@ pub struct Pattern {
 
 const BACKTRACK_LIMIT: usize = 100_000_000;
 
+/// The words every backtrack-limit stop carries, so a caller can tell that stop from other failures.
+pub const LIMIT_HIT: &str = "hit the regex backtrack limit";
+
 static WARNED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(test)]
@@ -194,12 +197,24 @@ impl Pattern {
             .collect()
     }
 
-    /// Exit 1 so a redaction, refusal or audit flag never passes text a pattern could not finish reading.
-    fn stop(&self) -> ! {
-        let msg = format!(
-            "factory.py: pattern {} hit the regex backtrack limit; stopping rather than pass text it could not finish reading; shorten or split the text",
+    /// `re.search` for a gate whose caller decides what a limit hit stops: Err holds the reason.
+    pub fn search_or_err<'t>(&self, s: &'t str) -> Result<Option<Captures<'t>>, String> {
+        self.compiled("search")
+            .captures(s)
+            .map_err(|_| self.limit_reason())
+    }
+
+    /// Why a search past the backtrack limit stopped, naming the pattern.
+    fn limit_reason(&self) -> String {
+        format!(
+            "pattern {} {LIMIT_HIT}; stopping rather than pass text it could not finish reading; shorten or split the text",
             repr(self.src)
-        );
+        )
+    }
+
+    /// Exit 1 so a redaction or refusal never passes text a pattern could not finish reading.
+    fn stop(&self) -> ! {
+        let msg = format!("factory.py: {}", self.limit_reason());
         #[cfg(test)]
         panic!("{msg}");
         #[cfg(not(test))]
