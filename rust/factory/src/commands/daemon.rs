@@ -33,6 +33,7 @@ use crate::shared::py::os_error;
 use crate::shared::time::now;
 
 const HOST_EVENTS_PATH: &str = "/events/host";
+const HOST_403: &str = "HTTP 403: no paired or active host is bound to this service token; pair this host, or check its record under Settings, Hosts";
 
 #[derive(Clone, Copy)]
 struct Timing {
@@ -356,13 +357,15 @@ fn connect(
         Err(HandshakeError::Interrupted(_)) => return Err("timed out".to_string()),
         Err(HandshakeError::Failure(tungstenite::Error::Http(response))) => {
             return Err(match response.status().as_u16() {
-                301 | 302 | 303 | 307 | 308 | 401 | 403 => access_message(env_file),
+                301 | 302 | 303 | 307 | 308 | 401 => access_message(env_file),
+                // Access passed the token; the Worker found no paired or active host bound to it.
+                403 => HOST_403.to_string(),
                 404 => format!(
                     "HTTP 404: this Worker has no {HOST_EVENTS_PATH} route; deploy the Worker first"
                 ),
                 503 => "HTTP 503: the events room is full".to_string(),
                 status => format!("HTTP {status}"),
-            })
+            });
         }
         Err(HandshakeError::Failure(e)) => return Err(e.to_string()),
     };
@@ -1375,12 +1378,26 @@ mod tests {
     }
 
     #[test]
-    fn handshake_403_logs_access_message() {
-        let (origin, _) = fake(Some(403), |_| sleep(Duration::from_secs(1)));
-        let home = home("403", &origin);
+    fn handshake_401_logs_access_message() {
+        let (origin, _) = fake(Some(401), |_| sleep(Duration::from_secs(1)));
+        let home = home("401", &origin);
         assert_eq!(run(&home, &origin, 2), ["fallback", "connect"]);
         let message = access_message(&home.join(".env"));
         assert!(log_text(&home).contains(&format!("connect failed: {message}; retry in ")));
+    }
+
+    /// A 403 comes from the Worker's host binding check, past Access, so it names the host record.
+    #[test]
+    fn handshake_403_logs_host_record_message() {
+        let (origin, _) = fake(Some(403), |_| sleep(Duration::from_secs(1)));
+        let home = home("403", &origin);
+        assert_eq!(run(&home, &origin, 2), ["fallback", "connect"]);
+        let log = log_text(&home);
+        assert!(
+            log.contains(&format!("connect failed: {HOST_403}; retry in ")),
+            "{log}"
+        );
+        assert!(!log.contains("Access rejected"), "{log}");
     }
 
     #[test]
