@@ -33,7 +33,8 @@ import stub
 
 ROOT = HERE.parents[1]
 FACTORY_BIN = os.environ.get("FACTORY_BIN", "")
-TOOLS = ("gh", "paseo", "git", "crontab")
+# claude is stubbed so a host's own claude on PATH never changes a case: bench checks for it.
+TOOLS = ("gh", "paseo", "git", "crontab", "claude")
 CASES = HERE / "cases"
 GOLDEN = HERE / "golden"
 REQUEST_HEADERS = ("content-type", "if-match", "if-none-match", "cf-access-client-id", "cf-access-client-secret",
@@ -41,6 +42,8 @@ REQUEST_HEADERS = ("content-type", "if-match", "if-none-match", "cf-access-clien
 FIELDS = ("exit code", "stdout", "stderr", "home tree") + tuple(f"{tool} calls" for tool in TOOLS) + ("requests",)
 # A golden's dates relative to the run's UTC date. --record writes these placeholders, and a compare expands them.
 DAYS = {"{today}": 0, "{today-6}": 6}
+# The host's OS label (host_os in the binary) in host-status.json and its PUT body, raw or JSON-escaped.
+HOST_OS = re.compile(rb'(\\?"os\\?": \\?")(?:Linux \(WSL\)|Linux|macOS|Windows|Other)(?=\\?")')
 ELAPSED = re.compile(rb'"elapsed": \d+')
 STAMP = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
@@ -260,7 +263,7 @@ def run_side(case, command):
             data = data.replace(os.path.dirname(os.path.dirname(runtime)).encode(), b"{skill}")
             data = data.replace(str(home).encode(), b"{home}").replace(str(root).encode(), b"{tmp}")
             data = data.replace(str(ROOT).encode(), b"{root}")
-            return ELAPSED.sub(rb'"elapsed": {n}', now_stamps(data, start, end))
+            return HOST_OS.sub(rb"\1{os}", ELAPSED.sub(rb'"elapsed": {n}', now_stamps(data, start, end)))
 
         tree = [f"{path} {mode:o} {normalize(data)!r}" if data is not None else f"{path} {mode:o}"
                 for path, (mode, data) in snapshot(home).items()]
