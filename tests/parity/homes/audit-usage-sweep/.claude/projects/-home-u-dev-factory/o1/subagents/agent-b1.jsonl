@@ -1,0 +1,3 @@
+{"type": "user", "isMeta": true, "message": {"content": "meta"}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "Your full prompt is in {home}/prompts/alpha/1017-add-x/spec.txt"}]}}
+{"type": "assistant", "isSidechain": true, "message": {"id": "m4", "model": "claude-opus-5-5", "usage": {"input_tokens": 100, "output_tokens": 3000, "cache_creation_input_tokens": 5000, "cache_read_input_tokens": 200000}}}

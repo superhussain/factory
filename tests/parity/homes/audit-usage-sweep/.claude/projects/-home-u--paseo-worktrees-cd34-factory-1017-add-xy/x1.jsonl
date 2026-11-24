@@ -1,0 +1,2 @@
+{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "other"}]}}
+{"type": "assistant", "isSidechain": false, "message": {"id": "m6", "model": "claude-opus-5-5", "usage": {"input_tokens": 5, "output_tokens": 5, "cache_creation_input_tokens": 5, "cache_read_input_tokens": 5}}}

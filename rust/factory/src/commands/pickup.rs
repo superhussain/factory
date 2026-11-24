@@ -12661,6 +12661,57 @@ exit "$archive_code"
         }
     }
 
+    mod daily_tokens_test {
+        use super::*;
+
+        const MIDNIGHT: i64 = 1_767_225_600; // 2026-01-01T00:00:00Z
+        const JOB: &str = "-home-u--paseo-worktrees-ab12-factory-1017-add-x";
+
+        fn turn(id: &str, input: i64, output: i64, write: i64, read: i64, at: &str) -> String {
+            let line = json!({"type": "assistant", "isSidechain": false, "timestamp": at,
+                "message": {"id": id, "model": "claude-opus-5-5", "usage": {
+                    "input_tokens": input, "output_tokens": output,
+                    "cache_creation_input_tokens": write, "cache_read_input_tokens": read}}});
+            format!("{line}\n")
+        }
+
+        /// The Python DailyTokensTest folder: d1 falls before midnight, d2 counts once.
+        fn with_day(fx: &Fx) -> PathBuf {
+            let projects = fx.root.join("claude/projects");
+            let job = projects.join(JOB);
+            fs::create_dir_all(&job).unwrap();
+            let d2 = turn("d2", 10, 20, 30, 40, "2026-01-01T00:00:00.250Z");
+            fs::write(
+                job.join("day.jsonl"),
+                turn("d1", 1, 2, 3, 4, "2025-12-31T23:59:59.900Z") + &d2 + &d2,
+            )
+            .unwrap();
+            projects
+        }
+
+        #[test]
+        fn test_outside_a_job_folder() {
+            let fx = Fx::new();
+            let projects = with_day(&fx);
+            let outside = projects.join("-home-u-dev-factory");
+            fs::create_dir_all(&outside).unwrap();
+            fs::write(
+                outside.join("day.jsonl"),
+                turn("d3", 500, 0, 0, 0, "2026-01-01T01:00:00.000Z"),
+            )
+            .unwrap();
+            assert_eq!(daily_tokens(MIDNIGHT), Ok(60));
+        }
+
+        #[test]
+        fn test_no_root() {
+            let fx = Fx::new();
+            with_day(&fx);
+            fx.set_env("CLAUDE_CONFIG_DIR", fx.root.join("missing"));
+            assert_eq!(daily_tokens(MIDNIGHT), Ok(0));
+        }
+    }
+
     mod daily_token_cap_test {
         use super::*;
 

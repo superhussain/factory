@@ -1,0 +1,3 @@
+job 1018-add-y on host-a: 1 transcript
+model            input  output  cache_write  cache_read
+claude-opus-5-5      1       1            1           1

@@ -10,6 +10,22 @@
       "exit": 0
     },
     {
+      "id": "usage/sweep-session",
+      "from": "tests/cli/test_usage.py::UsageTranscriptsTest.test_sweep_session_counts_each_subagent_once",
+      "argv": ["--home", "{home}", "usage", "alpha/1017-add-x"],
+      "home": "audit-usage-sweep",
+      "stubs": {},
+      "exit": 0
+    },
+    {
+      "id": "usage/sweep-session-other-job",
+      "from": "tests/cli/test_usage.py::UsageTranscriptsTest.test_sweep_session_counts_each_subagent_once",
+      "argv": ["--home", "{home}", "usage", "alpha/1018-add-y"],
+      "home": "audit-usage-sweep",
+      "stubs": {},
+      "exit": 0
+    },
+    {
       "id": "usage/warnings",
       "from": "tests/cli/test_usage.py UsageCommandTest.test_failures_warn",
       "argv": ["--home", "{home}", "usage", "alpha/1023-bad-lines"],

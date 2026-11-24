@@ -1111,6 +1111,15 @@ fn token_count(models: &Value) -> i64 {
         .sum()
 }
 
+/// The warning `usage` prints when it cannot list the transcripts folder.
+fn scan_failed(e: &io::Error) -> String {
+    format!(
+        "factory.py: usage: scan failed ({}: {}); nothing recorded",
+        exc_name(e),
+        os_error(e, Some(&retro_transcripts()))
+    )
+}
+
 pub fn usage_cmd(call: &Call) -> Res<()> {
     let args = &call.args;
     let record = args.len() == 2;
@@ -1140,11 +1149,7 @@ pub fn usage_cmd(call: &Call) -> Res<()> {
     let totals = match usage_totals(&home, &slug, &job_id) {
         Ok(totals) => totals,
         Err(e) => {
-            eprintln!(
-                "factory.py: usage: scan failed ({}: {}); nothing recorded",
-                exc_name(&e),
-                os_error(&e, Some(&retro_transcripts()))
-            );
+            eprintln!("{}", scan_failed(&e));
             return Ok(());
         }
     };
@@ -2963,6 +2968,37 @@ mod tests {
             line["timestamp"] = Value::from(stamp);
         }
         line.to_string() + "\n"
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn usage_names_a_failed_transcripts_scan() {
+        use std::os::unix::fs::PermissionsExt;
+        let _env = crate::shared::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("audit-usage-denied-{}", std::process::id()));
+        let projects = dir.join("projects");
+        fs::create_dir_all(&projects).unwrap();
+        let saved = std::env::var_os("CLAUDE_CONFIG_DIR");
+        std::env::set_var("CLAUDE_CONFIG_DIR", &dir);
+        fs::set_permissions(&projects, fs::Permissions::from_mode(0)).unwrap();
+        let root = fs::read_dir(&projects).is_ok();
+        let got = (!root).then(|| usage_totals(&dir, "alpha", "1017-add-x"));
+        let message = got.as_ref().and_then(|r| r.as_ref().err()).map(scan_failed);
+        fs::set_permissions(&projects, fs::Permissions::from_mode(0o755)).unwrap();
+        match saved {
+            Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+            None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+        }
+        let expected = format!(
+            "factory.py: usage: scan failed (PermissionError: [Errno 13] Permission denied: '{}'); nothing recorded",
+            projects.display()
+        );
+        fs::remove_dir_all(&dir).unwrap();
+        if got.is_some() {
+            assert_eq!(message, Some(expected));
+        }
     }
 
     #[test]
