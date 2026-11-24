@@ -7,11 +7,12 @@ values like `<your-worker-name>` are intentionally invalid until you fill them.
 
 ## Guided setup
 
-`tools/bootstrap.py` stands up an instance in one command. Run it from this
-checkout after the two install commands in section 1:
+`factory bootstrap` stands up an instance in one command. Run it from the root
+of this checkout after the two install commands in section 1 and
+`sh tools/install.sh <skills folder>`, which builds and installs the binary:
 
 ```sh
-mise exec -- python3 tools/bootstrap.py up
+mise exec -- <installed-skill>/runtime/factory bootstrap up
 ```
 
 **API token.** Create a Cloudflare API token scoped to your account and zone with
@@ -52,7 +53,7 @@ home `.env` (mode 0600) as soon as the token exists. If that write fails, `up`
 deletes the new token and stops, so no token is left that nobody holds. It
 then writes `deploy/profile.json` with the Access issuer and audience and
 deploys through `tools/deploy.mjs deploy`. Run
-`python3 tools/bootstrap.py plan --answers deploy/bootstrap.json` to print the
+`<installed-skill>/runtime/factory bootstrap plan --answers deploy/bootstrap.json` to print the
 names without contacting Cloudflare.
 
 **Reruns.** `up` matches every resource by name and keeps no state file. A
@@ -70,7 +71,7 @@ manage it.
 **A second device.** Run `up` on the other host with the same answers. It
 creates that host's token and policy and adds the policy to the application.
 
-**Teardown.** `python3 tools/bootstrap.py down` asks you to type the hostname,
+**Teardown.** `<installed-skill>/runtime/factory bootstrap down` asks you to type the hostname,
 then deletes the custom domain, the Worker, the application, the policies and
 the service tokens. It deletes only Access names that start with
 `<hostname> bootstrap`. It finds tokens by name, not through their policies, so
@@ -86,17 +87,17 @@ Keep the same token on each device that manages the instance. Agents there can t
 2. Store it as `CLOUDFLARE_API_TOKEN` in the factory home `.env`, the path `factory init` printed as `factory home:`. This command asks with a hidden prompt, replaces any `CLOUDFLARE_API_TOKEN` line, keeps every other line and leaves the file at mode `0600` on POSIX:
 
    ```sh
-   python3 -c 'import getpass, os, sys; p = sys.argv[1]; t = getpass.getpass("Cloudflare API token: ").strip(); t or sys.exit("no token entered, .env unchanged"); old = open(p, encoding="utf-8").read().splitlines() if os.path.exists(p) else []; keep = [l for l in old if l.partition("=")[0].strip() != "CLOUDFLARE_API_TOKEN"]; tmp = p + "." + str(os.getpid()) + ".tmp"; fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600); os.write(fd, ("\n".join(keep + ["CLOUDFLARE_API_TOKEN=" + t]) + "\n").encode()); os.close(fd); os.replace(tmp, p); os.chmod(p, 0o600)' "<factory-home>/.env"
+   (umask 077; f="<factory-home>/.env"; stty -echo; printf 'Cloudflare API token: '; read -r t; stty echo; echo; [ -n "$t" ] || { echo "no token entered, .env unchanged"; exit 1; }; { [ -f "$f" ] && grep -v '^[[:space:]]*CLOUDFLARE_API_TOKEN[[:space:]]*=' "$f"; printf 'CLOUDFLARE_API_TOKEN=%s\n' "$t"; } > "$f.tmp" && mv "$f.tmp" "$f" && chmod 600 "$f")
    ```
 
-   On Windows use `py -3` (this step needs Python). Never paste the token into chat, a commit, argv or a log.
+   On Windows add the `CLOUDFLARE_API_TOKEN=<token>` line to `.env` in a text editor. Never paste the token into chat, a commit, argv or a log.
 3. Use it. `up` reads `CLOUDFLARE_API_TOKEN` from the environment, not from `.env`, so load it for one command:
 
    ```sh
-   <installed-skill>/runtime/factory with-cloudflare -- mise exec -- python3 tools/bootstrap.py up
+   <installed-skill>/runtime/factory with-cloudflare -- mise exec -- <installed-skill>/runtime/factory bootstrap up
    ```
 
-   On Windows run `<installed-skill>\runtime\factory.exe` for the first part and use `py -3` for `tools/bootstrap.py`.
+   On Windows run `<installed-skill>\runtime\factory.exe` for both parts.
 
    `factory pr-screenshots` reads the key from `.env` itself. The Workers R2 Storage Edit permission covers its uploads.
 4. Revoke the old token. If `.env` held a narrower token before, delete it under My Profile, API Tokens after one screenshot upload and one `up` rerun pass with the new token.

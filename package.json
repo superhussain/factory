@@ -12,7 +12,7 @@
     "test:local": "node --test tests/tools/local.test.mjs && node tools/local.mjs --check",
     "test:browser": "node tests/browser/run.mjs",
     "test:assets": "node tools/deploy.mjs dry-run --profile tests/fixtures/deployment-valid.json && node tools/assets.mjs --verify",
-    "test:deploy": "node --test tests/tools/deploy.test.mjs && node tools/deploy.mjs check --profile tests/fixtures/deployment-valid.json && node tools/deploy.mjs render --profile tests/fixtures/deployment-valid.json && python3 -m unittest discover -s tests/tools -p test_bootstrap.py && python3 tools/bootstrap.py plan --answers tests/fixtures/bootstrap-valid.json",
+    "test:deploy": "node --test tests/tools/deploy.test.mjs && node tools/deploy.mjs check --profile tests/fixtures/deployment-valid.json && node tools/deploy.mjs render --profile tests/fixtures/deployment-valid.json",
     "test:verify": "node --test tests/tools/secret-scan.test.mjs tests/tools/stage-notes-check.test.mjs tests/tools/verify.test.mjs",
     "check:secrets": "node tools/secret-scan.mjs",
     "check:types": "tsc -p tsconfig.json",

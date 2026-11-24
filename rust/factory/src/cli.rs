@@ -4,8 +4,8 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use crate::commands::{
-    audit, catch_up, checks, claims, daemon, install, intake, lookup, ops, pickup, pipeline,
-    prompt, retro, screenshots, setup, sync, tracer, wait, worktree,
+    audit, bootstrap, catch_up, checks, claims, daemon, install, intake, lookup, ops, pickup,
+    pipeline, prompt, retro, screenshots, setup, sync, tracer, wait, worktree,
 };
 use crate::shared::consts::{MAX_RIDERS, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
@@ -103,6 +103,7 @@ const EXTRA: &[(&str, Handler, usize, usize)] = &[
     ("install", install::install, 4, 5),
     ("stalls", pickup::stalls_cmd, 1, 3),
     ("pr-screenshots", screenshots::pr_screenshots, 0, usize::MAX),
+    ("bootstrap", bootstrap::bootstrap, 1, 3),
 ];
 
 pub const USAGE: &str = include_str!("usage.txt");

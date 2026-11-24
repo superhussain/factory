@@ -148,7 +148,7 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
 | --- | --- | --- |
 | Factory dashboard URL | Paseo, Settings, Plugins, Factory | Paseo user, per host |
 | `embed_origins` | `deploy/profile.json` | Server operator |
-| SameSite None on the Access cookie | Cloudflare Access application, set by `tools/bootstrap.py up` with the [device token](cloudflare.md#device-token) | Server operator |
+| SameSite None on the Access cookie | Cloudflare Access application, set by `factory bootstrap up` with the [device token](cloudflare.md#device-token) | Server operator |
 
 1. Install the plugin on the daemon host: `paseo plugin install <checkout>/paseo-plugin`.
    Check it with `paseo plugin ls`, which shows `factory running`.
