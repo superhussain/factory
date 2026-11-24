@@ -234,6 +234,21 @@ fn human_confirm(expected: &str, prompt: &str, what: &str) -> Res<()> {
     Ok(())
 }
 
+/// Env vars an agent's shell sets; any non-empty one marks an agent session.
+const AGENT_ENV: &[&str] = &[
+    "CLAUDECODE",
+    "AI_AGENT",
+    "PASEO_AGENT_ID",
+    "OPENCODE_TERMINAL",
+];
+
+fn agent_session(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<&'static str> {
+    AGENT_ENV
+        .iter()
+        .copied()
+        .find(|name| get(name).is_some_and(|v| !v.is_empty()))
+}
+
 fn home_and<T>(f: impl FnOnce(&Path) -> Res<T>) -> Res<T> {
     f(&factory_home()?)
 }
@@ -4199,10 +4214,16 @@ fn autonomy_report(home: &Path, slug: Option<&str>) -> Res<()> {
 }
 
 pub fn autonomy_cmd(call: &Call) -> Res<()> {
-    home_and(|home| autonomy_cmd_in(home, &call.args, &mut human_confirm))
+    let agent = agent_session(|k| std::env::var_os(k));
+    home_and(|home| autonomy_cmd_in(home, &call.args, agent, &mut human_confirm))
 }
 
-fn autonomy_cmd_in(home: &Path, args: &[String], confirm: &mut Confirm<'_>) -> Res<()> {
+fn autonomy_cmd_in(
+    home: &Path,
+    args: &[String],
+    agent: Option<&str>,
+    confirm: &mut Confirm<'_>,
+) -> Res<()> {
     let sub = args[0].as_str();
     let slug = args.get(1).map(String::as_str);
     let cls = args.get(2).map(String::as_str);
@@ -4224,6 +4245,12 @@ fn autonomy_cmd_in(home: &Path, args: &[String], confirm: &mut Confirm<'_>) -> R
     if sub == "status" {
         print_json(&load_autonomy(&read_board(home)?));
         return Ok(());
+    }
+    if let Some(name) = agent.filter(|_| sub == "resume" || sub == "allow" || lifts) {
+        return Err(fail(
+            format!("autonomy {sub} refuses to run in an agent session ({name} is set); a person types it in their own terminal. Nothing was changed."),
+            2,
+        ));
     }
     let slug = slug.unwrap_or("");
     if (sub == "allow" || lifts) && !registered(home)?.contains(slug) {
@@ -6489,11 +6516,75 @@ mod tests {
         list: &[&str],
         typed: &str,
     ) -> (Res<()>, Vec<String>, Vec<Value>) {
+        run_autonomy_as(name, replies, list, typed, None)
+    }
+
+    fn run_autonomy_as(
+        name: &str,
+        replies: Vec<Reply>,
+        list: &[&str],
+        typed: &str,
+        agent: Option<&str>,
+    ) -> (Res<()>, Vec<String>, Vec<Value>) {
         let (origin, seen) = serve(replies);
         let home = home_for(name, &origin);
         let asked = RefCell::new(Vec::new());
-        let got = autonomy_cmd_in(&home, &args(list), &mut typing(typed, &asked));
+        let got = autonomy_cmd_in(&home, &args(list), agent, &mut typing(typed, &asked));
         (got, asked.into_inner(), puts(&seen))
+    }
+
+    #[test]
+    fn agent_session_names() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(name, _)| *name == k)
+                    .map(|(_, v)| std::ffi::OsString::from(v))
+            }
+        };
+        assert_eq!(
+            agent_session(env(&[("CLAUDECODE", ""), ("PASEO_AGENT_ID", "abc")])),
+            Some("PASEO_AGENT_ID")
+        );
+        assert_eq!(
+            agent_session(env(&[("CLAUDECODE", ""), ("AI_AGENT", "")])),
+            None
+        );
+    }
+
+    #[test]
+    fn agent_refuses_loosening() {
+        for list in [
+            &["resume"][..],
+            &["allow", "alpha"],
+            &["restore", "alpha", "visible"],
+            &["promote", "alpha", "visible"],
+        ] {
+            let (got, asked, puts) =
+                run_autonomy_as("agent-refuses", vec![], list, list[0], Some("CLAUDECODE"));
+            let e = got.unwrap_err();
+            assert_eq!(e.code, 2);
+            assert_eq!(
+                e.stderr,
+                format!("factory.py: autonomy {} refuses to run in an agent session (CLAUDECODE is set); a person types it in their own terminal. Nothing was changed.\n", list[0])
+            );
+            assert!(asked.is_empty() && puts.is_empty());
+        }
+    }
+
+    #[test]
+    fn agent_allows_pause() {
+        let board = card_board("explorer", "sample", ALLOWED);
+        let (got, _, puts) = run_autonomy_as(
+            "agent-pause",
+            vec![ok(&board), ok("")],
+            &["pause"],
+            "",
+            Some("CLAUDECODE"),
+        );
+        assert!(got.is_ok());
+        assert_eq!(puts[0]["autonomy"]["paused"], true);
     }
 
     #[test]
