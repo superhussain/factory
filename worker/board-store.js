@@ -632,17 +632,18 @@ export class BoardRows {
         if (rowId(first) !== null) want.add(first.id);
       }
     }
-    const names = q.names?.length
-      ? this.sql
-          .exec(
-            `SELECT DISTINCT j.value AS name FROM board_index r INDEXED BY board_index_names, json_each(r.names) j
-              WHERE r.names IS NOT NULL AND j.value IN (SELECT value FROM json_each(?))`,
-            JSON.stringify(q.names),
-          )
-          .toArray()
-          .map((r) => r.name)
-      : [];
     const found = this.firstRows(pages, [...want]);
+    // The rows already fetched vouch for their own names; only the rest cost an index scan.
+    const carried = new Set([...found.values()].flatMap(({ row }) => rowNames(row)));
+    const names = (q.names ?? []).filter((n) => carried.has(n));
+    const rest = (q.names ?? []).filter((n) => !carried.has(n));
+    if (rest.length)
+      for (const r of this.sql.exec(
+        `SELECT DISTINCT j.value AS name FROM board_index r INDEXED BY board_index_names, json_each(r.names) j
+          WHERE r.names IS NOT NULL AND j.value IN (SELECT value FROM json_each(?))`,
+        JSON.stringify(rest),
+      ))
+        names.push(r.name);
     return {
       etag: state.etag,
       readable: true,

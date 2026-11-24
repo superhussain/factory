@@ -39,11 +39,13 @@ function projection(work, rate) {
 }
 
 test("a row PATCH reads and writes the same SQLite rows as the board doubles", () => {
-  for (const name of ["PATCH 1 row", "PATCH 5 rows", "PATCH adding"]) {
+  for (const name of ["PATCH 1 row", "PATCH 5 rows", "PATCH adding", "PATCH a row carrying"]) {
     assert.equal(op(doubled, name).read, op(today, name).read, name);
     assert.equal(op(doubled, name).written, op(today, name).written, name);
   }
   assert.ok(op(doubled, "PATCH 1 row").read <= 20, JSON.stringify(op(doubled, "PATCH 1 row")));
+  // The row vouches for its own upload names, so the 60 other rows that carry one go unread.
+  assert.equal(op(doubled, "PATCH a row carrying").read, op(doubled, "PATCH 1 row").read);
   assert.ok(op(doubled, "PATCH 1 row").written <= 3);
   assert.ok(op(doubled, "PATCH 5 rows").written <= 4);
   // A claim's stage reads cost one SQL row together; its digest reads cost their pages.

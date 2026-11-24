@@ -209,7 +209,7 @@ export async function benchWorker(rows, script) {
 // SQLite rows read and written by each board operation in the room, on a board of rows rows,
 // with the room's own milliseconds for an R2 copy and for building the board text.
 export async function roomWork(rows, script) {
-  const { mf, board, json } = await benchWorker(rows, script);
+  const { mf, bucket, board, json } = await benchWorker(rows, script);
   try {
     const out = {};
     const measure = async (name, fn) => {
@@ -235,10 +235,23 @@ export async function roomWork(rows, script) {
           return { id: row.id, expect, row };
         }),
       });
+    // 60 rows spread over the board carry an idea image, as about 56 of today's 2,317 do.
+    const merged = board.jobs.filter((j) => j.stage === "merged");
+    const uploaded = merged.filter((_, i) => i % Math.floor(merged.length / 60) === 0).slice(0, 60);
+    uploaded.forEach((j, i) => (j.idea_images = [`${i.toString(16).padStart(64, "0")}.png`]));
+    await bucket.put("board.json", JSON.stringify(board));
     await measure("seed (first read after deploy)", get);
     await touch(1);
     await measure("PATCH 1 row", () => touch(1));
     await measure("PATCH 5 rows", () => touch(5));
+    await measure("PATCH a row carrying an idea image", () => {
+      const row = uploaded[0];
+      const expect = { ...row };
+      row.updated = new Date(Date.UTC(2026, 10, 23, 12, 0, ++tick))
+        .toISOString()
+        .replace(/\.\d+Z$/, "Z");
+      return patch({ rows: [{ id: row.id, expect, row }] });
+    });
     const added = {
       id: `${rows + 1}-synthetic-job-${rows + 1}`,
       project: "sample",
