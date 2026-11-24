@@ -88,7 +88,7 @@ static AUDIT_FLAGS: [(&str, Pattern); 8] = [
 ];
 static AUDIT_SECRET_FILE: Pattern = Pattern::new(r#"(?:^|[\s/'\"=])\.env(?![\w.-])"#, Flags::NONE);
 static AUDIT_PR_MERGE: Pattern = Pattern::new(
-    r#"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo|xargs)(?:[ \t]+-[^\s;&|(){}`]*)*[ \t]+|[A-Za-z_]\w*=(?:"\$\([^()\n`"]*\)"|[^\s;&|(){}`]*)[ \t]+)*(?:gh(?:[ \t]+(?:-R|--repo)(?:[ \t]+|=)[^\s;&|(){}`]+)?\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/(?:\d+|\$\{?[A-Za-z_]\w*\}?)/merge\b)|(?:""|''|\$\{?[A-Za-z_]\w*\}?|(?:[^\s;&|(){}`'"]*/)?factory)[ \t]+pr-merge(?![\w-]))"#,
+    r#"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo|xargs)(?:[ \t]+-[^\s;&|(){}`]*)*[ \t]+|[A-Za-z_]\w*=(?:"\$\([^()\n`"]*\)"|[^\s;&|(){}`]*)[ \t]+)*(?:gh(?:[ \t]+(?:-R|--repo)(?:[ \t]+|=)[^\s;&|(){}`]+)?\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/(?:\d+|\$\{?[A-Za-z_]\w*\}?)/merge\b)|(?:""|''|\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_])[^\s;&|(){}`'"]*|(?:[^\s;&|(){}`'"]*/)?factory)[ \t]+pr-merge(?![\w-]))"#,
     Flags::NONE,
 );
 static AUDIT_HEREDOC_OPEN: Pattern = Pattern::new(
@@ -2857,6 +2857,8 @@ mod tests {
             "factory pr-merge factory/1017-add-x",
             "cd x && \"$RUNTIME\" pr-merge factory/1017-add-x",
             "exec \"$RUNTIME\" pr-merge factory/1017-add-x",
+            "\"$HOME/bin/runtime\" pr-merge factory/1017-add-x",
+            "\"$R/factory.py\" pr-merge x",
         ] {
             assert_eq!(flags(command), ["pr-merge"], "{command}");
         }
@@ -2944,6 +2946,7 @@ mod tests {
             "a=\"$(x)\" ".repeat(20_000),
             "gh -R ".repeat(25_000),
             "gh api pulls/$".repeat(15_000),
+            "($a/".repeat(30_000),
         ] {
             let start = std::time::Instant::now();
             let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text));
