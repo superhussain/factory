@@ -14,14 +14,14 @@
 //! With no daemon, a daemon that can't answer, or gh credentials set in the command's own
 //! environment, each call runs gh directly, as before.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
 
-use crate::commands::checks::{GhCode, GhOut, Host, System};
+use crate::commands::checks::{GhCode, GhOut, Host, System, HEAD_CHECKS_QUERY, PR_GRAPHQL_QUERY};
 use crate::shared::board_client::{ask, PROTOCOL};
 use crate::shared::proc::which;
 
@@ -53,13 +53,15 @@ const OWN_GH_ENV: &[&str] = &[
     "GH_HOST",
     "GH_REPO",
     "GH_CONFIG_DIR",
+    "GH_DEBUG",
 ];
 
 type Key = Vec<String>;
 pub(crate) type RunGh = Box<dyn Fn(&[&str]) -> Option<GhOut> + Send + Sync>;
 
 /// True for the read-only gh calls the wait commands make, which the daemon may run and cache.
-/// Anything that writes (update-branch, merge, a mutation, an api call with fields) is refused.
+/// Anything that writes (update-branch, merge, a mutation, an api call with fields) is refused,
+/// and a GraphQL call must carry one of the wait commands' own queries.
 pub(crate) fn cacheable(args: &[&str]) -> bool {
     let pairs = |rest: &[&str], flags: &[&str]| {
         rest.len() % 2 == 0 && rest.chunks(2).all(|p| flags.contains(&p[0]))
@@ -71,28 +73,42 @@ pub(crate) fn cacheable(args: &[&str]) -> bool {
             pr_url(url) && pairs(rest, &["--json"])
         }
         ["api", "graphql", rest @ ..] => {
+            let fields = || rest.chunks(2).filter(|p| p[0] != "--jq").map(|p| p[1]);
             pairs(rest, &["-f", "-F", "--jq"])
-                && rest.chunks(2).any(|p| p[1].starts_with("query=query("))
-                && !rest.chunks(2).any(|p| p[1].starts_with("query=mutation"))
+                && fields().filter(|f| f.starts_with("query=")).count() == 1
+                && fields().all(|f| {
+                    [HEAD_CHECKS_QUERY, PR_GRAPHQL_QUERY].contains(&f)
+                        || ["o=", "r=", "n=", "sha="].iter().any(|n| {
+                            f.strip_prefix(n)
+                                .is_some_and(|v| !v.is_empty() && !v.starts_with('@'))
+                        })
+                })
         }
         ["api", path, "--jq", _] => path.starts_with("repos/"),
         _ => false,
     }
 }
 
-/// A rate limit or timeout: an answer that says nothing about the PR, so it never replaces one
-/// that does, and it backs the poller off.
-fn throttled(out: &GhOut) -> bool {
-    if matches!(out.code, GhCode::Timeout) {
-        return true;
-    }
+/// A rate limit: GitHub refused the call, so the poller backs off every key.
+fn rate_limited(out: &GhOut) -> bool {
     let err = out.stderr.to_lowercase();
     err.contains("rate limit") || err.contains("http 429")
 }
 
-/// True when an answer shows checks or a review still running, so its key is worth polling fast.
+/// A rate limit or timeout says nothing about the PR, so it never replaces an answer that does.
+fn throttled(out: &GhOut) -> bool {
+    matches!(out.code, GhCode::Timeout) || rate_limited(out)
+}
+
+/// True unless an answer shows settled work: checks or a review still running, or no checks
+/// listed yet, keep a key at its commands' own cadence.
 fn pending(out: &GhOut) -> bool {
+    let compact: String = out.stdout.chars().filter(|c| !c.is_whitespace()).collect();
     matches!(out.code, GhCode::Exit(8))
+        || compact == "[]"
+        || compact.is_empty()
+        || out.stderr.contains("no checks reported")
+        || out.stderr.contains("no required checks reported")
         || [
             "IN_PROGRESS",
             "QUEUED",
@@ -101,9 +117,14 @@ fn pending(out: &GhOut) -> bool {
             "EXPECTED",
             "WAITING",
             "REQUESTED",
+            "\"statusCheckRollup\":null",
+            "\"statusCheckRollup\":[]",
+            "\"statusCheckRollup\":{\"contexts\":null",
+            "\"nodes\":[]",
+            "\"object\":null",
         ]
         .iter()
-        .any(|w| out.stdout.contains(w))
+        .any(|w| compact.contains(w))
 }
 
 fn same(a: &GhOut, b: &GhOut) -> bool {
@@ -112,6 +133,13 @@ fn same(a: &GhOut, b: &GhOut) -> bool {
         GhCode::Timeout => None,
     };
     code(a) == code(b) && a.stdout == b.stdout && a.stderr == b.stderr
+}
+
+/// The environment that picks gh's account and config. A command whose values differ from the
+/// daemon's runs gh itself.
+fn gh_env() -> Value {
+    let var = |k: &str| std::env::var(k).ok().map_or(Value::Null, Value::from);
+    json!({"HOME": var("HOME"), "XDG_CONFIG_HOME": var("XDG_CONFIG_HOME")})
 }
 
 struct Entry {
@@ -127,17 +155,16 @@ struct Entry {
 #[derive(Default)]
 struct Cache {
     entries: HashMap<Key, Entry>,
+    /// Keys a gh call is running for, so callers that want the same key share one call.
+    inflight: HashSet<Key>,
     versions: u64,
     backoff: Duration,
     backoff_until: Option<Instant>,
-    calls: u64,
 }
 
 pub struct Poller {
     state: Mutex<Cache>,
     moved: Condvar,
-    /// Held for each gh call, so callers that want the same key share one call.
-    fetching: Mutex<()>,
     gh: RunGh,
 }
 
@@ -148,7 +175,6 @@ impl Poller {
         Arc::new(Poller {
             state: Mutex::new(Cache::default()),
             moved: Condvar::new(),
-            fetching: Mutex::new(()),
             gh,
         })
     }
@@ -162,99 +188,101 @@ impl Poller {
         }
     }
 
-    /// Runs gh for key and stores the answer, unless it is a rate limit or timeout and a real
-    /// answer is cached. Returns what the cache holds for key afterwards. The caller holds
-    /// `fetching`.
+    /// Runs gh for key, which the caller marked in flight, and stores the answer unless it is a
+    /// rate limit or timeout and a real answer is cached. Returns gh's answer, as a direct call
+    /// would, with the version the cache holds for key (0 when it holds none).
     fn fetch(&self, key: &Key, every: Duration) -> Option<(GhOut, u64)> {
         let args: Vec<&str> = key.iter().map(String::as_str).collect();
-        let out = (self.gh)(&args)?;
+        let out = (self.gh)(&args);
         let now = Instant::now();
         let mut s = self.state.lock().unwrap();
-        s.calls += 1;
-        let limited = throttled(&out);
-        if limited {
+        s.inflight.remove(key);
+        self.moved.notify_all();
+        let out = out?;
+        if rate_limited(&out) {
             s.backoff = (s.backoff * 2).clamp(MIN_BACKOFF, MAX_BACKOFF);
             s.backoff_until = Some(now + s.backoff);
-        } else {
+        } else if !throttled(&out) {
             s.backoff = Duration::ZERO;
             s.backoff_until = None;
         }
         let next = s.versions + 1;
-        let mut bumped = false;
-        match s.entries.get_mut(key) {
+        let full = s.entries.len() >= MAX_KEYS;
+        let version = match s.entries.get_mut(key) {
+            // A rate limit or timeout leaves the real answer, and its age, as they were.
+            Some(e) if throttled(&out) && !throttled(&e.answer) => e.version,
             Some(e) => {
                 e.fetched = now;
-                if !(limited && !throttled(&e.answer)) && !same(&e.answer, &out) {
+                if !same(&e.answer, &out) {
                     e.pending = pending(&out);
-                    e.answer = out;
+                    e.answer = out.clone();
                     e.version = next;
-                    bumped = true;
                 }
+                e.version
             }
+            None if full => 0,
             None => {
-                if s.entries.len() >= MAX_KEYS {
-                    return Some((out, 0));
-                }
                 s.entries.insert(
                     key.clone(),
                     Entry {
                         pending: pending(&out),
-                        answer: out,
+                        answer: out.clone(),
                         version: next,
                         fetched: now,
                         read: now,
                         every,
                     },
                 );
-                bumped = true;
+                next
             }
-        }
-        if bumped {
+        };
+        if version == next {
             s.versions = next;
-            self.moved.notify_all();
         }
-        let e = &s.entries[key];
-        Some((e.answer.clone(), e.version))
+        Some((out, version))
     }
 
     /// The cached answer to key when it is at most max_age old, else a fresh one.
     fn read(&self, key: &Key, max_age: Duration, every: Duration) -> Option<(GhOut, u64)> {
-        let fresh = |s: &mut Cache| {
-            let e = s.entries.get_mut(key)?;
-            e.read = Instant::now();
-            e.every = e.every.min(every);
-            (e.fetched.elapsed() <= max_age).then(|| (e.answer.clone(), e.version))
-        };
-        if let Some(hit) = fresh(&mut self.state.lock().unwrap()) {
-            return Some(hit);
+        let mut s = self.state.lock().unwrap();
+        loop {
+            if let Some(e) = s.entries.get_mut(key) {
+                e.read = Instant::now();
+                e.every = e.every.min(every);
+                if e.fetched.elapsed() <= max_age {
+                    return Some((e.answer.clone(), e.version));
+                }
+            }
+            if !s.inflight.contains(key) {
+                break;
+            }
+            // Another caller's gh call for this key is running; share its answer.
+            s = self.moved.wait(s).unwrap();
         }
-        let _turn = self.fetching.lock().unwrap();
-        // Another caller may have fetched it while this one queued.
-        if let Some(hit) = fresh(&mut self.state.lock().unwrap()) {
-            return Some(hit);
-        }
+        s.inflight.insert(key.clone());
+        drop(s);
         self.fetch(key, every)
     }
 
     /// Blocks until one of keys holds a version other than the one given, or wait passes.
-    /// Returns true when one changed.
-    fn wait(&self, keys: &[(Key, u64)], wait: Duration) -> bool {
+    /// Returns whether one changed, and the keys the cache no longer holds.
+    fn wait(&self, keys: &[(Key, u64)], wait: Duration) -> (bool, Vec<Key>) {
         let end = Instant::now() + wait;
         let mut s = self.state.lock().unwrap();
         loop {
             let now = Instant::now();
-            let mut changed = false;
+            let (mut changed, mut missing) = (false, Vec::new());
             for (key, version) in keys {
                 match s.entries.get_mut(key) {
                     Some(e) => {
                         e.read = now;
                         changed |= e.version != *version;
                     }
-                    None => changed = true,
+                    None => missing.push(key.clone()),
                 }
             }
-            if changed || now >= end {
-                return changed;
+            if changed || !missing.is_empty() || now >= end {
+                return (changed, missing);
             }
             // Wake at least every 10 s to renew the keys' lease while waiting.
             let nap = (end - now).min(Duration::from_secs(10));
@@ -263,32 +291,40 @@ impl Poller {
     }
 
     /// One pass of the poll loop: drops keys no command holds any more and refreshes those due,
-    /// unless GitHub rate-limited the last call.
-    fn tick(&self) {
-        let due: Vec<(Key, Duration)> = {
+    /// unless GitHub rate-limited the last call. It stops early once stop is true.
+    fn tick(&self, stop: &dyn Fn() -> bool) {
+        let due: Vec<Key> = {
             let mut s = self.state.lock().unwrap();
             s.entries.retain(|_, e| e.read.elapsed() <= LEASE);
-            if s.backoff_until.is_some_and(|t| Instant::now() < t) {
-                return;
-            }
             s.entries
                 .iter()
                 .filter(|(_, e)| e.fetched.elapsed() >= Self::interval(e))
-                .map(|(k, e)| (k.clone(), e.every))
+                .map(|(k, _)| k.clone())
                 .collect()
         };
-        for (key, every) in due {
-            let _turn = self.fetching.lock().unwrap();
-            let still_due = {
-                let s = self.state.lock().unwrap();
-                s.backoff_until.is_none_or(|t| Instant::now() >= t)
-                    && s.entries
-                        .get(&key)
-                        .is_some_and(|e| e.fetched.elapsed() >= Self::interval(e))
-            };
-            if still_due {
-                self.fetch(&key, every);
+        for key in due {
+            if stop() {
+                return;
             }
+            let every = {
+                let mut s = self.state.lock().unwrap();
+                if s.backoff_until.is_some_and(|t| Instant::now() < t) {
+                    return;
+                }
+                let due = s
+                    .entries
+                    .get(&key)
+                    .filter(|e| e.fetched.elapsed() >= Self::interval(e))
+                    .map(|e| e.every);
+                match due {
+                    Some(every) if !s.inflight.contains(&key) => {
+                        s.inflight.insert(key.clone());
+                        every
+                    }
+                    _ => continue,
+                }
+            };
+            self.fetch(&key, every);
         }
     }
 
@@ -313,6 +349,9 @@ impl Poller {
                 if !cacheable(&args) {
                     return refused("not a cached gh read");
                 }
+                if request["env"] != gh_env() {
+                    return refused("gh runs under another HOME or config");
+                }
                 let every = secs(&request["every"], 3600.0).max(FASTEST);
                 match self.read(&key, secs(&request["max_age"], TRUSTED), every) {
                     None => refused("gh is not installed"),
@@ -335,8 +374,8 @@ impl Poller {
                 let Some(keys) = keys else {
                     return refused("gh-wait needs keys");
                 };
-                let changed = self.wait(&keys, secs(&request["wait"], MAX_WAIT));
-                json!({"v": PROTOCOL, "ok": true, "changed": changed})
+                let (changed, missing) = self.wait(&keys, secs(&request["wait"], MAX_WAIT));
+                json!({"v": PROTOCOL, "ok": true, "changed": changed, "missing": missing})
             }
             _ => refused("unknown op"),
         }
@@ -358,7 +397,7 @@ pub fn start(stop: fn() -> Option<&'static str>) -> std::thread::JoinHandle<()> 
         .clone();
     std::thread::spawn(move || {
         while stop().is_none() {
-            poller.tick();
+            poller.tick(&|| stop().is_some());
             std::thread::sleep(Duration::from_secs(1));
         }
     })
@@ -404,6 +443,7 @@ impl Cached {
         request.insert("args".into(), json!(key));
         request.insert("max_age".into(), json!(max_age));
         request.insert("every".into(), json!(self.every));
+        request.insert("env".into(), gh_env());
         let (reply, _) = ask(&self.home, request, GH_REPLY).ok()?;
         let code = match &reply["code"] {
             Value::String(s) if s == "timeout" => GhCode::Timeout,
@@ -459,8 +499,19 @@ impl Host for Cached {
             request.insert("wait".into(), json!(wait));
             let limit = Duration::from_secs_f64(wait + 15.0);
             match ask(&self.home, request, limit) {
-                Ok((reply, _)) if reply["changed"] == true => return,
-                Ok(_) => {}
+                Ok((reply, _)) => {
+                    // A key the daemon dropped is read afresh next time, not waited on.
+                    for k in reply["missing"].as_array().into_iter().flatten() {
+                        if let Ok(k) = serde_json::from_value::<Key>(k.clone()) {
+                            self.held.remove(&k);
+                        }
+                    }
+                    if reply["changed"] == true
+                        || reply["missing"].as_array().is_some_and(|m| !m.is_empty())
+                    {
+                        return;
+                    }
+                }
                 Err(_) => self.live = false,
             }
         }
@@ -518,7 +569,8 @@ mod tests {
 
     #[test]
     fn cacheable_takes_the_wait_commands_reads_only() {
-        let head = "query=query($o:String!){x}";
+        let head = HEAD_CHECKS_QUERY;
+        let pull = PR_GRAPHQL_QUERY;
         for args in [
             vec!["pr", "view", PR, "--json", "state", "--jq", ".state"],
             vec!["pr", "view", PR, "--json", "headRefOid,baseRefName"],
@@ -532,7 +584,10 @@ mod tests {
             ],
             vec!["pr", "checks", PR, "--json", "name,bucket,link"],
             vec![
-                "api", "graphql", "-f", head, "-f", "o=a", "-F", "n=1", "--jq", ".data",
+                "api", "graphql", "-f", head, "-f", "o=a", "-f", "r=b", "-f", "sha=c", "--jq", ".d",
+            ],
+            vec![
+                "api", "graphql", "-f", pull, "-f", "o=a", "-f", "r=b", "-F", "n=1", "--jq", ".d",
             ],
             vec!["api", "repos/a/b/compare/main...abc", "--jq", ".behind_by"],
             vec!["api", "repos/a/b", "--jq", ".default_branch"],
@@ -553,6 +608,17 @@ mod tests {
                 "id=1",
             ],
             vec!["api", "graphql", "-f", head, "-f", "query=mutation{x}"],
+            vec![
+                "api",
+                "graphql",
+                "-f",
+                "query=query($x:ID){a} mutation M {b}",
+                "-f",
+                "operationName=M",
+            ],
+            vec!["api", "graphql", "-f", head, "-F", "query=@mut.graphql"],
+            vec!["api", "graphql", "-f", head, "-F", "n=@file"],
+            vec!["api", "graphql", "-f", " query=mutation{x}"],
             vec!["api", "repos/a/b/merges", "-f", "base=main"],
             vec!["api", "-X", "PUT", "repos/a/b"],
             vec!["api", "user", "--jq", ".login"],
@@ -588,7 +654,7 @@ mod tests {
             stdout: String::new(),
             stderr: String::new(),
         }]);
-        let reply = p.answer(&json!({"op": "gh", "args": view(), "max_age": 0}));
+        let reply = p.answer(&json!({"op": "gh", "args": view(), "max_age": 0, "env": gh_env()}));
         assert_eq!(reply["code"], "timeout");
         let (p, _) = poller(vec![out(8, "[]", "some checks pending\n")]);
         let args = key(&[
@@ -599,7 +665,7 @@ mod tests {
             "--json",
             "name,bucket,link",
         ]);
-        let reply = p.answer(&json!({"op": "gh", "args": args, "max_age": 0}));
+        let reply = p.answer(&json!({"op": "gh", "args": args, "max_age": 0, "env": gh_env()}));
         assert_eq!(
             (
                 reply["ok"].clone(),
@@ -617,7 +683,8 @@ mod tests {
         let reply = p.answer(&json!({"op": "gh", "args": ["pr", "update-branch", PR]}));
         assert_eq!(reply["ok"], false);
         let none: RunGh = Box::new(|_| None);
-        let reply = Poller::new(none).answer(&json!({"op": "gh", "args": view(), "max_age": 0}));
+        let reply = Poller::new(none)
+            .answer(&json!({"op": "gh", "args": view(), "max_age": 0, "env": gh_env()}));
         assert_eq!(reply["error"], "gh is not installed");
     }
 
@@ -626,23 +693,23 @@ mod tests {
         let (p, calls) = poller(vec![out(0, "{\"status\":\"IN_PROGRESS\"}", "")]);
         let k = view();
         p.read(&k, Duration::ZERO, Duration::from_secs(10)).unwrap();
-        p.tick();
+        p.tick(&|| false);
         assert_eq!(calls.load(Ordering::SeqCst), 1, "not due yet");
         age(&p, &k, 10);
-        p.tick();
+        p.tick(&|| false);
         assert_eq!(calls.load(Ordering::SeqCst), 2, "pending: every 10 s");
 
         let (p, calls) = poller(vec![out(0, "OPEN\n", "")]);
         p.read(&k, Duration::ZERO, Duration::from_secs(10)).unwrap();
         age(&p, &k, 30);
-        p.tick();
+        p.tick(&|| false);
         assert_eq!(
             calls.load(Ordering::SeqCst),
             1,
             "settled: not before a minute"
         );
         age(&p, &k, 30);
-        p.tick();
+        p.tick(&|| false);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
@@ -653,17 +720,17 @@ mod tests {
         let k = view();
         p.read(&k, Duration::ZERO, FASTEST).unwrap();
         age(&p, &k, 60);
-        p.tick();
+        p.tick(&|| false);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         let (o, v) = p
             .read(&k, Duration::from_secs(TRUSTED as u64), FASTEST)
             .unwrap();
         assert_eq!((o.stdout.as_str(), v), ("OPEN\n", 1));
         age(&p, &k, 60);
-        p.tick();
+        p.tick(&|| false);
         assert_eq!(calls.load(Ordering::SeqCst), 2, "backed off");
         p.state.lock().unwrap().backoff_until = Some(Instant::now());
-        p.tick();
+        p.tick(&|| false);
         assert_eq!(calls.load(Ordering::SeqCst), 3);
         let (o, v) = p
             .read(&k, Duration::from_secs(TRUSTED as u64), FASTEST)
@@ -678,7 +745,7 @@ mod tests {
         p.read(&k, Duration::ZERO, FASTEST).unwrap();
         p.state.lock().unwrap().entries.get_mut(&k).unwrap().read -= LEASE + Duration::from_secs(1);
         age(&p, &k, 120);
-        p.tick();
+        p.tick(&|| false);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(p.state.lock().unwrap().entries.is_empty());
     }
@@ -689,16 +756,88 @@ mod tests {
         let k = view();
         let (_, v) = p.read(&k, Duration::ZERO, FASTEST).unwrap();
         let start = Instant::now();
-        assert!(!p.wait(&[(k.clone(), v)], Duration::from_millis(200)));
+        assert!(!p.wait(&[(k.clone(), v)], Duration::from_millis(200)).0);
         assert!(start.elapsed() >= Duration::from_millis(200));
         let waiter = {
             let (p, k) = (p.clone(), k.clone());
-            std::thread::spawn(move || p.wait(&[(k, v)], Duration::from_secs(30)))
+            std::thread::spawn(move || p.wait(&[(k, v)], Duration::from_secs(30)).0)
         };
         std::thread::sleep(Duration::from_millis(100));
         age(&p, &k, 60);
-        p.tick();
+        p.tick(&|| false);
         assert!(waiter.join().unwrap());
+    }
+
+    #[test]
+    fn no_checks_yet_counts_as_pending() {
+        for (code, stdout, stderr) in [
+            (0, "{\"statusCheckRollup\": null}", ""),
+            (
+                0,
+                "{\"statusCheckRollup\":{\"contexts\":{\"nodes\":[]}}}",
+                "",
+            ),
+            (0, "[]", ""),
+            (1, "", "no checks reported on the 'x' branch"),
+            (0, "{\"object\": null}", ""),
+        ] {
+            assert!(pending(&out(code, stdout, stderr)), "{stdout} {stderr}");
+        }
+        assert!(!pending(&out(0, "OPEN\n", "")));
+        assert!(!pending(&out(0, "[{\"bucket\":\"pass\"}]", "")));
+    }
+
+    #[test]
+    fn a_timeout_keeps_the_answer_without_backing_off() {
+        let timeout = GhOut {
+            code: GhCode::Timeout,
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        let (p, calls) = poller(vec![out(0, "OPEN\n", ""), timeout, out(0, "MERGED\n", "")]);
+        let k = view();
+        p.read(&k, Duration::ZERO, FASTEST).unwrap();
+        age(&p, &k, 60);
+        p.tick(&|| false);
+        assert!(p.state.lock().unwrap().backoff_until.is_none());
+        // The kept answer stays old, so the next tick asks again.
+        p.tick(&|| false);
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        let (o, _) = p
+            .read(&k, Duration::from_secs(TRUSTED as u64), FASTEST)
+            .unwrap();
+        assert_eq!(o.stdout, "MERGED\n");
+    }
+
+    #[test]
+    fn a_wait_reports_keys_the_cache_dropped() {
+        let (p, _) = poller(vec![out(0, "OPEN\n", "")]);
+        let k = view();
+        let start = Instant::now();
+        assert_eq!(
+            p.wait(&[(k.clone(), 1)], Duration::from_secs(30)),
+            (false, vec![k])
+        );
+        assert!(start.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_tick_stops_when_asked() {
+        let (p, calls) = poller(vec![out(0, "OPEN\n", "")]);
+        let k = view();
+        p.read(&k, Duration::ZERO, FASTEST).unwrap();
+        age(&p, &k, 60);
+        p.tick(&|| true);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn another_home_runs_gh_itself() {
+        let (p, calls) = poller(vec![out(0, "OPEN\n", "")]);
+        let env = json!({"HOME": "/elsewhere", "XDG_CONFIG_HOME": null});
+        let reply = p.answer(&json!({"op": "gh", "args": view(), "env": env}));
+        assert_eq!(reply["ok"], false);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     /// A direct host that counts gh calls and keeps a fake clock.
@@ -792,7 +931,7 @@ mod tests {
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(200));
                 age(&p, &k, 60);
-                p.tick();
+                p.tick(&|| false);
             })
         };
         h.sleep(10.0);

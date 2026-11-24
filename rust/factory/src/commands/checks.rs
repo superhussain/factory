@@ -27,13 +27,13 @@ use crate::shared::time::{parse_stamp, unix_now};
 const CHECKS_USAGE: &str = "usage: checks <project-slug>/<job-id> [--timeout S]";
 const CHECKS_INTERVAL: f64 = 10.0;
 const CHECKS_REGISTER: u64 = 120;
-const HEAD_CHECKS_QUERY: &str = "query=query($o:String!,$r:String!,$sha:GitObjectID!){repository(owner:$o,name:$r){object(oid:$sha){...on Commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion startedAt} ...on StatusContext{context state createdAt}}}}}}}}";
+pub(crate) const HEAD_CHECKS_QUERY: &str = "query=query($o:String!,$r:String!,$sha:GitObjectID!){repository(owner:$o,name:$r){object(oid:$sha){...on Commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion startedAt} ...on StatusContext{context state createdAt}}}}}}}}";
 const PR_STATE_USAGE: &str = "usage: pr-state <project-slug>/<job-id> [--wait S]";
 const PR_STATE_FIELDS: &str =
     "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName,headRefOid";
 const PR_REVIEWERS: &[&str] = &["OWNER", "MEMBER", "COLLABORATOR"];
 // gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
-const PR_GRAPHQL_QUERY: &str = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved path comments(first:100){nodes{authorAssociation body author{__typename login}}}}} latestReviews(first:100){nodes{author{__typename login}}}}}}";
+pub(crate) const PR_GRAPHQL_QUERY: &str = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved path comments(first:100){nodes{authorAssociation body author{__typename login}}}}} latestReviews(first:100){nodes{author{__typename login}}}}}}";
 const PR_STATE_INTERVAL: f64 = 30.0;
 const HANDLED_CAP: u64 = 3;
 const BUILDKITE_API: &str = "https://api.buildkite.com/v2";
