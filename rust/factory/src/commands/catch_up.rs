@@ -154,12 +154,30 @@ fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String
     if argvs.is_empty() {
         return Ok(None);
     }
-    for argv in &argvs {
+    let ran = run_restart(&argvs, home);
+    if ran.is_err() && scheduler == "schtasks" {
+        // The marker written before /End would make the .cmd loop exit at every logon.
+        let _ = pickup::clear_stop_marker(home);
+    }
+    ran?;
+    if scheduler == "cron" {
+        spawn_daemon().map_err(|e| format!("could not start the daemon: {e}"))?;
+    }
+    let pid = pickup::daemon_pid(home, &mut || locked_pid(home))?;
+    Ok(Some(format!("restarted (pid {pid})")))
+}
+
+/// Runs a restart's argvs in order. A kill that fails counts only while the daemon still holds
+/// its lock: /End may already have ended it, and then taskkill finds no process.
+fn run_restart(argvs: &[Vec<String>], home: &Path) -> Result<(), String> {
+    for argv in argvs {
         if argv[0] == "schtasks" && argv[1] == "/Run" {
             pickup::clear_stop_marker(home).map_err(|e| strip(&e.stderr).to_string())?;
         }
         let r = run(argv, Some(TIMER_TIMEOUT));
-        if r.code != 0 && !(argv[0] == "schtasks" && argv[1] == "/End") {
+        let kill = argv[0] == "kill" || argv[0] == "taskkill";
+        let gone = || kill && matches!(locked_pid(home), Ok(None));
+        if r.code != 0 && !(argv[0] == "schtasks" && argv[1] == "/End") && !gone() {
             let both = r.stderr + &r.stdout;
             let text = strip(&both);
             return Err(format!(
@@ -168,15 +186,11 @@ fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String
                 text.split('\n').next().unwrap_or("")
             ));
         }
-        if argv[0] == "kill" || argv[0] == "taskkill" {
+        if kill {
             pickup::daemon_stopped(&mut || locked_pid(home))?;
         }
     }
-    if scheduler == "cron" {
-        spawn_daemon().map_err(|e| format!("could not start the daemon: {e}"))?;
-    }
-    let pid = pickup::daemon_pid(home, &mut || locked_pid(home))?;
-    Ok(Some(format!("restarted (pid {pid})")))
+    Ok(())
 }
 
 /// The pid of the daemon that holds the lock, through a fake in tests: other tests' child
@@ -2233,6 +2247,65 @@ mod tests {
         );
         assert_eq!(*marked.borrow(), [true, true, false]);
         assert!(!marker.exists(), "the restart clears the stop marker");
+    }
+
+    /// Wraps the service fakes so the daemon kill exits 1; with ends, the daemon still goes.
+    fn kill_fails(ends: bool) {
+        let inner = FAKES.with(|f| f.borrow().run.clone()).unwrap();
+        FAKES.with(|f| {
+            f.borrow_mut().run = Some(Rc::new(move |argv, timeout| {
+                if argv[0] != "kill" && argv[0] != "taskkill" {
+                    return inner(argv, timeout);
+                }
+                if ends {
+                    inner(argv, timeout);
+                }
+                Some(Ok(Out {
+                    code: 1,
+                    stdout: String::new(),
+                    stderr: "ERROR: The process not found.\n".into(),
+                }))
+            }))
+        });
+    }
+
+    /// A failed kill of a daemon that still runs is a failed step, and the stop marker goes, so
+    /// the task's loop still starts the daemon at the next logon.
+    #[test]
+    fn failed_windows_restart_clears_the_stop_marker() {
+        let t = T::new("restart-schtasks-kill-fails");
+        t.daemon(Some("schtasks"), false);
+        let marker = crate::commands::daemon::stop_marker(&t.home);
+        daemon_runs(&t.home);
+        let calls = t.service_calls(0, "", false);
+        kill_fails(false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1, "{lines:?}");
+        let pid = std::process::id().to_string();
+        assert!(
+            lines.contains(&format!(
+                "daemon: restart failed: kill {pid}: ERROR: The process not found."
+            )),
+            "{lines:?}"
+        );
+        assert!(!calls.borrow().iter().any(|a| a[1] == "/Run"));
+        assert!(!marker.exists(), "a failed restart leaves the stop marker");
+    }
+
+    /// A kill that fails because /End already ended the daemon still counts as stopped.
+    #[test]
+    fn kill_of_a_daemon_end_already_stopped_counts() {
+        let t = T::new("restart-schtasks-ended");
+        t.daemon(Some("schtasks"), false);
+        daemon_runs(&t.home);
+        t.service_calls(0, "", false);
+        kill_fails(true);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&format!("daemon: restarted (pid {})", std::process::id())),
+            "{lines:?}"
+        );
     }
 
     /// On cron, catch-up ends the running daemon, waits for its lock to go, starts the new binary
