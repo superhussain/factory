@@ -133,6 +133,7 @@ pipeline/trial-paused-autonomy-settles-nothing
 pipeline/trial-revert-reads-the-champion-from-history-not-the-board
 pipeline/trial-malformed-records-are-skipped
 pipeline/trial-malformed-records-do-not-crash-settle
+pipeline/trial-misshapen-open-records-are-dropped
 pipeline/trial-no-open-trials
 pipeline/trial-board-keeps-open-records-and-the-newest-settled-ones
 pipeline/trial-usage

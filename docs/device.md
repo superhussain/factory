@@ -352,14 +352,14 @@ Flags name risky calls. They are heuristics that inform a reader and block nothi
 | `sudo` | Bash | `sudo chown u x` |
 | `pipe-to-shell` | Bash | `curl ... \| sh` |
 | `deploy` | Bash | `wrangler deploy` |
-| `pr-merge` | subagent Bash | `gh pr merge 7`, `gh api -X PUT repos/o/r/pulls/7/merge` |
+| `pr-merge` | subagent Bash | `gh pr merge 7`, `gh api -X PUT repos/o/r/pulls/7/merge`, `"$RUNTIME" pr-merge factory/1017-add-x` |
 | `sandbox-off` | Bash | input `dangerouslyDisableSandbox: true` |
 | `secret-file` | Bash, Read, Edit, Write, Grep `path` | `Read ~/app/.env` |
 | `denied` | any | the call's result is an error that holds a denial phrase |
 
 A `gh pr merge` in the main session carries no flag, since the orchestrator merges approved PRs there. `pr-merge` flags only a merge that runs:
 
-- It matches `gh pr merge`, or `gh api` with `PUT` on `pulls/<n>/merge`, as a command's first word or after `;`, `&`, `|`, `(`, `$(`, a backtick or a newline. A `VAR=value`, `sudo`, `env`, `command`, `exec`, `time`, `if`, `then`, `else`, `elif`, `do` or `!` prefix may come first.
+- It matches `gh pr merge`, or `gh api` with `PUT` on `pulls/<n>/merge`, as a command's first word or after `;`, `&`, `|`, `(`, `$(`, a backtick or a newline. A `VAR=value`, `sudo`, `env`, `command`, `exec`, `time`, `if`, `then`, `else`, `elif`, `do` or `!` prefix may come first. It also matches the factory runtime's `pr-merge` subcommand, as in `"$RUNTIME" pr-merge factory/1017-add-x`, when the program is a quoted word, a `$NAME` variable, or a path whose last part is `factory`.
 - It skips `cat` and `tee` heredoc bodies the way `secret-file` does. It also skips text in single quotes, and text in double quotes that holds no `$(` or backtick, so a grep pattern or a commit message does not flag.
 - A merge inside `bash -c` or `eval` does not flag.
 

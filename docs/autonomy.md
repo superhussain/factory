@@ -360,11 +360,14 @@ open for the next settle until it is 28 days old. A 409 (paused autonomy or an i
 pipeline), 412 (a moved base) or 429 (the daily cap) leaves it open at any age, so the next
 settle tries again. A `revert-failed` trial neither blocks
 admit nor counts toward the pause. A revert counts toward the daily retro cap. The board keeps
-open records, every unresumed revert and the newest 20 other settled ones. Settle skips malformed records, including
-one whose `opened` is not a board timestamp, and drops non-dict entries from `trials`
+open records, every unresumed revert and the newest 20 other settled ones. Settle skips malformed records and drops an open one
+whose `opened` is not a board timestamp or whose `version` is not a whole number
+(`trial_misshapen`). It also drops non-dict entries from `trials`
 when it writes the board.
 - **Settle-shaped.** The Worker's `checkTrialSettle` refuses, with 400, a board `PUT` or
-  `PATCH` that changes a stored `open` trial any way `trial settle` would not. Every key
+  `PATCH` that changes a stored `open` trial any way `trial settle` would not.
+  `checkTrialSettle` does not guard an open record that `trialMisshapen` flags, so
+  `trial settle` can drop it. Every key
   outside `status`, `settled`, `arms`, `reads` and `revert_version` stays equal, a settled
   record's `settled` is a board timestamp, and the written record must pass:
 
