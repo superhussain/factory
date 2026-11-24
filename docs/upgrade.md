@@ -49,7 +49,11 @@ Then bring each host up to date with one command (`factory.exe` on Windows):
 It fetches the checkout's origin, builds the binary from origin's own `rust/`
 crate in a temporary detached worktree, and runs that binary's `install`. The new bundle then
 rewrites the pickup timer if the host has one, and catch-up checks the Worker's
-`deploy-main` run. A host with nothing new prints `catch-up: nothing new` and
+`deploy-main` run. Catch-up also rewrites every factory timer that still runs
+`runtime/factory.py` (the crontab, `~/Library/LaunchAgents/factory.*.plist`,
+`~/.config/systemd/user/factory-*.service` and `~/.config/factory-*.cmd`) and a
+`stalls.json` adapter that runs `runtime/paseo_stalls.py`, so they run the binary
+beside it, and reloads launchd and systemd. It prints one `timers:` line for each. A host with nothing new prints `catch-up: nothing new` and
 writes nothing.
 
 Before any local write it prints `backup: <home>/backups/catch-up-<stamp>`. That
