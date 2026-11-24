@@ -1,0 +1,3 @@
+wrote {home}/retro/unknown-fixed/findings.md
+rejected findings[0].fixed_by: must be a job id from merged in aggregate.json
+no suggestions

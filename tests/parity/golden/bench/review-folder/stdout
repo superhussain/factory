@@ -1,0 +1,38 @@
+{
+  "cases": 2,
+  "defects": 3,
+  "weights": {
+    "high": 3,
+    "medium": 2,
+    "low": 1
+  },
+  "arms": [
+    {
+      "arm": "review-dir",
+      "weighted_recall": 0.83,
+      "caught": 2,
+      "severity": {
+        "high": {
+          "caught": 1,
+          "of": 1
+        },
+        "medium": {
+          "caught": 1,
+          "of": 1
+        },
+        "low": {
+          "caught": 0,
+          "of": 1
+        }
+      },
+      "missed": [
+        "1018-add-y docs/device.md:12-12"
+      ],
+      "tokens": 413000,
+      "seconds": 540,
+      "runs": 2,
+      "missing": [],
+      "no_run": []
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "id": "008-fix-the-parser",
+  "stage": "idea",
+  "title": "sample: Fix the parser off-by-one",
+  "note": "explorer: bug-fix",
+  "idea": "## Fix the parser off-by-one\n\n\n---\nApproved option A in chat by parity at {now}: \"approve `008-guard-the-ls` A, not $(whoami) or $5\"",
+  "updated": "{now}",
+  "origin": {
+    "by": "explorer",
+    "project": "sample",
+    "run": "run-1",
+    "kind": "bug-fix",
+    "fingerprint": "0000000000000000",
+    "gate": "human",
+    "eligible": true,
+    "reasons": [],
+    "options": [
+      "A",
+      "B",
+      "C"
+    ],
+    "recommend": "B",
+    "created": "2020-01-01T00:00:00Z",
+    "admitted_by": "parity",
+    "approved": {
+      "option": "A",
+      "via": "chat",
+      "quote": "approve `008-guard-the-ls` A, not $(whoami) or $5",
+      "device": "parity",
+      "at": "{now}",
+      "decider": "person"
+    }
+  },
+  "project": "sample"
+}

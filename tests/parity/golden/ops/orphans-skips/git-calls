@@ -1,0 +1,2 @@
+{"argv": ["-C", "home/checkout", "ls-remote", "--heads", "origin", "refs/heads/factory/*"]}
+{"argv": ["-C", "home/bare", "ls-remote", "--heads", "origin", "refs/heads/factory/*"]}

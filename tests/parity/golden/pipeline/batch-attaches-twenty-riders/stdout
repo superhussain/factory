@@ -1,0 +1,145 @@
+{
+  "lead": "090-sample-export-csv",
+  "riders": [
+    {
+      "id": "100-sample-more",
+      "title": "Title 100-sample-more",
+      "idea": "Title 100-sample-more",
+      "hold": false
+    },
+    {
+      "id": "101-sample-more",
+      "title": "Title 101-sample-more",
+      "idea": "Title 101-sample-more",
+      "hold": false
+    },
+    {
+      "id": "102-sample-more",
+      "title": "Title 102-sample-more",
+      "idea": "Title 102-sample-more",
+      "hold": false
+    },
+    {
+      "id": "103-sample-more",
+      "title": "Title 103-sample-more",
+      "idea": "Title 103-sample-more",
+      "hold": false
+    },
+    {
+      "id": "104-sample-more",
+      "title": "Title 104-sample-more",
+      "idea": "Title 104-sample-more",
+      "hold": false
+    },
+    {
+      "id": "105-sample-more",
+      "title": "Title 105-sample-more",
+      "idea": "Title 105-sample-more",
+      "hold": false
+    },
+    {
+      "id": "106-sample-more",
+      "title": "Title 106-sample-more",
+      "idea": "Title 106-sample-more",
+      "hold": false
+    },
+    {
+      "id": "107-sample-more",
+      "title": "Title 107-sample-more",
+      "idea": "Title 107-sample-more",
+      "hold": false
+    },
+    {
+      "id": "108-sample-more",
+      "title": "Title 108-sample-more",
+      "idea": "Title 108-sample-more",
+      "hold": false
+    },
+    {
+      "id": "109-sample-more",
+      "title": "Title 109-sample-more",
+      "idea": "Title 109-sample-more",
+      "hold": false
+    },
+    {
+      "id": "110-sample-more",
+      "title": "Title 110-sample-more",
+      "idea": "Title 110-sample-more",
+      "hold": false
+    },
+    {
+      "id": "111-sample-more",
+      "title": "Title 111-sample-more",
+      "idea": "Title 111-sample-more",
+      "hold": false
+    },
+    {
+      "id": "112-sample-more",
+      "title": "Title 112-sample-more",
+      "idea": "Title 112-sample-more",
+      "hold": false
+    },
+    {
+      "id": "113-sample-more",
+      "title": "Title 113-sample-more",
+      "idea": "Title 113-sample-more",
+      "hold": false
+    },
+    {
+      "id": "114-sample-more",
+      "title": "Title 114-sample-more",
+      "idea": "Title 114-sample-more",
+      "hold": false
+    },
+    {
+      "id": "115-sample-more",
+      "title": "Title 115-sample-more",
+      "idea": "Title 115-sample-more",
+      "hold": false
+    },
+    {
+      "id": "116-sample-more",
+      "title": "Title 116-sample-more",
+      "idea": "Title 116-sample-more",
+      "hold": false
+    },
+    {
+      "id": "117-sample-more",
+      "title": "Title 117-sample-more",
+      "idea": "Title 117-sample-more",
+      "hold": false
+    },
+    {
+      "id": "118-sample-more",
+      "title": "Title 118-sample-more",
+      "idea": "Title 118-sample-more",
+      "hold": false
+    },
+    {
+      "id": "119-sample-more",
+      "title": "Title 119-sample-more",
+      "idea": "Title 119-sample-more",
+      "hold": false
+    }
+  ],
+  "candidates": [
+    {
+      "id": "091-sample-typo",
+      "title": "Title 091-sample-typo",
+      "idea": "Fix the header typo",
+      "hold": false
+    },
+    {
+      "id": "092-sample-csv-name",
+      "title": "Title 092-sample-csv-name",
+      "idea": "Title 092-sample-csv-name",
+      "hold": false
+    },
+    {
+      "id": "093-sample-login",
+      "title": "Title 093-sample-login",
+      "idea": "Title 093-sample-login",
+      "hold": false
+    }
+  ]
+}

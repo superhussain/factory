@@ -1,0 +1,25 @@
+{
+  "lead": "090-sample-export-csv",
+  "riders": [
+    {
+      "id": "091-sample-typo",
+      "title": "Title 091-sample-typo",
+      "idea": "Fix the header typo",
+      "hold": false
+    },
+    {
+      "id": "092-sample-csv-name",
+      "title": "Title 092-sample-csv-name",
+      "idea": "Title 092-sample-csv-name",
+      "hold": false
+    }
+  ],
+  "candidates": [
+    {
+      "id": "093-sample-login",
+      "title": "Title 093-sample-login",
+      "idea": "Title 093-sample-login",
+      "hold": false
+    }
+  ]
+}

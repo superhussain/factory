@@ -1,0 +1,1 @@
+factory.py: Project changed in R2. Local edits were kept. Compare sample.md.remote, merge into sample.md, delete the .remote file, then push sample.

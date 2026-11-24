@@ -1,0 +1,1 @@
+{"argv": ["pr", "view", "https://github.com/example/sample/pull/2", "--json", "state,isCrossRepository,headRefName", "--jq", ".state + \" \" + (.isCrossRepository | tostring) + \" \" + .headRefName"]}

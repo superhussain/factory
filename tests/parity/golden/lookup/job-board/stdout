@@ -1,0 +1,12 @@
+{
+  "id": "042-dark-mode",
+  "project": "sample",
+  "stage": "review",
+  "note": "caf\u00e9 \u2713 \ud83d\ude00",
+  "score": 0.1,
+  "ratio": 1e-05,
+  "big": 12345678901234567890123,
+  "tokens": {},
+  "refs": [],
+  "pr": "https://github.com/octo/sample/pull/7"
+}

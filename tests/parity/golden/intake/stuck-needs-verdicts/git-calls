@@ -1,0 +1,2 @@
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"]}
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "--verify", "-q", "refs/remotes/origin/factory/001-test"]}

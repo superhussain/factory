@@ -1,0 +1,10 @@
+skip 001-alpha alpha: in-flight cap full (1/1)
+skip 002-noproj: no project
+skip 003-missing missing: no checkout on this host
+skip 004-gated alpha: waiting on a human
+skip 005-paused alpha: paused
+skip 006-closing alpha: closing
+skip 007-later alpha: not before 2999-01-01T00:00:00Z
+skip 008-waits alpha: waits on 009-open
+skip 010-claimed alpha: claimed by other session s1
+host parity: would launch 0

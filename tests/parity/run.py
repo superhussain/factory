@@ -1,9 +1,10 @@
-"""Differential runner: run each parity case on Python and on a factory binary, then compare.
+"""Parity runner: run each parity case on a factory binary and compare it with the case's golden files.
 
-python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N]
+python3 tests/parity/run.py --bin PATH [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N] [--record]
 
-Each case side runs in its own temp root with its own home, stub folder and HTTP port, so cases run in a process
-pool. Results print in case order. --shard K/N keeps every Nth case starting at the Kth, for a CI matrix.
+Each case runs in its own temp root with its own home, stub folder and HTTP port, so cases run in a process pool.
+Results print in case order. --shard K/N keeps every Nth case starting at the Kth, for a CI matrix. --record writes
+each selected case's normalized output to tests/parity/golden/<case-id>/ instead of comparing it.
 """
 import argparse
 import calendar
@@ -11,27 +12,106 @@ import concurrent.futures
 import contextlib
 import difflib
 import fnmatch
+import gzip
+import hashlib
 import json
 import os
 import re
 import shutil
+import socket
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1] / "tests" / "cli"))
-from support import FACTORY_BIN, ROOT, SKILL, http_fixture, isolated_env, snapshot
+sys.path.insert(0, str(HERE))
 import stub
 
-PYTHON = [sys.executable, "-B", str(SKILL / "runtime/factory.py")]
-TOOLS = ("gh", "paseo", "git", "crontab")
+ROOT = HERE.parents[1]
+FACTORY_BIN = os.environ.get("FACTORY_BIN", "")
+# claude is stubbed so a host's own claude on PATH never changes a case: bench checks for it.
+TOOLS = ("gh", "paseo", "git", "crontab", "claude")
 CASES = HERE / "cases"
+GOLDEN = HERE / "golden"
 REQUEST_HEADERS = ("content-type", "if-match", "if-none-match", "cf-access-client-id", "cf-access-client-secret",
                    "user-agent", "authorization")
+FIELDS = ("exit code", "stdout", "stderr", "home tree") + tuple(f"{tool} calls" for tool in TOOLS) + ("requests",)
+# A golden's dates relative to the run's UTC date. --record writes these placeholders, and a compare expands them.
+DAYS = {"{today}": 0, "{today-6}": 6}
+# The host's OS label (host_os in the binary) in host-status.json and its PUT body, raw or JSON-escaped.
+HOST_OS = re.compile(rb'(\\?"os\\?": \\?")(?:Linux \(WSL\)|Linux|macOS|Windows|Other)(?=\\?")')
+# This host's name, where a device name falls back to it, as a whole word so a short name never matches inside a path.
+HOST = re.compile(rb"(?<![\w.-])" + re.escape(socket.gethostname().encode()) + rb"(?![\w.-])") if socket.gethostname() else None
+ELAPSED = re.compile(rb'"elapsed": \d+')
 STAMP = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
+
+
+def isolated_env(home):
+    env = dict(os.environ)
+    for key in list(env):
+        # CLAUDECODE, AI_AGENT and OPENCODE_TERMINAL mark an agent's shell, where autonomy commands refuse.
+        if (key in ("FACTORY_HOME", "FACTORY_SESSION", "PASEO_HOME", "PASEO_AGENT_ID", "CLAUDE_CONFIG_DIR",
+                    "CLAUDECODE", "AI_AGENT", "OPENCODE_TERMINAL",
+                    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
+                or key.startswith("GIT_CONFIG_") or key.lower().endswith("_proxy")):
+            env.pop(key, None)
+    env.update(HOME=str(home), USERPROFILE=str(home), XDG_CONFIG_HOME=str(home / "config"),
+               NO_PROXY="localhost,127.0.0.1",
+               GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=str(home / "gitconfig"),
+               GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.invalid",
+               GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.invalid")
+    return env
+
+
+def snapshot(root):
+    return {str(path.relative_to(root)): (stat.S_IMODE(path.stat().st_mode),
+            path.read_bytes() if path.is_file() else None)
+            for path in [root] + sorted(root.rglob("*"))}
+
+
+@contextlib.contextmanager
+def http_fixture(routes):
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            requests.append((self.command, self.path, dict(self.headers), data))
+            route = routes.get(f"{self.command} {self.path}", routes.get(self.path, (404, b"")))
+            # A list serves its replies in order, and the last one repeats.
+            if isinstance(route, list):
+                route = route.pop(0) if len(route) > 1 else route[0]
+            status, body, *extra = route
+            if not isinstance(body, bytes):
+                body = json.dumps(body).encode("utf-8")
+            self.send_response(status)
+            if status == 302:
+                self.send_header("Location", "https://example.invalid/login")
+            self.send_header("ETag", '"' + hashlib.sha256(body).hexdigest() + '"')
+            for name, value in (extra[0] if extra else {}).items():
+                self.send_header(name, value)
+            self.end_headers()
+            self.wfile.write(body)
+        do_POST = do_PUT = do_PATCH = do_GET
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.requests = requests
+    server.origin = "http://127.0.0.1:" + str(server.server_port)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 def load_cases(folder=CASES):
@@ -98,6 +178,10 @@ def request_lines(server, normalize):
     return lines
 
 
+def utc_date(days_back):
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() - days_back * 86400))
+
+
 def now_stamps(data, start, end):
     def stamp(match):
         try:
@@ -114,13 +198,8 @@ def place_skill(case, command, values):
         return command
     skill = Path(expand(case["skill"], values))
     (skill / "runtime").mkdir(parents=True)
-    if command == PYTHON:
-        for path in (SKILL / "runtime").glob("*.py"):
-            shutil.copy2(path, skill / "runtime")
-        command = PYTHON[:2] + [str(skill / "runtime" / "factory.py")]
-    else:
-        shutil.copy2(command[0], skill / "runtime" / "factory")
-        command = [str(skill / "runtime" / "factory")]
+    shutil.copy2(command[0], skill / "runtime" / "factory")
+    command = [str(skill / "runtime" / "factory")]
     if "bundle" in case:
         (skill / "bundle.json").write_text(expand(case["bundle"], values), encoding="utf-8")
     return command
@@ -132,7 +211,7 @@ def run_side(case, command):
         home, bin_dir, stub_dir = root / "home", root / "bin", root / "stub"
         routes = {}
         with http_fixture(routes) if "routes" in case else contextlib.nullcontext() as server:
-            values = {"home": str(home), "tmp": str(root), "today": time.strftime("%Y-%m-%d"), "root": str(ROOT)}
+            values = {"home": str(home), "tmp": str(root), "today": utc_date(0), "root": str(ROOT)}
             if server:
                 values["api"] = server.origin
                 routes.update(routes_for(case, values))
@@ -157,6 +236,8 @@ def run_side(case, command):
             # A side gets only the fake token from home/.env, so a real one never reaches the fixture or a diff.
             env.pop("FACTORY_ACCESS_CLIENT_ID", None)
             env.pop("FACTORY_ACCESS_CLIENT_SECRET", None)
+            # The binary's local dates are UTC dates, so a golden holds the same dates in every zone.
+            env["TZ"] = "UTC"
             env.update(case.get("env", {}))
             env.update(PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""), FACTORY_STUB_DIR=str(stub_dir),
                        PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
@@ -174,17 +255,19 @@ def run_side(case, command):
         def normalize(data):
             if server:
                 data = data.replace(server.origin.encode(), b"{api}")
-            # Python prints factory.py's path and the binary its own or the factory.py beside it; the
-            # skill root is two folders up.
+            # The goldens came from Python, which printed factory.py's path where the binary prints its own;
+            # both read {runtime}. The skill root is two folders up.
             runtime = os.path.realpath(command[-1])
             data = data.replace(os.path.join(os.path.dirname(runtime), "factory.py").encode(), b"{runtime}")
             if "skill" in case:
-                # In a skill folder both sides sit in runtime/, so the binary beside factory.py reads {bin}.
+                # In a skill folder the binary sits in runtime/ and reads {bin}.
                 data = data.replace(os.path.join(os.path.dirname(runtime), "factory").encode(), b"{bin}")
             data = data.replace(runtime.encode(), b"{runtime}").replace(os.path.abspath(command[-1]).encode(), b"{runtime}")
             data = data.replace(os.path.dirname(os.path.dirname(runtime)).encode(), b"{skill}")
             data = data.replace(str(home).encode(), b"{home}").replace(str(root).encode(), b"{tmp}")
-            return now_stamps(data, start, end)
+            data = data.replace(str(ROOT).encode(), b"{root}")
+            data = HOST_OS.sub(rb"\1{os}", ELAPSED.sub(rb'"elapsed": {n}', now_stamps(data, start, end)))
+            return HOST.sub(b"{host}", data) if HOST else data
 
         tree = [f"{path} {mode:o} {normalize(data)!r}" if data is not None else f"{path} {mode:o}"
                 for path, (mode, data) in snapshot(home).items()]
@@ -200,13 +283,59 @@ def run_side(case, command):
         shutil.rmtree(root)
 
 
-def run_case(case, bin_command):
-    python = run_side(case, PYTHON)
-    if ("routes" in case or "exit" in case) and python[0][1] != str(case.get("exit")):
-        return [f"FAIL {case['id']}: python exit {python[0][1]}, case expects {case.get('exit')}"]
-    for (field, python), (_, binary) in zip(python, run_side(case, bin_command)):
-        if python != binary:
-            diff = difflib.unified_diff(python.splitlines(), binary.splitlines(), "python", "bin", lineterm="")
+def golden_file(folder, field):
+    """A field's golden file. The home tree repeats each home's fixtures, so it is gzipped."""
+    name = field.replace(" ", "-")
+    return folder / (name + ".gz" if field == "home tree" else name)
+
+
+def read_golden(case):
+    """The case's golden fields, or None when it has no golden folder. A missing file is an empty field."""
+    folder = GOLDEN / case["id"]
+    if not folder.is_dir():
+        return None
+    fields = []
+    for field in FIELDS:
+        path = golden_file(folder, field)
+        data = path.read_bytes() if path.is_file() else b""
+        if data and path.suffix == ".gz":
+            data = gzip.decompress(data)
+        fields.append((field, data.decode("utf-8", "surrogateescape")))
+    return fields
+
+
+def write_golden(case, fields):
+    folder = GOLDEN / case["id"]
+    if folder.is_dir():
+        shutil.rmtree(folder)
+    folder.mkdir(parents=True)
+    for field, value in fields:
+        if value or field == "exit code":
+            path = golden_file(folder, field)
+            data = value.encode("utf-8", "surrogateescape")
+            path.write_bytes(gzip.compress(data, 9, mtime=0) if path.suffix == ".gz" else data)
+
+
+def run_case(case, command, record):
+    fields = run_side(case, command)
+    dates = {name: utc_date(back) for name, back in DAYS.items()}
+    if record:
+        # A date the case itself spells out is fixture data, not today's date, so it stays literal.
+        written = json.dumps(case)
+        for name, date in dates.items():
+            if date not in written:
+                fields = [(field, value.replace(date, name)) for field, value in fields]
+        if ("routes" in case or "exit" in case) and fields[0][1] != str(case.get("exit")):
+            return [f"FAIL {case['id']}: exit {fields[0][1]}, case expects {case.get('exit')}"]
+        write_golden(case, fields)
+        return []
+    golden = read_golden(case)
+    if golden is None:
+        return [f"FAIL {case['id']}: no golden folder {GOLDEN / case['id']}; run with --record"]
+    for (field, want), (_, got) in zip(golden, fields):
+        want = expand(want, {name[1:-1]: date for name, date in dates.items()})
+        if want != got:
+            diff = difflib.unified_diff(want.splitlines(), got.splitlines(), "golden", "bin", lineterm="")
             return [f"FAIL {case['id']}: {field} differs"] + list(diff)[:40]
     return []
 
@@ -218,6 +347,7 @@ def main(argv):
     parser.add_argument("--case", action="append", default=[])
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--shard")
+    parser.add_argument("--record", action="store_true")
     args = parser.parse_args(argv)
     shard = re.fullmatch(r"([1-9]\d*)/([1-9]\d*)", args.shard or "1/1")
     if args.jobs < 1 or not shard or int(shard[1]) > int(shard[2]):
@@ -246,14 +376,18 @@ def main(argv):
     if patterns:
         cases = [case for case in cases if any(fnmatch.fnmatchcase(case["id"], p) for p in patterns)]
     cases = cases[int(shard[1]) - 1::int(shard[2])]
-    bin_command = [os.path.abspath(binary)] if binary else PYTHON
+    if not binary:
+        print("parity: --bin or FACTORY_BIN required", file=sys.stderr)
+        return 2
+    command = [os.path.abspath(binary)]
     failed = 0
-    # Processes, not threads: each case's Python-side work holds the GIL, so threads barely overlap.
+    # Processes, not threads: each case's harness work holds the GIL, so threads barely overlap.
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs) as pool:
-        for case, lines in zip(cases, pool.map(run_case, cases, [bin_command] * len(cases), chunksize=4)):
+        runs = pool.map(run_case, cases, [command] * len(cases), [args.record] * len(cases), chunksize=4)
+        for case, lines in zip(cases, runs):
             print("\n".join(lines) if lines else f"PASS {case['id']}", flush=True)
             failed += bool(lines)
-    print(f"parity: {len(cases) - failed} passed, {failed} failed")
+    print(f"parity: {len(cases) - failed} {'recorded' if args.record else 'passed'}, {failed} failed")
     return 1 if failed else 0
 
 

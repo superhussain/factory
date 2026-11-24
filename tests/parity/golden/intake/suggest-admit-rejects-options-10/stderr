@@ -1,0 +1,1 @@
+factory.py: {home}/suggest-options-10.json: suggestions[0].options[2].cons: must be a string of 1-120 characters; nothing admitted

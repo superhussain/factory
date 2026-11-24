@@ -1,0 +1,1 @@
+factory.py: handoff is only for spec, build, review, or approve; human and PR gates stay held

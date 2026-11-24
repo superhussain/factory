@@ -1,0 +1,1 @@
+factory.py: usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]: role "reviewer" is not one of orchestrator, spec, build, review-security, review-ux, review-ui, review-code, approve

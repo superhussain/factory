@@ -1,4 +1,4 @@
-// Nx graph guard: the four concern projects stay script-backed and cacheable,
+// Nx graph guard: the three concern projects stay script-backed and cacheable,
 // no target command invokes Python, and nx.json carries no lint/format
 // configuration (job 108 owns those targets) or credential-shaped strings.
 import assert from "node:assert/strict";
@@ -22,13 +22,8 @@ const nxText = read("nx.json");
 const nx = JSON.parse(nxText);
 const manifest = JSON.parse(read("package.json"));
 
-const PROJECT_FILES = [
-  "worker/project.json",
-  "web/project.json",
-  "tools/project.json",
-  "skills/project.json",
-];
-const PROJECT_NAMES = ["worker-hosted", "web-dashboard", "tooling", "device-bundle"];
+const PROJECT_FILES = ["worker/project.json", "web/project.json", "tools/project.json"];
+const PROJECT_NAMES = ["worker-hosted", "web-dashboard", "tooling"];
 const TARGETS = {
   auth: "pnpm run test:auth",
   protocol: "pnpm run test:protocol",
@@ -36,8 +31,6 @@ const TARGETS = {
   deploy: "pnpm run test:deploy",
   local: "pnpm run test:local",
   browser: "pnpm run test:browser",
-  cli: "pnpm run test:cli",
-  install: "pnpm run test:install",
   verify: "pnpm run test:verify",
 };
 const OUTPUTS = {
@@ -47,8 +40,6 @@ const OUTPUTS = {
   deploy: [],
   local: [],
   browser: [],
-  cli: [],
-  install: [],
   verify: [],
 };
 const INPUTS = {
@@ -116,37 +107,12 @@ const INPUTS = {
     "{workspaceRoot}/.node-version",
     { env: "FACTORY_BROWSER_SHARD" },
   ],
-  cli: [
-    "default",
-    "shared",
-    "{workspaceRoot}/tests/cli/**/*",
-    "{workspaceRoot}/tests/parity/**/*",
-    "{workspaceRoot}/rust/factory/src/usage.txt",
-    "{workspaceRoot}/tools/install.py",
-    "{workspaceRoot}/tests/tools/test_install.py",
-    "{workspaceRoot}/tests/fixtures/cli-v1.json",
-    "{workspaceRoot}/tests/fixtures/inbox-count.json",
-    "{workspaceRoot}/docs/device.md",
-    "{workspaceRoot}/docs/integrations.md",
-    "{workspaceRoot}/worker/admission.js",
-    "{workspaceRoot}/.github/workflows/ci.yml",
-    "{workspaceRoot}/.github/actions/ci-setup/action.yml",
-    { env: "FACTORY_FORBID_LITERALS_JSON" },
-    { runtime: "python3 --version" },
-  ],
-  install: [
-    "default",
-    "shared",
-    "{workspaceRoot}/tools/install.py",
-    "{workspaceRoot}/tests/tools/test_install.py",
-    "{workspaceRoot}/tests/cli/support.py",
-    "{workspaceRoot}/skills/**/*",
-    { runtime: "python3 --version" },
-  ],
   verify: [
     "default",
     "shared",
     "{workspaceRoot}/tests/tools/test_verify.py",
+    "{workspaceRoot}/tests/tools/test_paseo_stalls.py",
+    "{workspaceRoot}/skills/factory/runtime/paseo_stalls.py",
     "{workspaceRoot}/tests/tools/test_pr_screenshots.py",
     "{workspaceRoot}/tests/tools/test_copy_pr_screenshots.py",
     "{workspaceRoot}/tests/tools/test_public_cutover.py",

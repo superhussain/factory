@@ -1,7 +1,7 @@
 ---
 name: factory
 description: Use for /factory commands, factory dashboard tasks, and continuing or handing a factory job between Claude, OpenCode, and other coding agents. Captures ideas before project registration, then runs spec, build, four reviews, approval, PR and merge. Registers projects with init; handoff and resume preserve an existing job.
-compatibility: Requires git and gh, plus a Rust toolchain (rustup) to build the binary, and Python 3.8+ for tools/install.py and the other tools/*.py scripts; network access to the configured factory HTTPS API and project Git/gh remotes.
+compatibility: Requires git and gh, plus a Rust toolchain (rustup) to build the binary; network access to the configured factory HTTPS API and project Git/gh remotes.
 ---
 
 # Software factory
@@ -95,6 +95,7 @@ Read [feature](references/commands/feature.md) before step 1 of any loop run. It
 ## Where things live
 
 Setup and diagnostics (home precedence, `adopt-home`, `doctor`) are in [init](references/commands/init.md).
+To move a host from the Python factory to the Rust binary, follow `docs/migrating-to-rust.md` in the factory checkout. Its agent checklist runs unattended.
 
 Resolve the paths once per command, from the installed skill (`factory.exe` on
 Windows):
@@ -390,7 +391,8 @@ Every job field, with an example row and who writes it, is in [board fields](ref
 - Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
   at `pr-open` until its parent merges and it is retargeted to `$BASE`. Wait for
   checks with `"$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0: they
-  passed, or the repo has none. On a PR behind `$BASE`, it runs
+  passed, or the repo has none. It records that head as `checked_head`, and
+  `pr-merge` merges only that head. On a PR behind `$BASE`, it runs
   `gh pr update-branch` and rechecks the new head. Exit 3: still pending; run it
   again once. A second exit 3 in a row from `checks` or `pr-merge` moves the job to
   `needs-human` with the note `merge stalled: exit 3 twice` and `needs` `merge or

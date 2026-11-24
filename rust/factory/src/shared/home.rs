@@ -162,7 +162,7 @@ pub fn bundle_entry(skill: &Path) -> Option<Vec<String>> {
 }
 
 /// What `where` and prompts name as the runtime: the bundle's binary when the skill's bundle.json
-/// has an entry, else the `factory.py` beside this binary.
+/// has an entry, else this binary.
 pub fn runtime_path() -> Res<PathBuf> {
     let exe = std::env::current_exe()
         .and_then(|p| resolve(&p))
@@ -170,7 +170,7 @@ pub fn runtime_path() -> Res<PathBuf> {
     if let Some(entry) = exe.parent().and_then(Path::parent).and_then(bundle_entry) {
         return Ok(PathBuf::from(&entry[0]));
     }
-    Ok(exe.with_file_name("factory.py"))
+    Ok(exe)
 }
 
 fn valid_manifest(path: &Path) -> Option<()> {
@@ -373,12 +373,9 @@ mod tests {
     }
 
     #[test]
-    fn runtime_is_the_factory_py_beside_the_binary() {
+    fn runtime_is_this_binary_without_a_bundle_entry() {
         let exe = resolve(&std::env::current_exe().unwrap()).unwrap();
-        assert_eq!(
-            runtime_path().unwrap(),
-            exe.parent().unwrap().join("factory.py")
-        );
+        assert_eq!(runtime_path().unwrap(), exe);
     }
 
     #[test]
@@ -480,6 +477,65 @@ mod tests {
         fs::write(dir.join("config.md"), "---\ndevice: box\n---\n").unwrap();
         assert_eq!(device_name(&dir), "box");
         assert_eq!(holder(&dir).unwrap().2, 120);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Ported from tests/cli/test_location.py: a symlinked pointer, a symlinked metadata folder in the
+    /// home and a FIFO under jobs/ are each refused with exit 2.
+    #[cfg(unix)]
+    #[test]
+    fn pointer_and_metadata_links_and_a_fifo_are_refused() {
+        let dir = temp_dir("home-links");
+        let home = dir.join("home");
+        fs::create_dir(&home).unwrap();
+        fs::write(home.join("config.md"), "---\napi_url:\n---\nBody\n").unwrap();
+        let data = dir.join("pointer-data");
+        fs::write(
+            &data,
+            format!(
+                "{{\"version\": 1, \"home\": {}}}",
+                pyjson::dumps(&Value::from(home.to_str().unwrap()), pyjson::DEFAULT)
+            ),
+        )
+        .unwrap();
+        assert_eq!(read_location(&data).unwrap(), home);
+        let pointer = dir.join("factory-location.json");
+        std::os::unix::fs::symlink(&data, &pointer).unwrap();
+        let e = read_location(&pointer).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr),
+            (
+                2,
+                format!(
+                    "factory.py: Invalid location pointer: {}.\n",
+                    pointer.display()
+                )
+            )
+        );
+        std::os::unix::fs::symlink(&dir, home.join("projects")).unwrap();
+        for deep in [false, true] {
+            let e = validate_home(&home, deep).unwrap_err();
+            assert_eq!(
+                (e.code, e.stderr.as_str()),
+                (2, "factory.py: Invalid local metadata: projects.\n")
+            );
+        }
+        fs::remove_file(home.join("projects")).unwrap();
+        let job = home.join("jobs/sample/001-test");
+        fs::create_dir_all(&job).unwrap();
+        assert!(std::process::Command::new("mkfifo")
+            .arg(job.join("pipe"))
+            .status()
+            .unwrap()
+            .success());
+        let e = validate_home(&home, true).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (
+                2,
+                "factory.py: Invalid local metadata: jobs/sample/001-test/pipe.\n"
+            )
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 }

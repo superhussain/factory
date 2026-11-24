@@ -1,0 +1,5 @@
+{"argv": ["inspect", "agent-1", "--json"]}
+{"argv": ["workspace", "ls", "--json"]}
+{"argv": ["workspace", "archive", "wks_0a1b"]}
+{"argv": ["inspect", "agent-1", "--json"]}
+{"argv": ["archive", "agent-1", "--force"]}

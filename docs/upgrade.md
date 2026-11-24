@@ -46,8 +46,8 @@ Then bring each host up to date with one command (`factory.exe` on Windows):
 <installed-skill>/runtime/factory catch-up
 ```
 
-It fetches the checkout's origin and installs the skill with origin's own
-`tools/install.py` from a temporary detached worktree. The new bundle then
+It fetches the checkout's origin, builds the binary from origin's own `rust/`
+crate in a temporary detached worktree, and runs that binary's `install`. The new bundle then
 rewrites the pickup timer if the host has one, and catch-up checks the Worker's
 `deploy-main` run. A host with nothing new prints `catch-up: nothing new` and
 writes nothing.
@@ -62,6 +62,9 @@ Catch-up never prunes these folders. To roll back:
 2. Restore the timer: `crontab <backup>/crontab.txt`, or copy the plists back to
    `~/Library/LaunchAgents` (or the `.cmd` files back to `~/.config`).
 3. Copy the files in `home/` back into the factory home.
+
+This restore is the only rollback. The Python runtime and its `FACTORY_RUNTIME=python`
+switch are gone, and `runtime/factory.py` is now a stub that runs the binary beside it.
 
 See [device.md](device.md) for the installer's lock and backup rules.
 

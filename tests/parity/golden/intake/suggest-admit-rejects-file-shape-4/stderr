@@ -1,0 +1,1 @@
+factory.py: {home}/suggest-shape-4.json is not UTF-8 JSON: 'utf-8' codec can't decode byte 0xff in position 12: invalid start byte; nothing admitted

@@ -1,0 +1,6 @@
+catch-up: factory checkout {home}/checkout, origin/main at 0123456
+checkout: already at 0123456
+skill: current at 0123456
+pickup timer: none on this host, left alone
+worker: deploy run https://github.com/example/factory/actions/runs/7 is in_progress
+catch-up: nothing new

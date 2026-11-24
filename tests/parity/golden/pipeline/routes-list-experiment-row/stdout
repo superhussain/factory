@@ -1,0 +1,22 @@
+[
+  {
+    "route": "alpha",
+    "provider": "provider-a",
+    "model": "model-a",
+    "limited_until": null
+  },
+  {
+    "route": "beta",
+    "provider": "provider-b",
+    "model": "vendor/model-b[1m]",
+    "limited_until": null
+  },
+  {
+    "experiment": "pilot",
+    "provider": "provider-c",
+    "model": "model-c",
+    "effort": "high",
+    "percent": 50,
+    "limited_until": "2999-01-01T00:00:00Z"
+  }
+]

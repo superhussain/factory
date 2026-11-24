@@ -1,0 +1,16 @@
+{
+  "queued": [
+    "101-queued"
+  ],
+  "in_flight": [
+    "102-flight"
+  ],
+  "stale": [
+    "103-stale",
+    "107-bad-stamp"
+  ],
+  "running": [
+    "105-running"
+  ],
+  "due": false
+}

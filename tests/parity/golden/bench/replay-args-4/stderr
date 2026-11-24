@@ -1,0 +1,1 @@
+factory.py: usage: factory.py bench score <cases-file> <arm-folder>... | bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] | bench cases <project-slug>

@@ -1,0 +1,3 @@
+factory.py: /api/backlog kept changing under us; gave up after 20 tries
+factory.py: /api/board kept changing under us; gave up after 20 tries
+factory.py: batch could not remove 094-name-the-weekly; they stay on the board at spec, batched into 090-sample-export-csv, and their backlog lines stay unchecked

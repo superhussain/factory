@@ -1,0 +1,7 @@
+{
+  "id": "001-lead",
+  "project": "sample",
+  "stage": "closed",
+  "updated": "{now}",
+  "done": "{now}"
+}

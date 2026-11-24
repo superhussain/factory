@@ -1,0 +1,1 @@
+factory.py: only the dashboard, factory.py pickup and factory.py control set close. To relay a person's chat, run factory.py control <job-id> close --reason-file <file> --chat-file <file>

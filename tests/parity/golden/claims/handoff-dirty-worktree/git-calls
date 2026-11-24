@@ -1,0 +1,2 @@
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"]}
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"]}

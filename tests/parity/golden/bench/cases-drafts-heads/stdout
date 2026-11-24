@@ -1,0 +1,11 @@
+{
+  "cases": [
+    {
+      "id": "1018-add-y",
+      "pr": "https://github.com/example/alpha/pull/8",
+      "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source": "reworked",
+      "defects": []
+    }
+  ]
+}

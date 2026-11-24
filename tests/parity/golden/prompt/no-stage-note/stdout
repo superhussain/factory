@@ -1,0 +1,10 @@
+Job id: 001-sample-job
+Job folder: {home}/jobs/sample/001-sample-job
+Worktree: {home}/worktrees/sample/001-sample-job (branch factory/001-sample-job, base branch main)
+Project file: {home}/projects/sample.md
+Project documents: {home}/projects/sample.documents.md
+Visuals reference: {skill}/references/visuals.md
+Walkthrough template: {skill}/references/walkthrough.html
+Runtime: {runtime}
+Temp folder: {home}/tmp/factory-sample-001-sample-job
+Your file: {home}/jobs/sample/001-sample-job/decision.md

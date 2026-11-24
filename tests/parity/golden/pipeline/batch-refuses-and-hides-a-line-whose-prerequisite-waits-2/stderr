@@ -1,0 +1,1 @@
+skipping backlog:d490eda97f9a "sample: Store imported recipes (sub-job-of 041-recipe-import)": it depends on "sample: Parse recipe URLs (sub-job-of 041-recipe-import)", which is still unchecked

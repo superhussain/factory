@@ -1,0 +1,2 @@
+{"body": "", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "user-agent": "factory"}, "method": "GET", "path": "/api/jobs/sample/001-idea/?etags=1"}
+{"body": "# Pacing log\n\n## 2026-11-12 limit check\n\n- Synthetic note.\n", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "content-type": "application/x-www-form-urlencoded", "if-none-match": "*", "user-agent": "factory"}, "method": "PUT", "path": "/api/jobs/sample/001-idea/scratchpad.md"}

@@ -1,0 +1,1 @@
+{"body": "---\nrepo: octo/sample\nbase: rust\n---\n# Sample\n", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "content-type": "text/markdown; charset=utf-8", "if-match": "\"4e358e0b0579d797d44edf58212eb06d1fb6a11e0b4a01429026aef59a0539c8\"", "user-agent": "factory"}, "method": "PUT", "path": "/api/projects/sample.md"}
