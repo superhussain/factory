@@ -37,6 +37,20 @@ static CREATED: Pattern = Pattern::new("[0-9a-f]{40,64} branch: Created from .*"
 const ORPHAN_KINDS: &[&str] = &["branch", "pr", "worktree", "workspace"];
 const GIT_TIMEOUT: Duration = Duration::from_secs(20);
 
+#[cfg(test)]
+thread_local! {
+    static SCAN_TIMEOUT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+/// The orphan scan's `git ls-remote` limit; a test can shorten it.
+fn scan_timeout() -> Duration {
+    #[cfg(test)]
+    if let Some(limit) = SCAN_TIMEOUT.with(|c| c.get()) {
+        return limit;
+    }
+    GIT_TIMEOUT
+}
+
 pub fn stop(call: &Call) -> Res<()> {
     let alive = worktree::stop_pids(Path::new(&call.args[0])).unwrap_or_default();
     for pid in &alive {
@@ -412,7 +426,7 @@ fn scan(
             ],
             None,
             &[("GIT_TERMINAL_PROMPT", "0")],
-            Some(GIT_TIMEOUT),
+            Some(scan_timeout()),
         );
         match listed {
             Err(e) if e.kind() == io::ErrorKind::TimedOut => skipped.push(format!(
@@ -1015,6 +1029,68 @@ mod tests {
                 "branches a: git ls-remote failed (exit 128)",
                 "prs: gh is not on PATH",
                 "branches b: git ls-remote failed (exit 128)",
+                "workspaces: paseo is not on PATH",
+            ]
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn orphans_skip_a_symlinked_worktree() {
+        let home = temp_dir("orphans-symlink");
+        let project = home.join("worktrees/factory");
+        fs::create_dir_all(project.join("2031-stale-banner")).unwrap();
+        let link = project.join("2099-linked");
+        std::os::unix::fs::symlink(&home, &link).unwrap();
+        let (orphans, skipped) = scan(&home, &[], &[], None, false).unwrap();
+        let kinds: Vec<_> = orphans
+            .iter()
+            .map(|o| o["kind"].as_str().unwrap())
+            .collect();
+        assert_eq!(kinds, ["worktree"]);
+        assert_eq!(
+            skipped,
+            [
+                format!("worktrees: {} is a symlink or junction", text(&link)),
+                "workspaces: paseo is not on PATH".to_string(),
+            ]
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn orphans_skip_a_git_listing_that_times_out() {
+        let home = temp_dir("orphans-timeout");
+        let checkout = home.join("checkout");
+        fs::create_dir_all(home.join("projects")).unwrap();
+        fs::write(
+            home.join("projects/factory.md"),
+            "---\ntitle: factory\n---\n",
+        )
+        .unwrap();
+        fs::create_dir(&checkout).unwrap();
+        let dir = text(&checkout);
+        let git = |args: &[&str]| {
+            let mut argv = vec!["git", "-C", dir.as_str()];
+            argv.extend_from_slice(args);
+            assert_eq!(capture(&argv, None, &[], None).unwrap().code, 0, "{args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "protocol.ext.allow", "always"]);
+        git(&["remote", "add", "origin", "ext::sleep 30"]);
+        let paths = vec![("factory".to_string(), dir.clone())];
+        SCAN_TIMEOUT.with(|c| c.set(Some(Duration::from_millis(300))));
+        let got = scan(&home, &[], &paths, None, false);
+        SCAN_TIMEOUT.with(|c| c.set(None));
+        let (orphans, skipped) = got.unwrap();
+        assert!(orphans.is_empty());
+        assert_eq!(
+            skipped,
+            [
+                "branches factory: git ls-remote timed out after 20 s",
+                "prs factory: the project file names no repo",
                 "workspaces: paseo is not on PATH",
             ]
         );
