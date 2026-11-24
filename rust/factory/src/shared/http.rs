@@ -236,8 +236,22 @@ pub(crate) fn platform_agent(origin: &str) -> &'static Agent {
         .or_insert_with(|| Box::leak(Box::new(new_agent(RootCerts::PlatformVerifier, origin))))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A test's stand-in for FALLBACK_CA_FILE, so a test can trust its own certificate.
+    static FALLBACK_CA_OVERRIDE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+fn fallback_ca_file() -> String {
+    #[cfg(test)]
+    if let Some(path) = FALLBACK_CA_OVERRIDE.with(|o| o.borrow().clone()) {
+        return path;
+    }
+    FALLBACK_CA_FILE.to_string()
+}
+
 fn fallback_agent(origin: &str) -> Option<Agent> {
-    let pem = std::fs::read(FALLBACK_CA_FILE).ok()?;
+    let pem = std::fs::read(fallback_ca_file()).ok()?;
     let certs: Vec<_> = ureq::tls::parse_pem(&pem)
         .filter_map(|item| match item {
             Ok(PemItem::Certificate(cert)) => Some(cert),
@@ -409,7 +423,7 @@ pub fn api(
     if result.as_ref().is_err_and(cert_error) {
         let ssl_env = std::env::var_os("SSL_CERT_FILE").is_some_and(|v| !v.is_empty())
             || std::env::var_os("SSL_CERT_DIR").is_some_and(|v| !v.is_empty());
-        let fallback = if Path::new(FALLBACK_CA_FILE).is_file() && !ssl_env {
+        let fallback = if Path::new(&fallback_ca_file()).is_file() && !ssl_env {
             fallback_agent(&key.0)
         } else {
             None
@@ -799,9 +813,11 @@ pub(crate) mod tests {
     }
 
     /// A TLS server with a self-signed certificate that no system store trusts, from `openssl s_server`.
-    /// None when openssl is not installed. The child is killed when the guard drops.
+    /// Panics when openssl is missing, so a host without it fails these tests instead of skipping them.
+    /// The child is killed when the guard drops.
     struct SelfSigned {
         origin: String,
+        cert: std::path::PathBuf,
         child: std::process::Child,
     }
 
@@ -812,7 +828,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn self_signed_server(name: &str) -> Option<SelfSigned> {
+    fn self_signed_server(name: &str) -> SelfSigned {
         use std::process::{Command, Stdio};
         let dir = temp_dir(name);
         let (key, cert) = (dir.join("key.pem"), dir.join("cert.pem"));
@@ -833,10 +849,8 @@ pub(crate) mod tests {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
-            .ok()?;
-        if !made.success() {
-            return None;
-        }
+            .expect("these TLS tests need openssl on PATH");
+        assert!(made.success(), "openssl req failed");
         let probe = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = probe.local_addr().unwrap().port();
         drop(probe);
@@ -850,23 +864,42 @@ pub(crate) mod tests {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .ok()?;
+            .expect("these TLS tests need openssl on PATH");
         for _ in 0..100 {
             if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
                 break;
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        Some(SelfSigned {
+        SelfSigned {
             origin: format!("https://127.0.0.1:{port}"),
+            cert,
             child,
-        })
+        }
     }
 
-    /// Runs one GET against an untrusted TLS server with the given CA env, and returns the error.
-    fn cert_failure(name: &str, ssl_file: &str, ssl_dir: &str) -> Option<Exit> {
-        let server = self_signed_server(name)?;
-        let home = home_for(name, &server.origin);
+    /// Runs one GET against the untrusted TLS server with the given CA env. The fallback bundle is the
+    /// server's own certificate when `trusted_fallback` is set, and a missing file otherwise, so a
+    /// fallback retry succeeds exactly when the client makes one.
+    fn cert_get(
+        name: &str,
+        ssl_file: &str,
+        ssl_dir: &str,
+        trusted_fallback: bool,
+    ) -> Res<Response> {
+        let server = self_signed_server(name);
+        // home_for clears temp_dir(name), which holds the server's certificate, so the home gets its own.
+        let home = home_for(&format!("{name}-home"), &server.origin);
+        let fallback = if trusted_fallback {
+            server.cert.to_string_lossy().into_owned()
+        } else {
+            server
+                .cert
+                .with_file_name("absent.pem")
+                .to_string_lossy()
+                .into_owned()
+        };
+        FALLBACK_CA_OVERRIDE.with(|o| *o.borrow_mut() = Some(fallback));
         let _lock = crate::shared::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -883,18 +916,22 @@ pub(crate) mod tests {
                 None => std::env::remove_var(key),
             }
         }
+        FALLBACK_CA_OVERRIDE.with(|o| *o.borrow_mut() = None);
         std::fs::remove_dir_all(home).unwrap();
-        Some(result.unwrap_err())
+        result
     }
 
-    // The fallback bundle path is fixed at /etc/ssl/cert.pem, so these tests assert the failure a user
-    // sees when the system store rejects the certificate and no fallback retry can succeed. They hold
-    // on hosts with or without that file, because the bundle never trusts this throwaway certificate.
+    #[test]
+    fn cert_error_retries_with_fallback_bundle() {
+        let response = cert_get("http-cert-retry", "", "", true).unwrap();
+        assert_eq!(response.status, 200);
+    }
+
+    // The fallback bundle trusts the server here, so a retry would return 200. Exit 5 proves the
+    // client skipped the retry because SSL_CERT_FILE or SSL_CERT_DIR is set.
     #[test]
     fn cert_error_respects_ssl_cert_file() {
-        let Some(e) = cert_failure("http-cert-file", "/synthetic/ca.pem", "") else {
-            return;
-        };
+        let e = cert_get("http-cert-file", "/synthetic/ca.pem", "", true).unwrap_err();
         assert_eq!(e.code, 5);
         assert!(
             e.stderr.contains("can't reach https://127.0.0.1:"),
@@ -905,9 +942,7 @@ pub(crate) mod tests {
 
     #[test]
     fn cert_error_respects_ssl_cert_dir() {
-        let Some(e) = cert_failure("http-cert-dir", "", "/synthetic/certs") else {
-            return;
-        };
+        let e = cert_get("http-cert-dir", "", "/synthetic/certs", true).unwrap_err();
         assert_eq!(e.code, 5);
         assert!(
             e.stderr.contains("can't reach https://127.0.0.1:"),
@@ -918,9 +953,7 @@ pub(crate) mod tests {
 
     #[test]
     fn cert_error_without_fallback_file_explains() {
-        let Some(e) = cert_failure("http-cert-explains", "", "") else {
-            return;
-        };
+        let e = cert_get("http-cert-explains", "", "", false).unwrap_err();
         assert_eq!(e.code, 5);
         assert!(
             e.stderr
