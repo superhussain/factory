@@ -388,6 +388,19 @@ pub(crate) fn autonomy_hold_write(home: &Path, job_id: &str) -> Res<Option<Strin
     })
 }
 
+/// Record the head checks passed as the job's checked_head, with no write when the row is missing or holds it.
+fn checked_head_write(home: &Path, job_id: &str, sha: &str) -> Res<()> {
+    cas(home, "/api/board", |text| {
+        let mut data = load_board(text)?;
+        match find_job(&data, job_id) {
+            Some(job) if job.get("checked_head").and_then(Value::as_str) != Some(sha) => {}
+            _ => return Ok((None, ())),
+        }
+        patch_job(&mut data, job_id, &json!({"checked_head": sha}));
+        Ok((Some(dump_board(&data)), ()))
+    })
+}
+
 /// One check as gh lists it.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Check {
@@ -593,7 +606,7 @@ fn checks_loop(
     timeout: u64,
     out: &mut dyn Write,
     err: &mut dyn Write,
-) -> Res<()> {
+) -> Res<String> {
     let start = h.monotonic();
     let mut since = start;
     let mut usable = false;
@@ -631,7 +644,7 @@ fn checks_loop(
                 if !failing.is_empty() {
                     return Err(fail(format!("failing checks: {}", failing.join(", ")), 1));
                 }
-                return Ok(());
+                return Ok(sha);
             }
             if behind != 0 && fresh {
                 let n = pr.rsplit('/').next().unwrap();
@@ -664,7 +677,7 @@ fn checks_loop(
                     "factory.py: PR #{n} was {behind} commit{s} behind {base}; gh pr update-branch merged {base} into it, so checks run again on the new head."
                 )
                 .ok();
-                updated_from = Some(sha);
+                updated_from = Some(sha.clone());
                 since = h.monotonic();
             }
         }
@@ -675,7 +688,7 @@ fn checks_loop(
         }
         if checks.is_empty() && problem.is_none() && waited >= CHECKS_REGISTER as f64 {
             writeln!(out, "no checks reported").ok();
-            return Ok(());
+            return Ok(sha);
         }
         if elapsed >= timeout_f {
             if let Some(p) = problem {
@@ -750,13 +763,14 @@ pub fn checks_cmd(call: &Call) -> Res<()> {
             4,
         ));
     }
-    checks_loop(
+    let sha = checks_loop(
         &mut host,
         &pr,
         timeout,
         &mut io::stdout(),
         &mut io::stderr(),
-    )
+    )?;
+    checked_head_write(&home, &job_id, &sha)
 }
 
 /// The branch a job's PR should target: the project base, or the archive repo's default branch for an archive PR.
@@ -2489,7 +2503,7 @@ mod tests {
     fn run_loop(fake: &mut Fake, timeout: u64) -> (i32, String, String) {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let code = match checks_loop(fake, PR, timeout, &mut out, &mut err) {
-            Ok(()) => 0,
+            Ok(_) => 0,
             Err(e) => {
                 err.extend(e.stderr.as_bytes());
                 e.code
@@ -3509,6 +3523,34 @@ mod tests {
     }
 
     const MERGE_HEAD: &str = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+
+    #[test]
+    fn checks_record_the_passed_head() {
+        use crate::shared::http::tests::{home_for, serve};
+        let board = r#"{"updated":"","jobs":[{"id":"042-sample-export","project":"alpha","stage":"pr-open"}]}"#;
+        let (origin, seen) = serve(vec![
+            (200, board, vec![("ETag", "\"b1\"")]),
+            (200, "{}", vec![("ETag", "\"b2\"")]),
+        ]);
+        let home = home_for("checks-record-head", &origin);
+        checked_head_write(&home, "042-sample-export", MERGE_HEAD).unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[1].method, "PUT");
+        let put = loads(&String::from_utf8(seen[1].body.clone()).unwrap()).unwrap();
+        assert_eq!(put["jobs"][0]["checked_head"], MERGE_HEAD);
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn checks_record_skips_an_unchanged_head() {
+        use crate::shared::http::tests::{home_for, serve};
+        let board = r#"{"updated":"","jobs":[{"id":"042-sample-export","checked_head":"a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"}]}"#;
+        let (origin, seen) = serve(vec![(200, board, vec![("ETag", "\"b1\"")])]);
+        let home = home_for("checks-record-same", &origin);
+        checked_head_write(&home, "042-sample-export", MERGE_HEAD).unwrap();
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        std::fs::remove_dir_all(home).unwrap();
+    }
 
     /// PR 42's GraphQL mergeability reading.
     fn mergeability(mergeable: &str, status: &str) -> Value {
