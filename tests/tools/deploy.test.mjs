@@ -98,6 +98,22 @@ test("overlay and test entry keys are rejected", (t) => {
   }
 });
 
+test("malformed JSON is reported by position, never by its text", (t) => {
+  for (const [raw, where] of [
+    ['{\n  "version": 1,\n  "audience": aud-secret-value\n}', null],
+    ['{"audience": "aud-secret-value"} aud-secret-value', "line 1 column 34 (char 33)"],
+    ['["aud-secret-value"', "line 1 column 20 (char 19)"],
+  ]) {
+    const result = runCli(["check", "--profile", writeProfile(t, null, raw)]);
+    assert.equal(result.status, 2);
+    assert.ok(!(result.stdout + result.stderr).includes("aud-secret"), result.stderr);
+    assert.equal(
+      result.stderr,
+      `invalid profile: profile is not valid JSON${where ? ": " + where : ""}\n`,
+    );
+  }
+});
+
 test("usage errors exit 2", () => {
   for (const args of [
     [],

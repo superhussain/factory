@@ -173,7 +173,14 @@ function loadObject(path) {
   try {
     data = JSON.parse(raw);
   } catch (error) {
-    fail("profile is not valid JSON: " + error.message);
+    // JSON.parse's message can quote the input, and deploy-main prints this into a public log,
+    // so only a position goes out.
+    const at = /at position (\d+)/.exec(error.message);
+    if (!at) fail("profile is not valid JSON");
+    const before = raw.slice(0, Number(at[1])).split("\n");
+    fail(
+      `profile is not valid JSON: line ${before.length} column ${before.at(-1).length + 1} (char ${at[1]})`,
+    );
   }
   const duplicate = duplicateKey(raw);
   if (duplicate !== undefined) fail("duplicate key " + JSON.stringify(duplicate));
