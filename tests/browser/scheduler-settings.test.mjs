@@ -139,7 +139,7 @@ test("scheduler settings", { timeout: 180000 }, async (t) => {
       }
       assert.equal(
         await page.$eval("#scheduler-not-a-prompt", (el) => el.textContent),
-        "A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the host timer runs pickup.",
+        "A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the daemon service or the host timer runs pickup.",
       );
       await page.click("#scheduler-mode-tab-agent");
       assert.equal(await page.$eval("#scheduler-agent-prompt", (el) => el.textContent), prompt);

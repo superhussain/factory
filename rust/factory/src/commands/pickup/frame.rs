@@ -91,9 +91,16 @@ pub(super) fn run(io: &mut Io, home: &Path, flags: &Flags) -> Res<()> {
     let mut failing = cached_status(home).2;
     let result = run_passes(io, home, flags, &device, minutes, &started, &mut failing);
     if !flags.dry {
+        // Where a daemon holds the lock it is this host's scheduler, and on Linux that may be a
+        // systemd service rather than cron.
+        let scheduler = if daemon::running(home) == Some(true) {
+            daemon_scheduler()
+        } else {
+            pickup_scheduler()
+        };
         report_status(
             home,
-            pickup_scheduler(),
+            scheduler,
             Some(&started),
             failing.as_deref(),
             None,
