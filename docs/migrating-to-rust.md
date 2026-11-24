@@ -232,7 +232,7 @@ Find them:
 | launchd | `grep -l factory.py ~/Library/LaunchAgents/*.plist` |
 | Windows wrappers | `findstr /m factory.py %USERPROFILE%\.config\*.cmd` |
 | Windows tasks | `schtasks /Query /FO LIST /V \| findstr factory.py` |
-| Agent and schedule prompts | `grep -rl factory.py <home> <your prompt folders>` |
+| Home config and schedule prompts | `grep -l factory.py <home>/*.md <home>/*.json`, then the same in any folder that holds your agent prompts |
 
 Fix them:
 
