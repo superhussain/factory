@@ -58,7 +58,7 @@ const USAGE_PICKUP_SETUP: &str = "usage: pickup setup [--install]";
 const USAGE_DAEMON_SETUP: &str = "usage: daemon setup [--install | --uninstall]";
 const TRIAGE_SWEEP_MINUTES: i64 = 30;
 const FETCH_TIMEOUT_SECONDS: u64 = 60;
-const SCHEDULERS: &[&str] = &["launchd", "cron", "schtasks", "none"];
+const SCHEDULERS: &[&str] = &["launchd", "systemd", "cron", "schtasks", "none"];
 const PICKUP_SCHEDULER: &str = if cfg!(target_os = "macos") {
     "launchd"
 } else if cfg!(windows) {
@@ -970,9 +970,16 @@ fn run(io: &mut Io, home: &Path, flags: &Flags) -> Res<()> {
     let mut failing = cached_status(home).2;
     let result = run_passes(io, home, flags, &device, minutes, &started, &mut failing);
     if !flags.dry {
+        // Where a daemon holds the lock it is this host's scheduler, and on Linux that may be a
+        // systemd service rather than cron.
+        let scheduler = if daemon::running(home) == Some(true) {
+            daemon_scheduler()
+        } else {
+            pickup_scheduler()
+        };
         report_status(
             home,
-            pickup_scheduler(),
+            scheduler,
             Some(&started),
             failing.as_deref(),
             None,
@@ -20616,6 +20623,23 @@ exit "$archive_code"
                 .unwrap()
                 .get("triage_failed_since")
                 .is_none());
+        }
+
+        /// While a daemon holds the lock, pickup reports the daemon's scheduler, so a systemd
+        /// host says systemd rather than cron, and the cache keeps it.
+        #[test]
+        fn test_a_daemon_host_reports_the_daemon_scheduler() {
+            let (fx, worker) = setup("device: host-a\n");
+            fx.set_fakes(|f| {
+                f.backlog_triage_pass = Some(Rc::new(|_| Ok(())));
+                f.daemon_scheduler = Some("systemd");
+            });
+            assert_eq!(fx.pickup(&["--triage-now"]).0, 0);
+            assert_eq!(worker.last_body()["scheduler"], PICKUP_SCHEDULER);
+            let _lock = daemon::take_lock(&fx.home).unwrap().unwrap();
+            assert_eq!(fx.pickup(&["--triage-now"]).0, 0);
+            assert_eq!(worker.last_body()["scheduler"], "systemd");
+            assert_eq!(cached_status(&fx.home).0, "systemd");
         }
     }
 
