@@ -48,7 +48,9 @@ STAMP = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 def isolated_env(home):
     env = dict(os.environ)
     for key in list(env):
+        # CLAUDECODE, AI_AGENT and OPENCODE_TERMINAL mark an agent's shell, where autonomy commands refuse.
         if (key in ("FACTORY_HOME", "FACTORY_SESSION", "PASEO_HOME", "PASEO_AGENT_ID", "CLAUDE_CONFIG_DIR",
+                    "CLAUDECODE", "AI_AGENT", "OPENCODE_TERMINAL",
                     "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
                 or key.startswith("GIT_CONFIG_") or key.lower().endswith("_proxy")):
             env.pop(key, None)
