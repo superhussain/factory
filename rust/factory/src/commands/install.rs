@@ -1202,4 +1202,87 @@ mod tests {
             assert!(feature.contains(rule), "{rule}");
         }
     }
+    fn skill_files() -> BTreeMap<String, String> {
+        fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, String>) {
+            for entry in fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    walk(root, &path, out);
+                } else {
+                    let rel = path
+                        .strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    out.insert(rel, String::from_utf8(fs::read(&path).unwrap()).unwrap());
+                }
+            }
+        }
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills/factory");
+        let mut out = BTreeMap::new();
+        walk(&root, &root, &mut out);
+        out
+    }
+
+    /// Ported from tests/cli/test_portability.py: the real skill tree is exactly the installed bundle, holds
+    /// no machine-specific path, and every relative markdown link resolves.
+    #[test]
+    fn skill_tree_is_the_exact_bundle_with_portable_links() {
+        let files = skill_files();
+        assert_eq!(files.keys().cloned().collect::<BTreeSet<_>>(), required());
+        assert_eq!(files.len(), 44);
+        for (name, text) in &files {
+            assert!(!text.contains("file://"), "{name}");
+            for token in text.split_whitespace() {
+                let drive = token.len() > 9
+                    && token.as_bytes()[0].is_ascii_alphabetic()
+                    && token[1..].starts_with(":\\Users\\");
+                assert!(
+                    !(token.starts_with("/home/") && token.len() > 6)
+                        && !(token.starts_with("/Users/") && token.len() > 7)
+                        && !(token.starts_with("/users/") && token.len() > 7)
+                        && !drive,
+                    "{name}: {token}"
+                );
+            }
+            if name.ends_with(".md") {
+                let mut rest = text.as_str();
+                while let Some(at) = rest.find("](") {
+                    rest = &rest[at + 2..];
+                    let Some(end) = rest.find(')') else { break };
+                    let link = &rest[..end];
+                    if ["references/", "execution.md", "integrations.md"]
+                        .iter()
+                        .any(|p| link.starts_with(p))
+                    {
+                        let target = match name.rsplit_once('/') {
+                            Some((dir, _)) => format!("{dir}/{}", link.split('#').next().unwrap()),
+                            None => link.split('#').next().unwrap().to_string(),
+                        };
+                        assert!(files.contains_key(&target), "{name}: {link}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Ported from tests/cli/test_portability.py: SKILL.md stays small and links every command reference.
+    #[test]
+    fn skill_md_is_small_and_indexes_every_command() {
+        let files = skill_files();
+        let skill = &files["SKILL.md"];
+        assert!(skill.len() < 45000, "{}", skill.len());
+        let commands: Vec<_> = files
+            .keys()
+            .filter(|k| k.starts_with("references/commands/"))
+            .collect();
+        assert_eq!(commands.len(), 15);
+        for path in commands {
+            let name = path.rsplit('/').next().unwrap();
+            assert!(
+                skill.contains(&format!("](references/commands/{name})")),
+                "{name}"
+            );
+        }
+    }
 }
