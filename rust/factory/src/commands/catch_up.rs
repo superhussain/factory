@@ -917,6 +917,15 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                 outln!(out, "skill: {}", strip(text));
             }
         }
+        // Before the pickup and daemon steps, so they act on the rewritten timers and a removed
+        // or reinstalled timer is never written back from this earlier snapshot.
+        if !legacy.is_empty() {
+            if ok {
+                failed += legacy_apply(out, &legacy);
+            } else {
+                outln!(out, "timers: skipped, skill install failed");
+            }
+        }
         if backup.is_some() && !ok && timer {
             outln!(out, "pickup timer: skipped, skill install failed");
         } else if ok && !timer {
@@ -1002,13 +1011,6 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                     failed += 1;
                     outln!(out, "daemon service: {}", strip(&(r.stderr + &r.stdout)));
                 }
-            }
-        }
-        if !legacy.is_empty() {
-            if ok {
-                failed += legacy_apply(out, &legacy);
-            } else {
-                outln!(out, "timers: skipped, skill install failed");
             }
         }
     }
@@ -2070,6 +2072,57 @@ mod tests {
             lines.contains(&"pickup timer: could not remove the cron timer: synthetic".to_string()),
             "{lines:?}"
         );
+    }
+
+    #[test]
+    fn daemon_host_removes_the_pickup_line_after_the_python_rewrite() {
+        let t = T::new("legacy-daemon-host");
+        t.timer(true);
+        t.drift(None);
+        t.daemon(Some("cron"), false);
+        t.service_calls(0, "", false);
+        let pickup = "*/5 * * * * /old/runtime/factory pickup";
+        let crontab = Rc::new(RefCell::new(format!(
+            "30 8 * * * python3 /old/runtime/factory.py retro push\n{pickup}\n"
+        )));
+        let (tab, removed) = (crontab.clone(), crontab.clone());
+        FAKES.with(|f| {
+            let mut f = f.borrow_mut();
+            f.scheduler = Some("cron");
+            f.setup_run = Some(Rc::new(move |argv| match argv {
+                ["crontab", "-l"] => (0, tab.borrow().clone()),
+                ["crontab", "-", text] => {
+                    *tab.borrow_mut() = text.to_string();
+                    (0, String::new())
+                }
+                _ => (0, String::new()),
+            }));
+            f.remove_timer = Some(Rc::new(move |_| {
+                let kept: String = removed
+                    .borrow()
+                    .lines()
+                    .filter(|l| !l.ends_with(" pickup"))
+                    .map(|l| format!("{l}\n"))
+                    .collect();
+                *removed.borrow_mut() = kept;
+                Ok(())
+            }));
+        });
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        let binary = t.skill.join("runtime").join("factory");
+        assert_eq!(
+            *crontab.borrow(),
+            format!("30 8 * * * {} retro push\n", binary.display()),
+            "the retro line runs the binary and the removed pickup line stays removed"
+        );
+        let timers = lines
+            .iter()
+            .position(|l| l == "timers: crontab now runs the binary");
+        let replaced = lines
+            .iter()
+            .position(|l| l == "pickup timer: replaced by the daemon");
+        assert!(timers.is_some() && timers < replaced, "{lines:?}");
     }
 
     #[test]
