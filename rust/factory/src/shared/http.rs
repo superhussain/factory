@@ -301,7 +301,7 @@ pub fn urlopen_error(e: &ureq::Error) -> String {
     printable_line(&urlopen_detail(e), 200)
 }
 
-fn send(
+pub(crate) fn send(
     agent: &Agent,
     method: &str,
     url: &str,

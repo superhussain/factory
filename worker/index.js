@@ -36,6 +36,7 @@ import {
   escalationInput,
   REVIEWERS,
 } from "./escalation.js";
+import { boardStore, rowNames, storedNames } from "./board-store.js";
 import { announce, connectEvents, EVENTS_PATH, HOST_EVENTS_PATH, revokeSeats } from "./events.js";
 import {
   boardPushes,
@@ -70,7 +71,7 @@ import {
 } from "./triage.js";
 import { recordSpendNudges, spendGet, spendNudgePass } from "./spend.js";
 
-export { BoardEvents } from "./events.js";
+export { BoardEvents } from "./room.js";
 
 // A job id starts with a word character, so "." and ".." are never ids.
 const JOB_FILE =
@@ -332,25 +333,32 @@ async function getFile(env, key, type, headers = {}) {
 let slimMemo = { etag: "", body: "" };
 
 async function readSlim(env) {
-  const obj = await env.BUCKET.get("board.json");
+  const obj = await boardStore(env).read();
   if (!obj) return null;
-  const text = await obj.text();
   let data = null;
   try {
-    data = JSON.parse(text);
+    data = JSON.parse(obj.text);
   } catch {}
-  if (!Array.isArray(data?.jobs)) return { etag: obj.httpEtag, body: text };
-  slimMemo = { etag: obj.httpEtag, body: JSON.stringify(slimBoard(data)) };
+  if (!Array.isArray(data?.jobs)) return { etag: obj.etag, body: obj.text };
+  slimMemo = { etag: obj.etag, body: JSON.stringify(slimBoard(data)) };
   return slimMemo;
+}
+
+// The whole board as stored, with its version. Its bytes pass through undecoded.
+async function boardGet(env, headers) {
+  const obj = await boardStore(env).body();
+  return obj
+    ? reply(obj.body, 200, "application/json", { ETag: obj.etag, ...headers })
+    : notFound();
 }
 
 // The dashboard's first read. A board that is not JSON with a jobs array goes out as stored.
 async function slimBoardGet(env) {
-  const head = await env.BUCKET.head("board.json");
+  const head = await boardStore(env).head();
   if (!head) return notFound();
   const send = (body, etag) =>
     reply(body, 200, "application/json", { ETag: etag, "X-Factory-Version": DASHBOARD_VERSION });
-  if (slimMemo.etag === head.httpEtag) return send(slimMemo.body, head.httpEtag);
+  if (slimMemo.etag === head.etag) return send(slimMemo.body, head.etag);
   const out = await readSlim(env);
   return out ? send(out.body, out.etag) : notFound();
 }
@@ -480,12 +488,21 @@ function condition(request) {
 
 // The first reason a board write of data over stored is refused, or null. The row checks
 // compare against the stored rows, so they run only when data was built on that version,
-// or creates the board when none is stored.
-async function boardRefusal(env, stored, data, sameBase, principal) {
+// or creates the board when none is stored. A row PATCH passes only the rows it changes and
+// the rows they name, in board order, plus names, every upload name the stored board carries:
+// an unchanged row passes every check, so the first refusal is the one the whole board gets.
+async function boardRefusal(
+  env,
+  stored,
+  data,
+  sameBase,
+  principal,
+  storedUploads = storedNames(stored.jobs),
+) {
   return (
     checkGoals(data.jobs) ??
-    (await checkIdeaImages(env, data.jobs, stored.jobs)) ??
-    (await checkIdeaFiles(env, data.jobs, stored.jobs)) ??
+    (await checkIdeaImages(env, data.jobs, storedUploads)) ??
+    (await checkIdeaFiles(env, data.jobs, storedUploads)) ??
     (sameBase
       ? (checkRowIds(stored.jobs, data.jobs) ??
         checkArchived(stored, data) ??
@@ -606,17 +623,21 @@ async function casPut(request, env, key, type, principal, ctx) {
     const bad = await boardRefusal(env, stored, data, builtOn, principal);
     if (bad) return reply(bad, 400);
   }
-  const obj = await env.BUCKET.put(key, body, {
-    onlyIf: cond,
-    httpMetadata: { contentType: type },
-  });
+  const obj =
+    key === "board.json"
+      ? await boardStore(env).replace(body, {
+          ifMatch: cond.get("If-Match") ?? undefined,
+          ifNoneMatch: cond.has("If-None-Match"),
+        })
+      : await env.BUCKET.put(key, body, { onlyIf: cond, httpMetadata: { contentType: type } });
+  if (obj?.tooLarge)
+    return reply("a board row over 1 MiB cannot be stored. Nothing was written.", 413);
+  const etag = obj && (obj.etag ?? obj.httpEtag);
   // The stored board is the true prior version only when the write named its ETag.
   const sameBase = obj && stored && cond.has("If-Match") && stored.etag === cond.get("If-Match");
-  if (obj) await announce(env, key, sameBase ? rowsFrame(stored, data, obj.httpEtag) : "");
+  if (obj) await announce(env, key, sameBase ? rowsFrame(stored, data, etag) : "");
   if (sameBase) await boardCommitted(env, stored.jobs, data.jobs, ctx);
-  return obj
-    ? reply("ok", 200, "text/plain", { ETag: obj.httpEtag })
-    : reply("precondition failed", 412);
+  return obj ? reply("ok", 200, "text/plain", { ETag: etag }) : reply("precondition failed", 412);
 }
 
 // JSON.stringify with object keys sorted at every depth, so equal rows compare equal.
@@ -655,7 +676,7 @@ const READS_SHAPE =
 
 // Applies the dashboard's changed rows, each with the row it expects to replace, to the
 // stored board. A row that changed since the client read it comes back as a 409 conflict;
-// an R2 race with another writer is retried here. Each read names a row the write decided
+// a race with another writer is retried here. Each read names a row the write decided
 // from: {id, sha256} when the decision read the whole row, or {id, stage} when it read only
 // the stage, such as whether a merged row is still finished. A stage read is a string compare,
 // so a client can name thousands of rows without the Worker hashing them.
@@ -700,23 +721,39 @@ async function boardPatch(request, env, principal, ctx) {
     new Set(reads.map((r) => r.id)).size !== reads.length
   )
     return reply(READS_SHAPE, 400);
-  // Digests keyed by the row's JSON text, so an R2 retry hashes only rows that changed.
+  // The store reads only what the patch names: its rows, the rows its reads hash, the stage
+  // of each stage read, the first holder of each new capture_id, and which of its new rows'
+  // upload names the stored board already carries.
+  const store = boardStore(env);
+  const query = {
+    ids: [...entries.keys(), ...reads.filter((r) => "sha256" in r).map((r) => r.id)],
+    stages: reads.filter((r) => !("sha256" in r)).map((r) => [r.id, r.stage]),
+    captures: [
+      ...new Set(
+        rows
+          .filter((e) => e.expect === null && typeof e.row.capture_id === "string")
+          .map((e) => e.row.capture_id),
+      ),
+    ],
+    names: [...new Set(rows.flatMap((e) => rowNames(e.row)))],
+  };
+  // Digests keyed by the row's JSON text, so a retry hashes only rows that changed.
   const digests = new Map();
   for (let attempt = 0; attempt < 10; attempt++) {
-    const stored = await storedBoard(env);
-    if (stored.etag && !stored.doc)
+    const snap = await store.rows(query);
+    if (snap.etag && !snap.readable)
       return reply("the stored board is not readable JSON. Nothing was written.", 400);
-    const doc = stored.doc ?? { updated: "", jobs: [] };
     const byId = new Map(),
-      captured = new Map();
-    let maxId = Number.isInteger(stored.archived?.max_id) ? stored.archived.max_id : 0;
-    for (const j of stored.jobs) {
-      if (!byId.has(j?.id)) byId.set(j?.id, j);
-      if (typeof j?.capture_id === "string" && !captured.has(j.capture_id))
-        captured.set(j.capture_id, j.id);
-      const m = typeof j?.id === "string" && /^(\d{3,})-/.exec(j.id);
-      if (m) maxId = Math.max(maxId, Number(m[1]));
-    }
+      posOf = new Map();
+    const take = ({ pos, row }) => {
+      if (byId.has(row.id)) return;
+      byId.set(row.id, row);
+      posOf.set(row.id, pos);
+    };
+    snap.rows.forEach(take);
+    const captured = new Map(snap.captures);
+    let maxId = Number.isInteger(snap.head?.archived?.max_id) ? snap.head.archived.max_id : 0;
+    if (snap.maxNum !== null) maxId = Math.max(maxId, snap.maxNum);
     const conflicts = new Set();
     for (const e of rows) {
       if (canonicalJson(byId.get(e.id) ?? null) !== canonicalJson(e.expect)) conflicts.add(e.id);
@@ -726,12 +763,13 @@ async function boardPatch(request, env, principal, ctx) {
       if (typeof e.row.capture_id === "string" && captured.has(e.row.capture_id))
         conflicts.add(captured.get(e.row.capture_id));
     }
+    const stale = new Set(snap.stale);
     for (const r of reads) {
       const row = byId.get(r.id);
-      if (!row) conflicts.add(r.id);
-      else if ("stage" in r) {
-        if ((row.stage ?? null) !== r.stage) conflicts.add(r.id);
-      } else if ((await digestOnce(digests, row)) !== r.sha256) conflicts.add(r.id);
+      if ("stage" in r) {
+        if (stale.has(r.id)) conflicts.add(r.id);
+      } else if (!row) conflicts.add(r.id);
+      else if ((await digestOnce(digests, row)) !== r.sha256) conflicts.add(r.id);
     }
     if (conflicts.size)
       return reply(
@@ -743,30 +781,46 @@ async function boardPatch(request, env, principal, ctx) {
         409,
         "application/json",
       );
+    // The batch leads the stored and written rows name, which the batch checks read.
+    const leads = new Set(
+      rows.flatMap((e) => [...batchLeads(byId.get(e.id)), ...batchLeads(e.row)]),
+    );
+    const missing = [...leads].filter((id) => !byId.has(id));
+    if (missing.length) {
+      const more = await store.rows({ ids: missing }, snap.etag);
+      if (!more) continue;
+      more.rows.forEach(take);
+    }
+    // The changed rows and their leads in board order, then the new rows in patch order.
+    const subset = [...new Set([...entries.keys(), ...leads])]
+      .filter((id) => posOf.has(id))
+      .sort((a, b) => posOf.get(a) - posOf.get(b));
+    const storedJobs = subset.map((id) => byId.get(id));
     const jobs = [];
-    for (const j of stored.jobs) {
-      const e = entries.get(j?.id);
-      if (!e) jobs.push(j);
+    for (const id of subset) {
+      const e = entries.get(id);
+      if (!e) jobs.push(byId.get(id));
       else if (e.row) jobs.push(e.row);
     }
     for (const e of rows) if (e.expect === null) jobs.push(e.row);
+    const doc = snap.head ? { ...snap.head, jobs: storedJobs } : null;
+    const base = doc ?? { updated: "", jobs: [] };
     const updated =
-      typeof patch.updated === "string" && patch.updated > (doc.updated ?? "")
+      typeof patch.updated === "string" && patch.updated > (base.updated ?? "")
         ? patch.updated
-        : doc.updated;
-    const data = { ...doc, jobs, updated };
-    const bad = await boardRefusal(env, stored, data, true, principal);
+        : base.updated;
+    const stored = { etag: snap.etag, jobs: storedJobs, archived: snap.head?.archived, doc };
+    const data = { ...base, jobs, updated };
+    const storedUploads = new Set([...snap.names, ...storedNames(storedJobs)]);
+    const bad = await boardRefusal(env, stored, data, true, principal, storedUploads);
     if (bad) return reply(bad, 400);
-    const bytes = new TextEncoder().encode(JSON.stringify(data));
-    if (bytes.length > MAX_BOARD) return reply("board over 16 MiB. Nothing was written.", 413);
-    const obj = await env.BUCKET.put("board.json", bytes, {
-      onlyIf: new Headers(stored.etag ? { "If-Match": stored.etag } : { "If-None-Match": "*" }),
-      httpMetadata: { contentType: "application/json" },
-    });
-    if (obj) {
-      await announce(env, "board.json", rowsFrame(stored, data, obj.httpEtag));
+    const changes = rows.map((e) => ({ id: e.id, row: e.row, add: e.expect === null }));
+    const out = await store.commit({ base: snap.etag, changes, updated, max: MAX_BOARD });
+    if (out.tooLarge) return reply("board over 16 MiB. Nothing was written.", 413);
+    if (out.etag) {
+      await announce(env, "board.json", snap.clean ? rowsFrame(stored, data, out.etag) : "");
       await boardCommitted(env, stored.jobs, data.jobs, ctx);
-      return reply("ok", 200, "text/plain", { ETag: obj.httpEtag });
+      return reply("ok", 200, "text/plain", { ETag: out.etag });
     }
     await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 80));
   }
@@ -1146,10 +1200,10 @@ const RETRO_DOC_EDIT_SCOPE = "retro edits only allowlisted projects";
 // with paused set to false; a missing or malformed record counts as paused, as in the runtime.
 // projects is the allowlist when it is a well-formed list, else empty.
 async function boardAutonomy(env) {
-  const object = await env.BUCKET.get("board.json");
+  const object = await boardStore(env).read();
   let autonomy;
   try {
-    autonomy = object && JSON.parse(await object.text()).autonomy;
+    autonomy = object && JSON.parse(object.text).autonomy;
   } catch {
     autonomy = undefined;
   }
@@ -2231,12 +2285,9 @@ async function trialsResume(request, env, principal, slug) {
     });
     if (!n) return reply(JSON.stringify({ resumed: 0 }), 200, "application/json");
     const data = { ...stored.doc, trials };
-    const obj = await env.BUCKET.put("board.json", JSON.stringify(data), {
-      onlyIf: new Headers({ "If-Match": stored.etag }),
-      httpMetadata: { contentType: "application/json" },
-    });
+    const obj = await boardStore(env).replace(JSON.stringify(data), { ifMatch: stored.etag });
     if (obj) {
-      await announce(env, "board.json", rowsFrame(stored, data, obj.httpEtag));
+      await announce(env, "board.json", rowsFrame(stored, data, obj.etag));
       return reply(JSON.stringify({ resumed: n }), 200, "application/json");
     }
     await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 80));
@@ -2709,11 +2760,14 @@ const IDEA_REF_FRESH_MS = DAY_MS;
 async function pruneIdeaUploads(env, now) {
   const named = new Set();
   for (const key of ["board.json", ARCHIVE_KEY]) {
-    const object = await env.BUCKET.get(key);
-    if (!object && key === ARCHIVE_KEY) continue;
+    const text =
+      key === "board.json"
+        ? ((await boardStore(env).read())?.text ?? null)
+        : ((await (await env.BUCKET.get(key))?.text()) ?? null);
+    if (text === null && key === ARCHIVE_KEY) continue;
     let jobs;
     try {
-      jobs = JSON.parse(await object.text()).jobs;
+      jobs = JSON.parse(text).jobs;
     } catch {}
     if (!Array.isArray(jobs)) {
       console.warn(`idea upload sweep skipped: ${key} is unreadable`);
@@ -2820,19 +2874,19 @@ async function jobPut(request, env, key, ctx) {
 // The stored board's version, rows, archived field and parsed document. An unreadable board
 // has no rows and a null doc.
 async function storedBoard(env) {
-  const object = await env.BUCKET.get("board.json");
+  const object = await boardStore(env).read();
   if (!object) return { etag: null, jobs: [], doc: null };
   try {
-    const doc = JSON.parse(await object.text());
+    const doc = JSON.parse(object.text);
     const { jobs, archived } = doc;
     return {
-      etag: object.httpEtag,
+      etag: object.etag,
       jobs: Array.isArray(jobs) ? jobs : [],
       archived,
       doc: typeof doc === "object" && !Array.isArray(doc) ? doc : null,
     };
   } catch {
-    return { etag: object.httpEtag, jobs: [], doc: null };
+    return { etag: object.etag, jobs: [], doc: null };
   }
 }
 
@@ -3382,9 +3436,10 @@ function checkBatchRefs(storedJobs, jobs) {
 }
 
 // An error message, or null, for the idea_images and capture_id fields of a board write.
-// Only references the stored board doesn't already carry are looked up: an image is
-// immutable once uploaded, so one the stored board names was checked when it was saved.
-async function checkIdeaImages(env, jobs, storedJobs) {
+// Only references the stored board doesn't already carry, by its upload names, are looked
+// up: an image is immutable once uploaded, so one the stored board names was checked when
+// it was saved.
+async function checkIdeaImages(env, jobs, storedUploads) {
   const wanted = new Set();
   for (const j of jobs) {
     if (typeof j !== "object" || j === null) continue;
@@ -3402,10 +3457,8 @@ async function checkIdeaImages(env, jobs, storedJobs) {
     }
     names.forEach((n) => wanted.add(n));
   }
+  for (const n of storedUploads) wanted.delete(n);
   if (!wanted.size) return null;
-  try {
-    for (const j of storedJobs) for (const n of j.idea_images ?? []) wanted.delete(n);
-  } catch {} // an unreadable stored row vouches for nothing
   if (wanted.size > MAX_NEW_REFS) return "too many new idea images in one board write";
   for (const name of wanted) {
     const head = await env.BUCKET.head(`idea-images/${name}`);
@@ -3419,7 +3472,7 @@ async function checkIdeaImages(env, jobs, storedJobs) {
 
 // An error message, or null, for the idea_files field of a board write, checked like
 // idea_images: only names the stored board doesn't already carry are looked up.
-async function checkIdeaFiles(env, jobs, storedJobs) {
+async function checkIdeaFiles(env, jobs, storedUploads) {
   const wanted = new Set();
   for (const j of jobs) {
     if (typeof j !== "object" || j === null || !("idea_files" in j)) continue;
@@ -3435,10 +3488,8 @@ async function checkIdeaFiles(env, jobs, storedJobs) {
     }
     names.forEach((n) => wanted.add(n));
   }
+  for (const n of storedUploads) wanted.delete(n);
   if (!wanted.size) return null;
-  try {
-    for (const j of storedJobs) for (const n of j.idea_files ?? []) wanted.delete(n);
-  } catch {} // an unreadable stored row vouches for nothing
   if (wanted.size > MAX_NEW_REFS) return "too many new idea files in one board write";
   for (const name of wanted) {
     const head = await env.BUCKET.head(`idea-files/${name}`);
@@ -3703,12 +3754,9 @@ async function api(request, env, path, principal, ctx) {
       path === "/api/board" ? ["board.json", "application/json"] : ["backlog.md", "text/markdown"];
     // Accept-Patch tells a device client it may write the board as row PATCHes.
     if (method === "GET")
-      return getFile(
-        env,
-        key,
-        type,
-        key === "board.json" ? { "Accept-Patch": "application/json" } : {},
-      );
+      return key === "board.json"
+        ? boardGet(env, { "Accept-Patch": "application/json" })
+        : getFile(env, key, type);
     if (method === "PUT") return casPut(request, env, key, type, principal, ctx);
     if (method === "PATCH" && key === "board.json") return boardPatch(request, env, principal, ctx);
     return notFound();
@@ -3843,9 +3891,7 @@ export async function serveFactory(request, env, principal, ctx) {
   if (path === "/board.json")
     return new URL(request.url).searchParams.get("view") === "slim"
       ? slimBoardGet(env)
-      : getFile(env, "board.json", "application/json", {
-          "X-Factory-Version": DASHBOARD_VERSION,
-        });
+      : boardGet(env, { "X-Factory-Version": DASHBOARD_VERSION });
   if (path === "/projects.json") return projects(env);
   if (JOB_FILE.test(path)) return getJobFile(request, env, principal, path.slice(1));
   return notFound();

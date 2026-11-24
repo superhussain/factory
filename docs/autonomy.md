@@ -362,7 +362,9 @@ settle tries again. A `revert-failed` trial neither blocks
 admit nor counts toward the pause. A revert counts toward the daily retro cap. The board keeps
 open records, every unresumed revert and the newest 20 other settled ones. Settle skips malformed records and drops an open one
 whose `opened` is not a board timestamp or whose `version` is not a whole number
-(`trial_misshapen`). It also drops non-dict entries from `trials`
+(`trial_misshapen`).
+Settle prints `dropped malformed open trial records: <n> (<ids>; opened is not a board timestamp or version is not a whole number)`, with each id escaped and `(no id)` for a record without one.
+It also drops non-dict entries from `trials`
 when it writes the board.
 - **Settle-shaped.** The Worker's `checkTrialSettle` refuses, with 400, a board `PUT` or
   `PATCH` that changes a stored `open` trial any way `trial settle` would not.
@@ -579,7 +581,7 @@ text to the Worker. The Worker reads the effective `triage` block and answers:
   replay exits 5 and says to deploy the current Worker.
 - **Floors.** A queued idea still goes through the spec, the reviews F2 requires, the
   approver, merge rules and any `spec-approval` gate.
-- **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.py render` adds.
+- **Deploy.** The Worker needs the `ai` binding, which `tools/deploy.mjs render` adds.
   Workers AI usage bills against the account. Without the binding the route answers 503,
   and lines wait. In a 36-call live run, a call sent a median of 292 input tokens, which costs about
   $0.000011, or about 1 neuron. The free tier of 10,000 neurons a day covers about 9,900

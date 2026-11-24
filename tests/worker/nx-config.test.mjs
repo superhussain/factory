@@ -79,21 +79,26 @@ const INPUTS = {
   local: [
     "default",
     "shared",
-    "!{workspaceRoot}/tools/deploy.py",
+    "!{workspaceRoot}/tools/deploy.mjs",
     "{workspaceRoot}/tests/support/**/*",
     "{workspaceRoot}/tests/fixtures/project-documents.md",
     "{workspaceRoot}/tests/fixtures/project-document-notes.md",
     "{workspaceRoot}/tests/fixtures/project-settings.md",
     "{workspaceRoot}/worker/**/*",
     "{workspaceRoot}/web/**/*",
-    "{workspaceRoot}/tests/worker/*.py",
+    "{workspaceRoot}/tests/worker/local-http.mjs",
+    "{workspaceRoot}/tests/worker/http-v1.test.mjs",
+    "{workspaceRoot}/tests/worker/project-api.test.mjs",
+    "{workspaceRoot}/tests/worker/project-documents-api.test.mjs",
+    "{workspaceRoot}/rust/Cargo.lock",
+    "{workspaceRoot}/rust/factory/**/*",
     "{workspaceRoot}/THIRD_PARTY_NOTICES.md",
     "{workspaceRoot}/.node-version",
   ],
   browser: [
     "default",
     "shared",
-    "!{workspaceRoot}/tools/deploy.py",
+    "!{workspaceRoot}/tools/deploy.mjs",
     "{workspaceRoot}/tests/browser/**/*",
     "{workspaceRoot}/tests/fixtures/browser-cases.json",
     "{workspaceRoot}/tests/fixtures/inbox-count.json",
@@ -110,19 +115,12 @@ const INPUTS = {
   verify: [
     "default",
     "shared",
-    "{workspaceRoot}/tests/tools/test_verify.py",
-    "{workspaceRoot}/tests/tools/test_paseo_stalls.py",
-    "{workspaceRoot}/skills/factory/runtime/paseo_stalls.py",
-    "{workspaceRoot}/tests/tools/test_pr_screenshots.py",
-    "{workspaceRoot}/tests/tools/test_copy_pr_screenshots.py",
-    "{workspaceRoot}/tests/tools/test_public_cutover.py",
-    "{workspaceRoot}/tests/tools/test_rewrite_pr_links.py",
-    "{workspaceRoot}/tests/tools/test_secret_scan.py",
-    "{workspaceRoot}/tests/tools/test_stage_notes_check.py",
+    "{workspaceRoot}/tests/tools/verify.test.mjs",
+    "{workspaceRoot}/tests/tools/secret-scan.test.mjs",
+    "{workspaceRoot}/tests/tools/stage-notes-check.test.mjs",
     "{workspaceRoot}/docs/repo-security.md",
-    "{workspaceRoot}/skills/factory/runtime/pr_screenshots.py",
     "{workspaceRoot}/.gitleaks.toml",
-    { runtime: "python3 --version" },
+    { runtime: "node --version" },
   ],
 };
 
@@ -194,7 +192,7 @@ test("no target command invokes Python and nx.json declares no lint or format co
 
 test("nx.json carries no credential-shaped strings", () => {
   assert.doesNotMatch(
-    nxText.replaceAll("tests/tools/test_secret_scan.py", ""),
+    nxText.replaceAll("tests/tools/secret-scan.test.mjs", ""),
     /token|secret|password|api[_-]?key|credential|bearer/i,
   );
   assert.doesNotMatch(nxText, /\b[0-9a-f]{32,}\b/i);

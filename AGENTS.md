@@ -9,15 +9,16 @@ mise exec -- pnpm run format:check
 mise exec -- pnpm test
 mise exec -- pnpm exec nx affected -t auth protocol assets deploy local browser --base="$(git merge-base origin/main HEAD)" --head=HEAD
 mise exec -- pnpm exec nx run-many -t verify
-mise exec -- python3 tools/verify.py all
+mise exec -- node tools/verify.mjs all
 (cd rust && cargo build --profile host --locked && cargo test --locked </dev/null)
-python3 tests/parity/run.py --bin rust/target/host/factory --jobs 8
+node tests/parity/run.mjs --bin rust/target/host/factory --jobs 8
 ```
 
 The installed bundle is the factory binary, and its checks are `cargo test` and the parity
 harness; neither needs Node, pnpm or mise. The affected targets cache under the ignored
 `.nx/cache`; job 108 owns the lint and format targets. `local` binds
-`127.0.0.1:8220`/`8221`; `browser` binds owned ephemeral ports, so parallel
+`127.0.0.1:8220`/`8221` and runs its device flows on `rust/target/host/factory`, or `FACTORY_BIN`,
+so build the binary first; `browser` binds owned ephemeral ports, so parallel
 jobs can run it at once. `browser` has no Nx dependency on `local`, so the two run side by side.
 
 The parity harness compares the binary with the golden files in `tests/parity/golden/`. After an intended

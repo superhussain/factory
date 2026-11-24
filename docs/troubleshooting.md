@@ -11,7 +11,7 @@ context see [cloudflare.md](cloudflare.md), [device.md](device.md) and
   ([device.md](device.md)). `doctor` reports exactly which check fails.
 - Deployment tooling rejects the profile: `deploy/profile.json` is missing or
   invalid. Copy the shape from `tests/fixtures/deployment-valid.json` (synthetic
-  values) and validate with `python3 tools/deploy.py check --profile ...` —
+  values) and validate with `node tools/deploy.mjs check --profile ...` —
   `check` writes nothing.
 
 ## Access 401/403

@@ -1,11 +1,8 @@
 name: CI setup
-description: Python, Node and pnpm at the pinned versions, then a frozen install from main's pnpm store.
+description: Node and pnpm at the pinned versions, then a frozen install from main's pnpm store.
 runs:
   using: composite
   steps:
-    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-      with:
-        python-version: '3.12'
     - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version-file: .node-version

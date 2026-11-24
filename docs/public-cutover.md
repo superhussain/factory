@@ -6,9 +6,15 @@ that the repository is ready, prints the plan, and acts only with `--apply`.
 The examples use `OWNER/factory` for the repository, `OWNER/factory-private`
 for the archive and `you@example.com` for the public author email.
 
+This page is a record. The cutover ran on 2026-11-08, and
+`tools/public-cutover.py` and `tools/rewrite-pr-links.py` were deleted once it
+was done. Both need Python, and `rewrite-pr-links.py` also needs the Python
+runtime, so run them from commit `3e510927` if you ever need them again:
+`git worktree add <dir> 3e510927`.
+
 ## Before you start
 
-- Job 680 (release audit and `tools/secret-scan.py`) is merged to `main`.
+- Job 680 (release audit and the secret scan) is merged to `main`.
 - Job 681 (README quickstart and `docs/cloudflare.md`) is merged to `main`.
 - You have the values for the `deploy-main` workflow in hand: the
   `CLOUDFLARE_API_TOKEN` secret and the `FACTORY_DEPLOY_PROFILE` variable
@@ -42,7 +48,7 @@ Every check prints `[ok]` or `[fail]`:
 | jobs | the runtime's `builds <project>` lists an in-flight or stale job |
 | PRs | `OWNER/factory` has an open pull request |
 | archive name | `OWNER/factory-private` already exists |
-| gitleaks | `python3 tools/secret-scan.py` reports findings |
+| gitleaks | `tools/secret-scan.mjs` reports findings |
 | names | a secret or variable the workflows use is missing |
 | checkout | a `--checkout` path is dirty |
 
@@ -83,7 +89,8 @@ The first push deploys the same tree production already runs.
 ## Other hosts
 
 On every other host with a checkout, such as a second laptop, repoint it
-without touching GitHub:
+without touching GitHub, either by hand as Live run step 6 describes or with
+the tool from commit `3e510927`:
 
 ```sh
 python3 tools/public-cutover.py --repo OWNER/factory --archive OWNER/factory-private \

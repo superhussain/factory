@@ -7,10 +7,10 @@ Credentials are covered under [Secrets stay out of configuration](#secrets-stay-
 
 | Layer | Where it lives | Scope | Who writes it | Source |
 | --- | --- | --- | --- | --- |
-| Deployment profile | Ignored `deploy/profile.json`, or the path given to `--profile` | One hosted instance | Operator | `tools/deploy.py` `load_profile`, `PROFILE_KEYS` |
+| Deployment profile | Ignored `deploy/profile.json`, or the path given to `--profile` | One hosted instance | Operator | `tools/deploy.mjs` `load_profile`, `PROFILE_KEYS` |
 | CI copy of the profile | Repository variable `FACTORY_DEPLOY_PROFILE`, written to `deploy/profile.json` at run time | Main-push deploys | Operator | `.github/workflows/deploy-main.yml` "Materialize profile" step |
-| Worker vars | Rendered `.build/wrangler.production.json` `vars` | Running Worker | `tools/deploy.py render` only | `tools/deploy.py` `project_wrangler`; `worker/assets.js` `readServerConfig` |
-| Connection descriptor | `.build/connection.json`, exactly `{"version":1,"api_url":...}` | Handoff to devices | `tools/deploy.py render` | `project_wrangler`; runtime `load_connection` |
+| Worker vars | Rendered `.build/wrangler.production.json` `vars` | Running Worker | `tools/deploy.mjs render` only | `tools/deploy.mjs` `project_wrangler`; `worker/assets.js` `readServerConfig` |
+| Connection descriptor | `.build/connection.json`, exactly `{"version":1,"api_url":...}` | Handoff to devices | `tools/deploy.mjs render` | `project_wrangler`; runtime `load_connection` |
 | Device config | `<home>/config.md` frontmatter | One device | Device owner | runtime `api_url`, `holder`, agents install (`*_agents_dir`) |
 | Device checkout paths | `<home>/paths.md` | One device | `init <repo>` | runtime `init`, `validate_home` |
 | Device dispatch routes | `<home>/routes.md` | One device | Device owner, by hand | runtime `read_routes`, `read_review_routes`, `routes` |

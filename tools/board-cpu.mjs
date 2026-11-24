@@ -6,6 +6,7 @@
 import { build } from "esbuild";
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
+import { CLOUDFLARE_WORKERS } from "../tests/support/worker.mjs";
 
 // The made-up board: row n has a size drawn from the live distribution's quantiles.
 export function syntheticBoard(rows) {
@@ -55,6 +56,7 @@ async function load(dir) {
     platform: "neutral",
     target: "es2022",
     loader: { ".html": "text", ".txt": "text", ".md": "text" },
+    alias: { "cloudflare:workers": CLOUDFLARE_WORKERS },
   });
   return import(
     "data:text/javascript;base64," + Buffer.from(result.outputFiles[0].contents).toString("base64")

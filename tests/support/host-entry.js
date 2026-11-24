@@ -3,7 +3,7 @@
 // file, and no deployment profile can select it.
 import { serveFactory } from "../../worker/index.js";
 
-export { BoardEvents } from "../../worker/events.js";
+export { BoardEvents } from "../../worker/room.js";
 
 const config = {
   origin: "https://factory.example.test",
