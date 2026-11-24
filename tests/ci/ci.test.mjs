@@ -216,6 +216,27 @@ test("rust-build restores and saves this PR's incremental artifacts around an in
   assert.deepEqual(save.with, { path, key });
 });
 
+test("rust-test restores incremental artifacts, and one shard saves them between the build and the tests", () => {
+  const steps = workflow.jobs["rust-test"].steps;
+  const at = (name) => steps.findIndex((step) => step.name === name);
+  const cache = steps.findIndex((step) => action(step) === "Swatinem/rust-cache");
+  const restore = steps[at("Restore incremental artifacts")];
+  const save = steps[at("Save incremental artifacts")];
+  assert.equal(action(restore), "actions/cache/restore");
+  assert.equal(action(save), "actions/cache/save");
+  assert.ok(cache < at("Restore incremental artifacts"));
+  assert.ok(at("Restore incremental artifacts") < at("Build the tests"));
+  assert.ok(at("Build the tests") < at("Save incremental artifacts"));
+  assert.ok(at("Save incremental artifacts") < at("Test linux-x64"));
+  assert.equal(save.if, "matrix.shard == 1");
+  const path = "rust/target/debug/incremental";
+  const prefix =
+    "v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-";
+  const key = `${prefix}\${{ github.run_id }}-\${{ github.run_attempt }}`;
+  assert.deepEqual(restore.with, { path, key, "restore-keys": prefix });
+  assert.deepEqual(save.with, { path, key });
+});
+
 test("no job runs the Python CLI suites or sets up Python, and the workflow reads no secret", () => {
   assert.equal(workflow.jobs.python, undefined);
   const raw = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
@@ -268,12 +289,14 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
   assert.equal(unitRuns[0], "rustup toolchain install");
   assert.match(unitRuns[1], /cargo-nextest-0\.9\.152-x86_64-unknown-linux-gnu\.tar\.gz/);
   assert.match(unitRuns[1], /sha256sum -c/);
+  assert.equal(unitRuns[2], "CARGO_INCREMENTAL=1 cargo test --locked --no-run");
   // Every shard runs its count partition of every test, and the shards together cover all of them.
   assert.equal(
-    unitRuns[2],
-    "cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.shard }}/4",
+    unitRuns[3],
+    "CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.shard }}/2",
   );
-  assert.deepEqual(unit.strategy.matrix.shard, [1, 2, 3, 4]);
+  assert.equal(unitRuns.length, 4);
+  assert.deepEqual(unit.strategy.matrix.shard, [1, 2]);
   assert.equal(unit.strategy["fail-fast"], false);
   assert.deepEqual(runs(check), [
     "rustup toolchain install\nrustup target add aarch64-apple-darwin x86_64-pc-windows-gnu",

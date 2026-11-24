@@ -226,11 +226,12 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 6
     # nextest runs each test in its own process, so tests that hold TEST_ENV_LOCK no longer wait on each other,
-    # and count partitions split the tests evenly over the shards.
+    # and count partitions split the tests over the shards. hung_fetch_times_out waits 60 s by design, so more
+    # shards would not shorten the slowest one.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2]
     defaults:
       run:
         working-directory: rust
@@ -244,6 +245,14 @@ jobs:
         with:
           prefix-key: v1-rust
           workspaces: rust
+      # As in rust-build: the newest incremental artifacts, from main or this PR, let rustc reuse the unchanged
+      # codegen units of the test build.
+      - name: Restore incremental artifacts
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/debug/incremental
+          key: v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-
       - name: Install cargo-nextest
         run: |
           curl -sSfLo "$RUNNER_TEMP/nextest.tar.gz" https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.152/cargo-nextest-0.9.152-x86_64-unknown-linux-gnu.tar.gz
@@ -251,8 +260,18 @@ jobs:
           mkdir -p "$RUNNER_TEMP/bin"
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/bin" cargo-nextest
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # nextest builds with cargo test --no-run, so this is the build it runs.
+      - name: Build the tests
+        run: CARGO_INCREMENTAL=1 cargo test --locked --no-run
+      # One shard saves; both built the same artifacts.
+      - name: Save incremental artifacts
+        if: matrix.shard == 1
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/debug/incremental
+          key: v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Test linux-x64
-        run: cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.shard }}/4
+        run: CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.shard }}/2
   # Type-checks the darwin-arm64 and windows-x64 targets.
   rust-check:
     needs: plan

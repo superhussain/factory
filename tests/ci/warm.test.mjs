@@ -61,18 +61,21 @@ test("each warm job installs the same toolchain and compiles what its ci.yml job
     run(warm.jobs.targets, "Build the factory binary"),
     run(ci.jobs.targets, "Build the factory binary"),
   );
-  assert.equal(run(warm.jobs["rust-test"], "Build the tests"), "cargo test --locked --no-run");
-  // nextest builds the test profile with cargo test --no-run, so it reuses what warm compiled.
-  assert.match(run(ci.jobs["rust-test"], "Test linux-x64"), /^cargo nextest run --locked /);
+  assert.equal(
+    run(warm.jobs["rust-test"], "Build the tests"),
+    run(ci.jobs["rust-test"], "Build the tests"),
+  );
   for (const name of ["Check darwin-arm64", "Check windows-x64"]) {
     assert.equal(run(warm.jobs["rust-check"], name), run(ci.jobs["rust-check"], name));
   }
 });
 
-test("warm rust-build saves the incremental artifacts under the key ci.yml restores", () => {
-  for (const name of ["Restore incremental artifacts", "Save incremental artifacts"]) {
-    const [w, c] = [named(warm.jobs["rust-build"], name), named(ci.jobs["rust-build"], name)];
-    assert.equal(w.uses, c.uses, name);
-    assert.deepEqual(w.with, c.with, name);
+test("warm rust-build and rust-test save the incremental artifacts under the keys ci.yml restores", () => {
+  for (const id of ["rust-build", "rust-test"]) {
+    for (const name of ["Restore incremental artifacts", "Save incremental artifacts"]) {
+      const [w, c] = [named(warm.jobs[id], name), named(ci.jobs[id], name)];
+      assert.equal(w.uses, c.uses, `${id}: ${name}`);
+      assert.deepEqual(w.with, c.with, `${id}: ${name}`);
+    }
   }
 });
