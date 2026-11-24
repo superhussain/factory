@@ -672,3 +672,33 @@ test("a pages table from before meta, or with meta after json, is rebuilt meta f
     assert.deepEqual(order(), ["page", "meta", "json"]);
   }
 });
+
+// Rows a PATCH grows in place grow their page. Past MAX_PAGE (1.5 MiB) the pages are packed
+// anew, so none nears SQLite's 2 MB row limit, which setup's room enforces as workerd does.
+test("a PATCH that grows a page past its limit splits it, and the board reads back the same", async () => {
+  const jobs = Array.from({ length: 6 }, (_, n) => ({
+    id: `${3000 + n}-grows`,
+    project: "sample",
+    stage: "build",
+  }));
+  const s = setup({ ...BOARD, jobs });
+  await s.send("/board.json");
+  const sizes = () =>
+    s.room.object
+      .board()
+      .sql.exec("SELECT length(CAST(json AS BLOB)) AS n FROM board_pages ORDER BY page")
+      .toArray()
+      .map((p) => p.n);
+  assert.equal(sizes().length, 1);
+  for (const [n, row] of [...jobs].entries()) {
+    // 450,000 bytes in UTF-8, so four such rows pass MAX_PAGE and five pass 2 MB.
+    jobs[n] = { ...row, idea: "é".repeat(225_000) };
+    const ok = await s.patch({ rows: [{ id: row.id, expect: row, row: jobs[n] }] });
+    assert.equal(ok.status, 200, await ok.text());
+    const full = await (await s.send("/board.json")).text();
+    assert.deepEqual(JSON.parse(full).jobs, jobs);
+    assert.equal(await (await s.send("/board.json?view=slim")).text(), await workerSlim(full));
+    assert.ok(Math.max(...sizes()) <= 3 << 19, JSON.stringify(sizes()));
+  }
+  assert.ok(sizes().length > 1, JSON.stringify(sizes()));
+});

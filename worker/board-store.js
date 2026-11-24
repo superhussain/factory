@@ -28,6 +28,9 @@ export const ROOM = "main";
 export const FLUSH_MS = 30_000;
 export const PAGE_BYTES = 256 << 10;
 const MAX_ROW = 1 << 20;
+// Bytes past which a page grown by rows updated in place is split. Packing never makes a page
+// larger than one MAX_ROW row, and SQLite refuses a page row past 2 MB.
+const MAX_PAGE = 3 << 19;
 // Characters per board_meta value: at most 3 UTF-8 bytes each, under SQLite's 2 MB limit.
 const META_CHUNK = 512 << 10;
 // The customMetadata store value on the room's own copies in R2.
@@ -471,6 +474,26 @@ export class BoardRows {
       }
     }
     if (byteLength(boardText(state.head, "")) + bytes + Math.max(count - 1, 0) > max) return false;
+    const texts = new Map([...touched].map((page) => [page, JSON.stringify(pages.get(page))]));
+    // A page grown past MAX_PAGE by rows updated in place splits: every page is packed anew, as
+    // a seed packs them, which writes each page and index row once.
+    if (
+      [...texts.values()].some((json) => json.length > MAX_PAGE / 3 && byteLength(json) > MAX_PAGE)
+    ) {
+      const jobs = [];
+      const stored = new Map(
+        this.sql
+          .exec("SELECT page, json FROM board_pages")
+          .toArray()
+          .map((p) => [p.page, p.json]),
+      );
+      for (const page of [...new Set([...stored.keys(), ...pages.keys()])].sort((a, b) => a - b))
+        for (const row of pages.get(page) ?? JSON.parse(stored.get(page)))
+          jobs.push(JSON.stringify(row));
+      const packed = this.seed(boardText(state.head, jobs.join(",")), state.r2etag, state.etag);
+      for (const key of ["bytes", "count", "maxNum", "lastPage", "clean"]) state[key] = packed[key];
+      return true;
+    }
     for (const page of touched) {
       const rows = pages.get(page);
       const meta = pages.meta.get(page);
@@ -479,7 +502,7 @@ export class BoardRows {
           `INSERT INTO board_pages (page, json, meta) VALUES (?, ?, ?)
             ON CONFLICT (page) DO UPDATE SET json = excluded.json, meta = excluded.meta`,
           page,
-          JSON.stringify(rows),
+          texts.get(page),
           meta == null ? null : JSON.stringify(meta),
         );
       else this.sql.exec("DELETE FROM board_pages WHERE page = ?", page);
