@@ -20205,8 +20205,26 @@ exit "$archive_code"
             );
         }
 
+        /// Runs in its own test process. A child that a parallel test forks keeps a copy of each
+        /// daemon lock this test takes until that child execs, so in a shared process the lock can
+        /// still look held after this test drops it.
         #[test]
         fn kill_refuses_pids_kill_would_misread() {
+            const ALONE: &str = "FACTORY_TEST_ALONE";
+            if std::env::var_os(ALONE).is_none() {
+                let name = format!(
+                    "{}::kill_refuses_pids_kill_would_misread",
+                    module_path!().split_once("::").unwrap().1
+                );
+                let out = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", &name, "--test-threads=1"])
+                    .env(ALONE, "1")
+                    .output()
+                    .unwrap();
+                let text = String::from_utf8_lossy(&out.stdout);
+                assert!(out.status.success() && text.contains("1 passed"), "{text}");
+                return;
+            }
             assert_eq!(kill_argv(0), None);
             assert_eq!(kill_argv(i32::MAX as u32 + 1), None);
             assert_eq!(kill_argv(u32::MAX), None);
