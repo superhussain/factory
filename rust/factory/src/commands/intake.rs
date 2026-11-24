@@ -7453,6 +7453,17 @@ mod backlog_triage_pass_test {
     }
 
     #[test]
+    fn test_backlog_triage_queues_above_the_floor() {
+        let board = r#"{"updated": "", "jobs": [{"id": "412-fix-login", "project": "sample", "stage": "build"}], "archived": {"max_id": 416}}"#;
+        let backlog = "# Backlog\n- [ ] sample: Add thing\n";
+        let w = Worker::new("floor", queued(board, backlog));
+        let verdict = json!({"model": "m", "confidence": 90, "threshold": 80, "reason": "Small."});
+        assert!(!queue_backlog_item(&w.home, "sample", "Add thing", &verdict, None).unwrap());
+        assert_eq!(w.board_jobs().last().unwrap()["id"], "417-add-thing");
+        assert!(w.texts("PUT", "/api/backlog")[0].contains("(417-add-thing)"));
+    }
+
+    #[test]
     fn test_a_queued_sweep_line_carries_its_context() {
         let after = r#"{"updated": "", "jobs": [{"id": "008-old-job", "stage": "done"}, {"id": "009-add-pdf-export", "stage": "idea"}]}"#;
         let mut replies = opening(EXAMPLE, nulls(2));
