@@ -906,12 +906,26 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_lost_daemon_reply_is_an_error_not_a_retry() {
+        use std::os::unix::fs::DirBuilderExt;
         use std::os::unix::net::UnixListener;
+        use std::time::{SystemTime, UNIX_EPOCH};
         let (origin, seen) = serve(vec![]);
         let long = home_for("board-client-lost", &origin);
-        let home = std::path::PathBuf::from(format!("/tmp/factory-lost-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(&home).unwrap();
+        let home = (0..100)
+            .find_map(|_| {
+                let nanos = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos();
+                let path =
+                    PathBuf::from(format!("/tmp/factory-lost-{}-{nanos}", std::process::id()));
+                match std::fs::DirBuilder::new().mode(0o700).create(&path) {
+                    Ok(()) => Some(path),
+                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => None,
+                    Err(e) => panic!("{}: {e}", path.display()),
+                }
+            })
+            .expect("no free /tmp/factory-lost home after 100 tries");
         std::fs::copy(long.join("config.md"), home.join("config.md")).unwrap();
         std::fs::copy(long.join(".env"), home.join(".env")).unwrap();
         let home = std::fs::canonicalize(&home).unwrap();
