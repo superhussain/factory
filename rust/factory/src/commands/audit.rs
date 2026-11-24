@@ -3159,9 +3159,7 @@ exit "${FAKE_EXIT:-0}"
 
     impl Bench {
         pub fn new(name: &str) -> Bench {
-            let env = crate::shared::TEST_ENV_LOCK
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let env = crate::shared::test_env_lock();
             let root = temp_dir(&format!("bench-{name}"));
             let repo = root.join("alpha");
             fs::create_dir(&repo).unwrap();

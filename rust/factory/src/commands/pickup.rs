@@ -9207,7 +9207,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Mutex, MutexGuard};
 
-    use crate::shared::TEST_ENV_LOCK as ENV_LOCK;
     const DEVICE: &str = "host-a";
     const IDEA_TEXT: &str = "$(touch pwned)";
     const PLACEHOLDERS: [&str; 10] = [
@@ -9424,7 +9423,7 @@ exit "$code"
 
     impl Fx {
         pub fn new() -> Fx {
-            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = crate::shared::test_env_lock();
             let tmp = TempHome::new();
             let root = tmp.0.clone();
             let home = root.join("home");
