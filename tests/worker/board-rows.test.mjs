@@ -3,7 +3,7 @@
 // the made-up running example: 2001-add-csv-export lands on a board at "board.json-seed".
 import assert from "node:assert/strict";
 import test from "node:test";
-import { loadProduction, memoryBucket } from "../support/worker.mjs";
+import { loadProduction, memoryBucket, memoryRoom } from "../support/worker.mjs";
 
 const { serveFactory, BoardEvents } = await loadProduction();
 globalThis.WebSocketRequestResponsePair = class {};
@@ -23,6 +23,16 @@ const IDEA = {
   updated: "2026-11-19T12:00:00Z",
 };
 
+// The write tests run twice: on the room's row store, and on R2's board.json alone.
+let store = "room";
+const each = (name, fn) => {
+  for (const s of ["room", "r2"])
+    test(`${name} (${s})`, async (t) => {
+      store = s;
+      await fn(t);
+    });
+};
+
 // An env whose board starts as `board`, with every room notify body recorded.
 function setup(board = { updated: UPDATED, jobs: [BUILD, SPEC] }) {
   const bucket = memoryBucket();
@@ -33,17 +43,16 @@ function setup(board = { updated: UPDATED, jobs: [BUILD, SPEC] }) {
       httpEtag: SEED,
     });
   const bodies = [];
-  const BoardEvents = {
-    idFromName: (name) => ({ name }),
-    get: () => ({
-      fetch: async (input, init) => {
-        const request = new Request(input, init);
-        bodies.push([request.url, await request.text()]);
-        return new Response(null, { status: 204 });
-      },
-    }),
+  const fetch = async (input, init) => {
+    const request = new Request(input, init);
+    bodies.push([request.url, await request.text()]);
+    return new Response(null, { status: 204 });
   };
-  const env = { BUCKET: bucket, BoardEvents };
+  const env = { BUCKET: bucket };
+  env.BoardEvents =
+    store === "room"
+      ? memoryRoom(BoardEvents, env, fetch).namespace
+      : { idFromName: (name) => ({ name }), get: () => ({ fetch }) };
   const send = (method, body, headers = {}) => {
     const init = {
       method,
@@ -63,7 +72,7 @@ function setup(board = { updated: UPDATED, jobs: [BUILD, SPEC] }) {
 
 const NOTIFY = "https://board-events.invalid/notify?key=board.json";
 
-test("patch frame", async () => {
+each("patch frame", async () => {
   const s = setup();
   const response = await s.patch({
     updated: "2026-11-19T12:00:00Z",
@@ -82,7 +91,7 @@ test("patch frame", async () => {
   });
 });
 
-test("put frame", async () => {
+each("put frame", async () => {
   const s = setup();
   const opened = { ...BUILD, stage: "pr-open" };
   const moved = await s.put({ updated: UPDATED, jobs: [opened, SPEC] });
@@ -110,7 +119,7 @@ test("put frame", async () => {
   });
 });
 
-test("a row with its keys reordered, nested or not, is a changed row", async () => {
+each("a row with its keys reordered, nested or not, is a changed row", async () => {
   const nested = { ...BUILD, refs: [{ kind: "followup", id: SPEC.id }] };
   const s = setup({ updated: UPDATED, jobs: [nested, SPEC] });
   const reordered = { stage: SPEC.stage, project: SPEC.project, id: SPEC.id };
@@ -121,8 +130,10 @@ test("a row with its keys reordered, nested or not, is a changed row", async () 
 });
 
 // The CPU budget at twice today's board, pinned as call counts so it never flakes: a write
-// parses the board once per copy it reads and serializes no unchanged row to diff it.
-test("a PUT and a PATCH on a 4,600-row board serialize only the changed row", async () => {
+// parses the board once per copy it reads and serializes no unchanged row to diff it. The room's
+// budget is in board-store.test.mjs.
+test("a PUT and a PATCH on a 4,600-row board serialize only the changed row (r2)", async () => {
+  store = "r2";
   const rows = Array.from({ length: 4600 }, (_, i) => ({
     id: `${1000 + i}-synthetic-row`,
     project: "sample",
@@ -225,7 +236,7 @@ for (const [name, board, write] of [
     (s) => s.put({ updated: UPDATED, jobs: [{ ...BUILD, summary: "x".repeat(262144) }, SPEC] }),
   ],
 ]) {
-  test(`keeps the ping: ${name}`, async () => {
+  each(`keeps the ping: ${name}`, async () => {
     const s = setup(board === undefined ? { updated: UPDATED, jobs: [BUILD, SPEC] } : board);
     const response = await write(s);
     assert.equal(response.status, 200, await response.clone().text());

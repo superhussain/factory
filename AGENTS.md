@@ -9,9 +9,9 @@ mise exec -- pnpm run format:check
 mise exec -- pnpm test
 mise exec -- pnpm exec nx affected -t auth protocol assets deploy local browser --base="$(git merge-base origin/main HEAD)" --head=HEAD
 mise exec -- pnpm exec nx run-many -t verify
-mise exec -- python3 tools/verify.py all
+mise exec -- node tools/verify.mjs all
 (cd rust && cargo build --profile host --locked && cargo test --locked </dev/null)
-python3 tests/parity/run.py --bin rust/target/host/factory --jobs 8
+node tests/parity/run.mjs --bin rust/target/host/factory --jobs 8
 ```
 
 The installed bundle is the factory binary, and its checks are `cargo test` and the parity

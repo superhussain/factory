@@ -4,9 +4,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { loadProduction, memoryBucket } from "../support/worker.mjs";
+import { loadProduction, memoryBucket, memoryRoom } from "../support/worker.mjs";
 
-const { serveFactory } = await loadProduction();
+const { serveFactory, BoardEvents } = await loadProduction();
 const person = { verified: true, kind: "user", email: "person@example.test" };
 
 const BUILD = { id: "1999-synthetic-build", project: "sample", stage: "build" };
@@ -22,6 +22,17 @@ const IDEA = {
 };
 const add = (row = IDEA) => ({ id: row.id, expect: null, row });
 
+// Each test runs twice: on the room's row store, and on R2's board.json alone, the store the
+// Worker falls back to without a room.
+let store = "room";
+const each = (name, fn) => {
+  for (const s of ["room", "r2"])
+    test(`${name} (${s})`, async (t) => {
+      store = s;
+      await fn(t);
+    });
+};
+
 function setup(board = { updated: "2026-11-19T11:00:00Z", jobs: [BUILD, SPEC] }) {
   const bucket = memoryBucket();
   bucket.objects.set("board.json", {
@@ -30,15 +41,14 @@ function setup(board = { updated: "2026-11-19T11:00:00Z", jobs: [BUILD, SPEC] })
     httpEtag: '"board.json-seed"',
   });
   const notified = [];
-  const BoardEvents = {
-    idFromName: (name) => ({ name }),
-    get: () => ({
-      fetch: async (url) => (notified.push(url), new Response(null, { status: 204 })),
-    }),
-  };
+  const env = { BUCKET: bucket };
+  const fetch = async (url) => (notified.push(url), new Response(null, { status: 204 }));
+  const room = store === "room" ? memoryRoom(BoardEvents, env, fetch) : null;
+  env.BoardEvents = room
+    ? room.namespace
+    : { idFromName: (name) => ({ name }), get: () => ({ fetch }) };
   const waited = [];
   const ctx = { waitUntil: (p) => waited.push(p) };
-  const env = { BUCKET: bucket, BoardEvents };
   const patch = (body, raw = false) =>
     serveFactory(
       new Request("http://local/api/board", {
@@ -50,12 +60,14 @@ function setup(board = { updated: "2026-11-19T11:00:00Z", jobs: [BUILD, SPEC] })
       person,
       ctx,
     );
-  const etag = () => bucket.objects.get("board.json").httpEtag;
-  const stored = () => JSON.parse(bucket.objects.get("board.json").bytes.toString());
+  // Before its first request the room has not read R2, and seeds with R2's version.
+  const etag = () => room?.etag() ?? bucket.objects.get("board.json").httpEtag;
+  const stored = () =>
+    room ? room.stored() : JSON.parse(bucket.objects.get("board.json").bytes.toString());
   return { bucket, notified, waited, patch, etag, stored };
 }
 
-test("commits a new row", async () => {
+each("commits a new row", async () => {
   const s = setup();
   const response = await s.patch({ updated: "2026-11-19T12:00:00Z", rows: [add()] });
   assert.equal(response.status, 200);
@@ -81,7 +93,7 @@ test("commits a new row", async () => {
   assert.deepEqual(s.stored().jobs, [asked, IDEA]);
 });
 
-test("an unchanged read row is a no-op that still conflicts when stale", async () => {
+each("an unchanged read row is a no-op that still conflicts when stale", async () => {
   const s = setup();
   const read = { id: SPEC.id, expect: SPEC, row: SPEC };
   const done = { ...BUILD, stage: "review" };
@@ -118,7 +130,7 @@ const sha256 = (row) =>
     )
     .digest("hex");
 
-test("reads", async () => {
+each("reads", async () => {
   const held = Array.from({ length: 150 }, (_, k) => ({
     id: `${1700 + k}-held-follow-up`,
     project: "sample",
@@ -172,7 +184,7 @@ test("reads", async () => {
   assert.equal(s.etag(), before);
 });
 
-test("conflicts", async () => {
+each("conflicts", async () => {
   const conflict = async (s, rows, body) => {
     const before = s.etag();
     const response = await s.patch({ updated: "2026-11-19T12:00:00Z", rows });
@@ -205,7 +217,7 @@ test("conflicts", async () => {
   assert.equal(s.notified.length, 0);
 });
 
-test("same refusals", async () => {
+each("same refusals", async () => {
   const refused = async (s, rows, text) => {
     const before = s.etag();
     const response = await s.patch({ rows });
@@ -234,7 +246,7 @@ test("same refusals", async () => {
   );
 });
 
-test("new starter", async () => {
+each("new starter", async () => {
   const TEXT =
     'a board write cannot add "2001-add-csv-export" as a batch starter: start a batch from a held idea already on the board. Nothing was written.';
   const starter = { ...IDEA, priority: { at: "2026-11-19T12:00:00Z", batch: true } };
@@ -262,7 +274,9 @@ test("new starter", async () => {
   assert.equal(marked.status, 200, "an idea already on the board can become the starter");
 });
 
-test("retries", async () => {
+// An R2 race: the room's version moving under a patch is in board-store.test.mjs.
+test("retries (r2)", async () => {
+  store = "r2";
   const s = setup();
   const put = s.bucket.put.bind(s.bucket);
   let races = 1;
@@ -294,7 +308,7 @@ test("retries", async () => {
   assert.equal(busy.notified.length, 0);
 });
 
-test("shape", async () => {
+each("shape", async () => {
   const s = setup();
   const before = s.etag();
   const SHAPE =
@@ -361,7 +375,7 @@ test("shape", async () => {
 });
 
 // A device client writes rows only when its board read advertised PATCH.
-test("a board read advertises Accept-Patch and a backlog read does not", async () => {
+each("a board read advertises Accept-Patch and a backlog read does not", async () => {
   const s = setup();
   s.bucket.objects.set("backlog.md", {
     key: "backlog.md",
@@ -376,7 +390,7 @@ test("a board read advertises Accept-Patch and a backlog read does not", async (
 
 // A stage read is a plain compare: it holds while the row keeps its stage, whatever else
 // changes, and refuses the write once the stage moves, such as a merged row reopened.
-test("stage reads", async () => {
+each("stage reads", async () => {
   const merged = { id: "1600-sample-old", project: "sample", stage: "merged" };
   const s = setup({ updated: "", jobs: [BUILD, merged] });
   const done = { ...BUILD, stage: "review" };

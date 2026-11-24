@@ -1,2 +1,2 @@
 trial factory-spec-v8 reverted to version 9: rounds b higher, tokens no difference
-dropped malformed open trial records: 2 (bad id, project, stage, version, champion_version or opened)
+dropped malformed open trial records: 2 (factory-spec-v9, factory-spec-v10; bad id, project, stage, version, champion_version or opened)

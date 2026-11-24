@@ -362,9 +362,9 @@ Flags name risky calls. They are heuristics that inform a reader and block nothi
 
 A `gh pr merge` in the main session carries no flag, since the orchestrator merges approved PRs there. `pr-merge` flags only a merge that runs:
 
-- It matches `gh pr merge`, or `gh api` with `PUT` on `pulls/<n>/merge`, as a command's first word or after `;`, `&`, `|`, `(`, `$(`, a backtick or a newline. A `VAR=value`, `sudo`, `env`, `command`, `exec`, `time`, `if`, `then`, `else`, `elif`, `do` or `!` prefix may come first. It also matches the factory runtime's `pr-merge` subcommand, as in `"$RUNTIME" pr-merge factory/1017-add-x`, when the program is a quoted word, a `$NAME` variable, or a path whose last part is `factory`.
-- It skips `cat` and `tee` heredoc bodies the way `secret-file` does. It also skips text in single quotes, and text in double quotes that holds no `$(` or backtick, so a grep pattern or a commit message does not flag.
-- A merge inside `bash -c` or `eval` does not flag.
+- It matches `gh pr merge`, or `gh api` with `PUT` on `pulls/<n>/merge` or `pulls/$N/merge`, as a command's first word or after `;`, `&`, `|`, `(`, `$(`, a backtick or a newline. `gh` may carry `-R` or `--repo` first. A `VAR=value` or `VAR="$(...)"`, `sudo`, `env`, `command`, `exec`, `xargs`, `time`, `if`, `then`, `else`, `elif`, `do` or `!` prefix may come first, with flags such as `sudo -E` or `xargs -n1`. It also matches the factory runtime's `pr-merge` subcommand, as in `"$RUNTIME" pr-merge factory/1017-add-x`, when the program is a quoted word with a space, a word that starts with a `$NAME` or `${NAME}` variable, or a path whose last part is `factory`.
+- A quoted word with no space and no `;`, `&`, `|`, `(`, `)`, `<`, `>` or backtick counts as the bare word, so `gh "pr" merge` and a quoted URL match. It skips `cat` and `tee` heredoc bodies the way `secret-file` does. It skips other text in single quotes, and text in double quotes that holds no `$(` or backtick, so a grep pattern or a commit message does not flag.
+- A merge inside `bash -c` or `eval`, or after a prefix flag with a value such as `sudo -u root`, does not flag.
 
 `secret-file` skips the body of a `cat` or `tee` heredoc with no pipe after it, so writing about `.env` does not flag. A heredoc fed to a shell or interpreter, and every other line, still flags. That includes output run through `eval`, `-c` or a combined flag such as `-lc`, `<(` or `>(`, a `$(cat <<EOF` used as the command itself, and every body line inside a `$(` that spans lines, a delimiter with quotes inside it such as `E"OF"`, and lines an unquoted heredoc expands with `$(` or a backtick. A body written to a file and run later, such as `cat > s.sh <<EOF` then `bash s.sh`, is beyond a per-call heuristic.
 
@@ -759,8 +759,5 @@ schedules. Installation, initialization and adoption never weaken security polic
 
 The `CI` workflow runs parallel Ubuntu 22.04 jobs on pull requests. Its `rust-test` job runs the
 binary's unit tests, `rust-check` type-checks the `aarch64-apple-darwin` and `x86_64-pc-windows-gnu`
-targets, and `parity` compares the built binary with the golden files. The `tools/*.py` scripts
-support Python 3.8+. `tests/tools/test_paseo_stalls.py` skips its two zone cases where `zoneinfo`
-cannot resolve `UTC` (Python 3.8, or no zone data); `test_missing_zoneinfo_leaves_stalls_out`
-covers that path on every host.
+targets, and `parity` compares the built binary with the golden files.
 Do not skip a case when running on its owning platform.

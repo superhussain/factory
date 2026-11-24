@@ -23,8 +23,8 @@ output that does not match.
   - `crontab.txt` on cron hosts, `LaunchAgents/factory.*.plist` on macOS,
     `systemd/factory-*.service` on systemd hosts, and `config/factory-*.cmd` on
     Windows;
-  - `home/`, with `config.md`, `paths.md`, `routes.md`, `launchers.json` and
-    `.env`.
+  - `home/`, with `config.md`, `paths.md`, `routes.md`, `launchers.json`,
+    `stalls.json` and `.env`.
 
   Catch-up never prunes these folders.
 
@@ -246,6 +246,11 @@ Fix them:
 
 - **Pickup and daemon units.** Don't edit them by hand. Run
   `daemon setup --install`, which writes the units for the binary.
+- **Catch-up does the timers for you.** From the release after job 2251, catch-up
+  rewrites a crontab line, `factory.*.plist`, `factory-*.service` or
+  `factory-*.cmd` that runs `runtime/factory.py`, and a `stalls.json` adapter that
+  runs `runtime/paseo_stalls.py`, to the binary. It reloads launchd and systemd and
+  prints one `timers:` line each. The steps below are for anything else.
 - **Retro push and other lines.** Replace `python3 <installed-skill>/runtime/factory.py`
   with `<installed-skill>/runtime/factory`, and `py -3 <installed-skill>\runtime\factory.py`
   with `<installed-skill>\runtime\factory.exe`. Keep the arguments. On macOS, load

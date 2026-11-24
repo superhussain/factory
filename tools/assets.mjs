@@ -11,6 +11,8 @@ const CEILING = 3_000_000;
 const SOURCES = [
   "worker/index.js",
   "worker/events.js",
+  "worker/room.js",
+  "worker/board-store.js",
   "worker/access.ts",
   "worker/assets.js",
   "worker/pwa.js",
@@ -139,12 +141,14 @@ export async function inspectBundle(outDir, reported = "") {
   const entry = modules.find((part) => part.name === metadata.main_module);
   if (!entry) throw new Error("main module missing from upload");
 
-  // Every static import in the entry resolves to an inventoried uploaded module.
+  // Every static import in the entry resolves to an inventoried uploaded module, or to a
+  // workerd built-in such as cloudflare:workers.
   const names = new Set(modules.map((part) => part.name.replace(/^\.\//, "")));
   const specifiers = [...entry.body.toString().matchAll(/(?:import|from)\s*["']([^"']+)["']/g)].map(
     (m) => m[1],
   );
   for (const specifier of specifiers) {
+    if (specifier.startsWith("cloudflare:")) continue;
     if (!names.has(specifier.replace(/^\.\//, ""))) {
       throw new Error(`entry import ${specifier} does not resolve to an uploaded module`);
     }
@@ -254,7 +258,7 @@ export async function inspectBundle(outDir, reported = "") {
 
 export async function verifyAssets() {
   const path = new URL(".build/assets.json", root);
-  if (!existsSync(path)) throw new Error("Run python3 tools/deploy.py dry-run first.");
+  if (!existsSync(path)) throw new Error("Run node tools/deploy.mjs dry-run first.");
   const document = JSON.parse(await readFile(path, "utf8"));
   for (const asset of document.assets) {
     const bytes = await readFile(new URL(asset.path, root));

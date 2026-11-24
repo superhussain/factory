@@ -19,6 +19,7 @@ async function startHostWorker(persistDir) {
     platform: "neutral",
     conditions: ["workerd", "worker", "browser"],
     mainFields: ["module", "main"],
+    external: ["cloudflare:workers"],
     loader: { ".html": "text", ".txt": "text" },
   });
   const mf = new Miniflare(

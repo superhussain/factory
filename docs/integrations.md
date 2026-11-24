@@ -132,27 +132,13 @@ and agent app/web links belong to hosted deployment configuration, not fresh
 device config. A project may opt into its own image publisher; absence never
 blocks ordinary review/PR evidence. Never publish secrets or user data.
 
-`<installed-skill>/runtime/pr_screenshots.py` uploads PR screenshots on any host with the installed skill:
-`python3 <installed-skill>/runtime/pr_screenshots.py --home <factory home> [--project <slug>] <label> <file>...`.
+`factory pr-screenshots` uploads PR screenshots on any host with the installed skill:
+`<installed-skill>/runtime/factory pr-screenshots --home <factory home> [--project <slug>] <label> <file>...`.
 It reads `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PR_SCREENSHOTS_BUCKET` and
 `PR_SCREENSHOTS_ORIGIN` (an `https://` origin) from `<home>/.env`, stores each image in that
 bucket as `<project>/<label>/<12 hex>-<name>` (project `other` when `--project` is omitted)
 and prints one `<file>` and URL on the configured public origin per line. Any failure exits 1,
 and build-tab evidence stays the fallback. The [device token](cloudflare.md#device-token) covers these uploads.
-
-`tools/copy-pr-screenshots.py` copies older screenshots from `<source>/factory-<job-id>/` into
-their project folders, using the same four `<home>/.env` keys.
-`plan --home <factory home> --source-project <source> --out <plan.tsv>` lists the old keys and
-writes a `source`, `destination`, `reason` TSV. A key goes to `<project>/factory-<job-id>/...`
-when exactly one `<home>/jobs/<project>/<job-id>/` folder holds a file. `<source>` jobs stay in
-place, and no match or several matches go to `other`. Review the plan, then run
-`apply --home <factory home> --source-project <source> --plan <plan.tsv>`. It only copies. It
-never overwrites an existing key and never deletes, so old links keep working. Each copy is
-checked byte for byte against its new URL on the configured public origin, and any `exists-different`, `mismatch` or `failed` row
-exits 1. Each request waits up to 300 seconds. A `failed` row gets a fourth column naming the
-step and cause, such as `source read: timed out after 300 s`. `plan` skips, and `apply`
-rejects, any key with a `.` or `..` segment. Run it from the main checkout, never a job
-worktree, so the token only runs merged code.
 
 ## Paseo plugin
 
@@ -162,7 +148,7 @@ The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo si
 | --- | --- | --- |
 | Factory dashboard URL | Paseo, Settings, Plugins, Factory | Paseo user, per host |
 | `embed_origins` | `deploy/profile.json` | Server operator |
-| SameSite None on the Access cookie | Cloudflare Access application, set by `tools/bootstrap.py up` with the [device token](cloudflare.md#device-token) | Server operator |
+| SameSite None on the Access cookie | Cloudflare Access application, set by `factory bootstrap up` with the [device token](cloudflare.md#device-token) | Server operator |
 
 1. Install the plugin on the daemon host: `paseo plugin install <checkout>/paseo-plugin`.
    Check it with `paseo plugin ls`, which shows `factory running`.

@@ -1,0 +1,2 @@
+{"argv": ["--home", "/nonexistent/paseo-home", "inspect", "4cec0a47-1d21-4115-945b-9e7dfb668ef4", "--json"]}
+{"argv": ["--home", "/nonexistent/paseo-home", "archive", "--force", "4cec0a47-1d21-4115-945b-9e7dfb668ef4"]}
