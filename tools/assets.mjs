@@ -141,12 +141,14 @@ export async function inspectBundle(outDir, reported = "") {
   const entry = modules.find((part) => part.name === metadata.main_module);
   if (!entry) throw new Error("main module missing from upload");
 
-  // Every static import in the entry resolves to an inventoried uploaded module.
+  // Every static import in the entry resolves to an inventoried uploaded module, or to a
+  // workerd built-in such as cloudflare:workers.
   const names = new Set(modules.map((part) => part.name.replace(/^\.\//, "")));
   const specifiers = [...entry.body.toString().matchAll(/(?:import|from)\s*["']([^"']+)["']/g)].map(
     (m) => m[1],
   );
   for (const specifier of specifiers) {
+    if (specifier.startsWith("cloudflare:")) continue;
     if (!names.has(specifier.replace(/^\.\//, ""))) {
       throw new Error(`entry import ${specifier} does not resolve to an uploaded module`);
     }
