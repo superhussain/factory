@@ -21,7 +21,8 @@ pub mod unicode;
 mod unicode_printable;
 
 /// Held by every test that sets PATH, PASEO_HOME, PASEO_AGENT_ID, FACTORY_HOME or FACTORY_SESSION, and by
-/// fixtures that spawn git, since tests share one process environment.
+/// fixtures that spawn git, since tests share one process environment. Tests that hide a tool use
+/// path_without, never an empty PATH.
 #[cfg(test)]
 static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -63,6 +64,30 @@ pub(crate) fn test_env_lock_within(
     }
 }
 
+/// A folder of links to every tool on `from` except `tool`, so a test can hide one tool without
+/// emptying PATH for parallel tests.
+#[cfg(all(test, unix))]
+pub(crate) fn path_without(
+    tool: &str,
+    from: &std::ffi::OsStr,
+    dir: &std::path::Path,
+) -> std::ffi::OsString {
+    std::fs::create_dir_all(dir).unwrap();
+    for bin in std::env::split_paths(from) {
+        let Ok(entries) = std::fs::read_dir(&bin) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let link = dir.join(&name);
+            if name != tool && link.symlink_metadata().is_err() {
+                std::os::unix::fs::symlink(entry.path(), link).unwrap();
+            }
+        }
+    }
+    dir.as_os_str().to_os_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +115,25 @@ mod tests {
             message,
             "TEST_ENV_LOCK still held after 200ms by holder-test"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_without_hides_one_tool() {
+        let root = crate::shared::fs::temp_dir("path-without");
+        let (a, b) = (root.join("a"), root.join("b"));
+        for (dir, names) in [(&a, ["gh", "git"]), (&b, ["git", "sh"])] {
+            std::fs::create_dir(dir).unwrap();
+            for name in names {
+                std::fs::write(dir.join(name), "").unwrap();
+            }
+        }
+        let from = std::env::join_paths([&a, &b]).unwrap();
+        let farm = root.join("farm");
+        assert_eq!(path_without("gh", &from, &farm), farm.as_os_str());
+        assert_eq!(std::fs::read_link(farm.join("git")).unwrap(), a.join("git"));
+        assert_eq!(std::fs::read_link(farm.join("sh")).unwrap(), b.join("sh"));
+        assert!(farm.join("gh").symlink_metadata().is_err());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
