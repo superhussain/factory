@@ -1699,16 +1699,18 @@ mod tests {
         ]);
         let home = home("heartbeat", &api_origin);
         let origin = quiet();
-        let reads = std::cell::Cell::new(0);
-        let list = || {
-            reads.set(reads.get() + 1);
-            Some(serde_json::json!([
-                hb::agent("a1", "running", None),
-                hb::agent("dead", "closed", None),
-                hb::agent("orch", "idle", None),
-                hb::agent("sub", "running", Some("orch")),
-            ]))
-        };
+        let fake = hb::Fake::new(
+            serde_json::json!([
+                hb::agent("a1", "running", "x"),
+                hb::agent("dead", "closed", "x"),
+                hb::agent("orch", "idle", "x"),
+                hb::agent("sub", "running", "x"),
+            ]),
+            vec![(
+                "orch",
+                serde_json::json!([hb::agent("sub", "running", "x")]),
+            )],
+        );
         let headers = access_headers(&home, &origin).unwrap();
         let mut passes = Vec::new();
         serve(
@@ -1721,7 +1723,13 @@ mod tests {
             &|msg| log_line(&home, msg),
             &|| None,
             &mut |reason| {
-                let result = beat_with(&home, "mac", hb::SERVER, &list, &crate::shared::http::api);
+                let result = beat_with(
+                    &home,
+                    "mac",
+                    hb::SERVER,
+                    &|p| fake.list(p),
+                    &crate::shared::http::api,
+                );
                 report(result, &|msg| log_line(&home, msg));
                 passes.push(reason.to_string());
                 // The first pass reports a launch, so a second follows at min_gap.
@@ -1733,7 +1741,9 @@ mod tests {
             },
         );
         assert_eq!(passes, ["connect", "room left"]);
-        assert_eq!(reads.get(), 1);
+        // Pass one lists the agents and asks for the idle orchestrator's children; pass two
+        // finds every claim fresh and asks nothing.
+        assert_eq!(fake.asked.borrow().len(), 2);
         let requests = requests.lock().unwrap();
         let methods: Vec<&str> = requests.iter().map(|r| r.method.as_str()).collect();
         assert_eq!(methods, ["GET", "PATCH", "GET"]);
