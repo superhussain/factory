@@ -3280,9 +3280,23 @@ function checkTrials(storedDoc, data) {
 }
 
 const BOARD_STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
-// An open trial trial settle drops: its opened is not a board stamp or its version is not a whole number.
-const trialMisshapen = (t) =>
-  !Number.isInteger(t.version) || typeof t.opened !== "string" || !BOARD_STAMP.test(t.opened);
+const TRIAL_STAGES = ["spec", "build", "review", "approve", "babysit"];
+// An open trial trial settle drops: it fails the runtime's trial_valid.
+const trialMalformed = (t) =>
+  !(
+    Number.isSafeInteger(t.version) &&
+    Number.isSafeInteger(t.champion_version) &&
+    t.champion_version >= 0 &&
+    typeof t.project === "string" &&
+    /^[\w-]+$/.test(t.project) &&
+    TRIAL_STAGES.includes(t.stage) &&
+    t.id === `${t.project}-${t.stage}-v${t.version}` &&
+    typeof t.opened === "string" &&
+    BOARD_STAMP.test(t.opened) &&
+    !t.opened.startsWith("0000") &&
+    !Number.isNaN(Date.parse(t.opened)) &&
+    new Date(Date.parse(t.opened)).toISOString().slice(0, 19) + "Z" === t.opened
+  );
 const TRIAL_SETTLED = ["kept", "reverted", "superseded", "inconclusive", "revert-failed"];
 const TRIAL_SETTLE_KEYS = ["status", "settled", "arms", "reads", "revert_version"];
 const TRIAL_MAX_DAYS = 28;
@@ -3310,7 +3324,7 @@ async function checkTrialSettle(env, stored, data) {
   const written = trials(data);
   const seen = new Set();
   for (const s of trials(stored.doc)) {
-    if (s.status !== "open" || typeof s.id !== "string" || trialMisshapen(s) || seen.has(s.id))
+    if (s.status !== "open" || typeof s.id !== "string" || trialMalformed(s) || seen.has(s.id))
       continue;
     seen.add(s.id);
     const label = quoteIdCut(s.id, QUOTED_ID_MAX);
