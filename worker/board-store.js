@@ -164,6 +164,7 @@ export class BoardRows {
     };
     this.env = env;
     this.memo = { etag: null, blob: null };
+    this.decoded = { etag: null, text: "" };
     // While an R2 copy is under way, its promise; while a full write is, its promise.
     this.inflight = undefined;
     this.replacing = undefined;
@@ -623,7 +624,10 @@ export class BoardRows {
   // which one each read took.
   async body() {
     await this.sync();
-    let state = this.state();
+    return this.bodyOf(this.state());
+  }
+
+  async bodyOf(state) {
     if (!state) return null;
     const debug = (how) =>
       this.env.BOARD_DEBUG && console.log(`board store: read ${how} for ${state.etag}`);
@@ -648,9 +652,17 @@ export class BoardRows {
     return { etag: state.etag, body };
   }
 
+  // The board as { etag, text }. The text is kept per version, so the boardRead RPC behind
+  // readSlim and readBoardJson decodes each version once while the room stays in memory.
   async read() {
-    const board = await this.body();
-    return board && { etag: board.etag, text: await new Response(board.body).text() };
+    await this.sync();
+    const state = this.state();
+    if (!state || state.etag !== this.decoded.etag) {
+      const board = await this.bodyOf(state);
+      if (!board) return null;
+      this.decoded = { etag: board.etag, text: await new Response(board.body).text() };
+    }
+    return { ...this.decoded };
   }
 
   // What a row PATCH decides from, at the current version, or null when at names another.

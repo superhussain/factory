@@ -133,6 +133,19 @@ test("the first read after a write copies what it built; later reads stream R2's
   assert.equal(JSON.parse((await read()).text).jobs[2].title, "CSV 2");
 });
 
+test("boardRead decodes each version once while the room stays in memory", async (t) => {
+  const s = setup();
+  s.env.BOARD_DEBUG = "1";
+  const log = t.mock.method(console, "log", () => {});
+  const ok = await s.patch({ rows: [{ id: IDEA.id, expect: null, row: IDEA }] });
+  const first = await s.room.stub.boardRead();
+  assert.deepEqual(await s.room.stub.boardRead(), first);
+  assert.equal(first.etag, ok.headers.get("ETag"));
+  assert.deepEqual(JSON.parse(first.text).jobs, [BUILD, SPEC, IDEA]);
+  assert.equal(log.mock.calls.length, 1, "the second read takes the decoded text");
+  await s.room.settle();
+});
+
 test("a read whose R2 get sees another read's copy answers with the version it serves", async () => {
   const s = setup();
   await s.send("/board.json");

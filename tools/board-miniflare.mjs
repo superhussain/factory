@@ -65,6 +65,18 @@ export class BenchRoom extends BenchBase {
     this.store = undefined;
     return true;
   }
+  // The room's own mean milliseconds for a warm read() (the boardRead RPC), and for its R2 head
+  // alone, which every read starts with.
+  async boardReadTimed() {
+    const board = this.board();
+    await board.read();
+    const time = async (fn) => {
+      const t = performance.now();
+      for (let i = 0; i < 20; i++) await fn();
+      return (performance.now() - t) / 20;
+    };
+    return { read: await time(() => board.read()), head: await time(() => board.env.BUCKET.head("board.json")) };
+  }
   // Waits for a read's R2 copy, which runs after the read answers.
   async boardSettle() {
     await this.board().inflight;
@@ -121,6 +133,10 @@ export default {
     if (url.pathname === "/bench/work") return Response.json(await room(env).boardWork());
     if (url.pathname === "/bench/flush") return Response.json(await room(env).boardFlushTimed());
     if (url.pathname === "/bench/text") return Response.json(await room(env).boardTextTimed());
+    if (url.pathname === "/bench/readtimed")
+      return Response.json(await room(env).boardReadTimed());
+    if (url.pathname === "/bench/read")
+      return Response.json((await room(env).boardRead())?.text.length ?? 0);
     if (url.pathname === "/bench/settle") return Response.json(await room(env).boardSettle());
     if (url.pathname === "/bench/evict") return Response.json(await room(env).boardEvict());
     return serveFactory(request, { ...env, config }, principal, ctx);
@@ -324,6 +340,7 @@ export async function roomWork(rows, script) {
       copy = await json("/bench/flush");
     });
     const text = await json("/bench/text");
+    const warm = await json("/bench/readtimed");
     const etag = async () => (await mf.dispatchFetch(ORIGIN + "/board.json")).headers.get("ETag");
     const doc = JSON.parse(await get());
     await measure("full PUT, one row changed", async () =>
@@ -356,6 +373,8 @@ export async function roomWork(rows, script) {
         "room: R2 copy without the put": copy.room,
         "room: R2 copy, the put's wall time": copy.put,
         "room: board bytes for a new version (GET body or R2 put)": text.build,
+        "room: warm boardRead, wall": warm.read,
+        "room: its R2 head alone, wall": warm.head,
       },
     };
   } finally {
@@ -405,6 +424,9 @@ export async function benchMiniflare(rows, runs, script) {
     };
     const cached = await perRequest(runs, get);
     out["workerd CPU: GET /board.json, same version"] = cached.cpu;
+    // The boardRead RPC behind readSlim and readBoardJson, on a version the room holds warm.
+    const warmRead = async () => (await mf.dispatchFetch(`${origin}/bench/read`)).arrayBuffer();
+    out["workerd CPU: boardRead RPC, same version"] = (await perRequest(runs, warmRead)).cpu;
     // A GET after each PATCH reads a new version, which the room builds once. Since job 2280
     // that GET also copies the version to R2 after it answers; settle waits for the copy.
     const settle = async () => (await mf.dispatchFetch(`${origin}/bench/settle`)).arrayBuffer();
