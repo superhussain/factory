@@ -245,6 +245,7 @@ const REFUSED: &[(&str, bool, &str)] = &[
     ("auto_babysit", false, "only factory.py pickup sets auto_babysit. Nothing was written."),
     ("launch_failure", false, "only factory.py pickup sets launch_failure. Nothing was written."),
     ("repeated", false, "only factory.py repeats sets repeated. Nothing was written."),
+    ("checked_head", false, "only factory.py checks sets checked_head. Nothing was written."),
     ("handled", false, "only factory.py pr-handled sets handled. Nothing was written."),
     ("spec_approval", false, "only factory.py and the dashboard set spec_approval. Nothing was written."),
 ];
@@ -1769,6 +1770,29 @@ mod tests {
             (
                 2,
                 "factory.py: only factory.py push and pickup set decision\n"
+            )
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn test_board_refuses_checked_head() {
+        let home = refused_home("claims-refuses-checked-head");
+        let opts = WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: None,
+        };
+        let patch = json!({"checked_head": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"})
+            .as_object()
+            .unwrap()
+            .clone();
+        let e = board_write(&home, "042-sample-export", patch, &opts).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (
+                2,
+                "factory.py: only factory.py checks sets checked_head. Nothing was written.\n"
             )
         );
         fs::remove_dir_all(home).unwrap();
