@@ -2045,6 +2045,13 @@ mod tests {
             ));
         }
         fs::set_permissions(&env, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0)).unwrap();
+        if fs::symlink_metadata(&env).is_err() {
+            refused(format!(
+                "cannot read {shown}: check its permissions and that it is UTF-8 text."
+            ));
+        }
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(&env, b"CLOUDFLARE_API_TOKEN=\xff\n").unwrap();
         refused(format!(
             "cannot read {shown}: check its permissions and that it is UTF-8 text."

@@ -2839,6 +2839,15 @@ mod tests {
     }
 
     #[test]
+    fn documented_with_cloudflare_command_not_flagged() {
+        let command = r#"<installed-skill>/runtime/factory with-cloudflare -- sh -c 'printf "Authorization: Bearer %s\n" "$CLOUDFLARE_API_TOKEN" | curl -H @- https://api.cloudflare.com/client/v4/user/tokens/verify'"#;
+        let inp = json!({ "command": command });
+        let inp = inp.as_object().unwrap();
+        let raw = audit_target_raw("Bash", inp);
+        assert!(audit_flags("Bash", inp, &raw, false, false).is_empty());
+    }
+
+    #[test]
     fn pr_merge_runtime_subcommand() {
         let flags = |command: &str| {
             let inp = json!({ "command": command });
