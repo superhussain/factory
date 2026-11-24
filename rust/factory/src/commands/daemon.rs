@@ -210,16 +210,6 @@ fn run(home: &Path) -> Res<()> {
 const LOG_CAP: u64 = 5 << 20;
 const LOG_KEEP: u64 = 1 << 20;
 
-#[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
-const O_NOFOLLOW: i32 = 0o100000;
-#[cfg(all(
-    target_os = "linux",
-    not(any(target_arch = "aarch64", target_arch = "arm"))
-))]
-const O_NOFOLLOW: i32 = 0o400000;
-#[cfg(target_os = "macos")]
-const O_NOFOLLOW: i32 = 0x100;
-
 /// Trims the service log at path to its last LOG_KEEP bytes, from a line start, once it passes
 /// LOG_CAP. launchd, systemd and cron open it for append, so the daemon's writes go on at the new
 /// end. Windows' `>>` keeps its own offset, so the log there stays as it is. A link there is left
@@ -231,7 +221,7 @@ fn cap_log(path: &Path) {
     let mut options = OpenOptions::new();
     options.read(true).write(true);
     #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, O_NOFOLLOW);
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, crate::shared::fs::O_NOFOLLOW);
     let Ok(mut file) = options.open(path) else {
         return;
     };
