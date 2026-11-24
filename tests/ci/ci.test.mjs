@@ -184,6 +184,8 @@ test("rust-build caches the binary under the rust key, and targets restores it o
     onMiss.map((step) => step.run ?? action(step)),
     ["rustup toolchain install", "Swatinem/rust-cache", "cargo build --profile host --locked"],
   );
+  // The rust jobs save the shared rust/target cache; targets only reads it.
+  assert.equal(onMiss[1].with["save-if"], false);
   const nx = targets.steps.findIndex((step) => step.name === "Nx affected");
   assert.ok(onMiss.every((step) => targets.steps.indexOf(step) > restore));
   assert.ok(onMiss.every((step) => targets.steps.indexOf(step) < nx));

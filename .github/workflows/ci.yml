@@ -94,6 +94,7 @@ jobs:
         with:
           prefix-key: v1-rust
           workspaces: rust
+          save-if: false
       - name: Build the factory binary
         if: steps.factory-bin.outputs.cache-hit != 'true'
         working-directory: rust
