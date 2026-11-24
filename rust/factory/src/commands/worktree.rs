@@ -17,7 +17,7 @@ use crate::shared::fs::{contained, is_link, resolve};
 use crate::shared::home::device_name;
 use crate::shared::proc::{capture, git, git_ok, origin_git, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
-use crate::shared::py::{is_space, os_error, strip};
+use crate::shared::py::{is_space, os_error, repr, strip};
 use crate::shared::pyjson::{dumps, loads, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
 
@@ -728,12 +728,22 @@ fn stop_pids_with(wt: &Path, proc_root: &Path, lsof: Option<PathBuf>) -> Option<
         .into_iter()
         .flatten()
         .any(|p| !p.as_os_str().is_empty() && is_link(p).unwrap_or(true));
-    let real = match resolve(wt) {
-        Ok(real) if !wt.as_os_str().is_empty() && !linked => real,
+    let resolved = resolve(wt);
+    let cause = if wt.as_os_str().is_empty() {
+        "the path is empty"
+    } else if linked {
+        "it is a link or sits under one"
+    } else if resolved.is_err() {
+        "it cannot be resolved"
+    } else {
+        ""
+    };
+    let real = match resolved {
+        Ok(real) if cause.is_empty() => real,
         _ => {
             eprintln!(
-                "factory.py: refusing to stop processes in {}: not a real folder path",
-                wt.display()
+                "factory.py: refusing to stop processes in {}: {cause}; no process was signalled",
+                repr(&wt.to_string_lossy())
             );
             return None;
         }

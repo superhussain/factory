@@ -54,7 +54,7 @@ fn a_non_utf8_session_is_a_bad_tag() {
         (out.status.code(), String::from_utf8_lossy(&out.stderr)),
         (
             Some(2),
-            "factory.py: bad session tag: use letters, digits, - and _\n".into()
+            "factory.py: bad session tag in --session or FACTORY_SESSION: use letters, digits, - and _\n".into()
         )
     );
     fs::remove_dir_all(&root).unwrap();

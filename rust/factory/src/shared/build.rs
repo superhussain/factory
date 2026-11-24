@@ -170,7 +170,8 @@ fn build(
             make_dirs(&own).map_err(|e| os_error(&e, Some(&own)))?;
             own
         }
-        None => private_dir(&cache.join("cargo-target"))?,
+        None => private_dir(&cache.join("cargo-target"))
+            .map_err(|e| format!("{e}; chmod 700 it or set CARGO_TARGET_DIR"))?,
     };
     // One stable source path keeps cargo's incremental artifacts valid from one checkout to the next.
     let src = private_dir(&cache.join("build-src"))?;
@@ -881,7 +882,7 @@ pub(crate) mod tests {
         assert_eq!(
             rust_binary(&checkout, &host(&root, &[], Some(cargo)), &mut Vec::new()),
             Err(format!(
-                "Rust build failed ({} is not a private folder)",
+                "Rust build failed ({} is not a private folder; chmod 700 it or set CARGO_TARGET_DIR)",
                 target.display()
             ))
         );
