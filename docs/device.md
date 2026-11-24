@@ -55,6 +55,9 @@ rewrite the pickup timer. The timer command comes from the installed `bundle.jso
 program to run. Without it, catch-up runs the bundle's `runtime/factory` binary. See
 [upgrade.md](upgrade.md) for the backup folder and how to restore it.
 
+To move a host from the Python factory to the Rust binary, with its board, timers and
+automations intact, follow [migrating-to-rust.md](migrating-to-rust.md).
+
 Where the daemon service is installed (`<installed-skill>/runtime/factory daemon setup --install`),
 the daemon is the pickup scheduler and the host has no pickup timer: catch-up removes a
 leftover timer and prints `pickup timer: replaced by the daemon`, and never installs the
