@@ -2036,11 +2036,10 @@ fn bench_warn(line: &str) {
     #[cfg(not(test))]
     eprintln!("{line}");
 }
-const BENCH_REPLAY_TOOLS: [&str; 8] = [
+const BENCH_REPLAY_TOOLS: [&str; 7] = [
     "Read",
     "Grep",
     "Glob",
-    "Write",
     "Bash(git diff:*)",
     "Bash(git log:*)",
     "Bash(git show:*)",
@@ -2250,6 +2249,16 @@ fn run_logged(
     }
 }
 
+/// The allow rule that lets the replayed reviewer write only path, in Claude Code's //absolute form.
+fn bench_review_rule(path: &Path) -> String {
+    let mut p = path.to_string_lossy().replace('\\', "/");
+    let b = p.as_bytes();
+    if b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'/' {
+        p = format!("/{}{}", (b[0] as char).to_ascii_lowercase(), &p[2..]);
+    }
+    format!("Edit(/{p})")
+}
+
 /// (Some(true), line) when the reviewer wrote its review into arm/<id>, (None, line) when one is already there,
 /// (Some(false), line) when the case failed. run.json and replay.log stay once claude ran.
 fn bench_replay_case(
@@ -2336,6 +2345,7 @@ fn bench_replay_case(
         .map(|s| s.to_string())
         .collect();
         argv.extend(BENCH_REPLAY_TOOLS.iter().map(|s| s.to_string()));
+        argv.push(bench_review_rule(&round.join(&name)));
         argv.push("--disallowedTools".to_string());
         argv.extend(BENCH_REPLAY_DENIED.iter().map(|s| s.to_string()));
         argv.extend(["--add-dir".to_string(), job_dir]);
@@ -3384,6 +3394,18 @@ mod bench_replay_test {
     }
 
     #[test]
+    fn test_review_rule() {
+        assert_eq!(
+            bench_review_rule(Path::new("/private/var/t/job/round-1/review-code.md")),
+            "Edit(//private/var/t/job/round-1/review-code.md)"
+        );
+        assert_eq!(
+            bench_review_rule(Path::new(r"C:\Users\a\Temp\job\round-1\review-code.md")),
+            "Edit(//c/Users/a/Temp/job/round-1/review-code.md)"
+        );
+    }
+
+    #[test]
     fn test_claude_call() {
         let b = Bench::new("claude-call");
         let documents = b.home.join("projects/alpha.documents.md");
@@ -3400,6 +3422,7 @@ mod bench_replay_test {
         let at = call.argv.iter().position(|a| a == "--session-id").unwrap();
         let session = call.argv[at + 1].clone();
         let job = tmp.join("job").display().to_string();
+        let rule = format!("Edit(/{job}/round-1/review-code.md)");
         assert_eq!(
             call.argv,
             [
@@ -3419,11 +3442,11 @@ mod bench_replay_test {
                 "Read",
                 "Grep",
                 "Glob",
-                "Write",
                 "Bash(git diff:*)",
                 "Bash(git log:*)",
                 "Bash(git show:*)",
                 "Bash(git blame:*)",
+                &rule,
                 "--disallowedTools",
                 "Bash(git *--out*)",
                 "--add-dir",

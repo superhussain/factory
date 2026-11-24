@@ -5,7 +5,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import Mock, patch
 
 from support import IsolatedTestCase, http_fixture, invoke, load_runtime
@@ -272,6 +272,16 @@ AGENTS = json.dumps({"factory-review-code": {"description": "Code reviewer.", "p
                                              "tools": ["Read", "Grep", "Glob", "Bash", "Write"], "model": "opus"}})
 
 
+class BenchReviewRuleTest(BenchCase):
+    def test_posix(self):
+        self.assertEqual(self.module.bench_review_rule(PurePosixPath("/private/var/t/job/round-1/review-code.md")),
+                         "Edit(//private/var/t/job/round-1/review-code.md)")
+
+    def test_windows(self):
+        self.assertEqual(self.module.bench_review_rule(PureWindowsPath(r"C:\Users\a\Temp\job\round-1\review-code.md")),
+                         "Edit(//c/Users/a/Temp/job/round-1/review-code.md)")
+
+
 class BenchReplayCase(BenchCase):
     def setUp(self):
         super().setUp()
@@ -373,7 +383,8 @@ class BenchReplayTest(BenchReplayCase):
         self.assertEqual(call["argv"], [
             "-p", "--agent", "factory-review-code", "--agents", AGENTS, "--session-id", session,
             "--setting-sources", "", "--strict-mcp-config", "--permission-mode", "dontAsk", "--allowedTools", "Read",
-            "Grep", "Glob", "Write", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)",
+            "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)", "Bash(git blame:*)",
+            f"Edit(/{tmp / 'job' / 'round-1' / 'review-code.md'})",
             "--disallowedTools", "Bash(git *--out*)", "--add-dir", str(tmp / "job"), "--model", "claude-opus-5-5"])
         self.assertEqual(call["ceiling"], "0")
         self.assertEqual(call["stdin"], "\n".join([
