@@ -228,6 +228,8 @@ Each run, in order:
   the Worker after every run but `--dry-run`, failed runs included. It carries the OS,
   scheduler, run time, bundle stamp, doctor result, routes and checkout names.
   It is silent, calls no model, and never changes the run's output or exit code.
+  Beside a running daemon, which sends the heartbeat itself, a run sends it only
+  when the backlog triage failure changed.
 - Pushes this host's retro digest on its first run of each local date that
   `<home>/retro-push.json` does not record; a failed push prints one warning and
   the run goes on. On the host that keeps `<home>/retro-schedule-prompt.md`,
@@ -387,10 +389,20 @@ A standing instruction from the user, the person you are working for. It is abou
 Where `factory daemon setup --install` has installed the daemon service, the
 daemon is the host's only pickup scheduler and no pickup timer exists.
 
-- `daemon setup --install` installs the service, then removes the pickup timer.
-  `daemon setup --uninstall` puts the timer back, then removes the service, so the
-  host never goes without a scheduler. When either rewrites the crontab, it first
-  saves it to `<home>/backups/daemon-setup-<stamp>/crontab.txt`.
+- `daemon setup --install` installs the service, then removes the pickup timer
+  and the daily retro-push timer. `daemon setup --uninstall` puts both timers
+  back, then removes the service, so the host never goes without a scheduler.
+  When either rewrites the crontab, it first saves it to
+  `<home>/backups/daemon-setup-<stamp>/crontab.txt`. Catch-up removes a
+  retro-push timer left beside the daemon and prints
+  `retro-push timer: replaced by the daemon`.
+- The daemon sends the host status heartbeat at start and every 5 minutes, with
+  its own scheduler and when its last pass began. A pickup run beside it sends
+  the status only when the backlog triage failure changed.
+- The daemon runs `retro push` at the retro-push timer's local times: 06:30,
+  07:30 and 08:30 on macOS, 08:30 elsewhere. After a sleep it pushes once for the
+  latest time missed. A time that passed before the daemon started is left to
+  pickup's first-run-of-the-day push.
 - The daemon starts a pass about 2 s after a board or backlog change, when a
   local Paseo agent titled `factory <id>` or `babysit <id>` stops running, right
   after a pass that launched a job, and after 5 minutes with no pass. Passes
@@ -399,8 +411,8 @@ daemon is the host's only pickup scheduler and no pickup timer exists.
   while nothing changes, and not at all once none runs.
 - While the daemon cannot reach `/events/host`, it still runs a pass at start
   and then every 5 minutes. The 5-minute pass covers stale
-  claims, takeover, `not before` schedules, retro and outcomes stamps, orphan
-  scans and the host status heartbeat.
+  claims, takeover, `not before` schedules, retro and outcomes stamps and orphan
+  scans.
 - `pickup setup` reports check 7 as `scheduler: daemon` and passes it, and
   `--install` writes no timer. `daemon setup` and `doctor` at a terminal show the
   daemon state and when its last pass began.
