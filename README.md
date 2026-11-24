@@ -96,6 +96,7 @@ The full set, including Notifications, the Settings sections, a phone-width boar
 - [docs/integrations.md](docs/integrations.md) — optional native roles, model selection, schedules and the Tracer mirror
 - [docs/development.md](docs/development.md) — repository development, checks and the verify groups
 - [docs/upgrade.md](docs/upgrade.md) — upgrading a running instance to merged source
+- [docs/migrating-to-rust.md](docs/migrating-to-rust.md) — moving a host from the Python factory to the Rust binary, board intact
 - [docs/config-changes.md](docs/config-changes.md) — previewing, applying and rolling back config and URL changes
 - [docs/recovery.md](docs/recovery.md) — backup gate and recovery boundaries
 - [docs/autonomy.md](docs/autonomy.md) — explorer suggestions, the autonomy kill switch and human-only approval
