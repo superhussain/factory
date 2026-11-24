@@ -621,12 +621,16 @@ fn early_reason(session: bool, paseo: Option<&Path>) -> Option<&'static str> {
 
 /// What a workspace holds that no remote, other local branch or the branch's creation point keeps.
 fn workspace_leftovers(cwd: &str) -> Vec<String> {
+    leftovers_with("git", cwd, GIT_TIMEOUT)
+}
+
+fn leftovers_with(git_bin: &str, cwd: &str, timeout: Duration) -> Vec<String> {
     let git = |verb: &str, args: &[&str]| -> Result<Vec<String>, String> {
-        let argv: Vec<&str> = ["git", "-C", cwd, verb]
+        let argv: Vec<&str> = [git_bin, "-C", cwd, verb]
             .into_iter()
             .chain(args.iter().copied())
             .collect();
-        match capture(&argv, None, &[], Some(GIT_TIMEOUT)) {
+        match capture(&argv, None, &[], Some(timeout)) {
             Err(e) if e.kind() == io::ErrorKind::TimedOut => {
                 Err(format!("git {verb} failed: timed out after 20 s"))
             }
@@ -1098,5 +1102,122 @@ mod tests {
         assert_eq!(py_str(Some(&json!("-rf"))), "-rf");
         assert_eq!(py_str(Some(&json!(true))), "True");
         assert_eq!(py_str(Some(&json!(7))), "7");
+    }
+
+    fn git_stdout(wt: &Path, args: &[&str]) -> String {
+        let wt = wt.to_string_lossy();
+        let argv: Vec<&str> = ["git", "-C", &wt].iter().chain(args).copied().collect();
+        capture(&argv, None, &[], None).unwrap().stdout
+    }
+
+    /// A clone of a bare remote whose default branch holds one pushed commit.
+    fn leftovers_clone(name: &str) -> (PathBuf, PathBuf) {
+        let home = temp_dir(name);
+        let (remote, wt) = (home.join("remote.git"), home.join("factory-042-dark-mode"));
+        fs::create_dir_all(&remote).unwrap();
+        run_git(&remote, &["init", "-q", "--bare"]);
+        fs::create_dir_all(&wt).unwrap();
+        run_git(&wt, &["init", "-q"]);
+        run_git(&wt, &["remote", "add", "origin", &text(&remote)]);
+        run_git(&wt, &["commit", "-q", "--allow-empty", "-m", "pushed"]);
+        run_git(&wt, &["push", "-q", "origin", "HEAD"]);
+        run_git(&wt, &["fetch", "-q", "origin"]);
+        (home, wt)
+    }
+
+    fn short(wt: &Path, subject: &str) -> String {
+        let format = format!("--format=%h {subject}");
+        git_stdout(wt, &["log", "-1", &format]).trim().to_string()
+    }
+
+    /// An unpushed commit on the default branch, then the job branch cut from it with one local commit.
+    fn commit_inherited(wt: &Path, config: &[&str]) -> Vec<String> {
+        let default = git_stdout(wt, &["branch", "--show-current"]);
+        run_git(wt, &["commit", "-q", "--allow-empty", "-m", "inherited"]);
+        let args: Vec<&str> = config
+            .iter()
+            .copied()
+            .chain(["switch", "-q", "-c", "factory/042-dark-mode"])
+            .collect();
+        run_git(wt, &args);
+        run_git(wt, &["commit", "-q", "--allow-empty", "-m", "local"]);
+        run_git(wt, &["branch", "-q", "-D", default.trim()]);
+        git_stdout(wt, &["log", "-2", "--format=%h %s"])
+            .lines()
+            .map(|l| format!("commit: {l}"))
+            .collect()
+    }
+
+    #[test]
+    fn leftovers_ignore_a_stale_local_main() {
+        let (home, wt) = leftovers_clone("leftovers-stale-main");
+        run_git(&wt, &["commit", "-q", "--allow-empty", "-m", "stale"]);
+        run_git(&wt, &["switch", "-q", "-c", "factory/042-dark-mode"]);
+        assert_eq!(workspace_leftovers(&text(&wt)), Vec::<String>::new());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn leftovers_skip_inherited_commits_after_the_creation_entry() {
+        let (home, wt) = leftovers_clone("leftovers-inherited");
+        let commits = commit_inherited(&wt, &[]);
+        assert_eq!(workspace_leftovers(&text(&wt)), &commits[..1]);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn leftovers_list_inherited_commits_without_a_creation_entry() {
+        let (home, wt) = leftovers_clone("leftovers-no-creation");
+        let commits = commit_inherited(&wt, &["-c", "core.logAllRefUpdates=false"]);
+        assert_eq!(commits.len(), 2);
+        assert_eq!(workspace_leftovers(&text(&wt)), commits);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn leftovers_detached_head_at_a_pushed_commit_is_clean() {
+        let (home, wt) = leftovers_clone("leftovers-detached-pushed");
+        run_git(&wt, &["switch", "-q", "--detach"]);
+        assert_eq!(workspace_leftovers(&text(&wt)), Vec::<String>::new());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn leftovers_list_a_detached_commit_on_no_branch() {
+        let (home, wt) = leftovers_clone("leftovers-detached-new");
+        run_git(&wt, &["switch", "-q", "--detach"]);
+        run_git(&wt, &["commit", "-q", "--allow-empty", "-m", "detached"]);
+        let want = format!("commit: {}", short(&wt, "detached"));
+        assert_eq!(workspace_leftovers(&text(&wt)), [want]);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn leftovers_skip_a_detached_commit_a_local_branch_keeps() {
+        let (home, wt) = leftovers_clone("leftovers-detached-kept");
+        run_git(&wt, &["switch", "-q", "-c", "factory/042-dark-mode"]);
+        run_git(&wt, &["commit", "-q", "--allow-empty", "-m", "kept"]);
+        run_git(&wt, &["switch", "-q", "--detach"]);
+        assert_eq!(workspace_leftovers(&text(&wt)), Vec::<String>::new());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn leftovers_report_every_git_call_that_times_out() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = temp_dir("leftovers-timeout");
+        let fake = home.join("git");
+        fs::write(&fake, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        let got = leftovers_with(&text(&fake), &text(&home), Duration::from_millis(200));
+        assert_eq!(
+            got,
+            [
+                "git status failed: timed out after 20 s",
+                "git branch failed: timed out after 20 s"
+            ]
+        );
+        fs::remove_dir_all(home).unwrap();
     }
 }
