@@ -111,7 +111,7 @@ inside it, and for review-code the line is within 10 lines of a change on the
 branch. Citations that fail go in `round-N/grounding.md` and the round's board
 entry as unverified. The builder and approver check those lines before acting on
 the finding. The check never changes a verdict. The dashboard shows the file as
-the round's R<N> grounding tab and the count as an <N> unverified chip on the
+a `Round N` section of the grounding tab and the count as an <N> unverified chip on the
 card's round row.
 
 ## Admission rules

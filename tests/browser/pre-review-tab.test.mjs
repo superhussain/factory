@@ -73,7 +73,7 @@ async function seed(origin) {
 }
 
 test(
-  "pre-review.md shows as a Pre-review tab with its status chip",
+  "pre-review.md shows as a pre-review tab with its status chip",
   { timeout: 120000 },
   async () => {
     await prepareAssets();
@@ -119,7 +119,7 @@ test(
             });
             assert.equal(
               await page.$eval("#d-tabs .tab.active", (tab) => tab.textContent.trim()),
-              "Pre-review FAIL",
+              "pre-review FAIL",
             );
             assert.ok(
               await page.$eval("#d-tabs .tab.active .chip", (chip) =>
@@ -147,7 +147,7 @@ test(
             );
             assert.equal(
               await page.$eval("#d-tabs .tab.active", (tab) => tab.textContent.trim()),
-              "Pre-review NONE",
+              "pre-review NONE",
             );
             assert.ok(
               await page.$eval("#d-tabs .tab.active .chip", (chip) =>

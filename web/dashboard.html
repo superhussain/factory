@@ -1912,7 +1912,7 @@ function unverifiedChip(r, n) {
   if (!list.length) return '';
   const count = list.length >= GROUNDING_BOARD_MAX ? GROUNDING_BOARD_MAX + '+' : String(list.length);
   const title = 'Round ' + n + ' grounding could not check ' + count + ' citation' + (list.length === 1 ? '' : 's') +
-    '. The R' + n + ' grounding tab has the reasons.\n' + list.join('\n');
+    '. The grounding tab has the reasons.\n' + list.join('\n');
   return '<span class="chip unverified" title="' + esc(title) + '">' + count + ' unverified</span>';
 }
 
@@ -5634,13 +5634,33 @@ function candidates(j) {
   return list;
 }
 
+const ROUND_FILE = /^round-(\d+)\/(review-\w+|grounding)\.md$/;
+
+// Folds each reviewer's and grounding's round files into one page, oldest round first.
+// The page sits where its first round was and its text is the newest round's.
+function mergeRounds(list) {
+  const out = [];
+  for (const f of list) {
+    const m = f.name.match(ROUND_FILE);
+    if (!m) {
+      out.push(f);
+      continue;
+    }
+    let page = out.find((p) => p.name === m[2] + '.md');
+    if (!page) out.push(page = { name: m[2] + '.md', parts: [] });
+    page.parts.push({ round: Number(m[1]), name: f.name, text: f.text });
+    page.text = f.text;
+  }
+  return out;
+}
+
 function jobBase(j) {
   return './jobs/' + (j.project ? encodeURIComponent(j.project) + '/' : '') + encodeURIComponent(j.id) + '/';
 }
 
 async function loadFiles(j) {
   const results = await Promise.all(candidates(j).map((name) => readJobFile(j, name)));
-  return results.filter(Boolean);
+  return mergeRounds(results.filter(Boolean));
 }
 
 // Every host's pushed audit rows for the job. Unparsable lines are skipped; any failure gives [].
@@ -6194,6 +6214,7 @@ async function openJob(id) {
   else if (first && needsFile && !hashFile() && waitsOnYou(j)) activeFile = 'needs.md';
   else if (!files.find((f) => f.name === activeFile)) activeFile = (files.find((f) => f.name !== 'idea.md') || files[0])?.name ?? null;
   renderDetail();
+  if (want && hashRound()) $('d-doc').querySelector('.round-head[data-round="' + hashRound() + '"]')?.scrollIntoView();
   refreshPicker();
   if (needsFile && !needsFile.triage) loadNeedsTriage(j, needsFile.sha).then((triage) => {
     if (!triage || openId !== id || !files.includes(needsFile)) return;
@@ -6204,10 +6225,16 @@ async function openJob(id) {
   if (activeFile && !pendingTab()) writeHash();
 }
 
-// The file the hash names for the open job, or null.
+// The file the hash names for the open job, or null. An old round-N/<file> link names the merged <file>.md page.
 function hashFile() {
   const { id, tab } = parseHash();
-  return id === openId && tab ? tab + '.md' : null;
+  return id === openId && tab ? tab.replace(/^round-\d+\//, '') + '.md' : null;
+}
+
+// The round an old round-N/<file> link names, or 0.
+function hashRound() {
+  const m = parseHash().tab.match(/^round-(\d+)\//);
+  return m ? Number(m[1]) : 0;
 }
 
 // The hash's file when it isn't loaded, or null.
@@ -6222,17 +6249,29 @@ function writeHash() {
 }
 
 function label(name) {
-  if (name === 'pre-review.md') return 'Pre-review';
-  return name.replace(/^round-(\d+)\/review-(\w+)\.md$/, 'R$1 $2').replace(/^round-(\d+)\/grounding\.md$/, 'R$1 grounding').replace(/-(\d+)\.md$/, ' $1').replace(/\.md$/, '');
+  return name.replace(/^review-(\w+)\.md$/, '$1').replace(/-(\d+)\.md$/, ' $1').replace(/\.md$/, '');
 }
 
 // pre-review.md's first line as a review chip class: FAIL reads like changes requested, NONE like a skipped review.
 const PRE_REVIEW_CHIP = { PASS: 'PASS', FAIL: 'CHANGES', NONE: 'SKIPPED' };
+// decision.md's first word as a review chip class.
+const DECISION_CHIP = { APPROVE: 'PASS', CHANGES: 'CHANGES', ESCALATE: 'CHANGES', CLOSED: 'SKIPPED' };
 
-// The status chip after a tab's label: pre-review.md's PASS, FAIL or NONE, else ''.
+// A verdict page's first line as [chip class, chip text], or null. A merged page reads its newest round.
+function pageVerdict(f) {
+  const line = f.text.split('\n')[0].trim();
+  let m;
+  if (f.name === 'pre-review.md') return (m = line.match(/^PRE-REVIEW: (PASS|FAIL|NONE)$/)) ? [PRE_REVIEW_CHIP[m[1]], m[1]] : null;
+  if (/^review-\w+\.md$/.test(f.name)) return (m = line.match(/^(?:VERDICT:\s*)?(PASS|CHANGES|SKIPPED)\b/)) ? [m[1], m[1]] : null;
+  if (f.name === 'grounding.md') return (m = line.match(/^GROUNDING: (CLEAN|UNVERIFIED)\b/)) ? [m[1] === 'CLEAN' ? 'PASS' : 'unverified', m[1]] : null;
+  if (f.name === 'decision.md') return (m = line.match(/^(APPROVE|ESCALATE|CHANGES|CLOSED)\b/)) ? [DECISION_CHIP[m[1]], m[1]] : null;
+  return null;
+}
+
+// The status chip after a tab's label, or ''.
 function tabStatus(f) {
-  const m = f.name === 'pre-review.md' && f.text.split('\n')[0].trim().match(/^PRE-REVIEW: (PASS|FAIL|NONE)$/);
-  return m ? ' <span class="chip ' + PRE_REVIEW_CHIP[m[1]] + '">' + m[1] + '</span>' : '';
+  const v = pageVerdict(f);
+  return v ? ' <span class="chip ' + v[0] + '">' + v[1] + '</span>' : '';
 }
 
 function tabBox(tab) {
@@ -6399,7 +6438,8 @@ function walkthroughFor(name) {
 const walkthroughHash = () => '#theme=' + theme;
 
 // live is false in the swipe peek: the bar shows, the frame never loads.
-function addWalkthrough(root, live, page) {
+// after, when set, is the round heading the bar goes right after.
+function addWalkthrough(root, live, page, after) {
   const j = jobs.find((x) => x.id === openId);
   const file = walkthroughFor(page);
   if (!walkthroughs.has(file) || !j?.project) return;
@@ -6470,7 +6510,29 @@ function addWalkthrough(root, live, page) {
   });
   show();
   const at = root.querySelector('.stepper');
-  at ? at.before(box) : root.prepend(box);
+  if (after) after.after(box);
+  else at ? at.before(box) : root.prepend(box);
+}
+
+// One walkthrough bar per round of a merged page, each after its round heading.
+function addPageWalkthroughs(root, live, f) {
+  if (!f.parts) return addWalkthrough(root, live, f.name);
+  for (const part of f.parts) addWalkthrough(root, live, part.name, root.querySelector('.round-head[data-round="' + part.round + '"]'));
+}
+
+// A page's HTML. A merged page renders each round under a Round N heading, oldest first,
+// with relative images resolving against that round's own file.
+function pageHtml(j, f) {
+  if (f.name === 'needs.md') return renderNeeds(j, f);
+  if (f.name === 'audit.md') return renderAudit(f);
+  if (!f.parts) return md(f.text);
+  const base = docBase;
+  const html = f.parts.map((part) => {
+    docBase = docDir ? new URL(part.name, docDir).href : null;
+    return '<h2 class="round-head" data-round="' + part.round + '">Round ' + part.round + '</h2>' + md(part.text);
+  }).join('');
+  docBase = base;
+  return html;
 }
 
 function renderDetail() {
@@ -6488,9 +6550,9 @@ function renderDetail() {
     docDir = new URL(jobBase(j), location.href).href;
     docBase = new URL(f.name, docDir).href;
   }
-  setDocHtml(f ? (f.name === 'needs.md' ? renderNeeds(j, f) : f.name === 'audit.md' ? renderAudit(f) : md(f.text)) : '<p class="muted">No files yet.</p>');
+  setDocHtml(f ? pageHtml(j, f) : '<p class="muted">No files yet.</p>');
   buildSteppers($('d-doc'), openId + '/' + activeFile);
-  if (f && f.name !== 'needs.md') addWalkthrough($('d-doc'), true, f.name);
+  if (f && f.name !== 'needs.md') addPageWalkthroughs($('d-doc'), true, f);
   renderGallery(j, f);
   renderFiles(j, f);
   renderMermaid();
@@ -7025,11 +7087,11 @@ function swipePeek(s, to) {
   peek.style.height = $('d-doc').offsetHeight + 'px';
   const base = docBase;
   docBase = docDir ? new URL(f.name, docDir).href : null;
-  peek.innerHTML = f.name === 'needs.md' ? renderNeeds(j, f) : f.name === 'audit.md' ? renderAudit(f) : md(f.text);
+  peek.innerHTML = pageHtml(j, f);
   docBase = base;
   peek.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
   buildSteppers(peek, null);
-  if (f.name !== 'needs.md') addWalkthrough(peek, false, f.name);
+  if (f.name !== 'needs.md') addPageWalkthroughs(peek, false, f);
   $('d-pager').append(peek);
   s.peek = peek;
 }
@@ -7404,7 +7466,7 @@ function syncDetail() {
   renderDrawerStatus(j);
   const pending = pendingTab();
   if (stamp(j) !== openStamp ||
-      (pending && candidates(j).includes(pending))) openJob(openId);
+      (pending && candidates(j).some((name) => name.replace(ROUND_FILE, '$2.md') === pending))) openJob(openId);
 }
 
 window.addEventListener('hashchange', (e) => {

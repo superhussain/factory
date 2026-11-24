@@ -298,7 +298,7 @@ fn build(checkout: &Path, err: &mut dyn Write) -> Result<PathBuf, String> {
     if let Some(f) = fake!(build) {
         return f(checkout, err);
     }
-    rust_binary(checkout, &Host::current()?, err)
+    rust_binary(checkout, &Host::current()?, err).map(|(path, _)| path)
 }
 
 /// The new binary's `install` run: argv is the binary, then its operands.
@@ -1336,6 +1336,8 @@ mod tests {
         /// The checkout of each build, and the argv of each install run.
         builds: Calls,
         installs: Calls,
+        /// TEST_ENV_LOCK, so no other test empties PATH while this fixture or catch_up_cmd spawns git.
+        _env: std::sync::MutexGuard<'static, ()>,
     }
 
     /// The stand-in for a built binary's bytes.
@@ -1353,6 +1355,7 @@ mod tests {
 
     impl T {
         fn new(name: &str) -> T {
+            let env = crate::shared::test_env_lock();
             let root = temp_dir(&format!("catch-up-{name}"));
             TEMP_ROOT.with(|r| *r.borrow_mut() = Some(root.clone()));
             let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -1477,6 +1480,7 @@ mod tests {
                 gh_replies,
                 builds,
                 installs,
+                _env: env,
             }
         }
 
@@ -2205,6 +2209,7 @@ mod tests {
             &argvs(&[&["launchctl", "print", &target]])[0]
         );
 
+        drop(t);
         let t = T::new("retro-push-other");
         FAKES.with(|f| f.borrow_mut().scheduler = Some("launchd"));
         t.timer_calls(reply, reply_code);
@@ -2347,6 +2352,7 @@ mod tests {
         );
         assert!(calls.borrow().is_empty());
 
+        drop(t);
         let t = T::new("restart-cron-running");
         t.daemon(Some("cron"), false);
         daemon_runs(&t.home);
@@ -2441,6 +2447,7 @@ mod tests {
         assert!(daemon_lines(&lines).is_empty(), "{lines:?}");
         assert!(calls.borrow().is_empty());
 
+        drop(t);
         let t = T::new("restart-drift");
         t.daemon(Some("launchd"), true);
         let calls = t.service_calls(0, "", false);

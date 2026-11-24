@@ -39,7 +39,7 @@ const documents = {
   "134-ground-full": { "spec.md": "# Ground full spec\n\nThe synthetic full job.\n" },
 };
 const TITLE = [
-  "Round 1 grounding could not check 2 citations. The R1 grounding tab has the reasons.",
+  "Round 1 grounding could not check 2 citations. The grounding tab has the reasons.",
   ...UNVERIFIED,
 ].join("\n");
 
@@ -77,7 +77,7 @@ async function seed(origin) {
 }
 
 test(
-  "round-N/grounding.md shows as an R<N> grounding tab and the card counts unverified citations",
+  "round-N/grounding.md shows in the grounding tab and the card counts unverified citations",
   { timeout: 120000 },
   async () => {
     await prepareAssets();
@@ -119,17 +119,16 @@ test(
           });
           await page.waitForFunction(
             () =>
-              document.querySelector("#d-tabs .tab.active")?.dataset.name ===
-                "round-1/grounding.md" &&
+              document.querySelector("#d-tabs .tab.active")?.dataset.name === "grounding.md" &&
               document.getElementById("d-doc").textContent.includes("GROUNDING: UNVERIFIED 2"),
           );
           assert.equal(
             await page.$eval("#d-tabs .tab.active", (tab) => tab.textContent.trim()),
-            "R1 grounding",
+            "grounding UNVERIFIED",
           );
           assert.deepEqual(
             await page.$$eval("#d-tabs .tab", (tabs) => tabs.map((t) => t.dataset.name)),
-            ["spec.md", "round-1/review-code.md", "round-1/grounding.md"],
+            ["spec.md", "review-code.md", "grounding.md"],
           );
 
           await page.goto(origin + "/#133-ground-clean", { waitUntil: "domcontentloaded" });
@@ -140,7 +139,7 @@ test(
           );
           assert.deepEqual(
             await page.$$eval("#d-tabs .tab", (tabs) => tabs.map((t) => t.dataset.name)),
-            ["spec.md", "round-1/review-code.md"],
+            ["spec.md", "review-code.md"],
           );
           assert.deepEqual(external, [], "no external requests");
           assert.deepEqual(errors, [], "no page errors");
