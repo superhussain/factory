@@ -89,6 +89,8 @@ It fetches the checkout's origin and backs up. Then it builds origin's binary
 through the build cache, installs the skill and fixes the pickup timer. It ends with
 `catch-up: done`. If the old install had no Rust entry, it also prints
 `skill: the old install had no Rust entry; finish the move with <checkout>/docs/migrating-to-rust.md`.
+If you arrived from that line, continue at [Check the host](#check-the-host), then
+[Set up automations](#set-up-automations).
 
 **A Mac on a build older than `e137ba69`.** The old binary builds under the
 default `TMPDIR`, which sits below `/var`, a symlink. The installer refuses that
