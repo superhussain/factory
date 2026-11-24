@@ -92,7 +92,7 @@ async function setup({ trials = [V10], jobs = [] } = {}) {
       "pipeline/projects/factory.json",
       JSON.stringify({ version: 10, stage_notes: { spec } }),
     );
-  return { bucket, board, put, settle, note };
+  return { bucket, board, put, settle, note, send };
 }
 
 const LABEL = '"factory-spec-v10"';
@@ -140,6 +140,24 @@ test("a board write cannot drop an open trial or change its other keys", async (
   assert.deepEqual(await board(), before);
 });
 
+test("a misshapen open trial can be dropped", async () => {
+  const V11 = { ...V10, id: "factory-spec-v11", version: 11, opened: "garbage" };
+  const V12 = { ...V10, id: "factory-spec-v12", version: "12" };
+  const { put } = await setup({ trials: [V10, V11, V12] });
+  for (const t of [V11, V12]) {
+    const dropped = await put((ts) => ts.filter((s) => s.id !== t.id));
+    assert.equal(dropped.status, 200, dropped.text);
+  }
+  const kept = await put((ts) => ts.filter((s) => s.id !== V10.id));
+  assert.deepEqual(
+    [kept.status, kept.text],
+    [
+      400,
+      `a board write cannot drop the open trial ${LABEL}: only trial settle moves an open stage-note trial. Nothing was written.`,
+    ],
+  );
+});
+
 test("kept needs 5 finished jobs per arm and no b higher read", async () => {
   const short = await setup({ jobs: FIVE_AND_FOUR });
   const few = await short.settle({ status: "kept", ...SETTLED, arms: ARMS, reads: READS });
@@ -168,6 +186,30 @@ test("kept needs 5 finished jobs per arm and no b higher read", async () => {
   const kept = await settle({ status: "kept", ...SETTLED, reads: READS });
   assert.equal(kept.status, 200);
   assert.equal((await board()).doc.trials[0].status, "kept");
+});
+
+test("kept counts only rows already stored, and trusts the host that stored them", async () => {
+  const { board, settle, send } = await setup();
+  const write = async (trials) => {
+    const { etag, doc } = await board();
+    return send("PUT", "/api/board", {
+      body: JSON.stringify({ ...doc, jobs: FIVE_AND_FIVE, trials }),
+      headers: { ...json, "If-Match": etag },
+      principal: hostA,
+    });
+  };
+  const once = await write([{ ...V10, status: "kept", ...SETTLED, reads: READS }]);
+  assert.deepEqual(
+    [once.status, once.text],
+    [
+      400,
+      SETTLE("kept", "each arm needs 5 finished jobs on the board, and arm a has 0, arm b has 0"),
+    ],
+  );
+  const rows = await write([V10]);
+  assert.equal(rows.status, 200);
+  const kept = await settle({ status: "kept", ...SETTLED, reads: READS });
+  assert.equal(kept.status, 200);
 });
 
 test("inconclusive and revert-failed wait 28 days from opened", async () => {

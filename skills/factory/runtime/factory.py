@@ -103,12 +103,12 @@
                                             failed or refused 1, pending after 120 seconds 3, a bad or
                                             stacked pr 4, a gh problem 5
   factory.py pr-merge <project-slug>/<job-id>
-                                            check the job PR can merge, then merge it pinned to the checked
-                                            head, or queue it when the repo has a merge queue: one JSON line
-                                            of pr, status and detail; merged or enqueued exits 0, blocked,
-                                            draft or refused 1, behind or unknown 3, a bad or stacked pr 4,
-                                            a gh problem 5, a conflict 6, an escalated job 7, an autonomy
-                                            hold 8
+                                            check the job PR can merge, then merge it pinned to the head
+                                            checks passed, or queue it when the repo has a merge queue: one
+                                            JSON line of pr, status and detail; merged or enqueued exits 0,
+                                            blocked, draft or refused 1, behind, unknown or a head checks
+                                            did not pass 3, a bad or stacked pr 4, a gh problem 5, a
+                                            conflict 6, an escalated job 7, an autonomy hold 8
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
@@ -4202,6 +4202,23 @@ def trial_valid(t):
             and t.get("stage") in PIPELINE_STAGES and type(t.get("version")) is int
             and type(t.get("champion_version")) is int and t["champion_version"] >= 0
             and t.get("id") == f"{t['project']}-{t['stage']}-v{t['version']}" and stamp_of(t.get("opened")) is not None)
+
+
+# The Worker's BOARD_STAMP.
+TRIAL_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", re.ASCII)
+
+
+def trial_misshapen(t):
+    """True when a trial's opened is not a board stamp or its version is not a whole number, the
+    Worker's trialMisshapen. Every record this calls misshapen, the Worker does too."""
+    v, opened = t.get("version"), t.get("opened")
+    whole = type(v) is int or (type(v) is float and v.is_integer())
+    return not whole or not isinstance(opened, str) or not TRIAL_STAMP.fullmatch(opened)
+
+
+def trial_droppable(t):
+    """True for an open trial record trial settle drops: not well formed, and misshapen."""
+    return isinstance(t, dict) and t.get("status") == "open" and not trial_valid(t) and trial_misshapen(t)
 
 
 def open_trial_for(data, slug, stage):
@@ -9319,6 +9336,7 @@ def checks_cmd(target, *args):
                     print(f"{c['bucket']} {c['name']}")
                 if failing:
                     fail("failing checks: " + ", ".join(failing), 1)
+                checked_head_write(home, job_id, sha)
                 return
             if behind and sha != updated_from:
                 n = pr.rsplit("/", 1)[1]
@@ -9342,6 +9360,7 @@ def checks_cmd(target, *args):
             fail("gh api graphql never gave a usable check list", 5)
         if not checks and not problem and waited >= CHECKS_REGISTER:
             print("no checks reported")
+            checked_head_write(home, job_id, sha)
             return
         if elapsed >= timeout:
             if problem:
@@ -13735,7 +13754,7 @@ def bench_arm(folder, cases):
 
 
 BENCH_REPLAY_SECONDS = 3600
-BENCH_REPLAY_TOOLS = ("Read", "Grep", "Glob", "Write", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+BENCH_REPLAY_TOOLS = ("Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
                       "Bash(git blame:*)")
 BENCH_REPLAY_DENIED = ("Bash(git *--out*)",)
 
@@ -13823,6 +13842,14 @@ def bench_replay_prompt(row, tmp, base, role):
     return "\n".join(lines) + "\n"
 
 
+def bench_review_rule(path):
+    """The allow rule that lets the replayed reviewer write only path, in Claude Code's //absolute form."""
+    p = path.as_posix()
+    if re.match(r"[A-Za-z]:/", p):
+        p = f"/{p[0].lower()}{p[2:]}"
+    return f"Edit(/{p})"
+
+
 def bench_session_usage(session):
     """{model: {kind: tokens}} summed over one Claude Code session's main transcript and its subagents."""
     root, totals = retro_transcripts(), {}
@@ -13866,7 +13893,8 @@ def bench_replay_case(row, arm, role, model, agents):
         session = str(uuid.uuid4())
         argv = [shutil.which("claude"), "-p", "--agent", f"factory-{role}", "--agents", agents, "--session-id", session,
                 "--setting-sources", "", "--strict-mcp-config", "--permission-mode", "dontAsk", "--allowedTools",
-                *BENCH_REPLAY_TOOLS, "--disallowedTools", *BENCH_REPLAY_DENIED, "--add-dir", str(tmp / "job")]
+                *BENCH_REPLAY_TOOLS, bench_review_rule(tmp / "job" / "round-1" / name), "--disallowedTools",
+                *BENCH_REPLAY_DENIED, "--add-dir", str(tmp / "job")]
         argv += ["--model", model] if model else []
         out.mkdir(parents=True, exist_ok=True)
         start, code = time.monotonic(), None
@@ -14124,6 +14152,18 @@ def autonomy_hold_write(home, job_id):
         patch_job(data, job_id, {"automerge": False, "needs": needs, "note": AUTONOMY_HOLD_NOTE})
         return dump_board(data), needs
     return cas(home, "/api/board", change)
+
+
+def checked_head_write(home, job_id, sha):
+    """Record the head checks passed as the job's checked_head, with no write when the row is missing or holds it."""
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None or job.get("checked_head") == sha:
+            return None, None
+        patch_job(data, job_id, {"checked_head": sha})
+        return dump_board(data), None
+    cas(home, "/api/board", change)
 
 
 def autonomy_hold_pass(home, data, dry):
@@ -14770,7 +14810,7 @@ def trial_settle(home):
     if load_autonomy(data)["paused"] is not False:
         fail("autonomy is paused; no trial settled", 3)
     trials = [t for t in data.get("trials") or [] if trial_valid(t) and t.get("status") == "open"]
-    if not trials:
+    if not trials and not any(trial_droppable(t) for t in data.get("trials") or []):
         print("no open trials")
         return
     updates = {}
@@ -14815,9 +14855,13 @@ def trial_settle(home):
         else:
             print(f"trial {tid} open: a {a['finished']} finished, b {b['finished']} finished")
 
+    dropped = []
+
     def change(text):
         data = load_board(text)
         records = [t for t in data.get("trials") or [] if isinstance(t, dict)]
+        dropped[:] = [t for t in records if trial_droppable(t)]
+        records = [t for t in records if not trial_droppable(t)]
         for t in records:
             if t.get("status") == "open" and t.get("id") in updates:
                 t.update(updates[t["id"]])
@@ -14830,6 +14874,9 @@ def trial_settle(home):
         data["updated"] = now()
         return dump_board(data), data
     data = cas(home, "/api/board", change)
+    if dropped:
+        print(f"dropped malformed open trial records: {len(dropped)} "
+              "(opened is not a board timestamp or version is not a whole number)")
     for slug in sorted({t["project"] for t in trials if updates.get(t["id"], {}).get("status") == "reverted"}):
         if trials_paused(data, slug):
             print(f"stage-note trials paused for {slug} after {TRIAL_PAUSE_REVERTS} reverts; "
