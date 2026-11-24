@@ -77,7 +77,7 @@ same candidate with both optional integrations disabled, to confirm the core
 settings do not depend on them:
 
 ```sh
-python3 -c "import json, sys; p = json.load(open(sys.argv[1])); p.update(image_origins=[], agent_links={}); json.dump(p, open(sys.argv[2], 'w'), indent=2)" deploy/profile.candidate.json deploy/profile.disabled.json
+node -e 'const fs = require("fs"); const [from, to] = process.argv.slice(1); const p = JSON.parse(fs.readFileSync(from, "utf8")); Object.assign(p, { image_origins: [], agent_links: {} }); fs.writeFileSync(to, JSON.stringify(p, null, 2))' deploy/profile.candidate.json deploy/profile.disabled.json
 node tools/deploy.mjs check --profile deploy/profile.disabled.json
 node tools/deploy.mjs render --profile deploy/profile.disabled.json
 git diff --no-index -- "deploy/backups/wrangler.candidate.$stamp.json" .build/wrangler.production.json
