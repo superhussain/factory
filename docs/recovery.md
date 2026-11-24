@@ -32,6 +32,13 @@ requirement for a complete, independently verified R2 backup first.
   this checkout writes to your bucket.
 - Device credentials are restored per host from that host's own backup; do not
   import credentials from another host (see [device.md](device.md)).
+- The `BoardEvents` room holds the live board and copies it to R2 `board.json`
+  at most every 30 s (`FLUSH_MS`), so the R2 copy can lag the room by up to
+  30 s. The room tags its copies with `customMetadata` (`store: room`, `seq`).
+  A restored `board.json` must be written without that metadata, for example
+  by download and re-upload, not an R2 server-side copy, which keeps it.
+  Otherwise the room takes the restore for its own copy and overwrites it at
+  the next flush.
 - For deploy and cutover steps, follow [cloudflare.md](cloudflare.md) and
   [upgrade.md](upgrade.md); the same review gates apply after a recovery.
 
