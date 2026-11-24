@@ -3115,6 +3115,14 @@ def human_confirm(expected, prompt, what="this command"):
         fail(f"confirmation did not match {expected}; nothing was changed", 2)
 
 
+# Env vars an agent's shell sets; any non-empty one marks an agent session.
+AGENT_ENV = ("CLAUDECODE", "AI_AGENT", "PASEO_AGENT_ID", "OPENCODE_TERMINAL")
+
+
+def agent_session(env):
+    return next((n for n in AGENT_ENV if env.get(n)), None)
+
+
 def registered(home):
     return {p["slug"] for p in json.loads(api(home, "GET", "/projects.json")[2])}
 
@@ -3135,6 +3143,10 @@ def autonomy_cmd(sub, slug=None, cls=None):
     if sub == "status":
         print(json.dumps(load_autonomy(read_board(home)), indent=2))
         return
+    agent = agent_session(os.environ)
+    if agent and (sub in ("resume", "allow") or lifts):
+        fail(f"autonomy {sub} refuses to run in an agent session ({agent} is set); a person types it in their own "
+             "terminal. Nothing was changed.", 2)
     if (sub == "allow" or lifts) and slug not in registered(home):
         fail(f"no factory project {slug}", 4)
 
