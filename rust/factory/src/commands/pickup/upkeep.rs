@@ -677,8 +677,23 @@ pub(super) fn audit_pickup_push(io: &mut Io, home: &Path, data: Option<&Value>) 
                 .and_then(Number::as_i128)
                 != Some(stamp)
             {
-                audit_push(job_id)?;
-                usage_pickup_record(io, home, job)?;
+                match audit_push(job_id) {
+                    // A transcript a flag pattern could not finish reading pushes nothing, and
+                    // only changed transcripts retry it, so one oversized call cannot stop pickup.
+                    Err(e) if e.stderr.contains(crate::shared::pyre::LIMIT_HIT) => {
+                        // Pickup goes on and cannot shorten a transcript, so drop the stop advice.
+                        let why = e.stderr.trim_end().trim_start_matches("factory.py: ");
+                        let why = why.split("; stopping").next().unwrap_or(why);
+                        errln!(
+                            io,
+                            "factory.py: audit push skipped {job_id} until its transcripts change: {why}"
+                        );
+                    }
+                    pushed => {
+                        pushed?;
+                        usage_pickup_record(io, home, job)?;
+                    }
+                }
             }
             kept.insert(job_id.to_string(), Value::from(stamp));
         }
