@@ -780,12 +780,20 @@ pub(crate) fn stop_pids(wt: &Path) -> Option<Vec<u32>> {
 
 /// (exit code, stdout, stderr) of program -C repo args. A timeout or a git that cannot start gives (None, "",
 /// reason), so the caller keeps what it was about to remove.
+#[cfg(test)]
+thread_local! {
+    // Each git call this thread made through run_git_with: its first argument and its timeout.
+    static GIT_CALLS: std::cell::RefCell<Vec<(String, Option<Duration>)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 fn run_git_with(
     program: &str,
     repo: &str,
     args: &[&str],
     timeout: Option<Duration>,
 ) -> (Option<i32>, String, String) {
+    #[cfg(test)]
+    GIT_CALLS.with(|calls| calls.borrow_mut().push((args[0].to_string(), timeout)));
     let argv = [&[program, "-C", repo], args].concat();
     match capture(&argv, None, &[("GIT_TERMINAL_PROMPT", "0")], timeout) {
         Ok(r) => (Some(r.code), strip(&r.stdout).to_string(), r.stderr),
@@ -1063,9 +1071,17 @@ fn pr_state(repo: &str, number: u32, device: &str) -> Result<Option<(Value, Valu
 
 /// The head commit GitHub reports for a merged pull request URL, or None. A failed lookup warns and returns None.
 fn pr_merged_head(home: &Path, pr: &str) -> Option<String> {
+    pr_merged_head_with(home, pr, pr_state)
+}
+
+fn pr_merged_head_with(
+    home: &Path,
+    pr: &str,
+    lookup: impl Fn(&str, u32, &str) -> Result<Option<(Value, Value)>, String>,
+) -> Option<String> {
     let m = GH_PR_PARTS.fullmatch(pr)?;
     let number: u32 = m[3].parse().ok()?;
-    match pr_state(&format!("{}/{}", &m[1], &m[2]), number, &device_name(home)) {
+    match lookup(&format!("{}/{}", &m[1], &m[2]), number, &device_name(home)) {
         Err(why) => {
             eprintln!(
                 "factory.py: cleanup could not read pull request {pr} ({why}), so it keeps a branch HEAD does not contain"
@@ -2010,6 +2026,53 @@ mod tests {
             "keep me\n"
         );
         assert!(t.branch_exists());
+    }
+
+    /// Ported from tests/cli/test_cleanup.py: only `git worktree remove` waits without a cap.
+    #[test]
+    fn only_worktree_remove_waits_without_a_cap() {
+        let t = Checkout::new("wt-clean-caps");
+        t.merge();
+        GIT_CALLS.with(|calls| calls.borrow_mut().clear());
+        let (removed, left) = t.clean(false, None);
+        assert_eq!((removed.len(), left.len()), (2, 0), "{removed:?} {left:?}");
+        let calls = GIT_CALLS.with(|calls| calls.borrow().clone());
+        let uncapped: Vec<_> = calls.iter().filter(|c| c.1.is_none()).collect();
+        assert_eq!(uncapped.len(), 1, "{calls:?}");
+        assert_eq!(uncapped[0].0, "worktree");
+        assert!(calls
+            .iter()
+            .filter(|c| c.1.is_some())
+            .all(|c| c.1 == Some(GIT_TIMEOUT)));
+    }
+
+    /// Ported from tests/cli/test_cleanup.py: an unreadable claim_stale_minutes does not stop the pull request
+    /// lookup, which names the device from config.md.
+    #[test]
+    fn bad_claim_minutes_still_reads_the_pr() {
+        let home = temp_dir("wt-bad-minutes");
+        fs::write(
+            home.join("config.md"),
+            "---\ndevice: host-a\nclaim_stale_minutes: soon\n---\n",
+        )
+        .unwrap();
+        let head = "a".repeat(40);
+        let seen = std::cell::RefCell::new(Vec::new());
+        let got = pr_merged_head_with(
+            &home,
+            "https://github.com/sample/alpha/pull/7",
+            |repo, number, device| {
+                seen.borrow_mut()
+                    .push((repo.to_string(), number, device.to_string()));
+                Ok(Some((Value::from("MERGED"), Value::from(head.clone()))))
+            },
+        );
+        assert_eq!(got, Some(head));
+        assert_eq!(
+            seen.into_inner(),
+            [("sample/alpha".to_string(), 7, "host-a".to_string())]
+        );
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]
