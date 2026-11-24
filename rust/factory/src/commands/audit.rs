@@ -3121,6 +3121,105 @@ mod tests {
     }
 
     #[test]
+    fn test_sweep_session_counts_each_subagent_once() {
+        const OPUS: &str = "claude-opus-5-5";
+        let _lock = crate::shared::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!("audit-sweep-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let projects = root.join("claude/projects");
+        let home = root.join("home");
+        let prompt = |text: String| {
+            json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}})
+                .to_string()
+                + "\n"
+        };
+        let write = |rel: &str, text: String| {
+            let path = projects.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        };
+        let h = home.display();
+        let wt = "-home-u--paseo-worktrees-ab12-factory-1017-add-x";
+        write(&format!("{wt}/s1.jsonl"), prompt("build it".into()));
+        write(
+            &format!("{wt}/s1/subagents/agent-a1.jsonl"),
+            prompt("review it".into()),
+        );
+        write("-home-u-dev-factory/o1.jsonl", prompt("orchestrate".into()));
+        write(
+            "-home-u-dev-factory/o1/subagents/agent-b1.jsonl",
+            prompt(format!(
+                "Your full prompt is in {h}/prompts/alpha/1017-add-x/spec.txt"
+            )),
+        );
+        write(
+            "-home-u-dev-factory/o1/subagents/agent-b2.jsonl",
+            prompt(format!("Job folder: {h}/jobs/alpha/1017-add-xy")),
+        );
+        write(
+            "-home-u-dev-factory/o2.jsonl",
+            prompt(format!("Sweep {h}/jobs/alpha/1017-add-x"))
+                + &turn("m7", OPUS, [1, 1, 1, 1], false, None),
+        );
+        write(
+            "-home-u-dev-factory/o2/subagents/agent-c1.jsonl",
+            prompt(format!("Prompt: {h}/prompts/alpha/1017-add-x/b.txt")),
+        );
+        write(
+            "-home-u-dev-factory/o2/subagents/agent-c2.jsonl",
+            prompt(format!("Prompt: {h}/prompts/alpha/1018-add-y/b.txt")),
+        );
+        let saved = std::env::var_os("CLAUDE_CONFIG_DIR");
+        std::env::set_var("CLAUDE_CONFIG_DIR", root.join("claude"));
+        let found = |job: &str| -> std::collections::BTreeSet<(String, bool)> {
+            usage_transcripts(&home, "alpha", job)
+                .unwrap()
+                .into_iter()
+                .map(|(p, main)| {
+                    (
+                        p.strip_prefix(&projects)
+                            .unwrap()
+                            .to_string_lossy()
+                            .replace('\\', "/"),
+                        main,
+                    )
+                })
+                .collect()
+        };
+        let (first, second) = (found("1017-add-x"), found("1018-add-y"));
+        match saved {
+            Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+            None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+        }
+        let want = |items: &[(&str, bool)]| -> std::collections::BTreeSet<(String, bool)> {
+            items.iter().map(|(p, m)| (p.to_string(), *m)).collect()
+        };
+        assert_eq!(
+            first,
+            want(&[
+                (
+                    "-home-u--paseo-worktrees-ab12-factory-1017-add-x/s1.jsonl",
+                    true
+                ),
+                (
+                    "-home-u--paseo-worktrees-ab12-factory-1017-add-x/s1/subagents/agent-a1.jsonl",
+                    false
+                ),
+                ("-home-u-dev-factory/o1/subagents/agent-b1.jsonl", false),
+                ("-home-u-dev-factory/o2.jsonl", true),
+                ("-home-u-dev-factory/o2/subagents/agent-c1.jsonl", false),
+            ])
+        );
+        assert_eq!(
+            second,
+            want(&[("-home-u-dev-factory/o2/subagents/agent-c2.jsonl", false)])
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn outcomes_change_writes_known() {
         let board = json!({"updated": "2026-01-09T12:00:00Z", "jobs": [
             {"id": "1017-add-x", "updated": "u"}, {"id": "1018-add-y", "updated": "u"},
