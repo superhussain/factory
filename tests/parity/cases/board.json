@@ -56,6 +56,23 @@
       "from": "tests/cli/test_board_ids.py::BoardIdTest.test_refuses_an_id_key_in_the_patch"
     },
     {
+      "id": "board/checked-head",
+      "argv": ["--home", "{home}", "board", "{home}", "412-fix-login"],
+      "home": null,
+      "stubs": {},
+      "stdin": "{\"checked_head\": \"a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\"}",
+      "env": {
+        "FACTORY_SESSION": "tag"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"412-fix-login\",\"project\":\"sample\",\"stage\":\"build\"}]}\n"
+        ]
+      },
+      "exit": 2
+    },
+    {
       "id": "board/archived-id",
       "argv": ["--home", "{home}", "board", "{home}", "412-fix-login"],
       "home": null,
