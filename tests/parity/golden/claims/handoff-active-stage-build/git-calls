@@ -1,0 +1,4 @@
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"]}
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"]}
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"]}
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "ls-remote", "origin", "refs/heads/factory/001-test"]}

@@ -129,6 +129,12 @@ pipeline/trial-too-few-jobs-stays-open-then-inconclusive-after-28-days
 pipeline/trial-too-few-jobs-stays-open-then-inconclusive-after-28-days-2
 pipeline/trial-failed-revert-leaves-the-trial-open
 pipeline/trial-failed-revert-after-28-days-is-revert-failed
+pipeline/trial-failed-revert-after-28-days-is-revert-failed-403
+pipeline/trial-failed-revert-after-28-days-is-revert-failed-404
+pipeline/trial-failed-revert-after-28-days-is-revert-failed-413
+pipeline/trial-transient-refusal-after-28-days-409-stays-open
+pipeline/trial-transient-refusal-after-28-days-412-stays-open
+pipeline/trial-transient-refusal-after-28-days-429-stays-open
 pipeline/trial-paused-autonomy-settles-nothing
 pipeline/trial-revert-reads-the-champion-from-history-not-the-board
 pipeline/trial-malformed-records-are-skipped

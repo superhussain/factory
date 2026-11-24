@@ -1049,6 +1049,48 @@ mod tests {
         assert_eq!(early_reason(true, paseo), None);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn archive_git_times_out() {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::shared::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = temp_dir("archive-git-times-out");
+        let hung = home.join("hung");
+        fs::create_dir_all(&hung).unwrap();
+        let bin = home.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        // Hangs only for the hung folder, so a concurrent test's git still runs.
+        let shim = bin.join("git");
+        fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\nif [ \"$2\" = \"{}\" ]; then sleep 60; fi\nexec /usr/bin/git \"$@\"\n",
+                hung.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::var_os("PATH");
+        let mut dirs = vec![bin];
+        dirs.extend(std::env::split_paths(path.as_deref().unwrap_or_default()));
+        std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
+        let found = workspace_leftovers(&hung.to_string_lossy());
+        match path {
+            Some(v) => std::env::set_var("PATH", v),
+            None => std::env::remove_var("PATH"),
+        }
+        assert_eq!(GIT_TIMEOUT, Duration::from_secs(20));
+        assert_eq!(
+            found,
+            [
+                "git status failed: timed out after 20 s",
+                "git branch failed: timed out after 20 s"
+            ]
+        );
+    }
+
     #[test]
     fn orphans_and_archive_refuse_a_malformed_board() {
         let merged = json!({"id": "042-dark-mode", "project": "sample", "stage": "merged"});

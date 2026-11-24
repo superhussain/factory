@@ -1,0 +1,1 @@
+factory.py: cannot read {home}/prebuild.json: use {"version": 1, "prebuild": {"<project>": ["<dir>", ...]}}

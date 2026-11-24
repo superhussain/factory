@@ -2184,6 +2184,25 @@ pub(crate) fn close_stacked_prs(
 mod tests {
     use super::*;
 
+    #[test]
+    fn gh_failure() {
+        let _lock = crate::shared::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let empty =
+            std::env::temp_dir().join(format!("factory-test-gh-failure-{}", std::process::id()));
+        std::fs::create_dir_all(&empty).unwrap();
+        let old = std::env::var_os("PATH");
+        std::env::set_var("PATH", &empty);
+        let found = pr_merge_commits("example/alpha", &[9], "host-a");
+        match old {
+            Some(v) => std::env::set_var("PATH", v),
+            None => std::env::remove_var("PATH"),
+        }
+        std::fs::remove_dir(&empty).unwrap();
+        assert_eq!(found, Err("gh is not installed on host-a".to_string()));
+    }
+
     fn pull(
         state: &str,
         threads: Vec<Vec<Value>>,

@@ -1,0 +1,11 @@
+wrote {home}/retro/card-checked-mark-dedupes/findings.md
+{
+  "admitted": [],
+  "skipped": [
+    {
+      "title": "Guard the ls alias",
+      "reason": "duplicate in backlog"
+    }
+  ]
+}
+uploaded retro run card-checked-mark-dedupes

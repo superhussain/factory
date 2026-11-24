@@ -1776,6 +1776,46 @@ mod tests {
     }
 
     #[test]
+    fn test_board_refuses_agents() {
+        let home = refused_home("claims-refuses-agents");
+        let opts = WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: None,
+        };
+        let patch = json!({"agents": []}).as_object().unwrap().clone();
+        let e = board_write(&home, "042-sample-export", patch, &opts).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (
+                2,
+                "factory.py: only factory.py agent and pickup set agents\n"
+            )
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn test_board_refuses_repeated() {
+        let home = refused_home("claims-refuses-repeated");
+        let opts = WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: None,
+        };
+        let patch = json!({"repeated": []}).as_object().unwrap().clone();
+        let e = board_write(&home, "042-csv-export", patch, &opts).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (
+                2,
+                "factory.py: only factory.py repeats sets repeated. Nothing was written.\n"
+            )
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
     fn archive_floor_reads_only_a_positive_int() {
         for (archived, floor) in [
             (json!({"max_id": 416}), 416),

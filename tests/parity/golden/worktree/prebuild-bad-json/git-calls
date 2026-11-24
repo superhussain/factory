@@ -1,0 +1,8 @@
+{"argv": ["-C", "checkout", "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main"]}
+{"argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"]}
+{"argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"]}
+{"argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/factory/001-test"]}
+{"argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"]}
+{"argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/factory/001-test"]}
+{"argv": ["-C", "checkout", "ls-remote", "origin", "refs/heads/factory/001-test"]}
+{"argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/remotes/origin/factory/001-test"]}

@@ -1,0 +1,17 @@
+{
+  "id": "001-sample",
+  "project": "sample",
+  "stage": "needs-human",
+  "updated": "{now}",
+  "started": "2026-11-01T00:00:00Z",
+  "tracer": {
+    "follow": true,
+    "gather": true,
+    "feature": "factory-1",
+    "url": "{api}/#/f/factory-1",
+    "scope": "declined"
+  },
+  "idea": "Export samples as CSV\nWith a header row.",
+  "note": "gate: spec-approval",
+  "needs": "approve"
+}

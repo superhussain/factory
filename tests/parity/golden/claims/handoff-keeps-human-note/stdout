@@ -1,0 +1,23 @@
+pushed 1 files
+{
+  "id": "001-test",
+  "project": "sample",
+  "stage": "build",
+  "round": 0,
+  "updated": "{now}",
+  "started": "2999-01-01T00:00:00Z",
+  "note": "escalated: pending human sign-off",
+  "handoff": {
+    "state": "ready",
+    "from": {
+      "device": "parity",
+      "session": "s1",
+      "since": "2026-10-01T00:00:00Z",
+      "seen": "2026-11-01T00:00:00Z"
+    },
+    "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "stage": "build",
+    "round": 0,
+    "at": "{now}"
+  }
+}
