@@ -411,7 +411,7 @@ daemon is the host's only pickup scheduler and no pickup timer exists.
   heartbeat. A conflict keeps the local file, saves `<file>.remote` and goes to
   the daemon log. A failed push or pull retries after 60 s, doubling to 30
   minutes, and stops once the job is merged or closed. The daemon and a manual
-  `push` or `pull` take the job's `.sync.lock` in turn. `factory push` on a folder
+  `push` or `pull` take a lock on the job folder in turn. `factory push` on a folder
   that matches its last sync returns without a request while the daemon runs, so
   it no longer prints `remote newer`; the daemon pulls on the next row change.
   An old folder on a host for a job still active pushes its unpushed edits too.

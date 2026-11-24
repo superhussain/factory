@@ -512,20 +512,18 @@ pub(crate) fn locally_synced(folder: &Path) -> bool {
     })
 }
 
-/// The job's sync lock, `<folder>/.sync.lock`, held while a push or pull reads and rewrites the
-/// folder and its manifest, so the daemon and a command never interleave on one job.
-fn job_lock(home: &Path, slug: &str, job_id: &str) -> Res<fs::File> {
+/// The job's sync lock: an exclusive lock on the job folder itself, held while a push or pull
+/// reads and rewrites the folder and its manifest, so the daemon and a command never interleave
+/// on one job. It leaves no file behind. None when the folder doesn't exist yet, so there is
+/// nothing local to race on, and on Windows, which runs no daemon and can't open a folder as a file.
+fn job_lock(home: &Path, slug: &str, job_id: &str) -> Res<Option<fs::File>> {
     let folder = safe_job_folder(home, slug, job_id)?;
-    fs::create_dir_all(&folder).map_err(|e| os_fail(e, &folder))?;
-    let path = folder.join(".sync.lock");
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&path)
-        .map_err(|e| os_fail(e, &path))?;
-    file.lock().map_err(|e| os_fail(e, &path))?;
-    Ok(file)
+    if cfg!(windows) || !folder.is_dir() {
+        return Ok(None);
+    }
+    let file = fs::File::open(&folder).map_err(|e| os_fail(e, &folder))?;
+    file.lock().map_err(|e| os_fail(e, &folder))?;
+    Ok(Some(file))
 }
 
 /// Pushes one job's changed files, writing what `factory push` prints to out. Returns how many
@@ -1265,6 +1263,27 @@ mod tests {
         .unwrap();
         assert!(push_with_home(&home, "alpha/042-sample-export").is_err());
         drop(lock);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn job_lock_excludes_a_second_holder_and_leaves_no_file() {
+        let home = job_home("sync-job-lock", "http://127.0.0.1:9", &[]);
+        let held = job_lock(&home, "alpha", "042-sample-export")
+            .unwrap()
+            .unwrap();
+        let other = fs::File::open(home.join("jobs/alpha/042-sample-export")).unwrap();
+        assert!(matches!(
+            other.try_lock(),
+            Err(fs::TryLockError::WouldBlock)
+        ));
+        drop(held);
+        other.try_lock().unwrap();
+        assert!(walk(&home.join("jobs/alpha/042-sample-export"))
+            .unwrap()
+            .is_empty());
+        assert!(job_lock(&home, "alpha", "043-missing").unwrap().is_none());
         fs::remove_dir_all(home).unwrap();
     }
 
