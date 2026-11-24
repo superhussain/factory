@@ -54,7 +54,7 @@ mise exec -- pnpm exec nx run-many -t verify
 
 `worker-hosted` owns `auth` and `protocol`, `web-dashboard` owns `assets`, and `tooling` owns `deploy`, `local`, `browser` and `verify`. The `rust/` crate is not an Nx project: `node tools/verify.mjs device` runs its `cargo test`, and a host without Node runs `cargo test --locked --manifest-path rust/Cargo.toml` directly. `worker-hosted`'s suites depend on `web-dashboard:assets` because they import the `.build` artifacts it writes, so a clean checkout builds assets first. Only `local` binds the fixed ports 8220/8221; `browser` uses owned ephemeral ports, so the two run side by side.
 
-`nx` is a pinned devDependency; task results cache locally under the ignored `.nx/cache` (`pnpm exec nx reset` clears them), and `pnpm exec nx show projects` lists the four projects. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
+`nx` is a pinned devDependency; task results cache locally under the ignored `.nx/cache` (`pnpm exec nx reset` clears them), and `pnpm exec nx show projects` lists the three projects. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
 
 ## Private deployment profile
 
