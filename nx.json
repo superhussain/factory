@@ -109,7 +109,7 @@
         "{workspaceRoot}/skills/factory/runtime/paseo_stalls.py",
         "{workspaceRoot}/tests/tools/test_pr_screenshots.py",
         "{workspaceRoot}/tests/tools/secret-scan.test.mjs",
-        "{workspaceRoot}/tests/tools/test_stage_notes_check.py",
+        "{workspaceRoot}/tests/tools/stage-notes-check.test.mjs",
         "{workspaceRoot}/docs/repo-security.md",
         "{workspaceRoot}/skills/factory/runtime/pr_screenshots.py",
         "{workspaceRoot}/.gitleaks.toml",

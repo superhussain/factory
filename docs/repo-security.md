@@ -97,7 +97,7 @@ Only a signed-in person saves pipeline settings (F11); retro admit may edit only
 5. On a device, from the root of a checkout of this repository at current `main`, run this command. `<installed-skill>` is the `factory` folder that `tools/install.sh` created, see [device.md](device.md). It prints `review: matches` and `build: matches`. A `differs` or `missing` line means the live note is out of date, so repeat steps 1 to 4. A `no note in docs/repo-security.md` line means this checkout lost its note block, so restore that file from current `main`. If `factory` prints an error first, fix that error and run the command again. Do not re-paste the notes for it. If the `stdin is not a factory pipeline view` line prints with no error before it, the command before the pipe is wrong. Copy the command as shown and change only `<installed-skill>`.
 
 ```sh
-<installed-skill>/runtime/factory pipeline factory | python3 tools/stage-notes-check.py
+<installed-skill>/runtime/factory pipeline factory | node tools/stage-notes-check.mjs
 ```
 
 To change a note, edit it here in a pull request first, then repeat these steps.
