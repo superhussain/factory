@@ -19,6 +19,8 @@ export const ROOM = "main";
 export const FLUSH_MS = 30_000;
 export const PAGE_BYTES = 256 << 10;
 const MAX_ROW = 1 << 20;
+// Characters per board_meta value: at most 3 UTF-8 bytes each, under SQLite's 2 MB limit.
+const META_CHUNK = 512 << 10;
 // The customMetadata store value on the room's own copies in R2.
 const ROOM_COPY = "room";
 
@@ -170,21 +172,44 @@ export class BoardRows {
   // dirty { id: [hash of R2's row, seq] } for each id a row commit changed since that copy,
   // headBefore headKey of R2's copy while a top-level change is uncopied.
   state() {
-    const [row] = this.sql.exec("SELECT v FROM board_meta WHERE k = 'state'").toArray();
-    return row ? JSON.parse(row.v) : null;
+    return this.load("state");
   }
 
+  // One board_meta value, stored as key and, past META_CHUNK characters, key#0001 and on.
+  load(key) {
+    const rows = this.sql
+      .exec("SELECT v FROM board_meta WHERE k >= ? AND k < ? ORDER BY k", key, key + "$")
+      .toArray();
+    return rows.length ? JSON.parse(rows.map((r) => r.v).join("")) : null;
+  }
+
+  // A top-level field can be megabytes, past SQLite's 2 MB value limit, so long values split.
   save(state, key = "state") {
+    const json = JSON.stringify(state);
+    const chunks = [];
+    for (let i = 0; i < json.length || !chunks.length;) {
+      let end = Math.min(i + META_CHUNK, json.length);
+      // Never split a surrogate pair, which SQLite would store as two replacement characters.
+      if (end < json.length && /[\ud800-\udbff]/.test(json[end - 1])) end--;
+      chunks.push(json.slice(i, end));
+      i = end;
+    }
+    const chunkKey = (i) => (i ? `${key}#${String(i).padStart(4, "0")}` : key);
+    for (const [i, v] of chunks.entries())
+      this.sql.exec(
+        "INSERT INTO board_meta (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v",
+        chunkKey(i),
+        v,
+      );
     this.sql.exec(
-      "INSERT INTO board_meta (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v",
-      key,
-      JSON.stringify(state),
+      "DELETE FROM board_meta WHERE k > ? AND k < ?",
+      chunkKey(chunks.length - 1),
+      key + "$",
     );
   }
 
   stages() {
-    const [row] = this.sql.exec("SELECT v FROM board_meta WHERE k = 'stages'").toArray();
-    return new Map(row ? JSON.parse(row.v) : []);
+    return new Map(this.load("stages") ?? []);
   }
 
   // Every page holding a row with one of ids, as Map page -> parsed rows, in page order. Each
@@ -247,6 +272,8 @@ export class BoardRows {
       dirty: {},
       headSeq: 0,
       headBefore: null,
+      // The board is R2's body at r2etag byte for byte, so a read serves that body.
+      verbatim: true,
     };
     if (doc) {
       state.head = headPairs(doc);
@@ -446,6 +473,7 @@ export class BoardRows {
     const mine = this.firstRows(this.pagesOf(ids), ids);
     const state = this.seed(text, r2etag, newEtag());
     state.seq = old.seq;
+    state.verbatim = false;
     const r2rows = this.firstRows(this.pagesOf(ids), ids);
     const kept = [],
       changes = [];
@@ -570,6 +598,12 @@ export class BoardRows {
     await this.sync();
     const state = this.state();
     if (!state) return null;
+    // An unchanged board answers with R2's own bytes, such as a PUT body's trailing newline.
+    if (state.readable && state.verbatim && this.memo.etag !== state.etag) {
+      const object = await this.env.BUCKET.get(BOARD_KEY);
+      if (object?.httpEtag === state.r2etag)
+        this.memo = { etag: state.etag, text: await object.text() };
+    }
     if (state.readable) return { etag: state.etag, text: this.text(state) };
     const object = await this.env.BUCKET.get(BOARD_KEY);
     return object ? { etag: state.etag, text: await object.text() } : null;
@@ -638,11 +672,13 @@ export class BoardRows {
     const names = (q.names ?? []).filter((n) => carried.has(n));
     const rest = (q.names ?? []).filter((n) => !carried.has(n));
     if (rest.length)
-      for (const r of this.sql.exec(
-        `SELECT DISTINCT j.value AS name FROM board_index r INDEXED BY board_index_names, json_each(r.names) j
-          WHERE r.names IS NOT NULL AND j.value IN (SELECT value FROM json_each(?))`,
-        JSON.stringify(rest),
-      ))
+      for (const r of this.sql
+        .exec(
+          `SELECT DISTINCT j.value AS name FROM board_index r INDEXED BY board_index_names, json_each(r.names) j
+            WHERE r.names IS NOT NULL AND j.value IN (SELECT value FROM json_each(?))`,
+          JSON.stringify(rest),
+        )
+        .toArray())
         names.push(r.name);
     return {
       etag: state.etag,
@@ -699,6 +735,7 @@ export class BoardRows {
         state.headSeq = state.seq;
       }
       state.etag = newEtag();
+      state.verbatim = false;
       this.save(state);
       return { etag: state.etag };
     });
@@ -739,7 +776,8 @@ export class BoardRows {
     if (cond.ifNoneMatch && current !== null) return null;
     const seq = (state?.seq ?? 0) + 1;
     const r2etag = state?.r2etag ?? null;
-    const put = await this.env.BUCKET.put(BOARD_KEY, JSON.stringify(doc), {
+    // R2 keeps the body as sent, so a read of this version answers with the same bytes.
+    const put = await this.env.BUCKET.put(BOARD_KEY, text, {
       onlyIf: new Headers(r2etag ? { "If-Match": r2etag } : { "If-None-Match": "*" }),
       httpMetadata: { contentType: "application/json" },
       customMetadata: { store: ROOM_COPY, seq: String(seq) },
@@ -751,7 +789,7 @@ export class BoardRows {
     const etag = newEtag();
     this.storage.transactionSync(() => {
       const next = this.applyReplace(state, doc, put.httpEtag, etag);
-      Object.assign(next, { seq, dirty: {}, headSeq: 0, headBefore: null });
+      Object.assign(next, { seq, dirty: {}, headSeq: 0, headBefore: null, verbatim: true });
       this.save(next);
     });
     return { etag };

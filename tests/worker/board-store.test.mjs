@@ -26,10 +26,15 @@ function setup(board = BOARD, text = JSON.stringify(board)) {
     });
   const notified = [];
   const env = { BUCKET: bucket };
-  const room = memoryRoom(BoardEvents, env, async (input, init) => {
-    notified.push(await new Request(input, init).text());
-    return new Response(null, { status: 204 });
-  });
+  const room = memoryRoom(
+    BoardEvents,
+    env,
+    async (input, init) => {
+      notified.push(await new Request(input, init).text());
+      return new Response(null, { status: 204 });
+    },
+    2_000_000,
+  );
   env.BoardEvents = room.namespace;
   const send = (path, init = {}) =>
     serveFactory(new Request("http://local" + path, init), env, person, { waitUntil() {} });
@@ -41,12 +46,12 @@ function setup(board = BOARD, text = JSON.stringify(board)) {
 const boardPuts = (bucket) =>
   bucket.calls.filter(([op, key]) => op === "put" && key === "board.json").length;
 
-test("the first read seeds from R2 and keeps its ETag; GET is JSON.stringify of the board", async () => {
-  // A board a client wrote with indentation reads back as its compact JSON.
-  const s = setup(BOARD, JSON.stringify(BOARD, null, 2));
+test("the first read seeds from R2 and keeps its ETag; GET is R2's bytes until a row changes", async () => {
+  // A board a client wrote with indentation and a trailing newline reads back byte for byte.
+  const s = setup(BOARD, JSON.stringify(BOARD, null, 2) + "\n");
   const full = await s.send("/board.json");
   assert.equal(full.headers.get("ETag"), SEED);
-  assert.equal(await full.text(), JSON.stringify(BOARD));
+  assert.equal(await full.text(), JSON.stringify(BOARD, null, 2) + "\n");
   const api = await s.send("/api/board");
   assert.equal(api.headers.get("ETag"), SEED);
   assert.equal(api.headers.get("Accept-Patch"), "application/json");
@@ -185,6 +190,36 @@ test("a PUT copies to R2 before it answers and refuses a row over 1 MiB", async 
   assert.equal(s.room.alarm(), null);
   assert.equal((await put([SPEC], SEED)).status, 412, "the seed's ETag is stale now");
   assert.equal((await put([BUILD, SPEC], ok.headers.get("ETag"))).status, 200);
+});
+
+test("a PUT reads back byte for byte, even with a top-level field past SQLite's value limit", async () => {
+  const s = setup();
+  // 8 MiB in one top-level field, as the cancel drill writes, and a trailing newline.
+  const body = JSON.stringify({ ...BOARD, drillPad: Array(8192).fill("x".repeat(1024)) }) + "\n";
+  const ok = await s.send("/api/board", { method: "PUT", headers: { "If-Match": SEED }, body });
+  assert.equal(ok.status, 200);
+  assert.equal(await (await s.send("/board.json")).text(), body);
+  // A row change rebuilds the text from the rows, still with the large field.
+  const patched = await s.patch({ rows: [{ id: IDEA.id, expect: null, row: IDEA }] });
+  assert.equal(patched.status, 200);
+  const after = await (await s.send("/board.json")).json();
+  assert.equal(after.drillPad.length, 8192);
+  assert.deepEqual(
+    after.jobs.map((j) => j.id),
+    [...BOARD.jobs.map((j) => j.id), IDEA.id],
+  );
+});
+
+test("a new row may name an upload that another stored row carries", async () => {
+  const image = `${"a".repeat(64)}.png`;
+  const board = { ...BOARD, jobs: [{ ...BUILD, idea_images: [image] }, SPEC] };
+  const s = setup(board);
+  // IDEA is new and BUILD is not fetched, so only the index finds the stored name; R2 has no
+  // upload object, so a miss would refuse the write.
+  const added = await s.patch({
+    rows: [{ id: IDEA.id, expect: null, row: { ...IDEA, idea_images: [image] } }],
+  });
+  assert.equal(added.status, 200, await added.text());
 });
 
 test("a board.json written to R2 from outside is adopted with its ETag", async () => {

@@ -103,10 +103,12 @@ export const serverEnv = {
 // The board room as a real BoardEvents object over Node's SQLite, for Worker tests in Node.
 // Its stub copies every argument and result as RPC does and hands fetches, the room's notify
 // calls, to fetch. Alarms wait for runAlarm(), so a test decides when R2's copy is written.
+// valueLimit refuses a longer SQL value as workerd does (2 MB); Node's SQLite allows 1 GB.
 export function memoryRoom(
   BoardEvents,
   env,
   fetch = async () => new Response(null, { status: 204 }),
+  valueLimit = Infinity,
 ) {
   // Loaded here, so only the tests that use a room import node:sqlite.
   const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
@@ -117,6 +119,8 @@ export function memoryRoom(
   const storage = {
     sql: {
       exec(query, ...bindings) {
+        if (bindings.some((b) => typeof b === "string" && Buffer.byteLength(b) > valueLimit))
+          throw new Error("string or blob too big: SQLITE_TOOBIG");
         const rows = db.prepare(query).all(...bindings);
         work.sqlRows += rows.length;
         return { toArray: () => rows };
