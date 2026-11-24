@@ -194,11 +194,15 @@ export class BoardRows {
     this.inflight = undefined;
     this.replacing = undefined;
     for (const statement of SCHEMA) this.sql.exec(statement);
-    // A room from before the meta column gains it, which fails once it has it; its pages fill
-    // in their meta on the first slim read.
-    try {
+    // A room from before the meta column gains it; its pages fill in their meta on the first
+    // slim read.
+    if (
+      !this.sql
+        .exec("PRAGMA table_info(board_pages)")
+        .toArray()
+        .some((column) => column.name === "meta")
+    )
       this.sql.exec("ALTER TABLE board_pages ADD COLUMN meta TEXT");
-    } catch {}
   }
 
   // The store's state: null before the first seed. etag is the board version clients see,

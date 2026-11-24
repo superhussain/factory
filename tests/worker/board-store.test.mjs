@@ -624,3 +624,15 @@ test("a slim read is one room fetch the Worker passes through, at 2,300 and 4,60
   assert.ok(doubled.hit <= 3, JSON.stringify(doubled));
   assert.ok(doubled.miss <= 60, JSON.stringify(doubled));
 });
+
+test("a room whose pages table predates the meta column gains it and serves slim", async () => {
+  const s = setup();
+  await s.send("/board.json");
+  s.room.object.board().sql.exec("ALTER TABLE board_pages DROP COLUMN meta");
+  s.room.restart();
+  const full = await (await s.send("/board.json")).text();
+  assert.equal(await (await s.send("/board.json?view=slim")).text(), await workerSlim(full));
+  // The next room over the same table finds the column and leaves it be.
+  s.room.restart();
+  assert.equal((await s.send("/board.json?view=slim")).status, 200);
+});
