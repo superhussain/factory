@@ -1642,7 +1642,7 @@ pub(crate) struct Unit {
     /// The factory command it runs; its log is `<home>/logs/<command>.log`.
     command: &'static str,
     /// The launchd label.
-    label: &'static str,
+    pub(crate) label: &'static str,
     /// The scheduled task name, and the name of its `.cmd` and systemd unit files.
     task: &'static str,
     /// "timer" or "service", as install and status lines name it.
@@ -2061,6 +2061,92 @@ fn pause(d: Duration) {
     }
 }
 
+/// Polls for a launchd job to come up after a reload: 20 prints 250 ms apart, about 5 s.
+const RUNNING_POLLS: u32 = 20;
+
+/// Reloads a launchd job from its plist with bootout then bootstrap: (code, output) of the
+/// bootstrap. launchd re-reads the binary's signature only on bootstrap; after the binary is
+/// replaced, `kickstart -k` fails with OS_REASON_CODESIGNING ("needs LWCR update"). A job that is
+/// not loaded makes bootout fail, which is fine, so its result is ignored.
+pub(crate) fn launchd_reload(
+    label: &str,
+    plist: &Path,
+    run: &mut dyn FnMut(&[&str]) -> (i32, String),
+) -> (i32, String) {
+    let uid = getuid();
+    let target = format!("gui/{uid}/{label}");
+    run(&["launchctl", "bootout", &target]);
+    // bootout returns before launchd lets go of the job; bootstrapping a label that is still
+    // loaded fails with "5: Input/output error", so wait for print to stop finding it.
+    for _ in 0..BOOTOUT_POLLS {
+        if run(&["launchctl", "print", &target]).0 != 0 {
+            break;
+        }
+        pause(Duration::from_millis(250));
+    }
+    // A disabled label makes bootstrap fail with "5: Input/output error" too.
+    run(&["launchctl", "enable", &target]);
+    let shown = plist.to_string_lossy();
+    let bootstrap = ["launchctl", "bootstrap", &format!("gui/{uid}"), &shown];
+    let mut result = run(&bootstrap);
+    if result.0 != 0 && result.1.contains("Input/output error") {
+        pause(Duration::from_secs(2));
+        result = run(&bootstrap);
+    }
+    result
+}
+
+/// The pid of a launchd job once `launchctl print` shows it running with a pid, polled for about
+/// 5 s; otherwise why not, from the last print's job state and exit reason.
+pub(crate) fn launchd_running(
+    label: &str,
+    run: &mut dyn FnMut(&[&str]) -> (i32, String),
+) -> Result<u32, String> {
+    let target = format!("gui/{}/{label}", getuid());
+    let mut last = (0, String::new());
+    for i in 0..RUNNING_POLLS {
+        if i > 0 {
+            pause(Duration::from_millis(250));
+        }
+        last = run(&["launchctl", "print", &target]);
+        if last.0 != 0 {
+            continue;
+        }
+        let field = |name: &str| {
+            last.1.lines().find_map(|l| {
+                let (k, v) = l.trim().split_once(" = ")?;
+                (k == name).then(|| v.trim().to_string())
+            })
+        };
+        if field("state").as_deref() == Some("running") {
+            if let Some(pid) = field("pid").and_then(|p| p.parse().ok()) {
+                return Ok(pid);
+            }
+        }
+    }
+    if last.0 != 0 {
+        let text = strip(&last.1);
+        return Err(format!(
+            "{target} is not loaded: {}",
+            text.split('\n').next().unwrap_or("")
+        ));
+    }
+    let wanted = ["state", "job state", "last exit code", "last exit reason"];
+    let mut reason: Vec<&str> = Vec::new();
+    for name in wanted {
+        let line = last
+            .1
+            .lines()
+            .map(str::trim)
+            .find(|l| l.split_once(" = ").is_some_and(|(k, _)| k == name));
+        reason.extend(line);
+    }
+    if reason.is_empty() {
+        reason.push("no pid");
+    }
+    Err(format!("{target} is not running: {}", reason.join(", ")))
+}
+
 fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -> Res<String> {
     let values = timer_values(home, unit);
     check_unit_paths(scheduler, &values)?;
@@ -2069,8 +2155,8 @@ fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -> Res<Strin
     let noun = unit.noun;
     let (code, out, done);
     if scheduler == "launchd" {
-        let (plist, uid) = (timer_path(scheduler, unit), getuid());
-        let target = format!("gui/{uid}/{}", unit.label);
+        let plist = timer_path(scheduler, unit);
+        let target = format!("gui/{}/{}", getuid(), unit.label);
         if fs::read(&plist).ok().as_deref() == Some(text.as_bytes())
             && setup_run(&["launchctl", "print", &target], None).0 == 0
         {
@@ -2078,25 +2164,7 @@ fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -> Res<Strin
         }
         mkdirs(plist.parent().unwrap())?;
         write_file(&plist, &text)?;
-        setup_run(&["launchctl", "bootout", &target], None);
-        // bootout returns before launchd lets go of the job; bootstrapping a label that is still
-        // loaded fails with "5: Input/output error", so wait for print to stop finding it.
-        for _ in 0..BOOTOUT_POLLS {
-            if setup_run(&["launchctl", "print", &target], None).0 != 0 {
-                break;
-            }
-            pause(Duration::from_millis(250));
-        }
-        // A disabled label makes bootstrap fail with "5: Input/output error" too.
-        setup_run(&["launchctl", "enable", &target], None);
-        let shown = plist.to_string_lossy();
-        let bootstrap = ["launchctl", "bootstrap", &format!("gui/{uid}"), &shown];
-        let mut result = setup_run(&bootstrap, None);
-        if result.0 != 0 && result.1.contains("Input/output error") {
-            pause(Duration::from_secs(2));
-            result = setup_run(&bootstrap, None);
-        }
-        (code, out) = result;
+        (code, out) = launchd_reload(unit.label, &plist, &mut |argv| setup_run(argv, None));
         done = format!("installed launchd {noun}: {}", plist.display());
     } else if scheduler == "systemd" {
         let file = timer_path(scheduler, unit);
@@ -2710,12 +2778,8 @@ pub(crate) fn daemon_restart_argvs(
 ) -> Result<Vec<Vec<String>>, String> {
     let argv = |parts: &[&str]| parts.iter().map(|p| p.to_string()).collect::<Vec<String>>();
     Ok(match scheduler {
-        "launchd" => vec![argv(&[
-            "launchctl",
-            "kickstart",
-            "-k",
-            &format!("gui/{}/{}", getuid(), DAEMON.label),
-        ])],
+        // launchd restarts through launchd_reload, since kickstart -k cannot spawn a new binary.
+        "launchd" => Vec::new(),
         "systemd" => vec![argv(&[
             "systemctl",
             "--user",

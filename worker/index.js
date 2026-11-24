@@ -344,16 +344,20 @@ async function readSlim(env) {
   return slimMemo;
 }
 
-// The whole board as stored, with its version. Its bytes pass through undecoded.
-async function boardGet(env, headers) {
-  const obj = await boardStore(env).body();
+// The whole board as stored, or with view "slim" the room's slim board, with its version. Its
+// bytes pass through undecoded.
+async function boardGet(env, headers, view = "body") {
+  const obj = await boardStore(env)[view]();
   return obj
     ? reply(obj.body, 200, "application/json", { ETag: obj.etag, ...headers })
     : notFound();
 }
 
 // The dashboard's first read. A board that is not JSON with a jobs array goes out as stored.
+// The room builds it; without a room the Worker slices R2's board itself.
 async function slimBoardGet(env) {
+  if (boardStore(env).slim)
+    return boardGet(env, { "X-Factory-Version": DASHBOARD_VERSION }, "slim");
   const head = await boardStore(env).head();
   if (!head) return notFound();
   const send = (body, etag) =>

@@ -114,10 +114,33 @@ fn remove_timer(scheduler: &str, home: &Path) -> Result<(), String> {
         .map_err(|e| strip(e.stderr.trim_start_matches("factory.py: ")).to_string())
 }
 
+/// (code, output) of a launchctl step, through the faked child runner in tests.
+fn launchctl(argv: &[&str]) -> (i32, String) {
+    let argv: Vec<String> = argv.iter().map(|a| a.to_string()).collect();
+    let r = run(&argv, Some(TIMER_TIMEOUT));
+    (r.code, r.stdout + &r.stderr)
+}
+
 /// Restarts the installed daemon service with the scheduler's own commands, so it runs the binary
-/// catch-up just installed. False when there was nothing to restart: cron with no daemon running.
+/// catch-up just installed: the restarted line's detail, or None when there was nothing to
+/// restart (cron with no daemon running). launchd reloads the plist and then must show a pid.
 /// schtasks /End fails when the task is not running, so its failure does not count.
-fn restart_daemon(scheduler: &str, home: &Path) -> Result<bool, String> {
+fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String> {
+    if scheduler == "launchd" {
+        let plist = user_home()
+            .map_err(|e| e.stderr)?
+            .join("Library/LaunchAgents")
+            .join(format!("{}.plist", pickup::DAEMON.label));
+        let (code, text) = pickup::launchd_reload(pickup::DAEMON.label, &plist, &mut launchctl);
+        if code != 0 {
+            return Err(format!(
+                "launchctl bootstrap exited {code}: {}",
+                strip(&text).split('\n').next().unwrap_or("")
+            ));
+        }
+        let pid = pickup::launchd_running(pickup::DAEMON.label, &mut launchctl)?;
+        return Ok(Some(format!("restarted (pid {pid})")));
+    }
     let argvs = pickup::daemon_restart_argvs(scheduler, home)?;
     for argv in &argvs {
         let r = run(argv, Some(TIMER_TIMEOUT));
@@ -131,7 +154,35 @@ fn restart_daemon(scheduler: &str, home: &Path) -> Result<bool, String> {
             ));
         }
     }
-    Ok(!argvs.is_empty())
+    Ok((!argvs.is_empty()).then(|| "restarted".to_string()))
+}
+
+/// Reloads the launchd retro-push timer when it runs this binary, so launchd takes the new
+/// binary's signature and the timer still fires: the line to print, or None with no such timer.
+fn reload_retro_push(binary: &Path) -> Option<Result<String, String>> {
+    let label = "factory.retro-push";
+    let plist = user_home()
+        .ok()?
+        .join("Library/LaunchAgents")
+        .join(format!("{label}.plist"));
+    let text = fs::read_to_string(&plist).ok()?;
+    let target = format!("gui/{}/{label}", pickup::getuid());
+    if !text.contains(&*binary.to_string_lossy())
+        || launchctl(&["launchctl", "print", &target]).0 != 0
+    {
+        return None;
+    }
+    let (code, out) = pickup::launchd_reload(label, &plist, &mut launchctl);
+    Some(if code != 0 {
+        Err(format!(
+            "launchctl bootstrap exited {code}: {}",
+            strip(&out).split('\n').next().unwrap_or("")
+        ))
+    } else if launchctl(&["launchctl", "print", &target]).0 != 0 {
+        Err(format!("{target} is not loaded after bootstrap"))
+    } else {
+        Ok("reloaded".into())
+    })
 }
 
 /// The daemon service's scheduler when the service is installed on this host.
@@ -636,14 +687,7 @@ fn legacy_apply(out: &mut dyn Write, found: &[Legacy]) -> usize {
         let reload = if let Some(label) = name.strip_suffix(".plist") {
             let target = format!("gui/{}/{label}", pickup::getuid());
             if setup_run(&["launchctl", "print", &target]).0 == 0 {
-                setup_run(&["launchctl", "bootout", &target]);
-                let shown = file.to_string_lossy();
-                setup_run(&[
-                    "launchctl",
-                    "bootstrap",
-                    &format!("gui/{}", pickup::getuid()),
-                    &shown,
-                ])
+                pickup::launchd_reload(label, file, &mut |argv| setup_run(argv))
             } else {
                 (0, String::new())
             }
@@ -983,8 +1027,8 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                 // A new skill keeps the binary path, so the running daemon still runs the old one.
                 if !current {
                     match restart_daemon(daemon.unwrap_or_default(), home) {
-                        Ok(true) => outln!(out, "daemon: restarted"),
-                        Ok(false) => outln!(
+                        Ok(Some(done)) => outln!(out, "daemon: {done}"),
+                        Ok(None) => outln!(
                             out,
                             "daemon: not running; the crontab starts the new binary within 5 minutes"
                         ),
@@ -1020,6 +1064,16 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                     failed += 1;
                     outln!(out, "daemon service: {}", strip(&(r.stderr + &r.stdout)));
                 }
+            }
+        }
+        if ok && !current && scheduler == "launchd" {
+            match reload_retro_push(&binary) {
+                Some(Ok(done)) => outln!(out, "retro-push timer: {done}"),
+                Some(Err(e)) => {
+                    failed += 1;
+                    outln!(out, "retro-push timer: reload failed: {e}");
+                }
+                None => {}
             }
         }
     }
@@ -1456,6 +1510,64 @@ mod tests {
             calls
         }
 
+        /// Fakes launchctl as a domain that tracks which labels are loaded, starting with
+        /// `loaded`. bootout replies with `bootout` and unloads; bootstrap replies with
+        /// `bootstrap` and loads on success; print of a loaded job shows `pid` running, or a spawn
+        /// that failed on the code signature when pid is None.
+        fn launchd_calls(
+            &self,
+            loaded: &[&str],
+            bootout: (i32, &str),
+            bootstrap: (i32, &str),
+            pid: Option<u32>,
+        ) -> Calls {
+            let calls: Calls = Rc::default();
+            let prev = FAKES.with(|f| f.borrow().run.clone());
+            let seen = calls.clone();
+            let loaded: Rc<RefCell<Vec<String>>> =
+                Rc::new(RefCell::new(loaded.iter().map(|l| l.to_string()).collect()));
+            let (bootout, bootstrap) = (
+                (bootout.0, bootout.1.to_string()),
+                (bootstrap.0, bootstrap.1.to_string()),
+            );
+            FAKES.with(|f| {
+                f.borrow_mut().run = Some(Rc::new(move |argv, timeout| {
+                    if argv[0] != "launchctl" {
+                        return prev.as_ref().and_then(|p| p(argv, timeout));
+                    }
+                    assert_eq!(timeout, Some(Duration::from_secs(120)));
+                    seen.borrow_mut().push(argv.to_vec());
+                    let label = |t: &str| t.rsplit('/').next().unwrap().to_string();
+                    let mut loaded = loaded.borrow_mut();
+                    let (code, stdout) = match argv[1].as_str() {
+                        "bootout" => {
+                            loaded.retain(|l| *l != label(&argv[2]));
+                            bootout.clone()
+                        }
+                        "bootstrap" => {
+                            if bootstrap.0 == 0 {
+                                let plist = label(&argv[3]);
+                                loaded.push(plist.trim_end_matches(".plist").to_string());
+                            }
+                            bootstrap.clone()
+                        }
+                        "print" if loaded.contains(&label(&argv[2])) => match pid {
+                            Some(pid) => (0, format!("\tstate = running\n\tpid = {pid}\n")),
+                            None => (0, "\tstate = not running\n\tjob state = spawn failed\n\tlast exit reason = OS_REASON_CODESIGNING\n".into()),
+                        },
+                        "print" => (113, "Could not find service in domain\n".into()),
+                        _ => (0, String::new()),
+                    };
+                    Some(Ok(Out {
+                        code,
+                        stdout,
+                        stderr: String::new(),
+                    }))
+                }))
+            });
+            calls
+        }
+
         fn daemon(&self, scheduler: Option<&'static str>, drift: bool) {
             FAKES.with(|f| {
                 let mut f = f.borrow_mut();
@@ -1817,36 +1929,184 @@ mod tests {
             .collect()
     }
 
-    /// After a new skill, an installed service restarts once with its scheduler's own command; the
+    /// After a new skill, an installed systemd service restarts once with its own command; the
     /// next run, with nothing new, restarts nothing.
     #[test]
-    fn new_skill_restarts_launchd_and_systemd_services() {
-        let target = format!("gui/{}/factory.daemon", crate::commands::pickup::test_uid());
-        for (scheduler, want) in [
-            (
-                "launchd",
-                vec!["launchctl", "kickstart", "-k", target.as_str()],
+    fn new_skill_restarts_the_systemd_service() {
+        let t = T::new("restart-systemd");
+        t.daemon(Some("systemd"), false);
+        let calls = t.service_calls(0, "", false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert_eq!(
+            daemon_lines(&lines),
+            ["daemon service: current", "daemon: restarted"]
+        );
+        assert_eq!(
+            *calls.borrow(),
+            argvs(&[&["systemctl", "--user", "restart", "factory-daemon.service"]])
+        );
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0);
+        assert_eq!(daemon_lines(&lines), ["daemon service: current"]);
+        assert_eq!(calls.borrow().len(), 1);
+    }
+
+    /// launchd keeps the old binary's signature through `kickstart -k`, so a new binary restarts
+    /// by bootout then bootstrap of the plist, and the restart counts once a pid shows.
+    #[test]
+    fn new_skill_reloads_the_launchd_daemon_and_reports_its_pid() {
+        let uid = crate::commands::pickup::test_uid();
+        let target = format!("gui/{uid}/factory.daemon");
+        let t = T::new("restart-launchd");
+        t.daemon(Some("launchd"), false);
+        let calls = t.launchd_calls(&["factory.daemon"], (0, ""), (0, ""), Some(4242));
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert_eq!(
+            daemon_lines(&lines),
+            ["daemon service: current", "daemon: restarted (pid 4242)"]
+        );
+        let plist = t.root.join("Library/LaunchAgents/factory.daemon.plist");
+        let domain = format!("gui/{uid}");
+        assert_eq!(
+            *calls.borrow(),
+            argvs(&[
+                &["launchctl", "bootout", &target],
+                &["launchctl", "print", &target],
+                &["launchctl", "enable", &target],
+                &["launchctl", "bootstrap", &domain, text(&plist)],
+                &["launchctl", "print", &target],
+            ])
+        );
+        assert!(!calls.borrow().iter().any(|a| a[1] == "kickstart"));
+    }
+
+    /// A daemon that was not loaded makes bootout fail; the bootstrap still runs and counts.
+    #[test]
+    fn launchd_restart_tolerates_a_daemon_that_was_not_loaded() {
+        let t = T::new("restart-launchd-unloaded");
+        t.daemon(Some("launchd"), false);
+        let calls = t.launchd_calls(
+            &[],
+            (3, "Boot-out failed: 3: No such process\n"),
+            (0, ""),
+            Some(77),
+        );
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"daemon: restarted (pid 77)".to_string()),
+            "{lines:?}"
+        );
+        let verbs: Vec<String> = calls.borrow().iter().map(|a| a[1].clone()).collect();
+        assert_eq!(verbs, ["bootout", "print", "enable", "bootstrap", "print"]);
+    }
+
+    /// A bootstrap that loads a job launchd cannot spawn is a failed step that names the reason.
+    #[test]
+    fn launchd_restart_without_a_pid_is_a_failed_step() {
+        let uid = crate::commands::pickup::test_uid();
+        let t = T::new("restart-launchd-nopid");
+        t.daemon(Some("launchd"), false);
+        let calls = t.launchd_calls(&["factory.daemon"], (0, ""), (0, ""), None);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1, "{lines:?}");
+        assert!(
+            lines.contains(&format!("daemon: restart failed: gui/{uid}/factory.daemon is not running: state = not running, job state = spawn failed, last exit reason = OS_REASON_CODESIGNING")),
+            "{lines:?}"
+        );
+        assert!(!lines.iter().any(|l| l.starts_with("daemon: restarted")));
+        // The check polls print for about 5 s before it gives up.
+        let prints = calls.borrow().iter().filter(|a| a[1] == "print").count();
+        assert_eq!(prints, 1 + 20);
+    }
+
+    #[test]
+    fn launchd_bootstrap_failure_is_a_failed_step() {
+        let t = T::new("restart-launchd-bootstrap");
+        t.daemon(Some("launchd"), false);
+        let calls = t.launchd_calls(
+            &["factory.daemon"],
+            (0, ""),
+            (5, "Bootstrap failed: 5: Input/output error\n"),
+            Some(1),
+        );
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1, "{lines:?}");
+        assert!(
+            lines.contains(&"daemon: restart failed: launchctl bootstrap exited 5: Bootstrap failed: 5: Input/output error".to_string()),
+            "{lines:?}"
+        );
+        // Error 5 gets one retry before the failure stands.
+        let bootstraps = calls
+            .borrow()
+            .iter()
+            .filter(|a| a[1] == "bootstrap")
+            .count();
+        assert_eq!(bootstraps, 2);
+    }
+
+    /// A loaded retro-push timer that runs the binary reloads after a new skill, so launchd takes
+    /// the new signature; one that runs something else, or is not loaded, is left alone.
+    #[test]
+    fn new_skill_reloads_the_launchd_retro_push_timer() {
+        let uid = crate::commands::pickup::test_uid();
+        let target = format!("gui/{uid}/factory.retro-push");
+        let t = T::new("retro-push-reload");
+        FAKES.with(|f| f.borrow_mut().scheduler = Some("launchd"));
+        let (reply, reply_code) = default_timer_reply();
+        t.timer_calls(reply, reply_code);
+        let agents = t.root.join("Library/LaunchAgents");
+        fs::create_dir_all(&agents).unwrap();
+        let plist = agents.join("factory.retro-push.plist");
+        let binary = t.skill.join("runtime/factory");
+        fs::write(
+            &plist,
+            format!(
+                "<array><string>{}</string><string>retro</string><string>push</string></array>",
+                binary.display()
             ),
-            (
-                "systemd",
-                vec!["systemctl", "--user", "restart", "factory-daemon.service"],
-            ),
-        ] {
-            let t = T::new(&format!("restart-{scheduler}"));
-            t.daemon(Some(scheduler), false);
-            let calls = t.service_calls(0, "", false);
-            let (code, lines) = t.lines();
-            assert_eq!(code, 0, "{lines:?}");
-            assert_eq!(
-                daemon_lines(&lines),
-                ["daemon service: current", "daemon: restarted"]
-            );
-            assert_eq!(*calls.borrow(), argvs(&[&want]));
-            let (code, lines) = t.lines();
-            assert_eq!(code, 0);
-            assert_eq!(daemon_lines(&lines), ["daemon service: current"]);
-            assert_eq!(calls.borrow().len(), 1);
-        }
+        )
+        .unwrap();
+        let calls = t.launchd_calls(&["factory.retro-push"], (0, ""), (0, ""), None);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"retro-push timer: reloaded".to_string()),
+            "{lines:?}"
+        );
+        let calls = calls.borrow().clone();
+        let at = |verb: &str| {
+            calls
+                .iter()
+                .position(|a| a[1] == verb && a.last().unwrap().contains("retro-push"))
+                .unwrap()
+        };
+        assert!(at("bootout") < at("bootstrap"), "{calls:?}");
+        assert_eq!(
+            calls.last().unwrap(),
+            &argvs(&[&["launchctl", "print", &target]])[0]
+        );
+
+        let t = T::new("retro-push-other");
+        FAKES.with(|f| f.borrow_mut().scheduler = Some("launchd"));
+        t.timer_calls(reply, reply_code);
+        let agents = t.root.join("Library/LaunchAgents");
+        fs::create_dir_all(&agents).unwrap();
+        fs::write(
+            agents.join("factory.retro-push.plist"),
+            "<string>/elsewhere/factory</string>",
+        )
+        .unwrap();
+        let calls = t.launchd_calls(&["factory.retro-push"], (0, ""), (0, ""), None);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            !lines.iter().any(|l| l.starts_with("retro-push")),
+            "{lines:?}"
+        );
+        assert!(!calls.borrow().iter().any(|a| a[1] == "bootout"));
     }
 
     #[test]
@@ -1967,7 +2227,7 @@ mod tests {
         );
 
         t.daemon(Some("launchd"), false);
-        t.service_calls(0, "", false);
+        t.launchd_calls(&["factory.daemon"], (0, ""), (0, ""), Some(1));
         let (code, lines) = t.lines();
         assert_eq!(code, 0);
         assert!(

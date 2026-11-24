@@ -61,3 +61,25 @@ test("full board.json reads are not slim misses", () => {
   assert.equal(s.reads, 11);
   assert.equal(s.misses, 6);
 });
+
+// Production strips the query, so the room's GET /board/slim inside a read's wall time marks it.
+test("a stripped /board.json read is slim when the room's /board/slim starts within it", () => {
+  const stripped = (at, cpuTime) => ({
+    ...read(at, cpuTime),
+    wallTime: 400,
+    event: { request: { url: "https://factory.example.test/board.json" } },
+  });
+  const room = (at) => ({
+    ...read(at, 3),
+    event: { request: { url: "https://board-events.invalid/board/slim" } },
+  });
+  const s = summarize([
+    stripped(0, 2),
+    room(150),
+    stripped(60000, 40),
+    stripped(120000, 9),
+    room(120600),
+  ]);
+  assert.equal(s.reads, 1);
+  assert.equal(s.maxHitMs, 2);
+});

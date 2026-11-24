@@ -359,9 +359,12 @@ updated checkout. Later catch-ups work.
 
 ### Worker error 1102, `Worker exceeded CPU time limit`
 
-Board reads and writes failed now and then with HTTP 503. Hosts retry, so most
-writes land. The Worker fix shipped in `3a4a3852`. To check that the Worker runs
-main, look for `worker: deployed at <commit>` in catch-up's output.
+Board writes failed now and then with HTTP 503. `3a4a3852` cut the CPU of a full
+PUT, and `a1bba56c` stores board rows in the BoardEvents room, so a row PATCH
+costs only its rows. A board write that still gets a 503 retries
+up to three times, 1, 2 and 4 seconds apart. Before each retry it reads the
+board, and a write that already landed does not run again. To check that the
+Worker runs main, look for `worker: deployed at <commit>` in catch-up's output.
 
 ### A pickup timer is still installed beside the daemon
 

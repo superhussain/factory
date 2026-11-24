@@ -27,6 +27,17 @@ const WRITE_LIMIT: Duration = Duration::from_secs(45);
 /// The Worker's PATCH limits.
 const MAX_PATCH_ROWS: usize = 100;
 const MAX_PATCH_BYTES: usize = 1024 * 1024;
+/// How many times a board write retries a 503, and the first wait, which doubles each retry.
+const BUSY_RETRIES: u32 = 3;
+#[cfg(not(test))]
+const BUSY_BASE: Duration = Duration::from_secs(1);
+#[cfg(test)]
+const BUSY_BASE: Duration = Duration::from_millis(1);
+
+/// Whether the Worker answered 503, as when it ran out of CPU time.
+fn busy(e: &Exit) -> bool {
+    matches!(e.status, Some((503, _)))
+}
 
 /// The daemon's Unix socket.
 pub fn socket_path(home: &Path) -> PathBuf {
@@ -465,6 +476,63 @@ pub fn row_patch(old: &str, new: &str, reads: Reads) -> Option<String> {
     (body.len() <= MAX_PATCH_BYTES).then_some(body)
 }
 
+/// Whether the board `now` already holds the write that turned `old` into `new`: every changed
+/// top-level key but `jobs` and `updated` has its new value, every changed or added row is `new`'s
+/// row, and every removed row is gone. Rows match by the first row with each id, and an absent
+/// `old` counts as an empty board. False when `now` is absent, nothing changed, or JSON fails.
+fn landed(old: Option<&str>, new: &str, now: Option<&str>) -> bool {
+    let parse = |text: &str| match loads(text) {
+        Ok(Value::Object(doc)) => Some(doc),
+        _ => None,
+    };
+    let old = match old {
+        Some(text) => parse(text),
+        None => Some(Map::from_iter([("jobs".to_string(), json!([]))])),
+    };
+    let (Some(old), Some(new), Some(now)) = (old, parse(new), now.and_then(parse)) else {
+        return false;
+    };
+    let mut changed = false;
+    for key in old.keys().chain(new.keys()) {
+        if key != "jobs" && key != "updated" && old.get(key) != new.get(key) {
+            if now.get(key) != new.get(key) {
+                return false;
+            }
+            changed = true;
+        }
+    }
+    let rows = |doc: &Map<String, Value>| {
+        let mut rows = HashMap::new();
+        for j in doc
+            .get("jobs")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(id) = j.get("id").and_then(Value::as_str) {
+                rows.entry(id.to_string()).or_insert_with(|| j.clone());
+            }
+        }
+        rows
+    };
+    let (was, will, is) = (rows(&old), rows(&new), rows(&now));
+    for (id, row) in &will {
+        if was.get(id) != Some(row) {
+            if is.get(id) != Some(row) {
+                return false;
+            }
+            changed = true;
+        }
+    }
+    for id in was.keys().filter(|id| !will.contains_key(*id)) {
+        if is.contains_key(id) {
+            return false;
+        }
+        changed = true;
+    }
+    changed
+}
+
 /// Sends a row PATCH, through the daemon when the read came from its mirror, else, or when no
 /// daemon takes it, straight to the Worker. True once the Worker committed it, false on a 409
 /// conflict, so the caller reads again. A request the daemon took but never answered fails,
@@ -536,7 +604,9 @@ pub fn cas_reading<T>(
     cas_via(home, reads, &api, change)
 }
 
-/// `cas_reading` through the Worker client `api`, so a caller's test seam reaches it too.
+/// `cas_reading` through the Worker client `api`, so a caller's test seam reaches it too. A 503 on
+/// the write or its read retries up to `BUSY_RETRIES` times after a backoff, reading the Worker
+/// directly first, and a write the re-read shows `landed` returns without running its change again.
 pub fn cas_via<T>(
     home: &Path,
     reads: Reads,
@@ -544,11 +614,33 @@ pub fn cas_via<T>(
     mut change: impl FnMut(Option<&str>) -> Res<(Option<String>, T)>,
 ) -> Res<T> {
     let mut direct = false;
+    let mut busy_tries = 0;
+    let mut wait_busy = |e: &Exit| {
+        if !busy(e) || busy_tries == BUSY_RETRIES {
+            return false;
+        }
+        busy_tries += 1;
+        std::thread::sleep(BUSY_BASE * (1 << (busy_tries - 1)) + jitter());
+        true
+    };
+    let mut sent: Option<(Option<String>, String, T)> = None;
     for _ in 0..20 {
         let read = match (direct, mirror_read(home, Map::new())) {
             (false, Some(read)) => read,
-            _ => http_read_via(home, api)?,
+            _ => match http_read_via(home, api) {
+                Ok(read) => read,
+                Err(e) if wait_busy(&e) => {
+                    direct = true;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            },
         };
+        if let Some((old, new, result)) = sent.take() {
+            if landed(old.as_deref(), &new, read.text.as_deref()) {
+                return Ok(result);
+            }
+        }
         if read.text.is_some() && read.etag.is_none() {
             return Err(fail("/api/board: the Worker sent no ETag", 1));
         }
@@ -559,31 +651,35 @@ pub fn cas_via<T>(
             _ => None,
         };
         let wrote = match body {
-            Some(body) => send_patch(home, &body, read.mirror, api)?,
+            Some(body) => send_patch(home, &body, read.mirror, api),
             None => {
                 let cond = match &read.etag {
                     Some(etag) => ("If-Match", etag.as_str()),
                     None => ("If-None-Match", "*"),
                 };
-                let r = api(
+                api(
                     home,
                     "PUT",
                     "/api/board",
                     Some(new.as_bytes()),
                     &[200, 412],
                     &[cond],
-                )?;
-                if let Some(etag) = r.header("ETag").filter(|_| r.status == 200) {
-                    await_etag(home, etag.strip_prefix("W/").unwrap_or(etag));
-                }
-                r.status == 200
+                )
+                .map(|r| {
+                    if let Some(etag) = r.header("ETag").filter(|_| r.status == 200) {
+                        await_etag(home, etag.strip_prefix("W/").unwrap_or(etag));
+                    }
+                    r.status == 200
+                })
             }
         };
-        if wrote {
-            return Ok(result);
+        match wrote {
+            Ok(true) => return Ok(result),
+            Ok(false) => std::thread::sleep(jitter()),
+            Err(e) if wait_busy(&e) => sent = Some((read.text, new, result)),
+            Err(e) => return Err(e),
         }
         direct = true;
-        std::thread::sleep(jitter());
     }
     Err(fail(
         "/api/board kept changing under us; gave up after 20 tries",
@@ -832,6 +928,35 @@ mod tests {
         assert_eq!(row_patch(&old, &big, None), None);
     }
 
+    #[test]
+    fn landed_sees_rows_and_top_level_keys() {
+        let old = board(json!([{"id": "1999-a", "stage": "build"}, {"id": "2000-b"}]));
+        let changed = board(json!([{"id": "1999-a", "stage": "review"}, {"id": "2000-b"}]));
+        let added =
+            board(json!([{"id": "1999-a", "stage": "build"}, {"id": "2000-b"}, {"id": "2001-c"}]));
+        let removed = board(json!([{"id": "1999-a", "stage": "build"}]));
+        let autonomy = dumps(
+            &json!({"updated": "2026-11-23T10:00:00Z", "jobs": [{"id": "1999-a", "stage": "build"}, {"id": "2000-b"}], "autonomy": {"paused": true}}),
+            COMPACT,
+        );
+        for new in [&changed, &added, &removed, &autonomy] {
+            assert!(landed(Some(&old), new, Some(new)), "{new}");
+            assert!(!landed(Some(&old), new, Some(&old)), "{new}");
+            assert!(!landed(Some(&old), new, None), "{new}");
+        }
+        // Another writer's later edit to the same row is not this write.
+        let other = board(json!([{"id": "1999-a", "stage": "merged"}, {"id": "2000-b"}]));
+        assert!(!landed(Some(&old), &changed, Some(&other)));
+        // An unrelated row changing too does not hide a landed write.
+        let both = board(json!([{"id": "1999-a", "stage": "review"}, {"id": "2000-b", "x": 1}]));
+        assert!(landed(Some(&old), &changed, Some(&both)));
+        // No board yet, then the first row.
+        let first = board(json!([{"id": "1999-a"}]));
+        assert!(landed(None, &first, Some(&first)));
+        assert!(!landed(Some(&old), &old, Some(&old)));
+        assert!(!landed(Some(&old), "not json", Some(&old)));
+    }
+
     use crate::shared::http::tests::{home_for, serve};
 
     /// A change a PATCH can't say goes as a PUT with If-Match even when the read advertised
@@ -899,6 +1024,112 @@ mod tests {
             .map(|s| s.method.clone())
             .collect();
         assert_eq!(methods, ["GET", "PATCH", "GET", "PATCH"]);
+    }
+
+    const BUSY: &str = "error code: 1102";
+
+    /// Runs `cas` against `replies`, moving row `1999-a` from build to review. Returns the result,
+    /// how many times the change ran, and the request methods.
+    fn cas_review(
+        name: &str,
+        replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>,
+    ) -> (Res<()>, usize, Vec<String>) {
+        let (origin, seen) = serve(replies);
+        let home = home_for(name, &origin);
+        let mut runs = 0;
+        let result = cas(&home, |text| {
+            runs += 1;
+            let mut b = loads(text.unwrap()).unwrap();
+            b["jobs"][0]["stage"] = "review".into();
+            Ok((Some(dumps(&b, COMPACT)), ()))
+        });
+        let methods = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.method.clone())
+            .collect();
+        (result, runs, methods)
+    }
+
+    fn leak(jobs: Value) -> &'static str {
+        Box::leak(board(jobs).into_boxed_str())
+    }
+
+    fn patchable() -> Vec<(&'static str, &'static str)> {
+        vec![("ETag", "\"e1\""), ("Accept-Patch", "application/json")]
+    }
+
+    /// A PATCH that gets 503 reads again and, when the write had not landed, runs it again.
+    #[test]
+    fn a_503_patch_rereads_and_retries() {
+        let build = leak(json!([{"id": "1999-a", "stage": "build"}]));
+        let (result, runs, methods) = cas_review(
+            "board-client-503-retry",
+            vec![
+                (200, build, patchable()),
+                (503, BUSY, vec![]),
+                (200, build, patchable()),
+                (200, "ok", vec![("ETag", "\"e2\"")]),
+            ],
+        );
+        result.unwrap();
+        assert_eq!(runs, 2);
+        assert_eq!(methods, ["GET", "PATCH", "GET", "PATCH"]);
+    }
+
+    /// A PATCH that got 503 after it landed returns once the re-read shows it, without a second run.
+    #[test]
+    fn a_503_write_that_landed_runs_once() {
+        let build = leak(json!([{"id": "1999-a", "stage": "build"}]));
+        let review = leak(json!([{"id": "1999-a", "stage": "review"}]));
+        let (result, runs, methods) = cas_review(
+            "board-client-503-landed",
+            vec![
+                (200, build, patchable()),
+                (503, BUSY, vec![]),
+                (200, review, patchable()),
+            ],
+        );
+        result.unwrap();
+        assert_eq!(runs, 1);
+        assert_eq!(methods, ["GET", "PATCH", "GET"]);
+    }
+
+    /// Four 503s in a row fail as a single 503 did before the retry.
+    #[test]
+    fn four_503s_fail_with_exit_5() {
+        let build = leak(json!([{"id": "1999-a", "stage": "build"}]));
+        let mut replies = Vec::new();
+        for _ in 0..4 {
+            replies.push((200, build, patchable()));
+            replies.push((503, BUSY, vec![]));
+        }
+        let (result, _, methods) = cas_review("board-client-503-fail", replies);
+        let e = result.unwrap_err();
+        assert_eq!(e.code, 5);
+        assert!(e.stderr.contains("returned 503"), "{}", e.stderr);
+        assert_eq!(methods.len(), 8);
+    }
+
+    /// A 503 on the direct read after a 503 write retries the read, and the pending landed check
+    /// still returns once that read shows the write, without a second run.
+    #[test]
+    fn a_503_reread_keeps_the_landed_check() {
+        let build = leak(json!([{"id": "1999-a", "stage": "build"}]));
+        let review = leak(json!([{"id": "1999-a", "stage": "review"}]));
+        let (result, runs, methods) = cas_review(
+            "board-client-503-reread",
+            vec![
+                (200, build, patchable()),
+                (503, BUSY, vec![]),
+                (503, BUSY, vec![]),
+                (200, review, patchable()),
+            ],
+        );
+        result.unwrap();
+        assert_eq!(runs, 1);
+        assert_eq!(methods, ["GET", "PATCH", "GET", "GET"]);
     }
 
     /// A daemon that takes a board write and closes without a reply fails the write, and the
