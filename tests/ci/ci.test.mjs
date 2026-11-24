@@ -226,6 +226,15 @@ test("rust-build restores and saves this PR's incremental artifacts around an in
   assert.deepEqual(save.with, { path, key });
 });
 
+test("the nextest config neither retries nor terminates tests", () => {
+  const config = readFileSync(new URL("../../rust/.config/nextest.toml", import.meta.url), "utf8");
+  // A retry would turn a flaky failure green, and terminate-after would cut short the timeout tests.
+  const settings = config.split("\n").filter((line) => !line.trimStart().startsWith("#"));
+  for (const line of settings) {
+    assert.doesNotMatch(line, /\bretries\b|terminate-after/, line);
+  }
+});
+
 test("rust-test restores main's incremental artifacts before the build and never saves them", () => {
   const steps = workflow.jobs["rust-test"].steps;
   const at = (name) => steps.findIndex((step) => step.name === name);
