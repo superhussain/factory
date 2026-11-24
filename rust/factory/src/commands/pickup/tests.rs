@@ -8392,6 +8392,23 @@ mod permission_guard_test {
         assert_eq!(fx.job("042-sample-export")["stage"], "build");
     }
 
+    /// A claim the daemon's heartbeat refreshed after the job's last board change reads as work
+    /// in progress, so the idle agent gets no nudge; one whose seen only matches updated does.
+    #[test]
+    fn test_idle_nudge_skips_a_heartbeat_fresh_claim() {
+        let (fx, p, _) = setup();
+        let claim = |seen: &str| json!({"claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z", "seen": seen}});
+        build(&fx, claim(&stamp(-3)));
+        quiet(&fx);
+        assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+        assert!(p.sent().is_empty() && fx.puts().is_empty());
+        build(&fx, claim("2026-01-01T10:00:00Z"));
+        let (code, out, _) = fx.pickup(&[]);
+        assert_eq!(code, 0);
+        assert!(out.starts_with("nudged idle 042-sample-export"), "{out}");
+        assert_eq!(p.sent().len(), 1);
+    }
+
     #[test]
     fn test_idle_permission_wait_sets_a_note_once() {
         let (fx, p, waits) = setup();

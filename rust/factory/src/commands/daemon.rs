@@ -187,6 +187,7 @@ fn run(home: &Path) -> Res<()> {
         &running_agents,
         &mut |_| {
             let _ = std::fs::write(lock_dir(&home).join(LAST_PASS_FILE), now() + "\n");
+            crate::commands::heartbeat::before_pass(&home, &|msg| log_line(&home, msg));
             let (code, stopped, launched) = run_pickup(&exe, &home, signal_stop);
             log_line(&home, &format!("pickup exited {code}"));
             if !terminal {
@@ -1544,5 +1545,90 @@ mod tests {
             took >= t.silence && took < Duration::from_millis(290),
             "{took:?}"
         );
+    }
+
+    /// Each pass refreshes live claims first, in one board write: the first pass writes the two
+    /// live sessions' seen in one PATCH and leaves the dead one, and the next pass, which reads
+    /// them fresh, writes nothing and never asks paseo.
+    #[test]
+    fn each_pass_refreshes_live_claims_once() {
+        use crate::commands::heartbeat::{beat_with, report, tests as hb};
+        let old = hb::minutes_ago(30);
+        let fresh = hb::minutes_ago(0);
+        let jobs = |seen: &str| {
+            vec![
+                hb::job(
+                    "001-a",
+                    "build",
+                    hb::claim("mac", "s1", seen),
+                    Some((hb::SERVER, "a1")),
+                ),
+                hb::job(
+                    "002-b",
+                    "build",
+                    hb::claim("mac", "s2", &old),
+                    Some((hb::SERVER, "dead")),
+                ),
+                hb::job(
+                    "003-c",
+                    "review",
+                    hb::claim("mac", "s3", seen),
+                    Some((hb::SERVER, "orch")),
+                ),
+            ]
+        };
+        let mut after = hb::board_of(jobs(&fresh));
+        after["jobs"][1]["claim"]["seen"] = hb::minutes_ago(5).into();
+        let (api_origin, requests) = crate::shared::http::tests::serve(vec![
+            hb::get(&hb::board_of(jobs(&old))),
+            (200, "{}", vec![]),
+            hb::get(&after),
+        ]);
+        let home = home("heartbeat", &api_origin);
+        let origin = quiet();
+        let reads = std::cell::Cell::new(0);
+        let list = || {
+            reads.set(reads.get() + 1);
+            Some(serde_json::json!([
+                hb::agent("a1", "running", None),
+                hb::agent("dead", "closed", None),
+                hb::agent("orch", "idle", None),
+                hb::agent("sub", "running", Some("orch")),
+            ]))
+        };
+        let headers = access_headers(&home, &origin).unwrap();
+        let mut passes = Vec::new();
+        serve(
+            &host_url(&origin),
+            &headers,
+            &TEST,
+            &home.join(".env"),
+            None,
+            no_stop,
+            &|msg| log_line(&home, msg),
+            &|| None,
+            &mut |reason| {
+                let result = beat_with(&home, "mac", hb::SERVER, &list, &crate::shared::http::api);
+                report(result, &|msg| log_line(&home, msg));
+                passes.push(reason.to_string());
+                // The first pass reports a launch, so a second follows at min_gap.
+                if passes.len() == 2 {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(true)
+                }
+            },
+        );
+        assert_eq!(passes, ["connect", "room left"]);
+        assert_eq!(reads.get(), 1);
+        let requests = requests.lock().unwrap();
+        let methods: Vec<&str> = requests.iter().map(|r| r.method.as_str()).collect();
+        assert_eq!(methods, ["GET", "PATCH", "GET"]);
+        let log = log_text(&home);
+        assert!(
+            log.contains(" heartbeat: refreshed seen on 001-a 003-c\n"),
+            "{log}"
+        );
+        assert_eq!(log.matches("heartbeat:").count(), 1, "{log}");
     }
 }
