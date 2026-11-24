@@ -14,10 +14,14 @@
 //! `babysit <id>`. A long-lived agent that changed its session tag, left a job without releasing
 //! it, or kept a stale link from idea pickup is titled for another job or for none, so its claims
 //! age out.
+//!
+//! A claim that stays due, such as a dead session's, does not make every pass run `paseo ls`: the
+//! heartbeat skips the read while the due claims match its last read, for up to 10 minutes.
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -51,17 +55,20 @@ fn paseo_list(parent: Option<&str>) -> Option<Value> {
     }
 }
 
-/// The daemon's heartbeat before a pickup pass, as this host's device on its Paseo server. It
-/// logs the jobs it refreshed, or why the write failed, and never stops the pass.
-pub(crate) fn before_pass(home: &Path, log: &dyn Fn(&str)) {
-    // Tests that run the whole daemon never read this host's real agents.
-    if cfg!(test) {
-        return;
+/// The due claims a heartbeat last asked Paseo about, and when. While the same claims stay due,
+/// none of them was live at that read, so the next pass skips Paseo until `reprobe` has passed.
+pub(crate) struct Heart {
+    last: Option<(Vec<(String, String)>, Instant)>,
+    reprobe: Duration,
+}
+
+impl Default for Heart {
+    fn default() -> Self {
+        Heart {
+            last: None,
+            reprobe: Duration::from_secs((CLAIM_REFRESH_MINUTES * 60.0) as u64),
+        }
     }
-    let Some(server) = paseo_server() else {
-        return;
-    };
-    report(beat(home, &device_name(home), &server), log);
 }
 
 /// One log line for a heartbeat's result, when it wrote or failed.
@@ -73,69 +80,116 @@ pub(crate) fn report(result: Res<Vec<String>>, log: &dyn Fn(&str)) {
     }
 }
 
-/// One heartbeat for home, as device on Paseo server: the ids whose seen it refreshed, in board
-/// order. Nothing is written, and paseo is not asked, when no claim is due.
-pub(crate) fn beat(home: &Path, device: &str, server: &str) -> Res<Vec<String>> {
-    beat_with(home, device, server, &paseo_list, &crate::shared::http::api)
-}
+impl Heart {
+    /// A heart that asks Paseo again about an unchanged due set after reprobe.
+    #[cfg(test)]
+    pub(crate) fn every(reprobe: Duration) -> Self {
+        Heart {
+            last: None,
+            reprobe,
+        }
+    }
 
-/// `beat` with the Paseo list and Worker client injected.
-pub(crate) fn beat_with(
-    home: &Path,
-    device: &str,
-    server: &str,
-    list: List,
-    api: Api,
-) -> Res<Vec<String>> {
-    let agents: OnceCell<Option<Value>> = OnceCell::new();
-    let mut children: HashMap<String, bool> = HashMap::new();
-    cas_via(home, None, api, |text| {
-        let mut board = load_board(text)?;
-        let cutoff = unix_now() - (CLAIM_REFRESH_MINUTES * 60.0) as i64;
-        let mut due = due_claims(&board, device, server, cutoff);
-        let quiet_since = unix_now() - QUIET_CAP_HOURS * 3600;
-        due.retain(|(i, _)| {
-            board["jobs"][*i]["updated"]
-                .as_str()
-                .and_then(parse_stamp)
-                .is_some_and(|u| u >= quiet_since)
-        });
-        if due.is_empty() {
-            return Ok((None, Vec::new()));
+    /// The daemon's heartbeat before a pickup pass, as this host's device on its Paseo server.
+    /// It logs the jobs it refreshed, or why the write failed, and never stops the pass.
+    pub(crate) fn before_pass(&mut self, home: &Path, log: &dyn Fn(&str)) {
+        // Tests that run the whole daemon never read this host's real agents.
+        if cfg!(test) {
+            return;
         }
-        let Some(all) = agents.get_or_init(|| list(None)) else {
-            return Ok((None, Vec::new()));
+        let Some(server) = paseo_server() else {
+            return;
         };
-        let stamp = now();
-        let mut ids = Vec::new();
-        for (i, agent) in due {
-            let id = board["jobs"][i]["id"].as_str().unwrap_or_default();
-            let Some(entry) = entry_of(all, &agent).filter(|a| titled_for(a, id)) else {
-                continue;
-            };
-            let live = match entry["status"].as_str() {
-                Some("running") => true,
-                Some("closed") | None => false,
-                Some(_) => *children
-                    .entry(agent.clone())
-                    .or_insert_with(|| list(Some(&agent)).is_some_and(|c| any_running(&c))),
-            };
-            if live {
-                board["jobs"][i]["claim"]["seen"] = stamp.clone().into();
-                ids.push(
-                    board["jobs"][i]["id"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string(),
-                );
+        let result = self.beat_with(
+            home,
+            &device_name(home),
+            &server,
+            &paseo_list,
+            &crate::shared::http::api,
+        );
+        report(result, log);
+    }
+
+    /// One heartbeat for home, as device on Paseo server, with the Paseo list and Worker client
+    /// injected: the ids whose seen it refreshed, in board order. Nothing is written, and Paseo
+    /// is not asked, when no claim is due or the same claims were due at a read under reprobe ago.
+    pub(crate) fn beat_with(
+        &mut self,
+        home: &Path,
+        device: &str,
+        server: &str,
+        list: List,
+        api: Api,
+    ) -> Res<Vec<String>> {
+        let agents: OnceCell<Option<Value>> = OnceCell::new();
+        let mut children: HashMap<String, bool> = HashMap::new();
+        let last = &mut self.last;
+        let reprobe = self.reprobe;
+        cas_via(home, None, api, |text| {
+            let mut board = load_board(text)?;
+            let cutoff = unix_now() - (CLAIM_REFRESH_MINUTES * 60.0) as i64;
+            let mut due = due_claims(&board, device, server, cutoff);
+            let quiet_since = unix_now() - QUIET_CAP_HOURS * 3600;
+            due.retain(|(i, _)| {
+                board["jobs"][*i]["updated"]
+                    .as_str()
+                    .and_then(parse_stamp)
+                    .is_some_and(|u| u >= quiet_since)
+            });
+            if due.is_empty() {
+                return Ok((None, Vec::new()));
             }
-        }
-        if ids.is_empty() {
-            return Ok((None, ids));
-        }
-        board["updated"] = stamp.into();
-        Ok((Some(dump_board(&board)), ids))
-    })
+            let key: Vec<(String, String)> = due
+                .iter()
+                .map(|(i, a)| {
+                    (
+                        board["jobs"][*i]["id"].as_str().unwrap_or_default().into(),
+                        a.clone(),
+                    )
+                })
+                .collect();
+            if agents.get().is_none()
+                && last
+                    .as_ref()
+                    .is_some_and(|(k, at)| *k == key && at.elapsed() < reprobe)
+            {
+                return Ok((None, Vec::new()));
+            }
+            let Some(all) = agents.get_or_init(|| list(None)) else {
+                return Ok((None, Vec::new()));
+            };
+            *last = Some((key, Instant::now()));
+            let stamp = now();
+            let mut ids = Vec::new();
+            for (i, agent) in due {
+                let id = board["jobs"][i]["id"].as_str().unwrap_or_default();
+                let Some(entry) = entry_of(all, &agent).filter(|a| titled_for(a, id)) else {
+                    continue;
+                };
+                let live = match entry["status"].as_str() {
+                    Some("running") => true,
+                    Some("closed") | None => false,
+                    Some(_) => *children
+                        .entry(agent.clone())
+                        .or_insert_with(|| list(Some(&agent)).is_some_and(|c| any_running(&c))),
+                };
+                if live {
+                    board["jobs"][i]["claim"]["seen"] = stamp.clone().into();
+                    ids.push(
+                        board["jobs"][i]["id"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                    );
+                }
+            }
+            if ids.is_empty() {
+                return Ok((None, ids));
+            }
+            board["updated"] = stamp.into();
+            Ok((Some(dump_board(&board)), ids))
+        })
+    }
 }
 
 /// (row index, agent) of each open job device claims whose seen is older than cutoff and whose
@@ -291,14 +345,15 @@ pub(crate) mod tests {
     fn beat_on(name: &str, board: &Value, fake: &Fake) -> (Vec<String>, Vec<String>) {
         let (origin, seen) = serve(vec![get(board), (200, "{}", vec![])]);
         let home = home_for(name, &origin);
-        let ids = beat_with(
-            &home,
-            "mac",
-            SERVER,
-            &|p| fake.list(p),
-            &crate::shared::http::api,
-        )
-        .unwrap();
+        let ids = Heart::default()
+            .beat_with(
+                &home,
+                "mac",
+                SERVER,
+                &|p| fake.list(p),
+                &crate::shared::http::api,
+            )
+            .unwrap();
         let methods = seen
             .lock()
             .unwrap()
@@ -395,14 +450,15 @@ pub(crate) mod tests {
             ]),
             vec![("waiter", json!([agent("sub", "running", "x")]))],
         );
-        let ids = beat_with(
-            &home,
-            "mac",
-            SERVER,
-            &|p| fake.list(p),
-            &crate::shared::http::api,
-        )
-        .unwrap();
+        let ids = Heart::default()
+            .beat_with(
+                &home,
+                "mac",
+                SERVER,
+                &|p| fake.list(p),
+                &crate::shared::http::api,
+            )
+            .unwrap();
         assert_eq!(ids, ["001-a", "003-c"]);
         let seen = seen.lock().unwrap();
         let methods: Vec<&str> = seen.iter().map(|s| s.method.as_str()).collect();
@@ -547,5 +603,51 @@ pub(crate) mod tests {
         let (ids, methods) = beat_on("heartbeat-cap", &board_of(vec![near, quiet, odd]), &fake);
         assert_eq!(ids, ["001-a"]);
         assert_eq!(methods, ["GET", "PATCH"]);
+    }
+
+    /// A dead claim that stays due reads Paseo once: the next pass with the same due claims skips
+    /// the read until reprobe has passed, and a change in the due claims reads again at once.
+    #[test]
+    fn an_unchanged_due_set_skips_paseo_until_reprobe() {
+        let old = minutes_ago(30);
+        let dead = job(
+            "001-a",
+            "build",
+            claim("mac", "s1", &old),
+            Some((SERVER, "a")),
+        );
+        let other = job(
+            "002-b",
+            "build",
+            claim("mac", "s2", &old),
+            Some((SERVER, "b")),
+        );
+        let one = board_of(vec![dead.clone()]);
+        let two = board_of(vec![dead, other]);
+        let (origin, seen) = serve(vec![get(&one), get(&one), get(&two), get(&two), get(&two)]);
+        let home = home_for("heartbeat-reprobe", &origin);
+        let fake = Fake::new(json!([agent("a", "closed", "factory 001-a")]), vec![]);
+        let reprobe = Duration::from_millis(300);
+        let mut heart = Heart::every(reprobe);
+        let mut beat = || {
+            let ids = heart
+                .beat_with(
+                    &home,
+                    "mac",
+                    SERVER,
+                    &|p| fake.list(p),
+                    &crate::shared::http::api,
+                )
+                .unwrap();
+            assert!(ids.is_empty());
+            fake.asked.borrow().len()
+        };
+        assert_eq!(beat(), 1);
+        assert_eq!(beat(), 1, "same due claims: no read");
+        assert_eq!(beat(), 2, "a new due claim reads again");
+        assert_eq!(beat(), 2);
+        std::thread::sleep(reprobe);
+        assert_eq!(beat(), 3, "past reprobe the same claims read again");
+        assert_eq!(seen.lock().unwrap().len(), 5);
     }
 }

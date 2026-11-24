@@ -168,6 +168,7 @@ fn run(home: &Path) -> Res<()> {
         home.join("logs").join("daemon").display()
     );
     let terminal = io::stderr().is_terminal();
+    let mut heart = crate::commands::heartbeat::Heart::default();
     serve(
         &url,
         &headers,
@@ -189,7 +190,7 @@ fn run(home: &Path) -> Res<()> {
         &mut |_| {
             cap_log(&home.join("logs").join("daemon.log"));
             let _ = std::fs::write(lock_dir(&home).join(LAST_PASS_FILE), now() + "\n");
-            crate::commands::heartbeat::before_pass(&home, &|msg| log_line(&home, msg));
+            heart.before_pass(&home, &|msg| log_line(&home, msg));
             let (code, stopped, launched) = run_pickup(&exe, &home, signal_stop);
             log_line(&home, &format!("pickup exited {code}"));
             if !terminal {
@@ -1665,7 +1666,7 @@ mod tests {
     /// them fresh, writes nothing and never asks paseo.
     #[test]
     fn each_pass_refreshes_live_claims_once() {
-        use crate::commands::heartbeat::{beat_with, report, tests as hb};
+        use crate::commands::heartbeat::{report, tests as hb, Heart};
         let old = hb::minutes_ago(30);
         let fresh = hb::minutes_ago(0);
         let jobs = |seen: &str| {
@@ -1711,6 +1712,7 @@ mod tests {
                 serde_json::json!([hb::agent("sub", "running", "x")]),
             )],
         );
+        let mut heart = Heart::default();
         let headers = access_headers(&home, &origin).unwrap();
         let mut passes = Vec::new();
         serve(
@@ -1723,7 +1725,7 @@ mod tests {
             &|msg| log_line(&home, msg),
             &|| None,
             &mut |reason| {
-                let result = beat_with(
+                let result = heart.beat_with(
                     &home,
                     "mac",
                     hb::SERVER,
