@@ -125,6 +125,7 @@ struct Fakes {
     setup_run: Option<Rc<dyn Fn(&[&str], Option<&str>) -> (i32, String)>>,
     pickup_pass: Option<Rc<dyn Fn(&mut Io, &Path) -> Res<()>>>,
     orphan_pickup_scan: Hook,
+    orphan_scan: Option<Rc<dyn Fn(&Path) -> Res<(Vec<Orphan>, Vec<String>)>>>,
     outcomes_pickup_record: Hook,
     pick_route: Option<Rc<dyn Fn(&Path) -> Res<Option<Route>>>>,
     launch_idea: Option<Launch>,
@@ -3132,6 +3133,10 @@ struct Orphan {
 /// (orphans, skipped): factory branches on origin, open factory PRs, job worktrees and
 /// factory-<id> Paseo workspaces that no open board job owns. Only reads.
 fn orphan_scan(home: &Path) -> Res<(Vec<Orphan>, Vec<String>)> {
+    #[cfg(test)]
+    if let Some(f) = fake!(orphan_scan) {
+        return f(home);
+    }
     let board = read_board(home)?;
     let jobs: &[Value] = board["jobs"].as_array().map_or(&[], Vec::as_slice);
     let paths = paths_of(home)?;
@@ -14349,6 +14354,140 @@ exit "$archive_code"
             assert!(seen.borrow().is_empty());
             assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
             assert_eq!(*seen.borrow(), vec![fx.home.clone()]);
+        }
+    }
+
+    mod orphan_summary_test {
+        use super::*;
+
+        fn rows(kinds: &[&'static str]) -> Vec<Orphan> {
+            kinds
+                .iter()
+                .map(|kind| Orphan {
+                    kind,
+                    name: Some("x".into()),
+                })
+                .collect()
+        }
+
+        #[test]
+        fn example_line() {
+            assert_eq!(
+                orphan_summary(&rows(&["branch", "pr", "worktree", "workspace"]), &[]),
+                "orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory.py orphans to list them"
+            );
+        }
+
+        #[test]
+        fn plurals_and_skips() {
+            let four = rows(&["branch", "branch", "workspace", "workspace"]);
+            assert_eq!(
+                orphan_summary(&four, &["prs: gh is not on PATH".to_string()]),
+                "orphan scan: 4 orphaned (2 branches, 2 Paseo workspaces), 1 source skipped; run factory.py orphans to list them"
+            );
+            let two =
+                ["prs: gh is not on PATH", "workspaces: paseo is not on PATH"].map(String::from);
+            assert_eq!(
+                orphan_summary(&[], &two),
+                "orphan scan: nothing orphaned, 2 sources skipped; run factory.py orphans to list them"
+            );
+        }
+    }
+
+    mod orphan_pickup_scan_test {
+        use super::*;
+        use std::cell::Cell;
+
+        /// Fake orphan_scan answering with one open-PR orphan (or a stop with exit 5), counting calls.
+        fn scan_fake(stop: bool) -> Rc<Cell<usize>> {
+            let calls = Rc::new(Cell::new(0));
+            let seen = calls.clone();
+            FAKES.with(|f| {
+                *f.borrow_mut() = Fakes {
+                    orphan_scan: Some(Rc::new(move |_| {
+                        seen.set(seen.get() + 1);
+                        if stop {
+                            return Err(crate::shared::exit::exit(5));
+                        }
+                        Ok((
+                            vec![Orphan {
+                                kind: "pr",
+                                name: Some("https://github.com/example/factory/pull/7".into()),
+                            }],
+                            Vec::new(),
+                        ))
+                    })),
+                    ..Fakes::default()
+                }
+            });
+            calls
+        }
+
+        fn run_scan(home: &Path) -> (String, String) {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let mut io = Io {
+                out: &mut out,
+                err: &mut err,
+            };
+            orphan_pickup_scan(&mut io, home).unwrap();
+            (
+                String::from_utf8(out).unwrap(),
+                String::from_utf8(err).unwrap(),
+            )
+        }
+
+        #[test]
+        fn once_per_local_date() {
+            let home = crate::shared::fs::temp_dir("orphan-once");
+            let calls = scan_fake(false);
+            let (utc, offset) = local_now();
+            let today = local_date(utc, offset);
+            assert_eq!(
+                run_scan(&home),
+                (
+                    "orphan scan: 1 orphaned (1 open PR); run factory.py orphans to list them\n"
+                        .to_string(),
+                    String::new()
+                )
+            );
+            assert_eq!(
+                read_json(&home.join("orphan-scan.json")).unwrap(),
+                json!({"version": 1, "date": today})
+            );
+            assert_eq!(run_scan(&home), (String::new(), String::new()));
+            assert_eq!(calls.get(), 1);
+            fs::remove_dir_all(home).unwrap();
+        }
+
+        #[test]
+        fn new_date_scans_again() {
+            let home = crate::shared::fs::temp_dir("orphan-new-date");
+            let calls = scan_fake(false);
+            fs::write(
+                home.join("orphan-scan.json"),
+                "{\"version\": 1, \"date\": \"2000-01-01\"}\n",
+            )
+            .unwrap();
+            assert_eq!(run_scan(&home).0.matches('\n').count(), 1);
+            assert_eq!(calls.get(), 1);
+            fs::remove_dir_all(home).unwrap();
+        }
+
+        #[test]
+        fn stopped_scan_costs_one_line_and_waits() {
+            let home = crate::shared::fs::temp_dir("orphan-stopped");
+            let calls = scan_fake(true);
+            assert_eq!(
+                run_scan(&home),
+                (
+                    String::new(),
+                    "factory.py: orphan scan stopped (exit 5); it runs again tomorrow\n"
+                        .to_string()
+                )
+            );
+            assert_eq!(run_scan(&home), (String::new(), String::new()));
+            assert_eq!(calls.get(), 1);
+            fs::remove_dir_all(home).unwrap();
         }
     }
 
