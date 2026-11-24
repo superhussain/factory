@@ -10402,6 +10402,92 @@ mod daemon_setup_test {
         assert!(!timer.exists());
     }
 
+    /// A pickup plist that is not loaded is not installed, but it is still left to remove.
+    #[cfg(unix)]
+    #[test]
+    fn unloaded_pickup_plist_is_left_and_removed_beside_the_launchd_daemon() {
+        let ds = Ds::new("launchd");
+        let timer = ds.fx.root.join("Library/LaunchAgents/factory.pickup.plist");
+        fs::create_dir_all(timer.parent().unwrap()).unwrap();
+        fs::write(&timer, "synthetic").unwrap();
+        assert!(!timer_installed("launchd", &PICKUP).0);
+        assert!(timer_left("launchd", &PICKUP));
+        let out = uninstall_timer(&ds.fx.home, "launchd", &PICKUP).unwrap();
+        assert_eq!(out, format!("removed launchd timer: {}", timer.display()));
+        assert!(!timer_left("launchd", &PICKUP));
+    }
+
+    /// While the new daemon's pid file is empty or still names the killed daemon, the poll
+    /// keeps going instead of reporting it.
+    #[test]
+    fn daemon_pid_waits_past_a_stale_or_empty_pid_file() {
+        let home = Path::new("/synthetic");
+        let mut reads = vec![
+            Ok(Some(9)),
+            Err("a daemon runs, but its pid file holds no valid pid".to_string()),
+            Ok(Some(7)),
+            Ok(None),
+        ];
+        assert_eq!(
+            daemon_pid(home, Some(7), &mut || reads.pop().unwrap()),
+            Ok(9)
+        );
+        let mut stale = || Ok(Some(7));
+        assert!(daemon_pid(home, Some(7), &mut stale).is_err());
+    }
+
+    /// spawn_daemon runs the */5 daemon line's command, the installed binary it names, and
+    /// fails plainly when the crontab has no such line.
+    #[cfg(unix)]
+    #[test]
+    fn spawn_daemon_runs_the_cron_line() {
+        use std::os::unix::fs::PermissionsExt;
+        let ds = Ds::new("cron");
+        assert_eq!(
+            spawn_daemon(),
+            Err(
+                "no */5 daemon line in the crontab; run factory daemon setup --install".to_string()
+            )
+        );
+        let bin = ds.fx.root.join("factory");
+        let marker = ds.fx.root.join("started");
+        let part = ds.fx.root.join("started.part");
+        fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\n{{ echo \"$@\"; pwd; env | cut -d= -f1 | sort; }} > '{0}'\nmv '{0}' '{1}'\n",
+                part.display(),
+                marker.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        ds.sched.borrow_mut().crontab = format!(
+            "@reboot {0} --home /h daemon\n*/5 * * * * {0} --home /h daemon\n",
+            bin.display()
+        );
+        assert_eq!(spawn_daemon(), Ok(()));
+        let start = Instant::now();
+        while !marker.exists() && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let text = fs::read_to_string(&marker).unwrap();
+        let mut lines = text.lines();
+        assert_eq!(lines.next(), Some("--home /h daemon"));
+        // It runs in the user's home with only cron's variables, none of the caller's.
+        let home = std::env::home_dir().unwrap();
+        assert_eq!(lines.next(), Some(home.to_str().unwrap()));
+        let cron = [
+            "HOME", "LOGNAME", "OLDPWD", "PATH", "PWD", "SHELL", "SHLVL", "_",
+        ];
+        let names: Vec<&str> = lines.collect();
+        assert!(names.iter().all(|n| cron.contains(n)), "{names:?}");
+        assert!(
+            names.contains(&"HOME") && names.contains(&"PATH"),
+            "{names:?}"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn launchd_install_is_idempotent_and_uninstall_removes() {
@@ -11120,6 +11206,23 @@ mod pickup_heartbeat_test {
             .unwrap()
             .get("triage_failed_since")
             .is_none());
+    }
+
+    /// While a daemon holds the lock, pickup reports the daemon's scheduler, so a systemd
+    /// host says systemd rather than cron, and the cache keeps it.
+    #[test]
+    fn test_a_daemon_host_reports_the_daemon_scheduler() {
+        let (fx, worker) = setup("device: host-a\n");
+        fx.set_fakes(|f| {
+            f.backlog_triage_pass = Some(Rc::new(|_| Ok(())));
+            f.daemon_scheduler = Some("systemd");
+        });
+        assert_eq!(fx.pickup(&["--triage-now"]).0, 0);
+        assert_eq!(worker.last_body()["scheduler"], PICKUP_SCHEDULER);
+        let _lock = daemon::take_lock(&fx.home).unwrap().unwrap();
+        assert_eq!(fx.pickup(&["--triage-now"]).0, 0);
+        assert_eq!(worker.last_body()["scheduler"], "systemd");
+        assert_eq!(cached_status(&fx.home).0, "systemd");
     }
 }
 

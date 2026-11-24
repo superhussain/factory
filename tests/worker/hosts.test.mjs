@@ -350,6 +350,10 @@ test("PATCH and status reject fields their writer does not own", async () => {
       "bundle_behind_since: must be an ISO 8601 UTC time",
     ],
     [status({ bundle_behind_since: null }), "bundle_behind_since: must be an ISO 8601 UTC time"],
+    [
+      status({ scheduler: "anacron" }),
+      "scheduler: must be one of launchd, systemd, cron, schtasks, none",
+    ],
   ]) {
     const r = await s.putStatus("work-mac", JSON.parse(JSON.stringify(body)));
     assert.equal(r.status, 400, JSON.stringify(body));
@@ -375,6 +379,8 @@ test("PATCH and status reject fields their writer does not own", async () => {
   const stored = JSON.parse(s.bucket.objects.get("host-status/work-mac.json").bytes.toString());
   assert.equal(stored.triage_failed_since, "2026-01-01T09:00:00Z");
   assert.equal(stored.bundle_behind_since, "2025-12-30T14:00:00Z");
+  // A daemon host under a systemd user service reports systemd.
+  assert.equal((await s.putStatus("work-mac", status({ scheduler: "systemd" }))).status, 200);
 });
 
 test("the effective view keeps only active hosts once any host is registered", async () => {

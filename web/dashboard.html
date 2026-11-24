@@ -1186,7 +1186,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
     <section class="settings-section" id="settings-scheduler" aria-labelledby="scheduler-settings-heading" hidden>
       <h3 id="scheduler-settings-heading" tabindex="-1">Scheduler</h3>
       <p class="muted" id="scheduler-intro">Automatic pickup needs each host to run factory pickup every 5 minutes, with a launcher for each route. Let a coding agent on the host set it up, or follow the manual steps.</p>
-      <p class="muted" id="scheduler-not-a-prompt">A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the host timer runs pickup.</p>
+      <p class="muted" id="scheduler-not-a-prompt">A schedule prompt stored in Paseo or Claude does not pick up ideas. Only the daemon service or the host timer runs pickup.</p>
       <div class="settings-tabs" id="scheduler-mode-tabs" role="tablist" aria-label="Setup method">
         <button type="button" role="tab" id="scheduler-mode-tab-agent" aria-controls="scheduler-mode-panel-agent" aria-selected="true" tabindex="0">Agent</button>
         <button type="button" role="tab" id="scheduler-mode-tab-human" aria-controls="scheduler-mode-panel-human" aria-selected="false" tabindex="-1">Human</button>
@@ -1208,7 +1208,7 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
 4. Check 7 is the timer. Show me the command SKILL/runtime/factory pickup setup --install and say that it writes and loads a 5 minute timer for this host. Run it only after I answer yes. Otherwise I run it myself.
 5. Run pickup setup again until it prints 7 of 7 ok. Then tell me which program the timer runs and any note it printed.
 
-A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the host timer runs pickup.</code></pre></div>
+A stored Paseo or Claude schedule prompt does not pick up ideas, so do not create one. Only the daemon service or the host timer runs pickup.</code></pre></div>
       </div>
       <div id="scheduler-mode-panel-human" role="tabpanel" aria-labelledby="scheduler-mode-tab-human" hidden>
       <p class="muted">Nothing here is saved. Copy a snippet, then replace each placeholder with this host's values.</p>

@@ -43,7 +43,7 @@ static WORKER_MODEL: Pattern = Pattern::new(r"[A-Za-z0-9._:@/\[\]-]{1,128}", Fla
 static PAIRING_CODE: Pattern = Pattern::new(r"[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}", Flags::ASCII);
 
 const PAIRING_FAILED: &str = "pairing code is wrong, used or expired";
-const SCHEDULERS: &[&str] = &["launchd", "cron", "schtasks", "none"];
+const SCHEDULERS: &[&str] = &["launchd", "systemd", "cron", "schtasks", "none"];
 const MAX_EXPLORER_PROJECTS: usize = 1;
 
 const ROLE_NAMES: [&str; 9] = [
@@ -2133,8 +2133,10 @@ mod tests {
         );
         write(r#"{"scheduler": "cron", "last_pickup": null, "triage_failed_since": "soon"}"#);
         assert_eq!(cached_status(&dir), ("cron".to_string(), None, None));
+        write(r#"{"scheduler": "systemd", "last_pickup": null}"#);
+        assert_eq!(cached_status(&dir), ("systemd".to_string(), None, None));
         for bad in [
-            r#"{"scheduler": "systemd", "last_pickup": null}"#,
+            r#"{"scheduler": "anacron", "last_pickup": null}"#,
             r#"{"scheduler": "cron", "last_pickup": "2026-1-1T00:00:00Z"}"#,
             r#"{"scheduler": "cron"}"#,
             r#"["cron"]"#,
