@@ -1,0 +1,20 @@
+# CI's rust-test shards run with nextest. A shard lasts at least as long as its slowest test, so the slow tests
+# start first instead of after the hundreds of fast ones ahead of them in name order. Shortening one of these
+# tests' waits would change what it asserts, so the 60 s test sets the floor of a rust-test run.
+
+# Waits out its 60 s fetch timeout by design.
+[[profile.default.overrides]]
+filter = 'test(=commands::worktree::tests::hung_fetch_times_out)'
+priority = 100
+
+# The other tests that take 10 s or more on a CI runner.
+[[profile.default.overrides]]
+filter = '''
+test(=commands::ops::tests::archive_git_times_out)
+| test(=commands::checks::tests::buildkite_stalled_body_times_out)
+| test(=commands::retro::tests::redact_supersets_cover_every_match)
+| test(=commands::worktree::tests::only_worktree_remove_waits_without_a_cap)
+| test(=commands::retro::tests::redact_matches_every_pass_run_unfiltered)
+| test(=commands::audit::tests::pr_merge_is_linear)
+'''
+priority = 50

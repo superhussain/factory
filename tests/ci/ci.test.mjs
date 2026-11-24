@@ -1,4 +1,4 @@
-// Contract guard for the pull-request workflow: parallel jobs, four browser
+// Contract guard for the pull-request workflow: parallel jobs, eight browser
 // shards, and one `ci` aggregate that fails unless every job succeeded.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -15,8 +15,8 @@ const fixture = JSON.parse(
   readFileSync(new URL("../fixtures/browser-cases.json", import.meta.url), "utf8"),
 );
 
-test("the four shards are disjoint, non-empty and cover every case", () => {
-  const shards = [1, 2, 3, 4].map((n) => selectShard(fixture, `${n}/4`));
+test("the eight shards are disjoint, non-empty and cover every case", () => {
+  const shards = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => selectShard(fixture, `${n}/8`));
   for (const shard of shards) {
     assert.ok(shard.suites.length >= 1);
     assert.ok(shard.nodeTests.length >= 1);
@@ -38,11 +38,11 @@ test("a bad shard value throws naming the variable", () => {
   }
 });
 
-test("the browser job is a four-shard matrix that keeps running on failure", () => {
+test("the browser job is an eight-shard matrix that keeps running on failure", () => {
   const { browser } = workflow.jobs;
-  assert.deepEqual(browser.strategy.matrix.shard, [1, 2, 3, 4]);
+  assert.deepEqual(browser.strategy.matrix.shard, [1, 2, 3, 4, 5, 6, 7, 8]);
   assert.equal(browser.strategy["fail-fast"], false);
-  assert.equal(browser.env.FACTORY_BROWSER_SHARD, "${{ matrix.shard }}/4");
+  assert.equal(browser.env.FACTORY_BROWSER_SHARD, "${{ matrix.shard }}/8");
 });
 
 test("the targets job provisions the browser before running Nx", () => {
@@ -159,10 +159,12 @@ test("the plan keys the whole merge tree and the rust inputs, and lookups never 
   }
 });
 
-test("targets restores the browser cache read-only", () => {
-  const uses = (job) => workflow.jobs[job].steps.map(action);
-  assert.ok(uses("targets").includes("actions/cache/restore"));
-  assert.ok(uses("browser").includes("actions/cache"));
+test("targets and browser restore the browser cache read-only", () => {
+  for (const job of ["targets", "browser"]) {
+    const uses = workflow.jobs[job].steps.map(action);
+    assert.ok(uses.includes("actions/cache/restore"), job);
+    assert.ok(!uses.includes("actions/cache") && !uses.includes("actions/cache/save"), job);
+  }
 });
 
 test("rust-build caches the binary under the rust key, and targets restores it or builds it on a miss", () => {
@@ -183,10 +185,18 @@ test("rust-build caches the binary under the rust key, and targets restores it o
   const onMiss = targets.steps.filter((step) => step.if === miss);
   assert.deepEqual(
     onMiss.map((step) => step.run ?? action(step)),
-    ["rustup toolchain install", "Swatinem/rust-cache", "cargo build --profile host --locked"],
+    [
+      "rustup toolchain install",
+      "Swatinem/rust-cache",
+      "actions/cache/restore",
+      "CARGO_INCREMENTAL=1 cargo build --profile host --locked",
+    ],
   );
-  // The rust jobs save the shared rust/target cache; targets only reads it.
+  // The rust jobs save the shared rust/target cache and rust-build's incremental artifacts; targets only reads them.
   assert.equal(onMiss[1].with["save-if"], false);
+  const incremental = build.steps.find((step) => step.name === "Restore incremental artifacts");
+  assert.deepEqual(onMiss[2].with, incremental.with);
+  assert.ok(!targets.steps.some((step) => action(step) === "actions/cache/save"));
   const nx = targets.steps.findIndex((step) => step.name === "Nx affected");
   assert.ok(onMiss.every((step) => targets.steps.indexOf(step) > restore));
   assert.ok(onMiss.every((step) => targets.steps.indexOf(step) < nx));
@@ -214,6 +224,34 @@ test("rust-build restores and saves this PR's incremental artifacts around an in
   // A fresh key per run, since a saved key never changes; restore takes the newest with the toolchain's prefix.
   assert.deepEqual(restore.with, { path, key, "restore-keys": prefix });
   assert.deepEqual(save.with, { path, key });
+});
+
+test("the nextest config neither retries nor terminates tests", () => {
+  const config = readFileSync(new URL("../../rust/.config/nextest.toml", import.meta.url), "utf8");
+  // A retry would turn a flaky failure green, and terminate-after would cut short the timeout tests.
+  const settings = config.split("\n").filter((line) => !line.trimStart().startsWith("#"));
+  for (const line of settings) {
+    assert.doesNotMatch(line, /\bretries\b|terminate-after/, line);
+  }
+});
+
+test("rust-test restores main's incremental artifacts before the build and never saves them", () => {
+  const steps = workflow.jobs["rust-test"].steps;
+  const at = (name) => steps.findIndex((step) => step.name === name);
+  const cache = steps.findIndex((step) => action(step) === "Swatinem/rust-cache");
+  const restore = steps[at("Restore incremental artifacts")];
+  assert.equal(action(restore), "actions/cache/restore");
+  assert.ok(cache < at("Restore incremental artifacts"));
+  assert.ok(at("Restore incremental artifacts") < at("Build the tests"));
+  assert.ok(at("Build the tests") < at("Test linux-x64"));
+  assert.ok(!steps.some((step) => action(step) === "actions/cache/save"));
+  const prefix =
+    "v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-";
+  assert.deepEqual(restore.with, {
+    path: "rust/target/debug/incremental",
+    key: `${prefix}\${{ github.run_id }}-\${{ github.run_attempt }}`,
+    "restore-keys": prefix,
+  });
 });
 
 test("no job runs the Python CLI suites or sets up Python, and the workflow reads no secret", () => {
@@ -264,7 +302,19 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
       'grep -q \'"entry": \\["runtime/factory"\\]\' "$root/skills/factory/bundle.json"',
     ].join("\n"),
   ]);
-  assert.deepEqual(runs(unit), ["rustup toolchain install", "cargo test --locked"]);
+  const unitRuns = runs(unit);
+  assert.equal(unitRuns[0], "rustup toolchain install");
+  assert.match(unitRuns[1], /cargo-nextest-0\.9\.152-x86_64-unknown-linux-gnu\.tar\.gz/);
+  assert.match(unitRuns[1], /sha256sum -c/);
+  assert.equal(unitRuns[2], "CARGO_INCREMENTAL=1 cargo test --locked --no-run");
+  // Every shard runs its hash partition of every test, and the shards together cover all of them.
+  assert.equal(
+    unitRuns[3],
+    "CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2",
+  );
+  assert.equal(unitRuns.length, 4);
+  assert.deepEqual(unit.strategy.matrix.shard, [1, 2]);
+  assert.equal(unit.strategy["fail-fast"], false);
   assert.deepEqual(runs(check), [
     "rustup toolchain install\nrustup target add aarch64-apple-darwin x86_64-pc-windows-gnu",
     "cargo fmt --check",

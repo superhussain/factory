@@ -74,7 +74,7 @@ jobs:
           key: browser-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             browser-${{ runner.os }}-
-      # assets runs a browser test, so this job provisions the browser too; only the browser shards save its cache.
+      # assets runs a browser test, so this job provisions the browser too; only warm.yml saves its cache.
       - run: node tests/browser/provision.mjs
       - run: pnpm run format:check
       # Workflow-only changes select no Nx target; the workflow contracts always run.
@@ -95,10 +95,19 @@ jobs:
           prefix-key: v1-rust
           workspaces: rust
           save-if: false
+      # rust-build runs beside this job, so a PR that changes Rust always misses the binary above. rust-build's
+      # incremental artifacts, which this job only reads, cut that build from about 27 s to a few.
+      - name: Restore incremental artifacts
+        if: steps.factory-bin.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/host/incremental
+          key: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-
       - name: Build the factory binary
         if: steps.factory-bin.outputs.cache-hit != 'true'
         working-directory: rust
-        run: cargo build --profile host --locked
+        run: CARGO_INCREMENTAL=1 cargo build --profile host --locked
       - name: Affected base and head
         run: |
           echo "NX_BASE=$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)" >> "$GITHUB_ENV"
@@ -114,9 +123,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
-      FACTORY_BROWSER_SHARD: ${{ matrix.shard }}/4
+      FACTORY_BROWSER_SHARD: ${{ matrix.shard }}/8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -131,8 +140,9 @@ jobs:
           else
             echo "apps_changed=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Cache browser provision
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # warm.yml saves the provision from main, so a PR never adds its own copy to the cache budget.
+      - name: Restore browser provision
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .context/browser
           key: browser-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
@@ -225,6 +235,13 @@ jobs:
     if: needs.plan.outputs.all != 'true' && needs.plan.outputs.rust != 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 6
+    # nextest runs each test in its own process, so tests that hold TEST_ENV_LOCK no longer wait on each other,
+    # and hash partitions split the tests over the shards by name, so a test keeps its shard as others come and
+    # go. hung_fetch_times_out waits 60 s by design, so more shards would not shorten the slowest one.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     defaults:
       run:
         working-directory: rust
@@ -238,8 +255,27 @@ jobs:
         with:
           prefix-key: v1-rust
           workspaces: rust
+      # As in rust-build, the newest incremental artifacts let rustc reuse the unchanged codegen units of the test
+      # build. Only warm.yml saves them, from main: at about 200 MB a copy, a save per PR run would crowd main's
+      # warm caches out of the repo's cache budget, and a PR's diff from main is what it recompiles either way.
+      - name: Restore incremental artifacts
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/debug/incremental
+          key: v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: v1-rust-test-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-
+      - name: Install cargo-nextest
+        run: |
+          curl -sSfLo "$RUNNER_TEMP/nextest.tar.gz" https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.152/cargo-nextest-0.9.152-x86_64-unknown-linux-gnu.tar.gz
+          echo "d039b43c3e0958441b6ad0a39c8884d018b3d2e8fb9928f209074b1100b5e17a  $RUNNER_TEMP/nextest.tar.gz" | sha256sum -c
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/bin" cargo-nextest
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # nextest builds with cargo test --no-run, so this is the build it runs.
+      - name: Build the tests
+        run: CARGO_INCREMENTAL=1 cargo test --locked --no-run
       - name: Test linux-x64
-        run: cargo test --locked
+        run: CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2
   # Type-checks the darwin-arm64 and windows-x64 targets.
   rust-check:
     needs: plan

@@ -21,9 +21,11 @@ test("warm runs on main pushes and by hand, reads only contents, and keeps the n
   // Per ref, so a manual run elsewhere never cancels main's.
   assert.equal(warm.concurrency.group, "warm-caches-${{ github.ref }}");
   // A manual run on another branch must not seed caches there.
-  for (const id of JOBS) assert.equal(warm.jobs[id].if, "github.ref == 'refs/heads/main'", id);
+  for (const id of [...JOBS, "browser"]) {
+    assert.equal(warm.jobs[id].if, "github.ref == 'refs/heads/main'", id);
+  }
   assert.doesNotMatch(raw, /secrets\./);
-  assert.deepEqual(Object.keys(warm.jobs), JOBS);
+  assert.deepEqual(Object.keys(warm.jobs), [...JOBS, "browser"]);
 });
 
 // rust-cache's key is its prefix-key, the job id, the runner, rustc -vV, every CARGO*, CC*, CFLAGS*, CXX*, CMAKE*
@@ -61,17 +63,43 @@ test("each warm job installs the same toolchain and compiles what its ci.yml job
     run(warm.jobs.targets, "Build the factory binary"),
     run(ci.jobs.targets, "Build the factory binary"),
   );
-  assert.equal(run(warm.jobs["rust-test"], "Build the tests"), "cargo test --locked --no-run");
-  assert.equal(run(ci.jobs["rust-test"], "Test linux-x64"), "cargo test --locked");
+  assert.equal(
+    run(warm.jobs["rust-test"], "Build the tests"),
+    run(ci.jobs["rust-test"], "Build the tests"),
+  );
   for (const name of ["Check darwin-arm64", "Check windows-x64"]) {
     assert.equal(run(warm.jobs["rust-check"], name), run(ci.jobs["rust-check"], name));
   }
 });
 
-test("warm rust-build saves the incremental artifacts under the key ci.yml restores", () => {
+test("warm rust-build and rust-test save the incremental artifacts under the keys ci.yml restores", () => {
   for (const name of ["Restore incremental artifacts", "Save incremental artifacts"]) {
     const [w, c] = [named(warm.jobs["rust-build"], name), named(ci.jobs["rust-build"], name)];
     assert.equal(w.uses, c.uses, name);
     assert.deepEqual(w.with, c.with, name);
+  }
+  // CI's rust-test only restores, under the key warm saves.
+  const restore = named(ci.jobs["rust-test"], "Restore incremental artifacts");
+  assert.deepEqual(
+    named(warm.jobs["rust-test"], "Restore incremental artifacts").with,
+    restore.with,
+  );
+  const save = named(warm.jobs["rust-test"], "Save incremental artifacts");
+  assert.equal(action(save), "actions/cache/save");
+  assert.deepEqual(save.with, { path: restore.with.path, key: restore.with.key });
+});
+
+test("warm browser saves the provision under the key ci.yml's browser and targets jobs restore", () => {
+  const save = warm.jobs.browser.steps.find((step) => action(step) === "actions/cache");
+  const runs = warm.jobs.browser.steps.map((step) => step.run ?? action(step));
+  assert.ok(
+    runs.indexOf("node tests/browser/provision.mjs") > warm.jobs.browser.steps.indexOf(save),
+  );
+  assert.equal(warm.jobs.browser.steps[0].with["persist-credentials"], false);
+  for (const id of ["browser", "targets"]) {
+    const restore = named(ci.jobs[id], "Restore browser provision");
+    assert.equal(action(restore), "actions/cache/restore", id);
+    assert.equal(restore.with.path, save.with.path, id);
+    assert.equal(restore.with.key, save.with.key, id);
   }
 });
