@@ -813,6 +813,7 @@ pub(crate) mod tests {
     }
 
     /// A TLS server with a self-signed certificate that no system store trusts, from `openssl s_server`.
+    /// It carries a serverAuth extended key usage because macOS rejects a TLS server certificate without one.
     /// Panics when openssl is missing, so a host without it fails these tests instead of skipping them.
     /// The child is killed when the guard drops.
     struct SelfSigned {
@@ -841,6 +842,8 @@ pub(crate) mod tests {
                 "/CN=127.0.0.1",
                 "-addext",
                 "subjectAltName=IP:127.0.0.1",
+                "-addext",
+                "extendedKeyUsage=serverAuth",
             ])
             .arg("-keyout")
             .arg(&key)
