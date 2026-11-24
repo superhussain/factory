@@ -4889,7 +4889,7 @@ mod audit_pickup_test {
         assert!(
             err.starts_with(
                 "factory.py: audit push skipped 1017-add-x until its transcripts change: "
-            ) && err.contains(crate::shared::pyre::LIMIT_HIT)
+            ) && err.ends_with(&format!("{}\n", crate::shared::pyre::LIMIT_HIT))
                 && err.lines().count() == 1,
             "{err}"
         );
