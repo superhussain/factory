@@ -882,8 +882,8 @@
    "source_group": "assertion-group-01",
    "replacements": [
     {
-     "file": "tests/worker/test_project_api.py",
-     "case": "test_refuses_other_targets_before_network"
+     "file": "tests/worker/project-api.test.mjs",
+     "case": "the target guard refuses every other origin before any request"
     }
    ],
    "status": "ported",
@@ -895,8 +895,8 @@
    "source_group": "assertion-group-02",
    "replacements": [
     {
-     "file": "tests/worker/test_project_api.py",
-     "case": "test_real_atomic_race_and_readback"
+     "file": "tests/worker/project-api.test.mjs",
+     "case": "real atomic race and readback"
     }
    ],
    "status": "ported",
@@ -908,8 +908,8 @@
    "source_group": "assertion-group-03",
    "replacements": [
     {
-     "file": "tests/worker/test_project_api.py",
-     "case": "test_validation_and_baseless_stale_writes_leave_bytes"
+     "file": "tests/worker/project-api.test.mjs",
+     "case": "validation and baseless stale writes leave bytes"
     }
    ],
    "status": "ported",
@@ -921,8 +921,8 @@
    "source_group": "assertion-group-04",
    "replacements": [
     {
-     "file": "tests/worker/test_project_api.py",
-     "case": "test_two_device_race_conflict_merge_and_where"
+     "file": "tests/worker/project-api.test.mjs",
+     "case": "two-device race, conflict, merge and where"
     }
    ],
    "status": "ported",
@@ -934,8 +934,8 @@
    "source_group": "assertion-group-05",
    "replacements": [
     {
-     "file": "tests/worker/test_project_api.py",
-     "case": "test_browser_like_and_device_conflicts_both_orders"
+     "file": "tests/worker/project-api.test.mjs",
+     "case": "browser-like and device conflicts in both orders"
     }
    ],
    "status": "ported",
