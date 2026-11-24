@@ -721,6 +721,95 @@ pub(crate) mod tests {
         assert_eq!(seen[1].header("Content-Type"), Some("application/json"));
     }
 
+    const VIEW_PATH: &str = "/api/pipeline/effective/sample";
+    const VIEW: &str = r#"{"project": "sample", "merge": "human"}"#;
+
+    fn reads_of(seen: &Mutex<Vec<Seen>>) -> Vec<String> {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .map(|s| format!("{} {}", s.method, s.path))
+            .collect()
+    }
+
+    #[test]
+    fn effective_view_is_read_once() {
+        let (origin, seen) = serve(vec![(200, VIEW, vec![])]);
+        let home = home_for("http-read-once", &origin);
+        for _ in 0..3 {
+            let got = api(&home, "GET", VIEW_PATH, None, &[200], &[]).unwrap();
+            assert_eq!(got.status, 200);
+        }
+        assert_eq!(reads_of(&seen), [format!("GET {VIEW_PATH}")]);
+    }
+
+    #[test]
+    fn pipeline_and_project_writes_clear_the_read_cache() {
+        let (origin, seen) = serve(vec![
+            (200, VIEW, vec![]),
+            (200, "", vec![]),
+            (200, "", vec![]),
+            (200, VIEW, vec![]),
+            (200, "", vec![]),
+            (200, VIEW, vec![]),
+        ]);
+        let home = home_for("http-read-clear", &origin);
+        let get = || api(&home, "GET", VIEW_PATH, None, &[200], &[]).unwrap();
+        let put = |path: &str| api(&home, "PUT", path, Some(b"x"), &[200], &[]).unwrap();
+        get();
+        put("/api/board");
+        get();
+        assert_eq!(reads_of(&seen).len(), 2);
+        put("/api/pipeline/retro/global");
+        get();
+        put("/api/projects/sample.md");
+        get();
+        let get_view = format!("GET {VIEW_PATH}");
+        assert_eq!(
+            reads_of(&seen),
+            [
+                get_view.as_str(),
+                "PUT /api/board",
+                "PUT /api/pipeline/retro/global",
+                get_view.as_str(),
+                "PUT /api/projects/sample.md",
+                get_view.as_str(),
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_view_is_not_cached() {
+        let (origin, seen) = serve(vec![(404, "", vec![]), (404, "", vec![])]);
+        let home = home_for("http-read-404", &origin);
+        for _ in 0..2 {
+            let got = api(&home, "GET", VIEW_PATH, None, &[200, 404], &[]).unwrap();
+            assert_eq!(got.status, 404);
+        }
+        assert_eq!(reads_of(&seen), vec![format!("GET {VIEW_PATH}"); 2]);
+    }
+
+    #[test]
+    fn cached_view_expires_at_the_ttl() {
+        let (origin, seen) = serve(vec![(200, VIEW, vec![]), (200, VIEW, vec![])]);
+        let home = home_for("http-read-ttl", &origin);
+        let get = || api(&home, "GET", VIEW_PATH, None, &[200], &[]).unwrap();
+        let age = |secs: u64| {
+            let mut cache = reads().lock().unwrap();
+            let entry = cache
+                .get_mut(&(origin.clone(), VIEW_PATH.to_string()))
+                .unwrap();
+            entry.0 = Instant::now() - Duration::from_secs(secs);
+        };
+        get();
+        age(READ_TTL - 1);
+        get();
+        assert_eq!(reads_of(&seen).len(), 1);
+        age(READ_TTL);
+        get();
+        assert_eq!(reads_of(&seen).len(), 2);
+    }
+
     #[test]
     fn cas_strips_weak_etags_and_retries_412() {
         let (origin, seen) = serve(vec![
