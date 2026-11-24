@@ -1002,8 +1002,36 @@ mod tests {
 
     const DECISION: &[u8] = b"APPROVE\nA person approved this job with /factory approve.\n";
 
+    // `factory_home` prefers the process-wide `--home` override, which another
+    // test may already have set, so the push tests run in a fresh process.
+    fn in_child(test: &str) -> bool {
+        if std::env::var_os("FACTORY_PUSH_TARGET_CHILD").is_some() {
+            return true;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                &format!("commands::sync::tests::{test}"),
+                "--exact",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("FACTORY_PUSH_TARGET_CHILD", "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "{stdout}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        false
+    }
+
     #[test]
     fn push_target_records_decision() {
+        if !in_child("push_target_records_decision") {
+            return;
+        }
         use crate::shared::http::tests::serve;
         let board = r#"{"updated":"2026-11-23T14:00:00Z","jobs":[{"id":"042-sample-export","project":"alpha","stage":"needs-human"}]}"#;
         let (origin, seen) = serve(vec![
@@ -1050,6 +1078,9 @@ mod tests {
 
     #[test]
     fn push_target_skips_decision_on_conflict() {
+        if !in_child("push_target_skips_decision_on_conflict") {
+            return;
+        }
         use crate::shared::http::tests::serve;
         let (origin, seen) = serve(vec![
             (200, r#"[{"name":"decision.md","etag":"\"d0\""}]"#, vec![]),
