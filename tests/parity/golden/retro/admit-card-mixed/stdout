@@ -1,0 +1,16 @@
+wrote {home}/retro/card-mixed/findings.md
+rejected suggestions[1].summary: must not hold a code fence or a link
+added sample-tools: Guard the ls alias with context
+link: {api}/#/backlog/203ae9a4105d
+held sample-tools: Guard the ls alias for review: retro items always wait for a person
+added sample-tools: Drop the ls alias with context
+link: {api}/#/backlog/85fafc782529
+held sample-tools: Drop the ls alias for review: retro items always wait for a person
+{
+  "admitted": [
+    "sample-tools: Guard the ls alias",
+    "sample-tools: Drop the ls alias"
+  ],
+  "skipped": []
+}
+uploaded retro run card-mixed

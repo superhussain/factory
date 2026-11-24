@@ -165,6 +165,49 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(debug_assertions, ignore = "timing runs under --release")]
+    fn note_patterns_finish_adversarial_inputs_in_50_ms() {
+        let inputs = [
+            "a".repeat(16384),
+            "a.".repeat(8192),
+            " ".repeat(16384),
+            "ignore ".repeat(2340),
+            ":/".repeat(8192),
+            "<".repeat(16384),
+        ];
+        let mut named: Vec<(String, &Pattern)> = vec![("NOTE_LINK".into(), &NOTE_LINK)];
+        named.extend(
+            NOTE_SECRETS
+                .iter()
+                .enumerate()
+                .map(|(n, p)| (format!("NOTE_SECRETS[{n}]"), p)),
+        );
+        named.extend(
+            NOTE_PHRASES
+                .iter()
+                .enumerate()
+                .map(|(n, (_, p))| (format!("NOTE_PHRASES[{n}]"), p)),
+        );
+        for (name, p) in named {
+            for text in &inputs {
+                let best = (0..3)
+                    .map(|_| {
+                        let start = std::time::Instant::now();
+                        p.search(text);
+                        start.elapsed()
+                    })
+                    .min()
+                    .unwrap();
+                assert!(
+                    best < std::time::Duration::from_millis(50),
+                    "{name} on {:?}",
+                    &text[..8]
+                );
+            }
+        }
+    }
+
+    #[test]
     fn note_invisible_reads_python_escapes() {
         assert!(NOTE_INVISIBLE.search("a\u{ad}b").is_some());
         assert!(NOTE_INVISIBLE.search("a\u{e0001}").is_some());

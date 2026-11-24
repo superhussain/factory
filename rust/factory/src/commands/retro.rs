@@ -5521,6 +5521,74 @@ mod tests {
     }
 
     #[test]
+    fn admit_bad_finding_link_values_are_refused() {
+        let message = "must be a finding number from 1 to 1, or a list of distinct finding numbers";
+        for link in [
+            json!(0),
+            json!(2),
+            json!("1"),
+            json!(true),
+            json!(1.5),
+            Value::Null,
+            json!([]),
+            json!([1, 1]),
+            json!([0]),
+            json!([1, "1"]),
+        ] {
+            assert_eq!(
+                check_finding_link(&link, 1).as_deref(),
+                Some(message),
+                "{link}"
+            );
+        }
+        assert_eq!(check_finding_link(&json!(1), 1), None);
+        assert_eq!(check_finding_link(&json!([1]), 1), None);
+    }
+
+    #[test]
+    fn role_card_fields_pass_admission() {
+        let role = include_str!("../../../../skills/factory/agents/factory-retro.md");
+        let table = role
+            .split("| Card field | Limit |\n| --- | --- |\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n\n").next())
+            .unwrap();
+        let names: BTreeSet<&str> = table
+            .lines()
+            .map(|row| row.strip_prefix("| `").unwrap().split('`').next().unwrap())
+            .collect();
+        let full = json!({
+            "kind": "tooling", "title": "Guard the ls alias", "summary": "The ls alias crashes without a terminal.",
+            "evidence": [{"note": "winsize_crash in tool results", "count": 253, "sessions": [REF]}],
+            "paths": ["zsh/aliases.zsh"], "size": "S", "question": "How should the alias be guarded?",
+            "options": [
+                {"key": "A", "label": "Interactive only", "detail": "Wrap the alias in an interactive check",
+                 "pros": ["One line"], "cons": []},
+                {"key": "B", "label": "Drop the alias", "detail": "Use plain ls", "pros": [], "cons": ["No colors"]}
+            ],
+            "recommend": "A", "reason": "It keeps colors for people.", "project": "sample-tools",
+            "diagram": "flowchart LR\n  A --> B"
+        });
+        let have: BTreeSet<&str> = full
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(names, have);
+        let card: Map<String, Value> = full
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(k, _)| names.contains(k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let doc = json!({"schema": SUGGESTION_SCHEMA, "by": "retro", "run": RUN_A, "suggestions": [card]});
+        assert_eq!(check_suggestions(&doc, "retro"), None);
+        assert!(!role.contains("docs/autonomy.md"));
+    }
+
+    #[test]
     fn admit_fixed_job_id_escaped() {
         let agg =
             json!({"from": "2026-11-10", "to": "2026-11-16", "hosts": {"pc": {"sessions": 1}}});
