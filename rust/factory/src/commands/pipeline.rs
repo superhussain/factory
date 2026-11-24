@@ -1375,10 +1375,10 @@ fn trial_droppable(t: &Value) -> bool {
     t.is_object() && str_of(t, "status") == Some("open") && !trial_valid(t)
 }
 
-/// A dropped trial record's id for the settle line, escaped, or "(no id)" when it has no non-empty string id.
+/// A dropped trial record's id for the settle line, quoted and escaped by {:?}, or "(no id)" when it has no non-empty string id.
 fn trial_drop_label(t: &Value) -> String {
     match str_of(t, "id") {
-        Some(id) if !id.is_empty() => id.escape_debug().to_string(),
+        Some(id) if !id.is_empty() => format!("{id:?}"),
         _ => "(no id)".to_string(),
     }
 }
@@ -5510,9 +5510,7 @@ mod tests {
         #[cfg(unix)]
         #[test]
         fn pick_runtime() {
-            let _lock = crate::shared::TEST_ENV_LOCK
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let _lock = crate::shared::test_env_lock();
             let home = home("routes-runtime", ROUTES);
             let paseo = home.join("paseo");
             fs::create_dir(&paseo).unwrap();
@@ -5823,15 +5821,17 @@ mod tests {
         fn trial_drop_label_names_the_id() {
             assert_eq!(
                 trial_drop_label(&json!({"id": "factory-spec-v10"})),
-                "factory-spec-v10"
+                "\"factory-spec-v10\""
             );
             assert_eq!(trial_drop_label(&json!({})), "(no id)");
             assert_eq!(trial_drop_label(&json!({"id": ""})), "(no id)");
             assert_eq!(trial_drop_label(&json!({"id": 42})), "(no id)");
             assert_eq!(
                 trial_drop_label(&json!({"id": "bad\u{1b}[31m"})),
-                "bad\\u{1b}[31m"
+                "\"bad\\u{1b}[31m\""
             );
+            assert_eq!(trial_drop_label(&json!({"id": "a, b; x"})), "\"a, b; x\"");
+            assert_eq!(trial_drop_label(&json!({"id": "a\"b"})), "\"a\\\"b\"");
         }
 
         fn arm_ids(trial_id: &str, arm: &str, count: usize) -> Vec<String> {
@@ -7360,8 +7360,8 @@ mod tests {
                     "deterministic",
                 ),
             ];
-            CHECK_TIMEOUT.with(|t| t.set(Some(1)));
             for (row, unit, exit, cell) in rows {
+                CHECK_TIMEOUT.with(|t| t.set(Some(if row == "budget" { 1 } else { 60 })));
                 let _ = fs::remove_file(&record);
                 f.base(Some(json!([check("lint", "pass"), unit])), None);
                 let (code, out, err) = f.gate();

@@ -36,9 +36,9 @@ export class BoardEvents extends DurableObject {
     }
     // The whole board as a body, so the Worker passes its bytes through without decoding them.
     if (request.method === "GET" && url.pathname === "/board") {
-      const board = await this.board().read();
+      const board = await this.board().body();
       return board
-        ? new Response(board.text, { headers: { ETag: board.etag } })
+        ? new Response(board.body, { headers: { ETag: board.etag } })
         : new Response(null, { status: 404 });
     }
     const key = url.searchParams.get("key");
@@ -89,7 +89,10 @@ export class BoardEvents extends DurableObject {
 
   // The board store's RPC methods, which boardStore(env) calls.
   board() {
-    return (this.store ??= new BoardRows(this.ctx.storage, this.env));
+    // A read's copy that fails is caught here; the alarm retries it.
+    return (this.store ??= new BoardRows(this.ctx.storage, this.env, (promise) =>
+      this.ctx.waitUntil(promise.catch(() => {})),
+    ));
   }
 
   boardHead() {

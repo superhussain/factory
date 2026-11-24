@@ -79,7 +79,6 @@ test("a PATCH puts no board.json; the alarm copies the board to R2", async () =>
     jobs: [BUILD, SPEC, IDEA],
     autonomy: { mode: "auto" },
   };
-  assert.equal(await (await s.send("/board.json")).text(), JSON.stringify(expected));
   assert.equal(boardPuts(s.bucket), 0);
   assert.equal(s.r2().httpEtag, SEED);
   assert.deepEqual(JSON.parse(s.notified[0]), {
@@ -94,8 +93,114 @@ test("a PATCH puts no board.json; the alarm copies the board to R2", async () =>
   await s.room.runAlarm();
   assert.equal(s.r2().bytes.toString(), JSON.stringify(expected));
   // The copy changes R2's version, not the board's.
-  assert.equal((await s.send("/board.json")).headers.get("ETag"), etag);
+  const read = await s.send("/board.json");
+  assert.equal(read.headers.get("ETag"), etag);
+  assert.equal(await read.text(), JSON.stringify(expected));
   assert.equal(s.room.object.board().hasDirty(), false);
+});
+
+test("the first read after a write copies what it built; later reads stream R2's bytes", async (t) => {
+  const s = setup();
+  s.env.BOARD_DEBUG = "1";
+  const log = t.mock.method(console, "log", () => {});
+  // Each read runs in a room evicted since the last request, as in production.
+  const read = async () => {
+    s.room.restart();
+    const response = await s.send("/board.json");
+    return { etag: response.headers.get("ETag"), text: await response.text() };
+  };
+  const ok = await s.patch({ rows: [{ id: IDEA.id, expect: null, row: IDEA }] });
+  const etag = ok.headers.get("ETag");
+  const built = await read();
+  assert.equal(built.etag, etag);
+  await s.room.settle();
+  assert.equal(boardPuts(s.bucket), 1, "one copy, put from the bytes the read built");
+  assert.equal(s.r2().bytes.toString(), built.text);
+  assert.equal(s.room.object.board().state().verbatim, true);
+  assert.equal(s.room.object.board().hasDirty(), false);
+  const copied = await read();
+  assert.deepEqual(copied, built);
+  await s.room.settle();
+  await s.room.runAlarm();
+  assert.equal(boardPuts(s.bucket), 1, "neither the second read nor the alarm copies again");
+  assert.deepEqual(
+    log.mock.calls.map((c) => c.arguments[0]),
+    [`board store: read the pages for ${etag}`, `board store: read R2's bytes for ${etag}`],
+  );
+  // A commit after the copy moves the board off R2's bytes until the next copy.
+  await s.patch({ rows: [{ id: IDEA.id, expect: IDEA, row: { ...IDEA, title: "CSV 2" } }] });
+  assert.equal(s.room.object.board().state().verbatim, false);
+  assert.equal(JSON.parse((await read()).text).jobs[2].title, "CSV 2");
+});
+
+test("boardRead decodes each version once while the room stays in memory", async (t) => {
+  const s = setup();
+  s.env.BOARD_DEBUG = "1";
+  const log = t.mock.method(console, "log", () => {});
+  const ok = await s.patch({ rows: [{ id: IDEA.id, expect: null, row: IDEA }] });
+  const first = await s.room.stub.boardRead();
+  assert.deepEqual(await s.room.stub.boardRead(), first);
+  assert.equal(first.etag, ok.headers.get("ETag"));
+  assert.deepEqual(JSON.parse(first.text).jobs, [BUILD, SPEC, IDEA]);
+  assert.equal(log.mock.calls.length, 1, "the second read takes the decoded text");
+  await s.room.settle();
+});
+
+test("a read whose R2 get sees another read's copy answers with the version it serves", async () => {
+  const s = setup();
+  await s.send("/board.json");
+  // An evicted room has no memo, so its next read of the seeded board gets R2's bytes.
+  s.room.restart();
+  const get = s.bucket.get.bind(s.bucket);
+  let release, entered;
+  const gate = new Promise((resolve) => (release = resolve));
+  const waiting = new Promise((resolve) => (entered = resolve));
+  s.bucket.get = async (...args) => {
+    s.bucket.get = get;
+    entered();
+    await gate;
+    return get(...args);
+  };
+  const first = s.send("/board.json");
+  await waiting;
+  // A PATCH lands and a second read builds the new version and copies it, all during that get.
+  const ok = await s.patch({
+    updated: "2026-11-19T12:00:00Z",
+    rows: [{ id: IDEA.id, expect: null, row: IDEA }],
+  });
+  const etag = ok.headers.get("ETag");
+  const expected = { ...BOARD, updated: "2026-11-19T12:00:00Z", jobs: [BUILD, SPEC, IDEA] };
+  assert.deepEqual(await (await s.send("/board.json")).json(), expected);
+  await s.room.settle();
+  assert.deepEqual(JSON.parse(s.r2().bytes), expected);
+  release();
+  const response = await first;
+  assert.equal(response.headers.get("ETag"), etag);
+  assert.deepEqual(await response.json(), expected);
+});
+
+test("a write during a read's copy leaves the board off R2's bytes until the next copy", async () => {
+  const s = setup();
+  const ok = await s.patch({ rows: [{ id: IDEA.id, expect: null, row: IDEA }] });
+  const put = s.bucket.put.bind(s.bucket);
+  const renamed = { ...IDEA, title: "CSV 2" };
+  s.bucket.put = async (...args) => {
+    s.bucket.put = put;
+    const again = await s.patch({ rows: [{ id: IDEA.id, expect: IDEA, row: renamed }] });
+    assert.equal(again.status, 200);
+    return put(...args);
+  };
+  const first = await s.send("/board.json");
+  assert.equal(first.headers.get("ETag"), ok.headers.get("ETag"));
+  await s.room.settle();
+  assert.deepEqual(JSON.parse(s.r2().bytes).jobs, [BUILD, SPEC, IDEA]);
+  const board = s.room.object.board();
+  assert.equal(board.state().verbatim, false);
+  assert.equal(board.hasDirty(), true);
+  assert.deepEqual((await (await s.send("/board.json")).json()).jobs, [BUILD, SPEC, renamed]);
+  await s.room.settle();
+  assert.deepEqual(JSON.parse(s.r2().bytes).jobs, [BUILD, SPEC, renamed]);
+  assert.equal(board.state().verbatim, true);
 });
 
 test("a PATCH during a copy stays unflushed until the next alarm", async () => {
@@ -135,7 +240,7 @@ test("the version moving under a patch retries it on the new version", async () 
   };
   const response = await s.patch({ rows: [{ id: IDEA.id, expect: null, row: IDEA }] });
   assert.equal(response.status, 200);
-  assert.deepEqual(s.room.stored().jobs, [{ ...BUILD, note: "host" }, SPEC, IDEA]);
+  assert.deepEqual((await s.room.stored()).jobs, [{ ...BUILD, note: "host" }, SPEC, IDEA]);
 });
 
 test("an archive pass that loses to a PATCH moves nothing", async (t) => {
@@ -162,7 +267,7 @@ test("an archive pass that loses to a PATCH moves nothing", async (t) => {
   assert.deepEqual(await run(), { status: "conflict", moved: [] });
   assert.equal(warn.mock.calls.length, 1);
   assert.deepEqual(
-    s.room.stored().jobs.map((j) => j.id),
+    (await s.room.stored()).jobs.map((j) => j.id),
     [old.id, SPEC.id],
   );
   s.room.stub.boardReplace = replace;
@@ -170,7 +275,7 @@ test("an archive pass that loses to a PATCH moves nothing", async (t) => {
   // A full write reaches R2 before it answers.
   assert.deepEqual(JSON.parse(s.r2().bytes).jobs, [{ ...SPEC, note: "device" }]);
   assert.equal(JSON.parse(s.r2().bytes).archived.max_id, 1999);
-  assert.deepEqual(s.room.stored(), JSON.parse(s.r2().bytes));
+  assert.deepEqual(await s.room.stored(), JSON.parse(s.r2().bytes));
 });
 
 test("a PUT copies to R2 before it answers and refuses a row over 1 MiB", async () => {
@@ -346,8 +451,8 @@ test("a copy that lands before the room records it is the room's own after a res
   assert.deepEqual(JSON.parse(s.r2().bytes).jobs, [first, SPEC]);
   assert.deepEqual((await (await s.send("/board.json")).json()).jobs, [second, SPEC]);
   assert.equal(warn.mock.calls.length, 0, "the room's own copy is no outside write to merge");
-  assert.equal(s.room.object.board().hasDirty(), true);
-  await s.room.runAlarm();
+  // That read built the board, so it copies it.
+  await s.room.settle();
   assert.deepEqual(JSON.parse(s.r2().bytes).jobs, [second, SPEC]);
   assert.equal(s.room.object.board().hasDirty(), false);
 });

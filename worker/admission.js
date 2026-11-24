@@ -181,6 +181,25 @@ export function checkOperatorText(text, field, kind = "note") {
   return null;
 }
 
+const SHELL = PHRASES.find(([id]) => id === "shell")[1];
+// Only the CR of CRLF reads as a space; a CR at the end of the file or of `replace` is lone.
+const spaced = (s) => s.replace(/\t|\r(?=\n)/g, " ");
+
+/**
+ * The notes.md retro rules, with tab and the CR of CRLF read as spaces: every note rule on the
+ * touched `lines`, the shell pattern on `joined` (the touched lines plus the nearest non-blank
+ * line on each side), and a suffix naming stored text when `replace` alone passes. A lone CR fails.
+ */
+export function checkNoteSplice(lines, joined, replace, field) {
+  const error =
+    checkOperatorText(spaced(lines), field, "note") ??
+    (SHELL.test(spaced(joined))
+      ? `${field}: reads like an instruction to override factory rules (shell)`
+      : null);
+  if (error === null || checkOperatorText(spaced(replace), field, "note") !== null) return error;
+  return `${error}; the match includes stored text around replace`;
+}
+
 const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** The first schema error in a parsed pipeline document, or null. */

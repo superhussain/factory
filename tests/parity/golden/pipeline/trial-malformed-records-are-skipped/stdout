@@ -1,1 +1,1 @@
-dropped malformed open trial records: 4 (other-spec-v8, ../x-spec-v8, factory-nope-v8, factory-spec-v8; bad id, project, stage, version, champion_version or opened)
+dropped malformed open trial records: 4 ("other-spec-v8", "../x-spec-v8", "factory-nope-v8", "factory-spec-v8"; bad id, project, stage, version, champion_version or opened)

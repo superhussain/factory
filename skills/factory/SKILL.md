@@ -263,7 +263,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
 
 ## Rules
 
-- Before each role dispatch, run `"$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`. For via paseo, record after the worker exists, with `--paseo-agent <agent-id>`.
+- Before each role dispatch, run `"$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`. `<via>` is `native` for a direct Claude Code subagent, else `paseo`, `launcher`, `general` or `direct`. For via paseo, record after the worker exists, with `--paseo-agent <agent-id>`.
   After hold, record the orchestrator once when no orchestrator row carries this session.
 - Agents get context from files, not the conversation. Build every agent prompt with
   `"$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] --out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`
@@ -394,7 +394,10 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   passed, or the repo has none. It records that head as `checked_head`, and
   `pr-merge` merges only that head. On a PR behind `$BASE`, it runs
   `gh pr update-branch` and rechecks the new head. Exit 3: still pending; run it
-  again. Exit 1 names failing checks. Exit 4: no open PR. Exit 5: no usable gh
+  again once. A second exit 3 in a row from `checks` or `pr-merge` moves the job to
+  `needs-human` with the note `merge stalled: exit 3 twice` and `needs` `merge or
+  close PR #<n>: checks or mergeability stayed pending`. Nothing merges. Exit 1
+  names failing checks. Exit 4: no open PR. Exit 5: no usable gh
   reply. Exit 6: `gh pr update-branch` failed; treat it as a merge conflict.
   Exit 7 means the approver escalated the job: the board marks
   it escalated or its decision.md says ESCALATE. Nothing merges. Patch
@@ -411,10 +414,11 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   `"$RUNTIME" pr-merge "$SLUG/<id>"` as its own command, never a bare `gh pr merge`.
   `merged`: move the job to `merged`, then run `cleanup`. `enqueued`: leave it at
   `pr-open` with note `queued: <detail>`. Exit 6: the conflict goes back to the
-  builder as a rework. Exit 3: run `checks` again, then `pr-merge`. Exit 1: move the
-  job to `needs-human` with `detail` as the note. Exits 4, 5, 7 and 8 act as they do
-  for `checks`. A failing check or a merge conflict goes back to the builder as a
-  rework with the log. A second failure moves the job to `needs-human`.
+  builder as a rework. Exit 3: run `checks` again, then `pr-merge`, under the same
+  cap. Exit 1: move the job to `needs-human` with `detail` as the note. Exits 4, 5,
+  7 and 8 act as they do for `checks`. A failing check or a merge conflict goes back
+  to the builder as a rework with the log. A second failure moves the job to
+  `needs-human`.
   With a stacked rider, `board` moves it out of the batch at `pr-open` with the job's
   `automerge` and `escalated`. Merge its PR the same way, move it to `merged`, and
   run `cleanup "$SLUG/<rider-id>"`. When a job with a stacked rider closes, `board`

@@ -363,7 +363,7 @@ admit nor counts toward the pause. A revert counts toward the daily retro cap. T
 open records, every unresumed revert and the newest 20 other settled ones. Settle drops an open
 record that is not well formed (`trial_valid`): a bad id, project, stage, version,
 champion_version or opened.
-Settle prints `dropped malformed open trial records: <n> (<ids>; bad id, project, stage, version, champion_version or opened)`, with each id escaped and `(no id)` for a record without one.
+Settle prints `dropped malformed open trial records: <n> (<ids>; bad id, project, stage, version, champion_version or opened)`, with each id quoted and escaped as Rust's `{:?}` writes it, and an unquoted `(no id)` for a record without one.
 It also drops non-dict entries from `trials`
 when it writes the board.
 - **Settle-shaped.** The Worker's `checkTrialSettle` refuses, with 400, a board `PUT` or
@@ -426,7 +426,7 @@ creates a missing file and never touches `global`.
 | `project.md` frontmatter is unchanged | 403 `retro edits never change project frontmatter` |
 | at most 2 retro versions per file in 24 hours | 429 `retro edit cap: 2 per file per day` |
 | the saved text and summary pass the project document checks | 400 `<field>: <reason>` |
-| the touched lines of the saved `notes.md` text, plus the nearest non-blank line on each side, pass the note checks, so `replace` cannot join stored text into a link or override phrase | 400 `replace: <reason>` |
+| the touched lines of the saved `notes.md` text, with CRLF and tab read as spaces, pass the note checks, and the nearest non-blank line on each side passes the shell pattern | 400 `replace: <reason>`, plus `; the match includes stored text around replace` when `replace` alone passes |
 
 - **Device first.** Before any PUT, `retro admit` repeats the text checks, the
   exactly-once match, the 600-character cap, the file rule, the daily cap and the pause.

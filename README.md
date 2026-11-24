@@ -8,7 +8,6 @@ A portable software factory: a shared board, safe multi-device state, and a priv
 - Node `>=22.18.0` (development and verification are pinned to `24.14.0`; see `.node-version`)
 - pnpm `11.9.0` (`package.json` `packageManager`)
 - Rust toolchain: install rustup from https://rustup.rs. `tools/install.sh` (`tools\install.ps1` on Windows) builds the factory binary with cargo from PATH or `~/.cargo/bin`
-- Python `3.8+` only for the `tests/worker/test_*.py` suites that `pnpm test` runs, until they move off Python
 - Git
 - A Cloudflare account with an active zone (for deployment)
 

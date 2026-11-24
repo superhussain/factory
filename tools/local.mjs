@@ -183,9 +183,20 @@ export async function startCancelWorker({ persistDir }) {
   return { origin: "http://127.0.0.1:8222", close: () => mf.dispose() };
 }
 
-function python(args, env) {
+// The local HTTP suites, one file at a time, since they share the services' storage.
+const SUITES = [
+  "tests/worker/http-v1.test.mjs",
+  "tests/worker/project-api.test.mjs",
+  "tests/worker/project-documents-api.test.mjs",
+];
+
+function nodeTest(env) {
   return new Promise((resolve) => {
-    const child = spawn("python3", args, { env: { ...process.env, ...env } });
+    const child = spawn(
+      process.execPath,
+      ["--test", "--test-concurrency=1", "--test-reporter=spec", ...SUITES],
+      { env: { ...process.env, ...env } },
+    );
     let output = "";
     child.stdout.on("data", (chunk) => {
       output += chunk;
@@ -197,18 +208,15 @@ function python(args, env) {
   });
 }
 
-function unittestCounts(output) {
-  const ran = /Ran (\d+) test/.exec(output);
-  const failed = /FAILED \(([^)]*)\)/.exec(output);
-  const counts = { executed: ran ? Number(ran[1]) : 0, failed: 0, errors: 0, skipped: 0 };
-  if (failed) {
-    for (const part of failed[1].split(", ")) {
-      const [name, value] = part.split("=");
-      if (name in counts) counts[name] = Number(value);
-    }
-  }
-  counts.passed = counts.executed - counts.failed - counts.errors - counts.skipped;
-  return counts;
+function nodeTestCounts(output) {
+  const count = (name) => Number(new RegExp(`^ℹ ${name} (\\d+)$`, "m").exec(output)?.[1] ?? 0);
+  return {
+    executed: count("tests"),
+    passed: count("pass"),
+    failed: count("fail") + count("cancelled"),
+    errors: 0,
+    skipped: count("skipped") + count("todo"),
+  };
 }
 
 // The workerd production-entry crypto checks: real default fetch, real jose, locally
@@ -251,16 +259,12 @@ async function check() {
   try {
     auth = await startWorkerd({ port: 8221, persistDir: dir + "r2-auth", config: AUTH_CONFIG });
     cancel = await startCancelWorker({ persistDir: dir + "r2-cancel" });
-    const suite = await python(
-      ["-B", "-m", "unittest", "discover", "-s", "tests/worker", "-p", "test_*.py", "-v"],
-      {
-        FACTORY_TEST_URL: service.origin,
-        FACTORY_CANCEL_TEST_URL: cancel.origin,
-        PYTHONDONTWRITEBYTECODE: "1",
-      },
-    );
+    const suite = await nodeTest({
+      FACTORY_TEST_URL: service.origin,
+      FACTORY_CANCEL_TEST_URL: cancel.origin,
+    });
     console.log(suite.output);
-    const counts = unittestCounts(suite.output);
+    const counts = nodeTestCounts(suite.output);
     for (const key of Object.keys(totals)) totals[key] += counts[key];
     if (suite.code !== 0) totals.failed += 1;
     let authFailed = 0;

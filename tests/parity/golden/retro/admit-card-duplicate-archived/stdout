@@ -1,0 +1,11 @@
+wrote {home}/retro/card-duplicate-archived/findings.md
+{
+  "admitted": [],
+  "skipped": [
+    {
+      "title": "Red flag: pipe-to-shell via Bash",
+      "reason": "duplicate 004-archived"
+    }
+  ]
+}
+uploaded retro run card-duplicate-archived

@@ -738,9 +738,7 @@ mod tests {
     }
 
     fn push_with_home(home: &Path, target: &str) -> Res<()> {
-        let _lock = crate::shared::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::shared::test_env_lock();
         let old = std::env::var_os("FACTORY_HOME");
         std::env::set_var("FACTORY_HOME", home);
         let result = push_target(target);
@@ -918,6 +916,61 @@ mod tests {
             e.stderr,
             "factory.py: cannot push local project: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte\n"
         );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn local_edit_during_get_and_put() {
+        use crate::shared::http::tests::serve_hooked;
+        use std::sync::{Arc, Mutex};
+        let doc: Arc<Mutex<PathBuf>> = Arc::default();
+        let hook_doc = doc.clone();
+        let (origin, seen) = serve_hooked(
+            vec![
+                (
+                    200,
+                    "---\nrepo: octo/sample\n---\n",
+                    vec![("ETag", "\"e1\"")],
+                ),
+                (
+                    200,
+                    "---\nrepo: octo/sample\n---\nRemote",
+                    vec![("ETag", "\"e2\"")],
+                ),
+                (200, "", vec![("ETag", "\"e3\"")]),
+            ],
+            // Request 1 is the second pull's GET and request 2 is the push's PUT.
+            move |index| {
+                let doc = hook_doc.lock().unwrap();
+                match index {
+                    1 => fs::write(&*doc, "---\nrepo: octo/sample\n---\nTyping").unwrap(),
+                    2 => fs::write(&*doc, "---\nrepo: octo/sample\n---\nTypingMore").unwrap(),
+                    _ => {}
+                }
+            },
+        );
+        let home = home_for("sync-local-edit", &origin);
+        *doc.lock().unwrap() = home.join("projects/sample.md");
+        let state_path = home.join("projects/sample.sync.json");
+        pull_project(&home, "sample").unwrap();
+        let before = fs::read(&state_path).unwrap();
+        let e = pull_project(&home, "sample").unwrap_err();
+        assert_eq!(e.code, 6);
+        assert_eq!(
+            e.stderr,
+            "factory.py: Project changed locally during pull. Local edits were kept.\n"
+        );
+        let draft = b"---\nrepo: octo/sample\n---\nTyping";
+        assert_eq!(fs::read(&*doc.lock().unwrap()).unwrap(), draft);
+        assert_eq!(fs::read(&state_path).unwrap(), before);
+        push_project(&home, "sample").unwrap();
+        assert_eq!(seen.lock().unwrap()[2].body, draft);
+        assert_eq!(
+            fs::read(&*doc.lock().unwrap()).unwrap(),
+            b"---\nrepo: octo/sample\n---\nTypingMore"
+        );
+        let state = read_project_state(&state_path).unwrap().unwrap();
+        assert_eq!(state["sha256"], sha(draft));
         fs::remove_dir_all(home).unwrap();
     }
 

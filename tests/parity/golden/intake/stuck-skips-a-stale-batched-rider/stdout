@@ -1,0 +1,9 @@
+[
+  {
+    "id": "090-sample-export-csv",
+    "project": "sample",
+    "repo_path": "/tmp",
+    "session": "tag",
+    "stage": "build"
+  }
+]
