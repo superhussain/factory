@@ -1304,16 +1304,7 @@ pub fn explore(call: &Call) -> Res<()> {
     let home = factory_home()?;
     let folder = home.join("explore").join(slug);
     if let [_, run] = rest {
-        let target = folder.join(run);
-        let linked = [&home.join("explore"), &folder, &target]
-            .iter()
-            .any(|p| is_link(p).unwrap_or(true));
-        if linked || !target.is_dir() {
-            return Err(fail(format!("no explorer checkout {slug}/{run}"), 4));
-        }
-        fs::remove_dir_all(&target).map_err(|e| os_fail(e, &target))?;
-        println!("removed {}", target.display());
-        return Ok(());
+        return explore_done(&home, slug, run);
     }
     let autonomy = load_autonomy(&read_board(&home)?);
     if autonomy["paused"] == true {
@@ -1356,7 +1347,28 @@ pub fn explore(call: &Call) -> Res<()> {
             2,
         ));
     }
-    let repo = Path::new(repo);
+    let printed = explore_snapshot(slug, &folder, Path::new(repo), base)?;
+    println!("{}", dumps(&printed, INDENT2));
+    Ok(())
+}
+
+/// Remove one run's checkout, unless it or a parent folder is a link or it is missing.
+fn explore_done(home: &Path, slug: &str, run: &str) -> Res<()> {
+    let folder = home.join("explore").join(slug);
+    let target = folder.join(run);
+    let linked = [&home.join("explore"), &folder, &target]
+        .iter()
+        .any(|p| is_link(p).unwrap_or(true));
+    if linked || !target.is_dir() {
+        return Err(fail(format!("no explorer checkout {slug}/{run}"), 4));
+    }
+    fs::remove_dir_all(&target).map_err(|e| os_fail(e, &target))?;
+    println!("removed {}", target.display());
+    Ok(())
+}
+
+/// Fetch origin's base, snapshot its head under folder and return the record explore prints.
+fn explore_snapshot(slug: &str, folder: &Path, repo: &Path, base: &str) -> Res<Value> {
     origin_git(
         repo,
         &[
@@ -1377,10 +1389,8 @@ pub fn explore(call: &Call) -> Res<()> {
     let checkout = folder.join(&run);
     let out = folder.join(format!("{run}.json"));
     snapshot(repo, &commit, &checkout)?;
-    let printed = json!({"project": slug, "run": run, "commit": commit,
-        "checkout": checkout.display().to_string(), "out": out.display().to_string()});
-    println!("{}", dumps(&printed, INDENT2));
-    Ok(())
+    Ok(json!({"project": slug, "run": run, "commit": commit,
+        "checkout": checkout.display().to_string(), "out": out.display().to_string()}))
 }
 
 /// Pair this device with a host a person added in Settings. The code goes only into the POST body.
@@ -2173,6 +2183,111 @@ mod tests {
         assert_eq!(found, vec![".env.example", "a.txt", "deep", long.as_str()]);
         assert_eq!(fs::read_to_string(dest.join(&long)).unwrap(), "long\n");
         assert!(snapshot(&repo, "no-such-commit", &dir.join("out/other")).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Run git in cwd with a fixed identity, failing the test when git fails, and return its stdout.
+    #[cfg(unix)]
+    fn git_in(cwd: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+            ])
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "protocol.file.allow=always",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}");
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explore_snapshot_of_the_fetched_head() {
+        let dir = temp_dir("setup-explore-snapshot");
+        let (seed, origin, repo) = (dir.join("seed"), dir.join("origin.git"), dir.join("repo"));
+        fs::create_dir(&seed).unwrap();
+        git_in(&dir, &["init", "-q", "--bare", origin.to_str().unwrap()]);
+        git_in(&dir, &["init", "-q", seed.to_str().unwrap()]);
+        for path in [&origin, &seed] {
+            git_in(path, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+        }
+        fs::write(seed.join("a.txt"), "a\n").unwrap();
+        fs::write(seed.join(".env.example"), "KEY=\n").unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", seed.join("link")).unwrap();
+        git_in(&seed, &["add", "-A"]);
+        git_in(&seed, &["commit", "-q", "-m", "one"]);
+        git_in(&seed, &["push", "-q", origin.to_str().unwrap(), "main"]);
+        git_in(
+            &dir,
+            &[
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                repo.to_str().unwrap(),
+            ],
+        );
+        // Origin moves after the clone, so the run has to fetch to see it.
+        fs::write(seed.join("b.txt"), "b\n").unwrap();
+        git_in(&seed, &["add", "-A"]);
+        git_in(&seed, &["commit", "-q", "-m", "two"]);
+        git_in(&seed, &["push", "-q", origin.to_str().unwrap(), "main"]);
+        let head = git_in(&origin, &["rev-parse", "main"]);
+        let folder = dir.join("explore/sample");
+        let got = explore_snapshot("sample", &folder, &repo, "main").unwrap();
+        let keys: Vec<&String> = got.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["project", "run", "commit", "checkout", "out"]);
+        assert_eq!(
+            (&got["project"], &got["commit"]),
+            (&json!("sample"), &json!(head))
+        );
+        let run = got["run"].as_str().unwrap();
+        assert!(RUN_TAG.is_full(run), "{run}");
+        let checkout = folder.join(run);
+        assert_eq!(got["checkout"], checkout.display().to_string());
+        assert_eq!(got["out"], format!("{}.json", checkout.display()));
+        let mut names: Vec<String> = fs::read_dir(&checkout)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(names, [".env.example", "a.txt", "b.txt"]);
+        assert_eq!(fs::read_to_string(checkout.join("a.txt")).unwrap(), "a\n");
+        assert!(!folder.join(format!("{run}.json")).exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explore_done_refuses_linked_parents() {
+        let dir = temp_dir("setup-explore-done");
+        let (home, elsewhere) = (dir.join("home"), dir.join("elsewhere"));
+        fs::create_dir_all(elsewhere.join("sample/run-1")).unwrap();
+        fs::create_dir(&home).unwrap();
+        let refused = |home: &Path| {
+            let e = explore_done(home, "sample", "run-1").unwrap_err();
+            assert_eq!(
+                (e.code, e.stderr.as_str()),
+                (4, "factory.py: no explorer checkout sample/run-1\n")
+            );
+            assert!(elsewhere.join("sample/run-1").is_dir());
+        };
+        std::os::unix::fs::symlink(&elsewhere, home.join("explore")).unwrap();
+        refused(&home);
+        fs::remove_file(home.join("explore")).unwrap();
+        fs::create_dir(home.join("explore")).unwrap();
+        std::os::unix::fs::symlink(elsewhere.join("sample"), home.join("explore/sample")).unwrap();
+        refused(&home);
         fs::remove_dir_all(dir).unwrap();
     }
 
