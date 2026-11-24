@@ -72,6 +72,17 @@ test("a whole-board read costs a row per page, and a same-version GET almost non
   }
 });
 
+// Production evicts the room between GETs a minute apart, so no memo carries a read.
+test("a GET after a PATCH in an evicted room reads its pages once; after the copy, none", () => {
+  for (const work of [today, doubled]) {
+    const built = op(work, "GET /board.json after a PATCH, room evicted");
+    assert.ok(built.read <= 45 && built.written === 0, JSON.stringify(built));
+    // R2's copy is the board again, so its bytes stream through and no page is read.
+    const copied = op(work, "GET /board.json after the copy, room evicted");
+    assert.ok(copied.read <= 3 && copied.written === 0, JSON.stringify(copied));
+  }
+});
+
 test("the daily projection at twice today's board and traffic stays under half of each cap", () => {
   const p = projection(doubled, 2);
   assert.ok(p.read < 2_500_000, `rows read a day ${p.read}`);

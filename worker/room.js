@@ -36,9 +36,9 @@ export class BoardEvents extends DurableObject {
     }
     // The whole board as a body, so the Worker passes its bytes through without decoding them.
     if (request.method === "GET" && url.pathname === "/board") {
-      const board = await this.board().read();
+      const board = await this.board().body();
       return board
-        ? new Response(board.text, { headers: { ETag: board.etag } })
+        ? new Response(board.body, { headers: { ETag: board.etag } })
         : new Response(null, { status: 404 });
     }
     const key = url.searchParams.get("key");

@@ -185,6 +185,6 @@ export function memoryRoom(
     },
     // The board the room holds, read without a request: its version and parsed document.
     etag: () => object.board().state()?.etag ?? null,
-    stored: () => JSON.parse(object.board().text(object.board().state())),
+    stored: async () => JSON.parse(await object.board().blob(object.board().state()).text()),
   };
 }
