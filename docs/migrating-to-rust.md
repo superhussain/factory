@@ -303,7 +303,7 @@ Use `factory.exe` and PowerShell paths on Windows.
 9. **Check the mirror.** `$RT job <id>` for any job on the board. Expect its JSON
    and well under a second.
 10. **Find old callers.** Run each search in [Update old automations](#update-old-automations).
-    Expect no matches outside the stub. Update any match, then search again.
+    Expect no matches. Update any match, then search again.
 11. **Hand back.** Tell the person the host is migrated, and that they can clear
     the halt from the dashboard banner once every host is done.
 
