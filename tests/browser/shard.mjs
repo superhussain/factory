@@ -1,6 +1,5 @@
 // Picks one CI shard of the browser cases. FACTORY_BROWSER_SHARD="<n>/<total>" keeps
 // every total-th CJS suite and node file, starting at position n - 1. Unset runs all.
-// Temporary: makes this PR's CI run the browser target, for timing only.
 export function selectShard(cases, value) {
   if (value === undefined || value === "") return cases;
   const match = /^([1-9][0-9]*)\/([1-9][0-9]*)$/.exec(value);
