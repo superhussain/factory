@@ -1,7 +1,7 @@
 ---
 name: factory
 description: Use for /factory commands, factory dashboard tasks, and continuing or handing a factory job between Claude, OpenCode, and other coding agents. Captures ideas before project registration, then runs spec, build, four reviews, approval, PR and merge. Registers projects with init; handoff and resume preserve an existing job.
-compatibility: Requires git and gh, plus a Rust toolchain (rustup) to build the binary, and Python 3.8+ for tools/install.py and the other tools/*.py scripts; network access to the configured factory HTTPS API and project Git/gh remotes.
+compatibility: Requires git and gh, plus a Rust toolchain (rustup) to build the binary; network access to the configured factory HTTPS API and project Git/gh remotes.
 ---
 
 # Software factory

@@ -61,7 +61,7 @@ device data. Locked integrity for the reviewed hook-bearing packages:
 | Verification | `tests/worker/`, `tests/browser/`, hosted `tests/support/`, hosted fixtures, `tests/tools/`. |
 | Documentation | `README.md`, `docs/architecture.md`, `docs/cloudflare.md`, `docs/device.md`, `docs/integrations.md`, `THIRD_PARTY_NOTICES.md`. |
 
-Source merge (Git), installed skill refresh (`tools/install.py`) and hosted
+Source merge (Git), installed skill refresh (`tools/install.sh`) and hosted
 deployment (`tools/deploy.py deploy`) are three distinct operations. None runs a
 migration or reset; installing or deploying never rewrites existing state.
 

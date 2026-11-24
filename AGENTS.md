@@ -8,19 +8,21 @@ mise exec -- pnpm run lint
 mise exec -- pnpm run format:check
 mise exec -- pnpm test
 mise exec -- pnpm exec nx affected -t auth protocol assets deploy local browser --base="$(git merge-base origin/main HEAD)" --head=HEAD
-mise exec -- pnpm exec nx run-many -t cli install verify
+mise exec -- pnpm exec nx run-many -t verify
 mise exec -- python3 tools/verify.py all
-python3 tools/verify.py device
-PYTHONPATH=tests/cli python3 -B -m unittest tests.cli.test_pickup.CloseTest
+(cd rust && cargo build --profile host --locked && cargo test --locked </dev/null)
+python3 tests/parity/run.py --bin rust/target/host/factory --jobs 8
 ```
 
-The device checks use only Python's standard library, and the installed bundle is the factory binary;
-neither needs Node, pnpm or mise. The affected targets cache under the ignored
+The installed bundle is the factory binary, and its checks are `cargo test` and the parity
+harness; neither needs Node, pnpm or mise. The affected targets cache under the ignored
 `.nx/cache`; job 108 owns the lint and format targets. `local` binds
 `127.0.0.1:8220`/`8221`; `browser` binds owned ephemeral ports, so parallel
 jobs can run it at once. `browser` has no Nx dependency on `local`, so the two run side by side.
 
-CLI tests import `support` from `tests/cli`. A command that names one test file, class or method needs the `PYTHONPATH=tests/cli` prefix, as above. On Windows, or in a shell without that prefix form, run `python3 -B -m unittest discover -s tests/cli -p test_pickup.py`. Without either, the run fails with `No module named 'support'`. The discover form runs every test in that file; it cannot select one class or method.
+The parity harness compares the binary with the golden files in `tests/parity/golden/`. After an intended
+output change, rerun the changed cases with `--record --case <id>` and review the golden diff
+(see [development.md](docs/development.md), Parity harness).
 
 Commits run a husky pre-commit hook. It runs gitleaks on the staged diff first,
 then lints and format-checks only the staged `.js`/`.mjs`/`.cjs`/`.ts` files

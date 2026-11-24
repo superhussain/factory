@@ -8,8 +8,8 @@ Working on the repository itself: tests, tooling and docs. For deployment see
 - mise for the pinned tools in `mise.toml`
 - Node `>=22.18.0`, development pinned to `24.14.0` (`.node-version`)
 - pnpm `11.9.0` (`package.json` `packageManager`)
-- Rust toolchain: install rustup from https://rustup.rs. `tools/install.py` uses cargo from PATH or `~/.cargo/bin`. Without cargo it installs only the Python runtime, `runtime/factory.py` run with `python3` (`py -3` on Windows), and no `runtime/factory` binary, so the `runtime/factory` commands in these docs do not exist until job 2222
-- Python `3.8+` for `tools/install.py` and the other `tools/*.py` scripts (still needed until those scripts move off Python)
+- Rust toolchain: install rustup from https://rustup.rs. `tools/install.sh` (`tools\install.ps1` on Windows) builds the factory binary with cargo from PATH or `~/.cargo/bin`
+- Python `3.8+` for the `tools/*.py` scripts and the parity harness (still needed until those move off Python)
 - Git
 
 ## Install and browser provisioning
@@ -59,7 +59,7 @@ Type checking is allowlisted per module: `mise exec -- pnpm run check:types` run
 `tools/verify.py` composes them into three fixed groups:
 
 ```sh
-python3 tools/verify.py device    # cli + installer unittest discovery
+python3 tools/verify.py device    # cargo test of the rust/ crate
 mise exec -- python3 tools/verify.py hosted    # the six pnpm scripts above, in order
 mise exec -- python3 tools/verify.py all       # device then hosted, each leaf once
 ```
@@ -68,24 +68,12 @@ mise exec -- python3 tools/verify.py all       # device then hosted, each leaf o
 failing command stops the run with exit 1; invalid arguments or a missing pnpm
 exit 2. The `device` group and the installed bundle need no Node, pnpm or mise.
 
-CLI tests import `support` from `tests/cli`. A command that names one test file,
-class or method needs the `PYTHONPATH` prefix in the first line below. On Windows,
-or in a shell without that prefix form, run the second line. Without either, the
-run fails with `No module named 'support'`.
-The discover form runs every test in that file; it cannot select one class or method.
-
-```sh
-PYTHONPATH=tests/cli python3 -B -m unittest tests.cli.test_pickup.CloseTest
-python3 -B -m unittest discover -s tests/cli -p test_pickup.py
-```
-
 CI runs the same leaves once each in one Ubuntu pull-request workflow with
 parallel jobs, and `verify.py all` is never a second CI run. The `targets` job
 runs `format:check`, the workflow contracts and the affected `auth`, `protocol`,
-`assets`, `deploy` and `local` targets. The `python` job runs the cached `cli`,
-`install` and `verify` targets via `nx run-many` on every pull request. Four
+`assets`, `deploy`, `local` and `verify` targets. Four
 `browser` jobs each run the affected `browser` target on a quarter of the
-suites, picked by `FACTORY_BROWSER_SHARD=<n>/4`; unset runs them all. The `paseo-plugin` job installs `paseo-plugin/` from its own lockfile, then runs its `typecheck` and `pnpm run test:paseo-plugin`, which also checks that every plugin lockfile entry has a public registry tarball URL. `paseo-plugin/.npmrc` pins `registry=https://registry.npmjs.org/`, because the plugin is its own pnpm workspace and does not read the root `.npmrc`. A user `~/.npmrc` that names a mirror would otherwise fail every plugin install with `ERR_PNPM_TARBALL_URL_MISMATCH`. Its packages are not in the cached store, so that install downloads them each run. The `rust` job checks `cargo fmt --check`, builds and tests the `rust/` crate for linux-x64 with the toolchain pinned in `rust/rust-toolchain.toml` (which includes `rustfmt`), runs `cargo check` for the `aarch64-apple-darwin` and `x86_64-pc-windows-gnu` targets, then runs the parity ratchet and `startup.py` (see Parity harness). The `ci`
+suites, picked by `FACTORY_BROWSER_SHARD=<n>/4`; unset runs them all. The `paseo-plugin` job installs `paseo-plugin/` from its own lockfile, then runs its `typecheck` and `pnpm run test:paseo-plugin`, which also checks that every plugin lockfile entry has a public registry tarball URL. `paseo-plugin/.npmrc` pins `registry=https://registry.npmjs.org/`, because the plugin is its own pnpm workspace and does not read the root `.npmrc`. A user `~/.npmrc` that names a mirror would otherwise fail every plugin install with `ERR_PNPM_TARBALL_URL_MISMATCH`. Its packages are not in the cached store, so that install downloads them each run. The `rust` job checks `cargo fmt --check`, builds and tests the `rust/` crate for linux-x64 with the toolchain pinned in `rust/rust-toolchain.toml` (which includes `rustfmt`), runs `cargo check` for the `aarch64-apple-darwin` and `x86_64-pc-windows-gnu` targets, then runs the parity harness against its golden files (see Parity harness). The `ci`
 job runs unless the run was cancelled, prints each job's name with its result,
 and passes only when every other job succeeds. `local` binds
 `127.0.0.1:8220`/`8221`/`8222` and `browser` binds owned ephemeral ports,
@@ -96,21 +84,16 @@ browser test, and it restores the browser cache read-only so only the shards
 save it. Each job restores the pnpm store read-only from `main`'s
 `node-cache-Linux-x64-pnpm-<lockfile hash>` key (saved by the deploy workflow's
 `setup-node`), so installs are warm across pull requests. Nx keeps task results in
-the local `.nx` folder. The `python` job saves that folder to the Actions cache
-under a key scoped to its pull request, so a rerun or a later commit on the same
-pull request replays unchanged `cli`, `install` and `verify` results. A pull
-request with no entry of its own restores the newest `main` entry, which the
-`Nx cache warm` workflow (`.github/workflows/nx-cache-warm.yml`) saves at 06:17 UTC
-each day or when run by hand. Other jobs start cold.
+the local `.nx` folder, and every CI job starts it cold.
 
 ## Affected runs
 
-The four concerns are Nx projects, so a change can run only what it touches:
+The three concerns are Nx projects, so a change can run only what it touches:
 
 ```sh
 mise exec -- pnpm exec nx affected -t auth protocol assets deploy local browser \
   --base="$(git merge-base origin/main HEAD)" --head=HEAD
-mise exec -- pnpm exec nx run-many -t cli install verify
+mise exec -- pnpm exec nx run-many -t verify
 ```
 
 | Project | Target | Runs |
@@ -118,7 +101,6 @@ mise exec -- pnpm exec nx run-many -t cli install verify
 | `worker-hosted` | `auth`, `protocol` | `pnpm run test:auth`, `pnpm run test:protocol` |
 | `web-dashboard` | `assets` | `pnpm run test:assets` |
 | `tooling` | `deploy`, `local`, `browser`, `verify` | `pnpm run test:deploy`, `pnpm run test:local`, `pnpm run test:browser`, `pnpm run test:verify` |
-| `device-bundle` | `cli`, `install` | `pnpm run test:cli`, `pnpm run test:install` |
 
 Selection is input-based, so shared Worker code invalidates the assets build and
 both Worker suites. `worker-hosted`'s suites depend on `web-dashboard:assets`
@@ -131,29 +113,27 @@ ports, so the two never contend for a port. Their inputs cover
 
 `nx` is a pinned devDependency. Task results cache locally under the ignored
 `.nx/cache`; `pnpm exec nx reset` clears them and `pnpm exec nx show projects`
-lists the four projects. The `device-bundle` Python suites run as the cached
-`cli`/`install` targets (and `tooling:verify`) through `nx run-many` — they are
-not part of the `affected` selection; `tools/verify.py` still
-runs them directly with no Node. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
+lists the three projects. The `rust/` crate is not an Nx project: CI builds and tests it
+in its own jobs, and `tools/verify.py device` runs its `cargo test`. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
 
 ## Parity harness
 
-The parity harness proves a `factory` binary against the Python CLI, one argv at a time. It runs on POSIX hosts only.
+The parity harness proves a `factory` binary against golden files, one argv at a time. The goldens were recorded from the Python CLI before it was removed, so they keep its behavior as the oracle. It runs on POSIX hosts only.
 
 ```sh
-python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]...
-python3 tests/parity/run.py --bin rust/target/host/factory --ids rust/parity
+python3 tests/parity/run.py --bin PATH [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N]
+python3 tests/parity/run.py --bin rust/target/host/factory --jobs 8
+python3 tests/parity/run.py --bin rust/target/host/factory --record --case 'prompt/*'
 ```
 
 - `tests/parity/cases/<subsystem>.json` holds the hand-written cases as `{"version": 1, "cases": [...]}`. A case id is `<subsystem>/<name>` and lives in its subsystem's file; a misplaced or duplicate id exits 2. The runner adds an `arity/<command>/<n>` case for each argument count just outside a command's range in `tests/fixtures/cli-v1.json`.
-- A case has `id`, `argv`, `home` and `stubs`, and may add `routes`, `stdin`, `env`, `exit` and `from`. `stdin` is piped to both sides; without it stdin is `/dev/null`. `env` is added to the isolated environment. `from` names the source test as `tests/cli/<file>::<Class>.<test>`.
-- `routes` maps `"METHOD /path"` to `[status, body]`, `[status, body, headers]`, or a list of those served in order, the last one repeating. A string body is sent as its UTF-8 bytes; any other body as JSON. Each side gets its own loopback Worker from `support.http_fixture`, a `config.md` pointing at it and a `.env` with a fake Access token. A case with `routes` must set `exit`, and Python must exit with it.
-- Each case runs twice, once on `python3 skills/factory/runtime/factory.py` and once on the binary, each in its own temp root with `home/`, `bin/` and `stub/`. `home/` starts as a copy of `tests/parity/homes/<home>`, or empty. The runner compares the exit code, stdout, stderr, the home tree, each stub's call log and the Worker requests, with the Worker origin, home path and temp root written as `{api}`, `{home}` and `{tmp}`. The side's own program path (`factory.py` or the binary) becomes `{runtime}`, and the folder two levels above it becomes `{skill}`. A `YYYY-MM-DDTHH:MM:SSZ` stamp inside the side's run window becomes `{now}`. A request is one JSON line of method, path, body and the `content-type`, `if-match`, `if-none-match`, `cf-access-client-id`, `cf-access-client-secret` and `user-agent` headers.
-- The binary is `--bin`, else `FACTORY_BIN`, else Python, which checks that the runner is deterministic. `FACTORY_BIN` also points `support.invoke_process` in `tests/cli` at a binary.
+- A case has `id`, `argv`, `home` and `stubs`, and may add `routes`, `stdin`, `env`, `exit` and `from`. `stdin` is piped to the binary; without it stdin is `/dev/null`. `env` is added to the isolated environment. `from` names the Python test the case came from, as `tests/cli/<file>::<Class>.<test>`.
+- `routes` maps `"METHOD /path"` to `[status, body]`, `[status, body, headers]`, or a list of those served in order, the last one repeating. A string body is sent as its UTF-8 bytes; any other body as JSON. Each run gets its own loopback Worker, a `config.md` pointing at it and a `.env` with a fake Access token. A case with `routes` must set `exit`, and `--record` refuses a run that exits otherwise.
+- Each case runs in its own temp root with `home/`, `bin/` and `stub/`. `home/` starts as a copy of `tests/parity/homes/<home>`, or empty. The runner compares the exit code, stdout, stderr, the home tree, each stub's call log and the Worker requests with `tests/parity/golden/<case-id>/`, one file per nonempty field. The home tree is gzipped as `home-tree.gz`; a missing file is an empty field. The Worker origin, home path and temp root are written as `{api}`, `{home}` and `{tmp}`, the binary's path as `{runtime}` (`{bin}` in a skill folder), and the folder two levels above it as `{skill}`. A `YYYY-MM-DDTHH:MM:SSZ` stamp inside the run window becomes `{now}`, and today's date `{today}`. A request is one JSON line of method, path, body and the `content-type`, `if-match`, `if-none-match`, `cf-access-client-id`, `cf-access-client-secret` and `user-agent` headers.
+- The binary is `--bin`, else `FACTORY_BIN`. `--record` writes the selected cases' goldens from that binary instead of comparing. Use it only for an intended output change, then review the golden diff before committing it.
 - `bin/gh`, `bin/paseo` and `bin/git` run `tests/parity/stub.py`, which replays the first entry in the case's `stubs` map whose `argv` matches, logs every call, and exits 127 with `stub: no recorded response for ...` otherwise.
-- `--ids` reads one `fnmatch` pattern per line, with `#` comments, from a file or from every `*.txt` in a folder. `rust/parity/<subsystem>.txt` lists the cases the Rust binary must pass; each port slice adds only its own `cases/<subsystem>.json` and `rust/parity/<subsystem>.txt`. In a folder, each pattern must start with its file's `<subsystem>/`. A pattern that matches nothing exits 2.
-- `python3 tests/parity/startup.py --bin PATH` times 20 no-argument runs on each side and exits 1 unless the binary's median is at most a tenth of Python's.
-- `rust/factory/src/usage.txt` is Python's no-argument stderr. When the runtime docstring changes, regenerate it with `python3 -B skills/factory/runtime/factory.py 2> rust/factory/src/usage.txt`.
+- `--ids` reads one `fnmatch` pattern per line, with `#` comments, from a file or from every `*.txt` in a folder. `rust/parity/<subsystem>.txt` lists the cases CI runs, which today is every case. In a folder, each pattern must start with its file's `<subsystem>/`. A pattern that matches nothing exits 2.
+- `rust/factory/src/usage.txt` is the binary's no-argument stderr, frozen from the Python runtime's docstring.
 
 ## Visual captures
 
