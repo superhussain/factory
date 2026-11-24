@@ -3,6 +3,7 @@
 // it at once, and a board.json written to R2 from outside is adopted, with unflushed rows
 // merged over it. Rows are the made-up running example around 2001-add-csv-export.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { syntheticBoard } from "../../tools/board-cpu.mjs";
 import { loadProduction, memoryBucket, memoryRoom } from "../support/worker.mjs";
@@ -477,4 +478,146 @@ test("a full write loses to an outside write that lands in R2 before its copy", 
   assert.equal(response.status, 412);
   assert.deepEqual(await (await s.send("/board.json")).json(), outside);
   assert.deepEqual(JSON.parse(s.r2().bytes), outside);
+});
+
+// The slim body before the room built it: the Worker's own slimBoard over a board in R2 alone.
+// Each text gets its own ETag, since the Worker keeps its last slim body by ETag.
+async function workerSlim(text) {
+  const bucket = memoryBucket();
+  const httpEtag = '"' + createHash("sha256").update(text).digest("hex") + '"';
+  bucket.objects.set("board.json", { key: "board.json", bytes: Buffer.from(text), httpEtag });
+  const request = new Request("http://local/board.json?view=slim");
+  return (await serveFactory(request, { BUCKET: bucket }, person)).text();
+}
+
+// Made-up boards of random shape: emoji, U+2028, duplicate, missing and object ids, rows that
+// are not objects, projects named __proto__ and 123, unparseable done stamps, a top-level slim
+// key, and rows big enough to fill several pages. Every write is a room commit, so rows the
+// Worker would refuse are written too.
+test("the room's slim body is byte for byte the Worker's slimBoard, across random boards and writes", async () => {
+  let seed = 2284;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const pick = (list) => list[Math.floor(rand() * list.length)];
+  const texts = ["plain", "emoji 🎉👩‍💻", "line sep end", 'quote " and \\', "é 中文", ""];
+  const stamp = () =>
+    new Date(Date.UTC(2026, 0, 1) + Math.floor(rand() * 400) * 3600000).toISOString();
+  let n = 0;
+  const row = (id = `${1000 + ++n}-random`) => {
+    if (rand() < 0.03) return pick([null, "a string row", 7, [1, 2]]);
+    const out = {
+      id: rand() < 0.05 ? pick([null, 12, { nested: 1 }, undefined]) : id,
+      stage: pick(["idea", "build", "merged", "merged", "merged", "closed", "Merged", undefined]),
+      project: pick(["factory", "sample", "__proto__", "123", "", 7, undefined]),
+      title: pick(texts),
+      updated: rand() < 0.9 ? stamp() : undefined,
+      done: pick([stamp(), stamp(), undefined, "not a date", 0]),
+    };
+    if (rand() < 0.04) out.idea = "x".repeat(60_000 + Math.floor(rand() * 90_000));
+    return out;
+  };
+  const check = async (s, what) => {
+    const full = await (await s.send("/board.json")).text();
+    const slim = await s.send("/board.json?view=slim");
+    assert.equal(slim.headers.get("ETag"), (await s.send("/board.json")).headers.get("ETag"));
+    assert.ok(slim.headers.get("X-Factory-Version"));
+    assert.equal(await slim.text(), await workerSlim(full), what);
+  };
+  for (let b = 0; b < 40; b++) {
+    const jobs = Array.from({ length: Math.floor(rand() * 70) }, () => row());
+    // Some rows repeat an earlier id, as an unclean board can.
+    for (const j of jobs)
+      if (rand() < 0.05 && j?.constructor === Object && jobs[0]?.id) j.id = jobs[0].id;
+    const board = { updated: stamp(), jobs, autonomy: { mode: "auto" } };
+    if (rand() < 0.2) board.slim = { stale: true };
+    if (rand() < 0.2) board["1"] = "an integer key";
+    if (rand() < 0.2) board.note = pick(texts);
+    const s = setup(board, JSON.stringify(board, null, rand() < 0.5 ? 2 : 0));
+    await check(s, `board ${b}`);
+    for (let w = 0; w < 4; w++) {
+      const store = s.room.object.board();
+      const ids = jobs.map((j) => j?.id).filter((id) => typeof id === "string");
+      const changes = [];
+      if (ids.length && rand() < 0.8) {
+        const id = pick(ids);
+        changes.push({ id, row: rand() < 0.2 ? null : { ...row(id), id }, add: false });
+      }
+      if (rand() < 0.6) {
+        const added = row();
+        changes.push({ id: added?.id ?? `${++n}-x`, row: added, add: true });
+      }
+      if (!changes.length) continue;
+      const out = await store.commit({ base: store.state().etag, changes, updated: stamp() });
+      assert.ok(out.etag, JSON.stringify(out));
+      await check(s, `board ${b} write ${w}`);
+    }
+    // A room from before the meta column fills it in on its first slim read.
+    s.room.object.board().sql.exec("UPDATE board_pages SET meta = NULL");
+    s.room.restart();
+    await check(s, `board ${b} without meta`);
+    const left = s.room.object.board().sql.exec("SELECT page FROM board_pages WHERE meta IS NULL");
+    assert.equal(left.toArray().length, 0);
+  }
+});
+
+// Ids 12 and "12", or null and "null", are different ids to slimBoard's per-stage count, and
+// two rows without an id are the same one.
+const LOOKALIKE_IDS = JSON.stringify({
+  jobs: [12, "12", null, "null", undefined, undefined, "undefined"].map((id) => ({
+    id,
+    stage: "merged",
+    project: "sample",
+  })),
+});
+
+test("a slim read of an empty, jobless, unreadable or lookalike-id board is what the Worker sent", async () => {
+  const texts = [
+    '{"jobs":[]}',
+    '{"updated":"2026-11-24T00:00:00Z"}',
+    '{"jobs":"none"}',
+    "{not json",
+  ];
+  for (const text of [...texts, LOOKALIKE_IDS]) {
+    const s = setup(null);
+    s.bucket.objects.set("board.json", {
+      key: "board.json",
+      bytes: Buffer.from(text),
+      httpEtag: SEED,
+    });
+    const slim = await s.send("/board.json?view=slim");
+    assert.equal(slim.status, 200);
+    assert.equal(await slim.text(), await workerSlim(text), text);
+  }
+  assert.equal((await setup(null).send("/board.json?view=slim")).status, 404);
+});
+
+// The Worker's step of a slim read is one fetch of the room's bytes, passed through: no RPC, so
+// no board text crosses to the Worker, and the same few JSON calls at 2,300 and 4,600 rows.
+test("a slim read is one room fetch the Worker passes through, at 2,300 and 4,600 rows", async () => {
+  const cost = async (rows) => {
+    const s = setup(syntheticBoard(rows));
+    await s.send("/board.json");
+    const out = {};
+    for (const what of ["miss", "hit"]) {
+      const before = { calls: s.room.calls.length, rpcBytes: s.room.work.rpcBytes };
+      const { parse } = JSON;
+      let parses = 0;
+      JSON.parse = (...a) => (parses++, parse(...a));
+      try {
+        const response = await s.send("/board.json?view=slim");
+        assert.equal(response.status, 200);
+        await response.arrayBuffer();
+      } finally {
+        JSON.parse = parse;
+      }
+      assert.deepEqual(s.room.calls.slice(before.calls), [], "no RPC");
+      assert.equal(s.room.work.rpcBytes, before.rpcBytes);
+      out[what] = parses;
+    }
+    return out;
+  };
+  const [today, doubled] = [await cost(2300), await cost(4600)];
+  // A hit parses only the room's state; a miss adds one meta parse per page.
+  assert.equal(doubled.hit, today.hit);
+  assert.ok(doubled.hit <= 3, JSON.stringify(doubled));
+  assert.ok(doubled.miss <= 60, JSON.stringify(doubled));
 });

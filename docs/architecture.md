@@ -369,10 +369,14 @@ headers other than the upgrade ones are still dropped.
   rows per project and stage, under the stored `ETag`. Finished column headers then say
   `showing 10 of N`. Once a view needs older rows (show all, the jumper, a link to an older
   job, another route, the starred-only view) it reads `/api/board` once and keeps those rows.
-  `/board.json` without the query still returns the stored bytes. Each slim miss does its own
-  read, since a promise one request starts cannot settle in another; the isolate keeps only
-  the last slim body as a string, `slimMemo`, keyed by board `ETag`. `node --expose-gc
-  tools/board-cpu.mjs` times each board write and slim step on a synthetic board.
+  `/board.json` without the query still returns the stored bytes. The BoardEvents room builds
+  the slim body (`buildSlim` in `worker/board-store.js`) and the Worker streams it from the
+  room's `GET /board/slim`. Each board page keeps a `meta` column with every row's byte length,
+  and for a finished row its stage, project, rank time and id, so a build picks the rows and
+  counts from the meta and cuts each kept row's bytes from its page without decoding it. The
+  room keeps the last slim body per board `ETag` until an eviction drops it. Without a room the
+  Worker still slices R2's board itself, keeping its last body in `slimMemo`.
+  `node tools/board-miniflare.mjs` times slim reads under workerd.
 
 | Request to `/events/board` | Result |
 | --- | --- |
