@@ -475,22 +475,17 @@ fn audit_flags(
 ) -> Vec<&'static str> {
     let mut flags: Vec<&'static str> = AUDIT_FLAGS
         .iter()
-        .filter(|(flag, pattern)| {
-            // A force-push a pattern could not finish reading stops the audit rather than pass unflagged.
-            name == "Bash"
-                && if *flag == "force-push" {
-                    pattern.search_or_stop(raw).is_some()
-                } else {
-                    pattern.search(raw).is_some()
-                }
-        })
+        // A call a flag pattern could not finish reading stops the audit rather than pass unflagged.
+        .filter(|(_, pattern)| name == "Bash" && pattern.search_or_stop(raw).is_some())
         .map(|(flag, _)| *flag)
         .collect();
     let stripped = (name == "Bash").then(|| audit_strip_data_heredocs(raw));
     if !main
-        && stripped
-            .as_ref()
-            .is_some_and(|s| AUDIT_PR_MERGE.search(&audit_strip_quotes(s)).is_some())
+        && stripped.as_ref().is_some_and(|s| {
+            AUDIT_PR_MERGE
+                .search_or_stop(&audit_strip_quotes(s))
+                .is_some()
+        })
     {
         flags.push("pr-merge");
     }
@@ -503,7 +498,7 @@ fn audit_flags(
         _ if AUDIT_FILE_TOOLS.contains(&name) => Some(raw.to_string()),
         _ => None,
     };
-    if path.is_some_and(|p| AUDIT_SECRET_FILE.search(&p).is_some()) {
+    if path.is_some_and(|p| AUDIT_SECRET_FILE.search_or_stop(&p).is_some()) {
         flags.push("secret-file");
     }
     if denied {
@@ -2635,11 +2630,79 @@ pub fn bench_cmd(call: &Call) -> Res<()> {
 mod tests {
     use super::*;
 
+    /// Run audit_flags on command with only pattern at a zero backtrack limit.
+    fn flags_at_limit(pattern: &'static Pattern, command: &str, main: bool) -> Vec<&'static str> {
+        crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
+        crate::shared::pyre::TEST_LIMIT_ONLY.with(|l| l.set(Some(pattern)));
+        audit_flags("Bash", &Map::new(), command, false, main)
+    }
+
+    /// The AUDIT_FLAGS pattern named flag.
+    fn flag_pattern(flag: &str) -> &'static Pattern {
+        &AUDIT_FLAGS.iter().find(|(f, _)| *f == flag).unwrap().1
+    }
+
     #[test]
     #[should_panic(expected = "hit the regex backtrack limit; stopping")]
     fn force_push_flag_stops_at_the_backtrack_limit() {
-        crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
-        audit_flags("Bash", &Map::new(), "git push x --force", false, true);
+        flags_at_limit(flag_pattern("force-push"), "git push x --force", true);
+    }
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn hard_reset_flag_stops_at_the_backtrack_limit() {
+        flags_at_limit(flag_pattern("hard-reset"), "git reset --hard", true);
+    }
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn branch_delete_flag_stops_at_the_backtrack_limit() {
+        flags_at_limit(flag_pattern("branch-delete"), "git branch -D x", true);
+    }
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn recursive_delete_flag_stops_at_the_backtrack_limit() {
+        flags_at_limit(flag_pattern("recursive-delete"), "rm -rf x", true);
+    }
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn no_verify_flag_stops_at_the_backtrack_limit() {
+        flags_at_limit(flag_pattern("no-verify"), "git commit --no-verify", true);
+    }
+
+    /// sudo has no lookaround, so it runs on the linear engine and never reaches the limit.
+    #[test]
+    fn sudo_flag_never_reaches_the_backtrack_limit() {
+        assert_eq!(
+            flags_at_limit(flag_pattern("sudo"), "sudo ls", true),
+            ["sudo"]
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn pipe_to_shell_flag_stops_at_the_backtrack_limit() {
+        flags_at_limit(flag_pattern("pipe-to-shell"), "curl x | sh", true);
+    }
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn deploy_flag_stops_at_the_backtrack_limit() {
+        flags_at_limit(flag_pattern("deploy"), "wrangler deploy", true);
+    }
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn pr_merge_flag_stops_at_the_backtrack_limit() {
+        flags_at_limit(&AUDIT_PR_MERGE, "gh pr merge 7", false);
+    }
+
+    #[test]
+    #[should_panic(expected = "hit the regex backtrack limit; stopping")]
+    fn secret_file_flag_stops_at_the_backtrack_limit() {
+        flags_at_limit(&AUDIT_SECRET_FILE, "cat .env", true);
     }
 
     #[cfg(unix)]

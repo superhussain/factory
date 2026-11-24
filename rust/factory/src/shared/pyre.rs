@@ -62,6 +62,8 @@ thread_local! {
     /// A backtrack limit every pattern uses in this test thread instead of its own, when set, so a
     /// test can reach the limit on short text.
     pub(crate) static TEST_LIMIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// The one pattern TEST_LIMIT applies to, when set, so a test can stop one gate of several.
+    pub(crate) static TEST_LIMIT_ONLY: std::cell::Cell<Option<*const Pattern>> = const { std::cell::Cell::new(None) };
 }
 
 impl Pattern {
@@ -99,7 +101,12 @@ impl Pattern {
         };
         #[cfg(test)]
         if let Some(limit) = TEST_LIMIT.with(std::cell::Cell::get) {
-            return Box::leak(Box::new(build(limit)));
+            if TEST_LIMIT_ONLY
+                .with(std::cell::Cell::get)
+                .is_none_or(|p| std::ptr::eq(p, self))
+            {
+                return Box::leak(Box::new(build(limit)));
+            }
         }
         lock.get_or_init(|| build(self.limit))
     }
