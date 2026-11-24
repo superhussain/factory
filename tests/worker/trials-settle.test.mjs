@@ -132,6 +132,24 @@ test("a board write cannot drop an open trial or change its other keys", async (
   assert.deepEqual(await board(), before);
 });
 
+test("a misshapen open trial can be dropped", async () => {
+  const V11 = { ...V10, id: "factory-spec-v11", version: 11, opened: "garbage" };
+  const V12 = { ...V10, id: "factory-spec-v12", version: "12" };
+  const { put } = await setup({ trials: [V10, V11, V12] });
+  for (const t of [V11, V12]) {
+    const dropped = await put((ts) => ts.filter((s) => s.id !== t.id));
+    assert.equal(dropped.status, 200, dropped.text);
+  }
+  const kept = await put((ts) => ts.filter((s) => s.id !== V10.id));
+  assert.deepEqual(
+    [kept.status, kept.text],
+    [
+      400,
+      `a board write cannot drop the open trial ${LABEL}: only trial settle moves an open stage-note trial. Nothing was written.`,
+    ],
+  );
+});
+
 test("kept needs 5 finished jobs per arm and no b higher read", async () => {
   const short = await setup({ jobs: FIVE_AND_FOUR });
   const few = await short.settle({ status: "kept", ...SETTLED, arms: ARMS, reads: READS });
