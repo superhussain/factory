@@ -1,0 +1,8 @@
+{"argv": ["-C", "{home}/alpha", "rev-parse", "--show-toplevel"]}
+{"argv": ["-C", "{home}/alpha", "config", "--bool", "extensions.worktreeConfig"]}
+{"argv": ["-C", "{home}/alpha", "config", "--local", "--includes", "--get-regexp", "^(url|http)\\."]}
+{"argv": ["-C", "{home}/alpha", "fetch", "-q", "https://github.com/example/alpha.git", "+refs/heads/main:refs/remotes/origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "1111111111111111111111111111111111111111", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "show", "-s", "--format=%ct", "1111111111111111111111111111111111111111"]}
+{"argv": ["-C", "{home}/alpha", "diff", "--name-only", "1111111111111111111111111111111111111111^1", "1111111111111111111111111111111111111111"]}
+{"argv": ["-C", "{home}/alpha", "log", "--no-merges", "--name-only", "--format=%x1e%H%x1f%ct%x1f%B%x1f", "1111111111111111111111111111111111111111..refs/remotes/origin/main"]}

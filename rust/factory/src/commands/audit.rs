@@ -2657,6 +2657,11 @@ mod tests {
             outcome_of(&dir, "main", &merge, &[]),
             ("held".into(), vec![])
         );
+        // A rework job ref alone is enough, with no fix commit.
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &["1022-redo-x".into()]),
+            ("reworked".into(), vec!["rework-of 1022-redo-x".into()])
+        );
         let fix = commit("a.py", "3\n", "Fix the change");
         commit("b.py", "x\n", "fix an unrelated file");
         run(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
@@ -2688,6 +2693,57 @@ mod tests {
             )]
         );
     }
+
+    /// Ported from tests/cli/test_outcomes.py test_fix_before_the_merge_holds and
+    /// test_fix_after_seven_days_holds: only a fix commit dated from the merge up to seven days after it
+    /// counts as rework.
+    #[cfg(unix)]
+    #[test]
+    fn outcome_of_fix_window_is_merge_through_seven_days() {
+        const T0: i64 = 1_767_600_000;
+        const DAY: i64 = 86_400;
+        let dir = crate::shared::fs::temp_dir("outcome-of-window");
+        let run = |args: &[&str], date: i64| {
+            let stamp = format!("@{date} +0000");
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+                .args(args)
+                .env("GIT_AUTHOR_DATE", &stamp)
+                .env("GIT_COMMITTER_DATE", &stamp)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{args:?}");
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        let commit = |text: &str, message: &str, date: i64| {
+            std::fs::write(dir.join("a.py"), text).unwrap();
+            run(&["add", "-A"], date);
+            run(&["commit", "-q", "-m", message], date);
+            run(&["rev-parse", "HEAD"], date)
+        };
+        run(&["init", "-q"], T0);
+        commit("1\n", "start", T0 - DAY);
+        let merge = commit("2\n", "the change", T0);
+        let judge = |dir: &Path| {
+            run(&["update-ref", "refs/remotes/origin/main", "HEAD"], T0);
+            outcome_of(dir, "main", &merge, &[])
+        };
+        // Later in history but dated before the merge.
+        commit("3\n", "fix a early", T0 - 3600);
+        assert_eq!(judge(&dir), ("held".into(), vec![]));
+        // One second past the seven-day window.
+        commit("4\n", "Fix a late", T0 + 7 * DAY + 1);
+        assert_eq!(judge(&dir), ("held".into(), vec![]));
+        // The last second inside it.
+        let edge = commit("5\n", "Fix a at the edge", T0 + 7 * DAY);
+        assert_eq!(
+            judge(&dir),
+            ("reworked".into(), vec![format!("commit {}", &edge[..12])])
+        );
+    }
+
     use crate::shared::pyval::py_repr;
     use serde_json::json;
 

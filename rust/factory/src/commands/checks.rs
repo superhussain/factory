@@ -1817,9 +1817,19 @@ fn graphql_repository(
     body: &str,
     device: &str,
 ) -> Result<Map<String, Value>, String> {
+    graphql_repository_via(&mut System::new(), owner, name, body, device)
+}
+
+fn graphql_repository_via(
+    host: &mut dyn Host,
+    owner: &str,
+    name: &str,
+    body: &str,
+    device: &str,
+) -> Result<Map<String, Value>, String> {
     let q =
         format!("query=query {{ repository(owner: \"{owner}\", name: \"{name}\") {{ {body}}} }}");
-    let Some(r) = gh_cli(&["api", "graphql", "-f", &q]) else {
+    let Some(r) = host.gh(&["api", "graphql", "-f", &q]) else {
         return Err(format!("gh is not installed on {device}"));
     };
     let code = match r.code {
@@ -1872,6 +1882,15 @@ pub(crate) fn pr_merge_commits(
     numbers: &[u64],
     device: &str,
 ) -> Result<BTreeMap<u64, Option<String>>, String> {
+    pr_merge_commits_via(&mut System::new(), repo, numbers, device)
+}
+
+fn pr_merge_commits_via(
+    host: &mut dyn Host,
+    repo: &str,
+    numbers: &[u64],
+    device: &str,
+) -> Result<BTreeMap<u64, Option<String>>, String> {
     let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
     let mut oids = BTreeMap::new();
     for chunk in numbers.chunks(50) {
@@ -1879,7 +1898,7 @@ pub(crate) fn pr_merge_commits(
             .iter()
             .map(|n| format!("p{n}: pullRequest(number: {n}) {{ state mergeCommit {{ oid }} }} "))
             .collect();
-        let found = graphql_repository(owner, name, &body, device)?;
+        let found = graphql_repository_via(host, owner, name, &body, device)?;
         for n in chunk {
             let pr = found.get(&format!("p{n}")).filter(|p| p.is_object());
             let oid = pr
@@ -2287,6 +2306,70 @@ mod tests {
         ] {
             assert_eq!(pr_signal(&node, None), reason, "{node}");
         }
+    }
+
+    /// Answers each merge-commit query for the numbers it names: odd numbers are MERGED, even ones OPEN, and 51
+    /// is missing from the answer.
+    #[derive(Default)]
+    struct MergeCommits {
+        calls: Vec<String>,
+    }
+
+    impl Host for MergeCommits {
+        fn gh(&mut self, args: &[&str]) -> Option<GhOut> {
+            let query = args.last().unwrap().to_string();
+            let mut repository = Map::new();
+            for part in query.split("pullRequest(number: ").skip(1) {
+                let n: u64 = part.split(')').next().unwrap().parse().unwrap();
+                if n != 51 {
+                    let state = if n % 2 == 1 { "MERGED" } else { "OPEN" };
+                    repository.insert(
+                        format!("p{n}"),
+                        json!({"state": state, "mergeCommit": {"oid": format!("{n:040x}")}}),
+                    );
+                }
+            }
+            self.calls.push(query);
+            ok(&json!({"data": {"repository": repository}}).to_string())
+        }
+
+        fn monotonic(&mut self) -> f64 {
+            0.0
+        }
+
+        fn sleep(&mut self, _: f64) {}
+
+        fn unix_time(&mut self) -> i64 {
+            0
+        }
+    }
+
+    /// Ported from tests/cli/test_outcomes.py OutcomesUnknownTest.test_merge_commits_query: 50 pull requests go
+    /// in each gh call, and only a MERGED one with a commit gets an oid.
+    #[test]
+    fn pr_merge_commits_batches_fifty_per_call() {
+        let mut host = MergeCommits::default();
+        let numbers: Vec<u64> = (1..=51).collect();
+        let found = pr_merge_commits_via(&mut host, "example/alpha", &numbers, "host-a").unwrap();
+        assert_eq!(host.calls.len(), 2);
+        assert_eq!(found[&1], Some(format!("{:040x}", 1)));
+        assert_eq!((&found[&2], &found[&51]), (&None, &None));
+        assert_eq!(found.len(), 51);
+    }
+
+    /// Ported from tests/cli/test_outcomes.py OutcomesUnknownTest.test_bad_oid and test_gh_failure: an oid that
+    /// is not 40 hex digits is dropped, and a missing gh names the host.
+    #[test]
+    fn pr_merge_commits_rejects_bad_oids_and_missing_gh() {
+        let answer = json!({"data": {"repository": {"p9": {"state": "MERGED", "mergeCommit": {"oid": "--output=x"}}}}});
+        let mut fake = Fake::default().on(&["api", "graphql"], vec![ok(&answer.to_string())]);
+        let found = pr_merge_commits_via(&mut fake, "example/alpha", &[9], "host-a").unwrap();
+        assert_eq!(found[&9], None);
+        let mut fake = Fake::default().on(&["api", "graphql"], vec![None]);
+        assert_eq!(
+            pr_merge_commits_via(&mut fake, "example/alpha", &[9], "host-a"),
+            Err("gh is not installed on host-a".to_string())
+        );
     }
 
     #[test]
