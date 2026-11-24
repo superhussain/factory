@@ -65,6 +65,63 @@
       "from": "tests/cli/test_factory.py::AgentInstallTest.test_repeated_init_preserves_native_header_and_refreshes_body"
     },
     {
+      "id": "setup/init-agents-none",
+      "argv": ["--home", "{home}", "init", "--agents", "none"],
+      "home": null,
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_roles.py::RolesTest.test_separate_and_combined_selection_and_custom_locations"
+    },
+    {
+      "id": "setup/init-agents-claude-only",
+      "argv": ["--home", "{home}", "init", "--agents", "claude"],
+      "home": null,
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_roles.py::RolesTest.test_separate_and_combined_selection_and_custom_locations"
+    },
+    {
+      "id": "setup/init-agents-opencode-only",
+      "argv": ["--home", "{home}", "init", "--agents", "opencode"],
+      "home": null,
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_roles.py::RolesTest.test_separate_and_combined_selection_and_custom_locations"
+    },
+    {
+      "id": "setup/init-agents-custom-dirs",
+      "argv": ["--home", "{home}", "init", "--agents", "both"],
+      "home": "setup-agents-custom",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_roles.py::RolesTest.test_separate_and_combined_selection_and_custom_locations"
+    },
+    {
+      "id": "setup/init-agents-refuses-relative-dir",
+      "argv": ["--home", "{home}", "init", "--agents", "claude"],
+      "home": "setup-agents-relative",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_roles.py::RolesTest.test_source_and_destination_links_overlap_and_relative_paths_refused"
+    },
+    {
+      "id": "setup/init-agents-refuses-skill-dir",
+      "argv": ["--home", "{home}", "init", "--agents", "claude"],
+      "home": "setup-agents-skill-dir",
+      "stubs": {},
+      "skill": "{tmp}/skill",
+      "exit": 2,
+      "from": "tests/cli/test_roles.py::RolesTest.test_source_and_destination_links_overlap_and_relative_paths_refused"
+    },
+    {
+      "id": "setup/init-agents-refuses-shared-dir",
+      "argv": ["--home", "{home}", "init", "--agents", "both"],
+      "home": "setup-agents-shared",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_roles.py::RolesTest.test_source_and_destination_links_overlap_and_relative_paths_refused"
+    },
+    {
       "id": "setup/init-register",
       "argv": ["--home", "{home}", "init", "/srv/sample"],
       "home": null,

@@ -1667,6 +1667,78 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    fn tree_bytes(dir: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut rows: Vec<(String, Vec<u8>)> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| {
+                let path = e.unwrap().path();
+                (
+                    path.file_name().unwrap().to_string_lossy().into_owned(),
+                    fs::read(&path).unwrap(),
+                )
+            })
+            .collect();
+        rows.sort();
+        rows
+    }
+
+    #[test]
+    fn malformed_last_role_prevents_all_writes_for_either_runtime() {
+        let dir = temp_dir("setup-roles-malformed");
+        let dirs = vec![
+            ("claude".to_string(), dir.join("claude")),
+            ("opencode".to_string(), dir.join("opencode")),
+        ];
+        assert_eq!(install_roles(&dirs).unwrap(), 18);
+        for (_, directory) in &dirs {
+            let last = directory.join(ROLE_NAMES[ROLE_NAMES.len() - 1]);
+            let saved = fs::read(&last).unwrap();
+            for invalid in [
+                &b"plain"[..],
+                b"---\nmissing close",
+                b"---\n...\n---\n",
+                b" ---\n---\n",
+            ] {
+                fs::write(&last, invalid).unwrap();
+                let before: Vec<_> = dirs.iter().map(|(_, d)| tree_bytes(d)).collect();
+                // Every role is stale-able, so a partial write would change another file.
+                let first = directory.join(ROLE_NAMES[0]);
+                fs::write(&first, "---\n---\nstale body\n").unwrap();
+                let before_first = fs::read(&first).unwrap();
+                assert_eq!(install_roles(&dirs).unwrap_err().code, 2);
+                assert_eq!(fs::read(&first).unwrap(), before_first);
+                assert_eq!(fs::read(&last).unwrap(), invalid);
+                for ((_, d), rows) in dirs.iter().zip(&before) {
+                    let mut now = tree_bytes(d);
+                    let mut was = rows.clone();
+                    now.retain(|(n, _)| n != ROLE_NAMES[0]);
+                    was.retain(|(n, _)| n != ROLE_NAMES[0]);
+                    assert_eq!(now, was);
+                }
+            }
+            fs::write(&last, saved).unwrap();
+            fs::write(directory.join(ROLE_NAMES[0]), "---\n---\n").unwrap();
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_and_destination_links_refused() {
+        let dir = temp_dir("setup-roles-link");
+        let agents = dir.join("agents");
+        let dirs = vec![("claude".to_string(), agents.clone())];
+        assert_eq!(install_roles(&dirs).unwrap(), 9);
+        let victim = agents.join(ROLE_NAMES[ROLE_NAMES.len() - 1]);
+        let target = dir.join("elsewhere.md");
+        fs::rename(&victim, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &victim).unwrap();
+        let before = tree_bytes(&agents);
+        assert_eq!(install_roles(&dirs).unwrap_err().code, 2);
+        assert_eq!(tree_bytes(&agents), before);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn adopt_home_once() {
