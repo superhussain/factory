@@ -14,11 +14,14 @@ const op = (work, prefix) => Object.entries(work.rows).find(([name]) => name.sta
 // board GETs. One PATCH in ten is a claim with reads, counted at its own cost within the 5,900.
 // The alarm is set at most once per FLUSH_MS (30 s), and the archive pass runs hourly. Each
 // version is built and copied to R2 at most once, by its first read or else by the alarm, so a
-// day holds at most one copy per PATCH; every other GET streams R2's copy.
+// day holds at most one copy per PATCH; every other GET streams R2's copy. The dashboard's slim
+// reads were 9 in 12.6 minutes of job 2280's tail, about 1,030 a day; the projection counts
+// 8,500, each as a miss in an evicted room, which joins the slim body from every page.
 const DAY = {
   patch: 5900,
   claim: 590,
   get: 8500,
+  slim: 8500,
   copy: 2880,
   archive: 24,
 };
@@ -34,6 +37,7 @@ function projection(work, rate) {
     [n("patch") - n("claim"), op(work, "PATCH 1 row")],
     [n("claim"), op(work, "PATCH claim")],
     [n("get"), op(work, "GET /board.json after the copy, room evicted")],
+    [n("slim"), costlier(op(work, "GET slim, room evicted"), op(work, "GET slim, new version"))],
     // A copy costs the costlier of a first read's build and copy, and the alarm's.
     [n("patch"), costlier(op(work, "GET /board.json after a PATCH"), op(work, "R2 copy"))],
     // Each setAlarm writes the room's alarm, which no cursor counts: one row written.
@@ -84,6 +88,18 @@ test("a GET after a PATCH in an evicted room reads its pages once; after the cop
     // R2's copy is the board again, so its bytes stream through and no page is read.
     const copied = op(work, "GET /board.json after the copy, room evicted");
     assert.ok(copied.read <= 3 && copied.written === 0, JSON.stringify(copied));
+  }
+});
+
+// The slim body is joined from the pages' bytes by their meta, so a miss reads a row per page
+// and writes nothing, and a hit reads only the room's state.
+test("a slim read costs a row per page on a miss, almost none on a hit, and writes nothing", () => {
+  for (const work of [today, doubled]) {
+    for (const name of ["GET slim, new version", "GET slim, room evicted"]) {
+      const o = op(work, name);
+      assert.ok(o.read <= 80 && o.written === 0, `${name} ${JSON.stringify(o)}`);
+    }
+    assert.ok(op(work, "GET slim, same version").read <= 3);
   }
 });
 

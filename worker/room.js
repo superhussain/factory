@@ -34,9 +34,10 @@ export class BoardEvents extends DurableObject {
       this.closeSeats((token) => token === url.searchParams.get("token"));
       return new Response(null, { status: 204 });
     }
-    // The whole board as a body, so the Worker passes its bytes through without decoding them.
-    if (request.method === "GET" && url.pathname === "/board") {
-      const board = await this.board().body();
+    // The whole board, or at /board/slim the dashboard's slim board, as a body, so the Worker
+    // passes its bytes through without decoding them.
+    if (request.method === "GET" && (url.pathname === "/board" || url.pathname === "/board/slim")) {
+      const board = await (url.pathname === "/board" ? this.board().body() : this.board().slim());
       return board
         ? new Response(board.body, { headers: { ETag: board.etag } })
         : new Response(null, { status: 404 });
