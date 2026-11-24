@@ -9208,6 +9208,26 @@ mod tests {
     use std::sync::{Mutex, MutexGuard};
 
     use crate::shared::TEST_ENV_LOCK as ENV_LOCK;
+    /// Parity writes the host-status "os" field as {os}, so only this test catches a wrong label.
+    #[test]
+    fn host_os_labels_each_platform() {
+        let os = host_os();
+        #[cfg(target_os = "macos")]
+        assert_eq!(os, "macOS");
+        #[cfg(windows)]
+        assert_eq!(os, "Windows");
+        #[cfg(target_os = "linux")]
+        {
+            let wsl = fs::read_to_string("/proc/sys/kernel/osrelease")
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("microsoft");
+            assert_eq!(os, if wsl { "Linux (WSL)" } else { "Linux" });
+        }
+        #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+        assert_eq!(os, "Other");
+    }
+
     const DEVICE: &str = "host-a";
     const IDEA_TEXT: &str = "$(touch pwned)";
     const PLACEHOLDERS: [&str; 10] = [

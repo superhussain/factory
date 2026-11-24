@@ -1510,6 +1510,26 @@ mod tests {
     use super::*;
     use crate::shared::fs::temp_dir;
 
+    /// Parity writes the host-status "os" field as {os}, so only this test catches a wrong label.
+    #[test]
+    fn host_os_labels_each_platform() {
+        let os = host_os();
+        #[cfg(target_os = "macos")]
+        assert_eq!(os, "macOS");
+        #[cfg(windows)]
+        assert_eq!(os, "Windows");
+        #[cfg(target_os = "linux")]
+        {
+            let wsl = fs::read_to_string("/proc/sys/kernel/osrelease")
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("microsoft");
+            assert_eq!(os, if wsl { "Linux (WSL)" } else { "Linux" });
+        }
+        #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+        assert_eq!(os, "Other");
+    }
+
     /// The daemon line goes only to a terminal, so piped doctor output stays factory.py's.
     #[test]
     fn doctor_daemon_line_only_on_a_terminal() {
