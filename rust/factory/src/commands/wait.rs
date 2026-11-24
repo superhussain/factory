@@ -215,6 +215,7 @@ fn watch_run(
     target: &str,
     args: &[String],
     session: bool,
+    host: &mut dyn checks::Host,
     io: &Io,
 ) -> Res<String> {
     let (mut artifacts, mut timeout, mut watch_pr) = (Vec::new(), None, false);
@@ -278,16 +279,15 @@ fn watch_run(
     }
     let folder = home.join("jobs").join(slug).join(job_id);
     let mut pr_leg = if watch_pr {
-        let mut host = checks::System::new();
         let pr = checks::board_pr(home, slug, job_id, true)?;
         let md = project_files(home, slug)?.0;
         let meta = frontmatter(&md)
             .map_err(|e| fail(os_error(&e, Some(&md)), 1))?
             .0;
-        let base = checks::pr_base(&mut host, &meta, &pr)?;
+        let base = checks::pr_base(host, &meta, &pr)?;
         let handled = checks::job_handled(home, job_id)?;
         let org = fm_get(&meta, "buildkite_org").unwrap_or("").to_string();
-        Some((host, pr, base, handled, org))
+        Some((pr, base, handled, org))
     } else {
         None
     };
@@ -306,9 +306,9 @@ fn watch_run(
                     .map(|l| (a.to_string(), l.clone()))
             })
             .collect();
-        if let Some((host, pr, base, handled, org)) = &mut pr_leg {
+        if let Some((pr, base, handled, org)) = &mut pr_leg {
             if (io.now)() >= read_at {
-                reading = checks::pr_reading(host, home, pr, base, org, handled)?;
+                reading = checks::pr_reading(&mut *host, home, pr, base, org, handled)?;
                 read_at = (io.now)() + PR_STATE_INTERVAL;
             }
         }
@@ -366,6 +366,7 @@ pub fn watch_cmd(call: &Call) -> Res<()> {
             &call.args[0],
             &call.args[1..],
             session,
+            &mut checks::System::new(),
             &io
         )?
     );
@@ -677,6 +678,7 @@ mod tests {
             "sample/042-sample-export",
             &strings(args),
             true,
+            &mut checks::System::new(),
             io,
         )
     }
@@ -811,6 +813,111 @@ mod tests {
             sleep: &|_| {},
         };
         assert_eq!(watch(&home, &["spec.md", "--pr"], &io).unwrap_err().code, 6);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    const WATCH_BOARD: &str = r#"{"updated": "", "jobs": [{"id": "042-sample-export", "project": "sample", "title": "Sample export", "stage": "pr-open", "pr": "https://github.com/example/sample/pull/44"}]}"#;
+
+    /// gh for one PR whose required checks read pending until the `pass_at`th check call.
+    struct PrHost {
+        pass_at: usize,
+        views: usize,
+        checks: usize,
+    }
+
+    impl checks::Host for PrHost {
+        fn gh(&mut self, args: &[&str]) -> Option<checks::GhOut> {
+            let out = match args {
+                ["pr", "view", ..] => {
+                    self.views += 1;
+                    r#"{"state": "OPEN", "baseRefName": "main", "headRefOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "reviewDecision": "APPROVED", "latestReviews": [], "mergeStateStatus": "CLEAN", "autoMergeRequest": null, "author": {"login": "pr-owner"}, "statusCheckRollup": [], "commits": [{"committedDate": "2026-01-01T09:00:00Z"}]}"#.to_string()
+                }
+                ["pr", "checks", ..] => {
+                    self.checks += 1;
+                    let bucket = if self.checks > self.pass_at { "pass" } else { "pending" };
+                    format!(r#"[{{"bucket": "{bucket}", "name": "check-0"}}]"#)
+                }
+                ["api", "graphql", ..] => {
+                    r#"{"isInMergeQueue": false, "isMergeQueueEnabled": false, "mergeQueueEntry": null, "reviewThreads": {"nodes": []}, "latestReviews": {"nodes": []}}"#.to_string()
+                }
+                ["api", path, ..] if path.contains("/compare/") => "0\n".to_string(),
+                ["api", ..] => "main\n".to_string(),
+                _ => panic!("no answer for {args:?}"),
+            };
+            Some(checks::GhOut {
+                code: checks::GhCode::Exit(0),
+                stdout: out,
+                stderr: String::new(),
+            })
+        }
+
+        fn monotonic(&mut self) -> f64 {
+            0.0
+        }
+
+        fn sleep(&mut self, _: f64) {}
+
+        fn unix_time(&mut self) -> i64 {
+            0
+        }
+    }
+
+    #[test]
+    fn watch_pr_polls_until_the_pr_needs_a_step() {
+        let (origin, _) = crate::shared::http::tests::serve(vec![(200, WATCH_BOARD, vec![]); 8]);
+        let home = crate::shared::http::tests::home_for("watch-pr-poll", &origin);
+        fs::create_dir_all(home.join("projects")).unwrap();
+        fs::write(
+            home.join("projects/sample.md"),
+            "---\nrepo: example/sample\nbase: main\n---\n# Sample\n",
+        )
+        .unwrap();
+        let run = |args: &[&str], host: &mut PrHost| {
+            let clock = Cell::new(0.0);
+            let io = Io {
+                hold: &no_hold,
+                now: &|| clock.get(),
+                sleep: &|s| clock.set(clock.get() + s),
+            };
+            let out = watch_run(
+                &home,
+                "sample",
+                "042-sample-export",
+                "sample/042-sample-export",
+                &strings(args),
+                false,
+                host,
+                &io,
+            )
+            .unwrap();
+            serde_json::from_str::<Value>(&out).unwrap()
+        };
+        let mut host = PrHost {
+            pass_at: 2,
+            views: 0,
+            checks: 0,
+        };
+        let got = run(&["--pr"], &mut host);
+        assert_eq!(
+            (&got["event"], &got["files"], &got["elapsed"]),
+            (&json!("pr"), &json!({}), &json!(60))
+        );
+        assert_eq!(
+            (&got["pr"]["pr"], &got["pr"]["next"]),
+            (&json!(44), &json!("merge"))
+        );
+        assert_eq!(host.views, 3);
+        let mut host = PrHost {
+            pass_at: usize::MAX,
+            views: 0,
+            checks: 0,
+        };
+        let got = run(&["--pr", "--timeout", "45"], &mut host);
+        assert_eq!(
+            (&got["event"], &got["pr"]["next"], &got["elapsed"]),
+            (&json!("timeout"), &json!("wait"), &json!(45))
+        );
+        assert_eq!(host.views, 2);
         fs::remove_dir_all(home).unwrap();
     }
 
