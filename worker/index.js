@@ -3289,6 +3289,7 @@ async function checkTrialSettle(env, stored, data) {
     )
       why = "reads.rounds and reads.tokens must each be a read other than b higher";
     else {
+      // Every count input is host-written: docs/autonomy.md records the host trust behind kept.
       const count = { a: 0, b: 0 };
       for (const j of stored.jobs)
         if (
