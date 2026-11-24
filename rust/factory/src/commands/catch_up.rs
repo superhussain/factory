@@ -87,10 +87,15 @@ fn scheduler() -> &'static str {
     pickup::pickup_scheduler()
 }
 
-fn timer_installed(scheduler: &str) -> bool {
+/// Whether this host has a pickup timer. Beside the daemon an unloaded launchd plist counts too,
+/// since it is a leftover to remove.
+fn timer_installed(scheduler: &str, daemon: bool) -> bool {
     #[cfg(test)]
     if let Some(t) = fake!(timer_installed) {
         return t;
+    }
+    if daemon {
+        return pickup::timer_left(scheduler, &pickup::PICKUP);
     }
     pickup::timer_installed(scheduler, &pickup::PICKUP).0
 }
@@ -895,9 +900,10 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
     });
     // One crontab read serves every check, so a host without a daemon reads it as before.
     let (timer, daemon, legacy) = pickup::with_crontab_memo(|| {
+        let daemon = daemon_service();
         (
-            timer_installed(scheduler),
-            daemon_service(),
+            timer_installed(scheduler, daemon.is_some()),
+            daemon,
             legacy_scan(home, scheduler, &binary.to_string_lossy()),
         )
     });

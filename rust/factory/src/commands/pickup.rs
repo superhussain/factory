@@ -1848,6 +1848,13 @@ fn cron_detail(unit: &Unit) -> String {
     }
 }
 
+/// True when the unit is installed, or its launchd plist is left on disk without being loaded:
+/// something uninstall_timer still has to remove.
+pub(crate) fn timer_left(scheduler: &str, unit: &Unit) -> bool {
+    timer_installed(scheduler, unit).0
+        || (scheduler == "launchd" && timer_path(scheduler, unit).exists())
+}
+
 /// (installed, detail) for this host's unit.
 pub(crate) fn timer_installed(scheduler: &str, unit: &Unit) -> (bool, String) {
     let label = unit.label;
@@ -2619,9 +2626,10 @@ fn pickup_setup(io: &mut Io, home: &Path, install: bool, overridden: bool) -> Re
         pickup_scheduler()
     };
     if install && daemon.is_some() {
-        // A timer left beside the daemon goes, as `daemon setup --install` removes it.
+        // A timer left beside the daemon goes, loaded or not, as `daemon setup --install`
+        // removes it.
         let timer = pickup_scheduler();
-        if timer_installed(timer, &PICKUP).0 {
+        if timer_left(timer, &PICKUP) {
             let mut files = timer_backup(timer, &PICKUP);
             if timer == "cron" {
                 files.push((
@@ -19874,6 +19882,21 @@ exit "$archive_code"
             let out = uninstall_timer(&ds.fx.home, "launchd", &PICKUP).unwrap();
             assert_eq!(out, format!("removed launchd timer: {}", timer.display()));
             assert!(!timer.exists());
+        }
+
+        /// A pickup plist that is not loaded is not installed, but it is still left to remove.
+        #[cfg(unix)]
+        #[test]
+        fn unloaded_pickup_plist_is_left_and_removed_beside_the_launchd_daemon() {
+            let ds = Ds::new("launchd");
+            let timer = ds.fx.root.join("Library/LaunchAgents/factory.pickup.plist");
+            fs::create_dir_all(timer.parent().unwrap()).unwrap();
+            fs::write(&timer, "synthetic").unwrap();
+            assert!(!timer_installed("launchd", &PICKUP).0);
+            assert!(timer_left("launchd", &PICKUP));
+            let out = uninstall_timer(&ds.fx.home, "launchd", &PICKUP).unwrap();
+            assert_eq!(out, format!("removed launchd timer: {}", timer.display()));
+            assert!(!timer_left("launchd", &PICKUP));
         }
 
         #[cfg(unix)]
