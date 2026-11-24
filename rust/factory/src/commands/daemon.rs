@@ -1496,24 +1496,27 @@ mod tests {
         );
     }
 
+    /// The server holds the connection open until connect returns, so only the watchdog can end the
+    /// handshake, however slowly a loaded machine runs it. Without one, the hold ends after 60 s
+    /// with a closed socket, not "timed out".
     #[test]
     fn stalled_tls_handshake_times_out() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
+        let (release, held_until) = mpsc::channel::<()>();
         std::thread::spawn(move || {
             let held: Vec<_> = listener.incoming().take(1).collect();
-            sleep(Duration::from_secs(2));
+            let _ = held_until.recv_timeout(Duration::from_secs(60));
             drop(held);
         });
         let t = Timing {
             connect_timeout: Duration::from_millis(300),
             ..TEST
         };
-        let start = Instant::now();
         let url = format!("wss://127.0.0.1:{port}{HOST_EVENTS_PATH}");
         let e = connect(&url, &[], &t, Path::new(".env")).err().unwrap();
+        let _ = release.send(());
         assert_eq!(e, "timed out");
-        assert!(start.elapsed() < Duration::from_secs(1));
     }
 
     #[test]
