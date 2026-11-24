@@ -133,6 +133,39 @@ test("the first read after a write copies what it built; later reads stream R2's
   assert.equal(JSON.parse((await read()).text).jobs[2].title, "CSV 2");
 });
 
+test("a read whose R2 get sees another read's copy answers with the version it serves", async () => {
+  const s = setup();
+  await s.send("/board.json");
+  // An evicted room has no memo, so its next read of the seeded board gets R2's bytes.
+  s.room.restart();
+  const get = s.bucket.get.bind(s.bucket);
+  let release, entered;
+  const gate = new Promise((resolve) => (release = resolve));
+  const waiting = new Promise((resolve) => (entered = resolve));
+  s.bucket.get = async (...args) => {
+    s.bucket.get = get;
+    entered();
+    await gate;
+    return get(...args);
+  };
+  const first = s.send("/board.json");
+  await waiting;
+  // A PATCH lands and a second read builds the new version and copies it, all during that get.
+  const ok = await s.patch({
+    updated: "2026-11-19T12:00:00Z",
+    rows: [{ id: IDEA.id, expect: null, row: IDEA }],
+  });
+  const etag = ok.headers.get("ETag");
+  const expected = { ...BOARD, updated: "2026-11-19T12:00:00Z", jobs: [BUILD, SPEC, IDEA] };
+  assert.deepEqual(await (await s.send("/board.json")).json(), expected);
+  await s.room.settle();
+  assert.deepEqual(JSON.parse(s.r2().bytes), expected);
+  release();
+  const response = await first;
+  assert.equal(response.headers.get("ETag"), etag);
+  assert.deepEqual(await response.json(), expected);
+});
+
 test("a write during a read's copy leaves the board off R2's bytes until the next copy", async () => {
   const s = setup();
   const ok = await s.patch({ rows: [{ id: IDEA.id, expect: null, row: IDEA }] });

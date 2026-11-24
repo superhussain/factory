@@ -623,7 +623,7 @@ export class BoardRows {
   // which one each read took.
   async body() {
     await this.sync();
-    const state = this.state();
+    let state = this.state();
     if (!state) return null;
     const debug = (how) =>
       this.env.BOARD_DEBUG && console.log(`board store: read ${how} for ${state.etag}`);
@@ -634,6 +634,9 @@ export class BoardRows {
         debug("R2's bytes");
         return { etag: state.etag, body: object.body };
       }
+      // R2 moved during the get, so the board may have too: build from the state as it is now,
+      // never an old head over the current pages.
+      state = this.state();
     }
     const built = this.memo.etag !== state.etag;
     debug(built ? "the pages" : "the memo");
