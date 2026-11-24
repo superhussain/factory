@@ -908,7 +908,13 @@ mod tests {
     fn a_lost_daemon_reply_is_an_error_not_a_retry() {
         use std::os::unix::net::UnixListener;
         let (origin, seen) = serve(vec![]);
-        let home = home_for("board-client-lost", &origin);
+        let long = home_for("board-client-lost", &origin);
+        let home = std::path::PathBuf::from(format!("/tmp/factory-lost-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::copy(long.join("config.md"), home.join("config.md")).unwrap();
+        std::fs::copy(long.join(".env"), home.join(".env")).unwrap();
+        let home = std::fs::canonicalize(&home).unwrap();
         let listener = UnixListener::bind(socket_path(&home)).unwrap();
         std::thread::spawn(move || {
             for (n, stream) in listener.incoming().enumerate() {
@@ -936,5 +942,6 @@ mod tests {
         assert_eq!((e.code, runs), (5, 1));
         assert!(e.stderr.contains("may have landed"), "{}", e.stderr);
         assert!(seen.lock().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

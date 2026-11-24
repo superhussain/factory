@@ -378,6 +378,7 @@ when it writes the board.
 | `kept` | each arm has 5 `merged` or `closed` jobs of the project on the stored board, started at or after `opened`, and no read is `b higher` |
 | any other status | never |
 
+- **Host trust.** `kept` counts only rows already on the stored board, so one write cannot add finished rows and settle on them. A bound host can still add five `merged` rows per arm in one write and settle `kept` in the next. The Worker accepts this. `stage`, `started` and `project` are host-written, and the Worker has no GitHub access or stage history to check a merge. A fake `kept` only ends a trial early and skips a possible revert, since a 28-day `inconclusive` also keeps the edit.
 - **Pause.** Two reverted trials without `resumed` pause a project's stage-note edits.
   Settle then prints
   `stage-note trials paused for <slug> after 2 reverts; a person runs trial resume <slug>`,
