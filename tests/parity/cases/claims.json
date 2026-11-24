@@ -220,6 +220,34 @@
       "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_resolve_patch"
     },
     {
+      "id": "claims/refuses-handled",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-test"
+      ],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"handled\": {\"check:da966368ea663ea5\": {\"count\": 1, \"at\": \"2026-01-02T10:00:00Z\"}}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_pr_state.py::PrHandledTest.test_board_refuses_handled"
+    },
+    {
       "id": "claims/refuses-stacked",
       "argv": ["--home", "{home}", "board", "{home}", "001-test"],
       "home": "claims",
@@ -1076,6 +1104,202 @@
         "PUT /api/board": [200, ""]
       },
       "exit": 2
+    },
+    {
+      "id": "claims/approve-no-rounds-missing",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-test"
+      ],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_refuses_without_rounds"
+    },
+    {
+      "id": "claims/approve-no-rounds-empty",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-test"
+      ],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[]}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_refuses_without_rounds"
+    },
+    {
+      "id": "claims/approve-no-rounds-bad-entry",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-test"
+      ],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},\"pending\"]}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_refuses_without_rounds"
+    },
+    {
+      "id": "claims/approve-rounds-from-patch",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-test"
+      ],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\", \"rounds\": [{\"security\": \"PASS\", \"ux\": \"PASS\", \"ui\": \"SKIPPED\", \"code\": \"CHANGES\"}, {\"security\": \"PASS\", \"ux\": \"SKIPPED\", \"ui\": \"SKIPPED\", \"code\": \"CHANGES\"}, {\"security\": \"pending\", \"ux\": \"pending\", \"ui\": \"pending\", \"code\": \"pending\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_reads_rounds_from_the_patch"
+    },
+    {
+      "id": "claims/approve-passes",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-test"
+      ],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"PASS\"}]}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_allows_pass_or_skipped"
+    },
+    {
+      "id": "claims/approve-already-at-approve",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "001-test"
+      ],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"approve\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_checks_a_job_already_at_approve"
+    },
+    {
+      "id": "claims/approve-before-automerge",
+      "argv": [
+        "--home",
+        "{home}",
+        "board",
+        "{home}",
+        "002-test"
+      ],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\", \"automerge\": true}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"002-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::AutomergeGuardTest.test_approve_check_runs_first"
     },
     {
       "id": "claims/automerge-approved",
