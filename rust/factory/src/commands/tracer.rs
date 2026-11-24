@@ -1674,6 +1674,7 @@ mod tests {
         board_writes: u32,
         pipeline: Option<Value>,
         refuse_receipt: bool,
+        receipt_error: Option<(u16, String)>,
         features: Map<String, Value>,
         requests: Vec<(String, String, Value)>,
         token: String,
@@ -1699,6 +1700,7 @@ mod tests {
                 board_writes: 0,
                 pipeline,
                 refuse_receipt: false,
+                receipt_error: None,
                 features: Map::new(),
                 requests: Vec::new(),
                 token: TOKEN.to_string(),
@@ -1799,6 +1801,9 @@ mod tests {
             }
             None => worker(&mut state.lock().unwrap(), &method, &path, &raw),
         };
+        if status == 0 {
+            return;
+        }
         let etag = if etag { "ETag: \"x\"\r\n" } else { "" };
         let head = format!(
             "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n{etag}\r\n",
@@ -1823,6 +1828,9 @@ mod tests {
                     .any(|j| j.get("tracer").and_then(|t| t.get("receipt")).is_some());
                 if s.refuse_receipt && receipt {
                     return (400, REFUSAL_TEXT.to_string(), false);
+                }
+                if let Some((code, text)) = s.receipt_error.clone().filter(|_| receipt) {
+                    return (code, text, false);
                 }
                 s.board = board;
                 s.board_writes += 1;
@@ -3447,6 +3455,32 @@ Nothing.
             format!("factory.py: PUT {}/api/board returned 400: {REFUSAL_TEXT}\nfactory.py: the Worker refused Tracer's receipt (check tracer_receipt_key); 001-sample waits at gate: spec-approval instead\n", fake.origin)
         );
         assert_eq!(writes(&fake), 1);
+    }
+
+    #[test]
+    fn transient_failure_keeps_the_receipt_write() {
+        for (name, error) in [
+            ("503", (503, "Storage is busy.".to_string())),
+            ("network", (0, String::new())),
+        ] {
+            let (fake, t) = gather_home();
+            approve(&fake, &t);
+            follow(&t);
+            set_job(&fake, "stage", json!("spec"));
+            fake.state().receipt_error = Some(error);
+            let err = board_write(
+                &t,
+                json!({"stage": "needs-human", "note": "gate: tracer-scope", "needs": "approve"}),
+            )
+            .unwrap_err();
+            assert_eq!(err.code, 5, "{name}: {}", err.stderr);
+            assert!(
+                !err.stderr.contains("the Worker refused Tracer's receipt"),
+                "{name}: {}",
+                err.stderr
+            );
+            assert_eq!(fake.job()["stage"], "spec", "{name}");
+        }
     }
 
     #[test]

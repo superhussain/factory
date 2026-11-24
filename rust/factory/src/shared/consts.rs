@@ -137,6 +137,34 @@ mod tests {
     }
 
     #[test]
+    fn walkthrough_html_names() {
+        for rel in [
+            "spec.md",
+            "round-1/review-code.md",
+            "shot.webp",
+            "walkthrough.html",
+            "build.walkthrough.html",
+            "decision.walkthrough.html",
+            "round-1/review-ui.walkthrough.html",
+            "rework-2.walkthrough.html",
+        ] {
+            assert!(JOB_REL.is_full(rel), "{rel}");
+        }
+        for rel in [
+            "round-1/walkthrough.html",
+            "other.html",
+            "walkthrough.html.remote",
+            "a.svg",
+            "a.b.walkthrough.html",
+            ".walkthrough.html",
+            "build.walkthrough.htm",
+            "round-1/x/y.walkthrough.html",
+        ] {
+            assert!(!JOB_REL.is_full(rel), "{rel}");
+        }
+    }
+
+    #[test]
     fn note_invisible_reads_python_escapes() {
         assert!(NOTE_INVISIBLE.search("a\u{ad}b").is_some());
         assert!(NOTE_INVISIBLE.search("a\u{e0001}").is_some());

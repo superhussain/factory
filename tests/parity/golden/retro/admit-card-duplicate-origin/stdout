@@ -1,0 +1,11 @@
+wrote {home}/retro/card-duplicate-origin/findings.md
+{
+  "admitted": [],
+  "skipped": [
+    {
+      "title": "Red flag: pipe-to-shell via Bash",
+      "reason": "duplicate 005-origin"
+    }
+  ]
+}
+uploaded retro run card-duplicate-origin

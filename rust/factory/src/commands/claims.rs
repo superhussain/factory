@@ -1697,7 +1697,6 @@ mod tests {
 
     use crate::shared::fs::temp_dir;
     use crate::shared::http::tests::{home_for, serve};
-    use crate::shared::TEST_ENV_LOCK;
 
     #[test]
     fn blocking_fails_closed_on_a_malformed_claim() {
@@ -1722,7 +1721,7 @@ mod tests {
     /// Run f with these environment variables set, restoring them after. Tests that read the Paseo or session
     /// variables hold the same lock.
     fn with_env<T>(vars: &[(&str, &str)], f: impl FnOnce() -> T) -> T {
-        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::shared::test_env_lock();
         let saved: Vec<_> = vars
             .iter()
             .map(|(k, _)| (*k, std::env::var_os(k)))
@@ -1770,6 +1769,46 @@ mod tests {
             (
                 2,
                 "factory.py: only factory.py push and pickup set decision\n"
+            )
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn test_board_refuses_agents() {
+        let home = refused_home("claims-refuses-agents");
+        let opts = WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: None,
+        };
+        let patch = json!({"agents": []}).as_object().unwrap().clone();
+        let e = board_write(&home, "042-sample-export", patch, &opts).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (
+                2,
+                "factory.py: only factory.py agent and pickup set agents\n"
+            )
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn test_board_refuses_repeated() {
+        let home = refused_home("claims-refuses-repeated");
+        let opts = WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: None,
+        };
+        let patch = json!({"repeated": []}).as_object().unwrap().clone();
+        let e = board_write(&home, "042-csv-export", patch, &opts).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr.as_str()),
+            (
+                2,
+                "factory.py: only factory.py repeats sets repeated. Nothing was written.\n"
             )
         );
         fs::remove_dir_all(home).unwrap();

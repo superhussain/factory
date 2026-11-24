@@ -125,6 +125,158 @@
       "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_move_patch"
     },
     {
+      "id": "claims/refuses-origin",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"origin\": {\"gate\": \"human\", \"approved\": {\"option\": \"A\"}}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_origin"
+    },
+    {
+      "id": "claims/refuses-started",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"started\": \"2026-10-30T00:00:00Z\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_started"
+    },
+    {
+      "id": "claims/refuses-goal",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"goal\": \"x\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_goal"
+    },
+    {
+      "id": "claims/refuses-gated-spec",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"spec\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"gate\":\"human\",\"kind\":\"bug-fix\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/refuses-gated-build",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"build\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"gate\":\"human\",\"kind\":\"bug-fix\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/refuses-gated-needs-human",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"gate\":\"human\",\"kind\":\"bug-fix\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/refuses-gated-null-stage",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": null, \"project\": \"sample\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"gate\":\"human\",\"kind\":\"bug-fix\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
+      "id": "claims/accepts-gated-closed",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"closed\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"origin\":{\"gate\":\"human\",\"kind\":\"bug-fix\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_suggest.py::SuggestTest.test_board_refuses_promoting_gated"
+    },
+    {
       "id": "claims/refuses-steer",
       "argv": ["--home", "{home}", "board", "{home}", "001-test"],
       "home": "claims",
@@ -218,6 +370,25 @@
       },
       "exit": 2,
       "from": "tests/cli/test_factory.py::MoveFenceTest.test_board_refuses_a_resolve_patch"
+    },
+    {
+      "id": "claims/refuses-handled",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"handled\": {\"check:da966368ea663ea5\": {\"count\": 1, \"at\": \"2026-01-02T10:00:00Z\"}}}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_pr_state.py::PrHandledTest.test_board_refuses_handled"
     },
     {
       "id": "claims/refuses-stacked",
@@ -1078,6 +1249,139 @@
       "exit": 2
     },
     {
+      "id": "claims/approve-no-rounds-missing",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_refuses_without_rounds"
+    },
+    {
+      "id": "claims/approve-no-rounds-empty",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_refuses_without_rounds"
+    },
+    {
+      "id": "claims/approve-no-rounds-bad-entry",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},\"pending\"]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_refuses_without_rounds"
+    },
+    {
+      "id": "claims/approve-rounds-from-patch",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\", \"rounds\": [{\"security\": \"PASS\", \"ux\": \"PASS\", \"ui\": \"SKIPPED\", \"code\": \"CHANGES\"}, {\"security\": \"PASS\", \"ux\": \"SKIPPED\", \"ui\": \"SKIPPED\", \"code\": \"CHANGES\"}, {\"security\": \"pending\", \"ux\": \"pending\", \"ui\": \"pending\", \"code\": \"pending\"}]}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_reads_rounds_from_the_patch"
+    },
+    {
+      "id": "claims/approve-passes",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"PASS\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_allows_pass_or_skipped"
+    },
+    {
+      "id": "claims/approve-already-at-approve",
+      "argv": ["--home", "{home}", "board", "{home}", "001-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\"}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"approve\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::ApproveGuardTest.test_checks_a_job_already_at_approve"
+    },
+    {
+      "id": "claims/approve-before-automerge",
+      "argv": ["--home", "{home}", "board", "{home}", "002-test"],
+      "home": "claims",
+      "stubs": {},
+      "stdin": "{\"stage\": \"approve\", \"automerge\": true}",
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"002-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-11-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"},{\"security\":\"PASS\",\"ux\":\"SKIPPED\",\"ui\":\"SKIPPED\",\"code\":\"CHANGES\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_stage_guard.py::AutomergeGuardTest.test_approve_check_runs_first"
+    },
+    {
       "id": "claims/automerge-approved",
       "argv": ["--home", "{home}", "board", "{home}", "001-test"],
       "home": "claims",
@@ -1201,6 +1505,169 @@
         "GET /api/jobs/sample/001-test/?etags=1": [200, []]
       },
       "exit": 0
+    },
+    {
+      "id": "claims/hold-fresh-own-claim-skips-the-write",
+      "argv": ["--home", "{home}", "hold", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [200, []]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::HoldWriteSkipTest.test_fresh_own_claim_skips_the_board_write"
+    },
+    {
+      "id": "claims/hold-take-own-fresh-claim-writes",
+      "argv": ["--home", "{home}", "hold", "sample/001-test", "take"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [200, []]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::HoldWriteSkipTest.test_take_writes"
+    },
+    {
+      "id": "claims/hold-released-own-fresh-claim-writes",
+      "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "receiver"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"receiver\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"},\"handoff\":{\"state\":\"accepted\",\"from\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stage\":\"build\",\"round\":0,\"at\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          200,
+          [
+            {
+              "name": "handoff.md",
+              "etag": "\"93fa28940b9b0bb9cf5e9b0a1c533b9e4a7ffc730e41ea79310f78bb8df3ce60\""
+            }
+          ]
+        ],
+        "GET /api/jobs/sample/001-test/handoff.md": [200, "# Handoff\n\nResume at task 3.\n"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::HoldWriteSkipTest.test_released_writes"
+    },
+    {
+      "id": "claims/hold-handoff-acceptance-on-own-fresh-claim-writes",
+      "argv": ["--home", "{home}", "hold", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "receiver"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"receiver\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"},\"handoff\":{\"state\":\"ready\",\"from\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stage\":\"build\",\"round\":0,\"at\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [200, []]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::HoldWriteSkipTest.test_handoff_acceptance_writes"
+    },
+    {
+      "id": "claims/hold-paseo-link-change-writes",
+      "argv": ["--home", "{home}", "hold", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "s1",
+        "PASEO_AGENT_ID": "agent-new"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"},\"paseo\":{\"server\":\"srv-old\",\"agent\":\"agent-old\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [200, []]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::HoldWriteSkipTest.test_paseo_link_change_writes"
+    },
+    {
+      "id": "claims/hold-paseo-link-removed-writes",
+      "argv": ["--home", "{home}", "hold", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"},\"paseo\":{\"server\":\"srv-old\",\"agent\":\"agent-old\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [200, []]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::HoldWriteSkipTest.test_paseo_link_change_writes"
+    },
+    {
+      "id": "claims/hold-unlinked-own-row-writes",
+      "argv": ["--home", "{home}", "hold", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "s1",
+        "PASEO_AGENT_ID": "agent-baby"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"},\"paseo\":{\"server\":\"srv-mac\",\"agent\":\"agent-baby\"},\"agents\":[{\"role\":\"babysit\",\"session\":\"s1\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [200, []]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::HoldWriteSkipTest.test_unlinked_own_row_writes"
+    },
+    {
+      "id": "claims/hold-unlinked-own-row-without-paseo-skips-the-write",
+      "argv": ["--home", "{home}", "hold", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"},\"agents\":[{\"role\":\"babysit\",\"session\":\"s1\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [200, []]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::HoldWriteSkipTest.test_unlinked_own_row_writes"
     },
     {
       "id": "claims/hold-held-by-another-session",
@@ -1411,6 +1878,210 @@
       "exit": 6
     },
     {
+      "id": "claims/hold-released-accepts-unclaimed-job",
+      "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "receiver"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"handoff\":{\"state\":\"ready\",\"from\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stage\":\"build\",\"round\":0,\"at\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          200,
+          [
+            {
+              "name": "handoff.md",
+              "etag": "\"93fa28940b9b0bb9cf5e9b0a1c533b9e4a7ffc730e41ea79310f78bb8df3ce60\""
+            }
+          ]
+        ],
+        "GET /api/jobs/sample/001-test/handoff.md": [200, "# Handoff\n\nResume at task 3.\n"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_released_hold_accepts_unclaimed_job_and_refreshes_own_claim"
+    },
+    {
+      "id": "claims/hold-released-refreshes-own-claim",
+      "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "receiver"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"receiver\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"handoff\":{\"state\":\"accepted\",\"from\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stage\":\"build\",\"round\":0,\"at\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          200,
+          [
+            {
+              "name": "handoff.md",
+              "etag": "\"93fa28940b9b0bb9cf5e9b0a1c533b9e4a7ffc730e41ea79310f78bb8df3ce60\""
+            }
+          ]
+        ],
+        "GET /api/jobs/sample/001-test/handoff.md": [200, "# Handoff\n\nResume at task 3.\n"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_released_hold_accepts_unclaimed_job_and_refreshes_own_claim"
+    },
+    {
+      "id": "claims/hold-released-keeps-human-note",
+      "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "receiver"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"handoff\":{\"state\":\"ready\",\"from\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stage\":\"build\",\"round\":0,\"at\":\"2026-11-01T00:00:00Z\"},\"note\":\"escalated: pending human sign-off\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          200,
+          [
+            {
+              "name": "handoff.md",
+              "etag": "\"93fa28940b9b0bb9cf5e9b0a1c533b9e4a7ffc730e41ea79310f78bb8df3ce60\""
+            }
+          ]
+        ],
+        "GET /api/jobs/sample/001-test/handoff.md": [200, "# Handoff\n\nResume at task 3.\n"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_handoff_preserves_human_note_through_acceptance"
+    },
+    {
+      "id": "claims/hold-released-round-drift",
+      "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "receiver"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"handoff\":{\"state\":\"ready\",\"from\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stage\":\"build\",\"round\":1,\"at\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          200,
+          [
+            {
+              "name": "handoff.md",
+              "etag": "\"93fa28940b9b0bb9cf5e9b0a1c533b9e4a7ffc730e41ea79310f78bb8df3ce60\""
+            }
+          ]
+        ],
+        "GET /api/jobs/sample/001-test/handoff.md": [200, "# Handoff\n\nResume at task 3.\n"]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_released_hold_rejects_round_drift_before_claiming"
+    },
+    {
+      "id": "claims/hold-released-after-progress-ignores-accepted-snapshot",
+      "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "receiver"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":2,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"receiver\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"handoff\":{\"state\":\"accepted\",\"from\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stage\":\"build\",\"round\":1,\"at\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          200,
+          [
+            {
+              "name": "handoff.md",
+              "etag": "\"93fa28940b9b0bb9cf5e9b0a1c533b9e4a7ffc730e41ea79310f78bb8df3ce60\""
+            }
+          ]
+        ],
+        "GET /api/jobs/sample/001-test/handoff.md": [200, "# Handoff\n\nResume at task 3.\n"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_released_hold_after_progress_ignores_accepted_snapshot"
+    },
+    {
+      "id": "claims/hold-released-listing-fails-after-claim",
+      "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "receiver"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"handoff\":{\"state\":\"ready\",\"from\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stage\":\"build\",\"round\":0,\"at\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"93fa28940b9b0bb9cf5e9b0a1c533b9e4a7ffc730e41ea79310f78bb8df3ce60\""
+              }
+            ]
+          ],
+          [500, ""]
+        ],
+        "GET /api/jobs/sample/001-test/handoff.md": [200, "# Handoff\n\nResume at task 3.\n"]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_released_hold_artifact_listing_failure_after_claim"
+    },
+    {
+      "id": "claims/hold-released-clean-resume-downloads-and-passes-strict-check",
+      "argv": ["--home", "{home}", "hold", "sample/001-test", "released"],
+      "home": "hold-released-clean-resume",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "receiver"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":1,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"handoff\":{\"state\":\"ready\",\"from\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stage\":\"build\",\"round\":1,\"at\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          200,
+          [
+            {
+              "name": "handoff.md",
+              "etag": "\"93fa28940b9b0bb9cf5e9b0a1c533b9e4a7ffc730e41ea79310f78bb8df3ce60\""
+            },
+            {
+              "name": "round-1/review-code.md",
+              "etag": "\"9be5730c4d0d0a8ecffdf85a79af72e79fb99032c911b248fd5eaa6c512fe045\""
+            }
+          ]
+        ],
+        "GET /api/jobs/sample/001-test/handoff.md": [200, "# Handoff\n\nResume at task 3.\n"],
+        "GET /api/jobs/sample/001-test/round-1/review-code.md": [200, "VERDICT: CHANGES\n"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_released_hold_clean_resume_downloads_and_passes_strict_check"
+    },
+    {
       "id": "claims/hold-links-paseo-rows",
       "argv": ["--home", "{home}", "hold", "sample/001-test"],
       "home": "claims-hold",
@@ -1427,6 +2098,45 @@
       "exit": 0
     },
     {
+      "id": "claims/hold-receiver-accepts-handoff-and-links-paseo",
+      "argv": ["--home", "{home}", "hold", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "receiver",
+        "PASEO_AGENT_ID": "agent_new"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"handoff\":{\"state\":\"ready\",\"from\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stage\":\"build\",\"round\":0,\"at\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [200, []]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_receiver_accepts_with_own_claim_and_paseo_link"
+    },
+    {
+      "id": "claims/hold-third-session-refused-after-acceptance",
+      "argv": ["--home", "{home}", "hold", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "third"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"receiver\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"},\"handoff\":{\"state\":\"accepted\",\"from\":{\"device\":\"parity\",\"session\":\"sender\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"stage\":\"build\",\"round\":0,\"at\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [200, []]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_receiver_accepts_with_own_claim_and_paseo_link"
+    },
+    {
       "id": "claims/handoff-needs-the-claim",
       "argv": ["--home", "{home}", "handoff", "sample/001-test"],
       "home": "claims-hold",
@@ -1441,6 +2151,37 @@
         "GET /api/jobs/sample/001-test/?etags=1": [200, []]
       },
       "exit": 6
+    },
+    {
+      "id": "claims/handoff-stale-foreign-claim",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"other\",\"session\":\"someone\",\"since\":\"2000-01-01T00:00:00Z\",\"seen\":\"2000-01-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_non_owner_cannot_handoff_even_if_claim_is_stale"
     },
     {
       "id": "claims/handoff-only-in-flight",
@@ -1473,6 +2214,37 @@
         "GET /api/jobs/sample/001-test/?etags=1": [200, []]
       },
       "exit": 2
+    },
+    {
+      "id": "claims/handoff-blank-checkpoint",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "handoff-blank-checkpoint",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_blank_checkpoint"
     },
     {
       "id": "claims/handoff-wrong-branch",
@@ -1639,6 +2411,662 @@
         "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
       },
       "exit": 0
+    },
+    {
+      "id": "claims/handoff-records-goal",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "handoff-records-goal",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"],
+            "stdout": "factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "ls-remote",
+              "origin",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              },
+              {
+                "name": "spec.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""],
+        "PUT /api/jobs/sample/001-test/spec.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_handoff_records_goal"
+    },
+    {
+      "id": "claims/handoff-active-stage-spec",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"],
+            "stdout": "factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "ls-remote",
+              "origin",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"spec\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"handoff\":{\"state\":\"accepted\",\"to\":{\"session\":\"old\"},\"accepted\":\"old\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_all_active_stages_and_old_acceptance_metadata"
+    },
+    {
+      "id": "claims/handoff-active-stage-build",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"],
+            "stdout": "factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "ls-remote",
+              "origin",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"handoff\":{\"state\":\"accepted\",\"to\":{\"session\":\"old\"},\"accepted\":\"old\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_all_active_stages_and_old_acceptance_metadata"
+    },
+    {
+      "id": "claims/handoff-active-stage-review",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"],
+            "stdout": "factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "ls-remote",
+              "origin",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"handoff\":{\"state\":\"accepted\",\"to\":{\"session\":\"old\"},\"accepted\":\"old\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_all_active_stages_and_old_acceptance_metadata"
+    },
+    {
+      "id": "claims/handoff-active-stage-approve",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"],
+            "stdout": "factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "ls-remote",
+              "origin",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"approve\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"handoff\":{\"state\":\"accepted\",\"to\":{\"session\":\"old\"},\"accepted\":\"old\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_all_active_stages_and_old_acceptance_metadata"
+    },
+    {
+      "id": "claims/handoff-keeps-human-note",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"],
+            "stdout": "factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "ls-remote",
+              "origin",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"note\":\"escalated: pending human sign-off\"}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_handoff_preserves_human_note_through_acceptance"
+    },
+    {
+      "id": "claims/handoff-origin-unreachable",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"],
+            "stdout": "factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "ls-remote",
+              "origin",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "",
+            "stderr": "fatal: unable to access origin\n",
+            "code": 128
+          }
+        ]
+      },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_network_failure_keeps_claim"
+    },
+    {
+      "id": "claims/handoff-unrelated-board-race-retries",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"],
+            "stdout": "factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "ls-remote",
+              "origin",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          [
+            200,
+            "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+          ],
+          [
+            200,
+            "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+          ],
+          [
+            200,
+            "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}},{\"id\":\"002-other\",\"stage\":\"spec\"}]}\n"
+          ]
+        ],
+        "PUT /api/board": [
+          [412, ""],
+          [200, ""]
+        ],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_unrelated_board_race_retries"
+    },
+    {
+      "id": "claims/handoff-no-session",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": ""
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_no_session_cannot_handoff"
+    },
+    {
+      "id": "claims/handoff-wrong-project",
+      "argv": ["--home", "{home}", "handoff", "wrong/001-test"],
+      "home": "claims-hold",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 4,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_project_mismatch"
+    },
+    {
+      "id": "claims/handoff-failed-upload",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"],
+            "stdout": "factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "ls-remote",
+              "origin",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [500, ""]
+      },
+      "exit": 5,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_failed_upload_keeps_claim"
     },
     {
       "id": "claims/handoff-cas-retry-keeps-new-owner",
@@ -1932,6 +3360,820 @@
         "GET /api/pipeline/global": [200, { "schema": 1, "tracer": { "enabled": true } }]
       },
       "exit": 0
+    },
+    {
+      "id": "claims/board-tracer-bad-url",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"url\": \"x\"}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-feature",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"feature\": \"f\"}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-false",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": false}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-follow-url",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": true, \"url\": \"x\"}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-string",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": \"yes\"}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-list",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": []}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-follow-null",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": null}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z",
+                "tracer": {
+                  "follow": true
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-null",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": null}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z",
+                "tracer": {
+                  "follow": true
+                }
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-building",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"building\": true}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-tasks",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"tasks\": []}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::BoardHookTest.test_follow_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-gather-false",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"gather\": false}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-scope",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"scope\": \"approved\"}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-bad-stopped",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"stopped\": true}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 2,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-gather-follow",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"follow\": true, \"gather\": true}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "idea",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": false
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_patch_validation"
+    },
+    {
+      "id": "claims/board-tracer-gate-gathering",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: spec-approval\", \"needs\": \"approve\"}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z",
+                "tracer": {
+                  "follow": true,
+                  "gather": true,
+                  "feature": "factory-1",
+                  "url": "{api}/#/f/factory-1",
+                  "scope": "gathering"
+                },
+                "idea": "Export samples as CSV\nWith a header row."
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ],
+        "GET /api/features/factory-1": [
+          200,
+          {
+            "id": "factory-1",
+            "ticket": "FACTORY-1",
+            "tasks": [],
+            "agents": []
+          }
+        ],
+        "POST /api/features": [
+          201,
+          {
+            "id": "factory-1",
+            "ticket": "FACTORY-1",
+            "tasks": [],
+            "agents": []
+          }
+        ],
+        "PUT /api/features/factory-1/agents/factory-builder": [200, {}],
+        "PUT /api/features/factory-1/tasks/t1": [
+          200,
+          {
+            "id": "t1"
+          }
+        ],
+        "PUT /api/features/factory-1/tasks/t2": [
+          200,
+          {
+            "id": "t2"
+          }
+        ],
+        "PUT /api/features/factory-1/tasks/t3": [
+          200,
+          {
+            "id": "t3"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t1": [
+          200,
+          {
+            "id": "t1"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t2": [
+          200,
+          {
+            "id": "t2"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t3": [
+          200,
+          {
+            "id": "t3"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gate_patch_without_approval_holds"
+    },
+    {
+      "id": "claims/board-tracer-gate-declined",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"stage\": \"needs-human\", \"note\": \"gate: spec-approval\", \"needs\": \"approve\"}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z",
+                "tracer": {
+                  "follow": true,
+                  "gather": true,
+                  "feature": "factory-1",
+                  "url": "{api}/#/f/factory-1",
+                  "scope": "declined"
+                },
+                "idea": "Export samples as CSV\nWith a header row."
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ],
+        "GET /api/features/factory-1": [
+          200,
+          {
+            "id": "factory-1",
+            "ticket": "FACTORY-1",
+            "tasks": [],
+            "agents": [],
+            "closed": true
+          }
+        ],
+        "POST /api/features": [
+          201,
+          {
+            "id": "factory-1",
+            "ticket": "FACTORY-1",
+            "tasks": [],
+            "agents": [],
+            "closed": true
+          }
+        ],
+        "PUT /api/features/factory-1/agents/factory-builder": [200, {}],
+        "PUT /api/features/factory-1/tasks/t1": [
+          200,
+          {
+            "id": "t1"
+          }
+        ],
+        "PUT /api/features/factory-1/tasks/t2": [
+          200,
+          {
+            "id": "t2"
+          }
+        ],
+        "PUT /api/features/factory-1/tasks/t3": [
+          200,
+          {
+            "id": "t3"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t1": [
+          200,
+          {
+            "id": "t1"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t2": [
+          200,
+          {
+            "id": "t2"
+          }
+        ],
+        "PATCH /api/features/factory-1/tasks/t3": [
+          200,
+          {
+            "id": "t3"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gate_patch_without_approval_holds"
+    },
+    {
+      "id": "claims/board-tracer-gather-needs-follow",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"tracer\": {\"gather\": true}, \"stage\": \"idea\"}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "idea",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": true
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::GatherTest.test_gather_needs_follow"
+    },
+    {
+      "id": "claims/board-tracer-off-patch",
+      "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
+      "home": "tracer-mirror",
+      "stubs": {},
+      "stdin": "{\"stage\": \"build\", \"tracer\": {\"follow\": true}}",
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "",
+            "jobs": [
+              {
+                "id": "001-sample",
+                "project": "sample",
+                "stage": "spec",
+                "jira": "PLAN-1234",
+                "title": "Sample feature",
+                "updated": "2026-11-01T00:00:00Z",
+                "started": "2026-11-01T00:00:00Z"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/pipeline/global": [
+          200,
+          {
+            "schema": 1,
+            "tracer": {
+              "enabled": false
+            }
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_tracer.py::OffTest.test_off_board_patch_makes_no_tracer_call"
     },
     {
       "id": "claims/board-tracer-failure-warns",

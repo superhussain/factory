@@ -858,6 +858,64 @@ mod tests {
         fs::remove_dir_all(home).unwrap();
     }
 
+    #[test]
+    fn writes_as_verdicts_land() {
+        use crate::shared::http::tests::{home_for, serve};
+        let round = |security: &str, code: &str| json!({"security": security, "ux": "SKIPPED", "ui": "SKIPPED", "code": code});
+        let round_1 = json!({"security": "PASS", "ux": "PASS", "ui": "SKIPPED", "code": "CHANGES"});
+        let board = json!({"updated": "", "jobs": [{
+            "id": "042-sample-export", "project": "sample", "title": "Sample export",
+            "stage": "review", "round": 2, "rounds": [round_1, round("pending", "pending")],
+        }]})
+        .to_string();
+        let board: &'static str = Box::leak(board.into_boxed_str());
+        let (origin, seen) = serve(vec![(200, board, vec![("ETag", "\"e1\"")]); 24]);
+        let home = home_for("round-wait-writes", &origin);
+        let folder = home.join("jobs/sample/042-sample-export/round-2");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("review-ux.md"), "VERDICT: SKIPPED\n").unwrap();
+        fs::write(folder.join("review-ui.md"), "VERDICT: SKIPPED\n").unwrap();
+        let clock = Cell::new(0.0);
+        let sleep = |s: f64| {
+            clock.set(clock.get() + s);
+            if clock.get() == 212.0 {
+                fs::write(folder.join("review-security.md"), "VERDICT: CHANGES\n").unwrap();
+            }
+            if clock.get() == 305.0 {
+                fs::write(folder.join("review-code.md"), "VERDICT: PASS\n").unwrap();
+            }
+        };
+        let io = Io {
+            hold: &no_hold,
+            now: &|| clock.get(),
+            sleep: &sleep,
+        };
+        round_wait_run(
+            &home,
+            "sample",
+            "042-sample-export",
+            "sample/042-sample-export",
+            &strings(&["2"]),
+            &io,
+        )
+        .unwrap();
+        let puts: Vec<Value> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.method == "PUT")
+            .map(|r| serde_json::from_slice::<Value>(&r.body).unwrap()["jobs"][0]["rounds"].clone())
+            .collect();
+        assert_eq!(
+            puts,
+            [
+                json!([round_1, round("CHANGES", "pending")]),
+                json!([round_1, round("CHANGES", "PASS")]),
+            ]
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn watch_linked_file_exits_6() {

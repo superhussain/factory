@@ -5508,9 +5508,7 @@ mod tests {
         #[cfg(unix)]
         #[test]
         fn pick_runtime() {
-            let _lock = crate::shared::TEST_ENV_LOCK
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let _lock = crate::shared::test_env_lock();
             let home = home("routes-runtime", ROUTES);
             let paseo = home.join("paseo");
             fs::create_dir(&paseo).unwrap();
@@ -7336,8 +7334,8 @@ mod tests {
                     "deterministic",
                 ),
             ];
-            CHECK_TIMEOUT.with(|t| t.set(Some(1)));
             for (row, unit, exit, cell) in rows {
+                CHECK_TIMEOUT.with(|t| t.set(Some(if row == "budget" { 1 } else { 60 })));
                 let _ = fs::remove_file(&record);
                 f.base(Some(json!([check("lint", "pass"), unit])), None);
                 let (code, out, err) = f.gate();

@@ -1,0 +1,4 @@
+factory agents: 9 role prompt bodies refreshed; existing native headers kept verbatim
+factory home: {home}
+Set api_url in {home}/config.md, then run /factory init again.
+Set FACTORY_ACCESS_CLIENT_ID and FACTORY_ACCESS_CLIENT_SECRET in {home}/.env, then run /factory init again.

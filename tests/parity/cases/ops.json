@@ -285,6 +285,16 @@
       "stubs": {}
     },
     {
+      "id": "ops/archive-no-server-id",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-archive-no-server-id",
+      "stubs": {},
+      "from": "tests/cli/test_archive_workspace.py::ArchiveWorkspaceTest.test_not_a_paseo_session",
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      }
+    },
+    {
       "id": "ops/archive-dash-agent",
       "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
       "home": "ops-paseo",
@@ -621,6 +631,120 @@
       "exit": 0
     },
     {
+      "id": "ops/archive-not-worktree-suffix",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode-x\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode-x\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_archive_workspace.py::ArchiveWorkspaceTest.test_workspace_not_this_jobs_worktree"
+    },
+    {
+      "id": "ops/archive-not-worktree-prefix",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_archive_workspace.py::ArchiveWorkspaceTest.test_workspace_not_this_jobs_worktree"
+    },
+    {
       "id": "ops/archive-null-wks",
       "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
       "home": "ops-paseo",
@@ -931,6 +1055,206 @@
         ]
       },
       "exit": 0
+    },
+    {
+      "id": "ops/archive-no-creation-entry",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "factory/042-dark-mode\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/042-dark-mode"
+            ],
+            "code": 0,
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa commit: local\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb commit: inherited\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--exclude=factory/042-dark-mode",
+              "--branches"
+            ],
+            "code": 0,
+            "stdout": "abc1234 local\ndef5678 inherited\n",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_archive_workspace.py::ArchiveWorkspaceTest.test_inherited_commits_without_creation_entry"
+    },
+    {
+      "id": "ops/archive-reflog-fails",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "factory/042-dark-mode\n",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/042-dark-mode"
+            ],
+            "code": 1,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--exclude=factory/042-dark-mode",
+              "--branches"
+            ],
+            "code": 0,
+            "stdout": "abc1234 local\ndef5678 inherited\n",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_archive_workspace.py::ArchiveWorkspaceTest.test_reflog_fails"
     },
     {
       "id": "ops/archive-closed",
@@ -1484,6 +1808,277 @@
         ]
       },
       "exit": 0
+    },
+    {
+      "id": "ops/archive-detached-pushed",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--branches"
+            ],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_archive_workspace.py::ArchiveWorkspaceTest.test_detached_head_at_pushed_commit"
+    },
+    {
+      "id": "ops/archive-detached-unpushed",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--branches"
+            ],
+            "code": 0,
+            "stdout": "abc1234 detached\n",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_archive_workspace.py::ArchiveWorkspaceTest.test_detached_head_commit_not_on_any_branch"
+    },
+    {
+      "id": "ops/archive-detached-kept",
+      "argv": ["--home", "{home}", "archive-workspace", "sample/042-dark-mode"],
+      "home": "ops-paseo",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["inspect", "agent-1", "--json"],
+            "code": 0,
+            "stdout": "{\"Cwd\": \"/work/factory-042-dark-mode\", \"Archived\": true}",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "code": 0,
+            "stdout": "[{\"workspaceId\": \"wks_0a1b\", \"cwd\": \"/work/factory-042-dark-mode/\", \"isolation\": \"worktree\"}]",
+            "stderr": ""
+          },
+          {
+            "argv": ["workspace", "archive", "wks_0a1b"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "git": [
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "reflog",
+              "show",
+              "--format=%H %gs",
+              "refs/heads/factory/042-dark-mode"
+            ],
+            "code": 1,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "argv": [
+              "-C",
+              "/work/factory-042-dark-mode",
+              "log",
+              "--format=%h %s",
+              "HEAD",
+              "--not",
+              "--remotes",
+              "--branches"
+            ],
+            "code": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ]
+      },
+      "env": {
+        "PASEO_AGENT_ID": "agent-1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-01T00:00:00Z",
+            "jobs": [
+              {
+                "id": "042-dark-mode",
+                "project": "sample",
+                "stage": "merged"
+              },
+              {
+                "id": "043-other",
+                "project": "sample",
+                "stage": "building"
+              },
+              {
+                "id": "045-closed",
+                "project": "sample",
+                "stage": "closed"
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_archive_workspace.py::ArchiveWorkspaceTest.test_detached_head_commit_kept_by_local_branch"
     },
     {
       "id": "ops/handled-counts",

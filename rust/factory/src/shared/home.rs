@@ -411,6 +411,22 @@ mod tests {
     }
 
     #[test]
+    fn empty_xdg_config_home_falls_back_to_default() {
+        let dir = temp_dir("home-empty-xdg");
+        let root = config_root_from(Some(OsStr::new("")), Some(&dir)).unwrap();
+        assert_eq!(root, dir.join(".config"));
+        assert_eq!(
+            resolve_home(None, Some(OsStr::new("")), Some(&dir)).unwrap(),
+            dir.join(".config/factory")
+        );
+        assert_eq!(
+            root.join("opencode/agents"),
+            dir.join(".config/opencode/agents")
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn pointer_must_name_a_valid_home() {
         let dir = temp_dir("home-pointer");
         let home = dir.join("home");

@@ -110,6 +110,14 @@ mod tests {
     }
 
     #[test]
+    fn hold_prints_elapsed_since_started() {
+        // A start 340 seconds ago reads as 340 to 400 elapsed seconds, as hold prints it.
+        let started = format_stamp(unix_now() - 340);
+        let elapsed = elapsed_seconds(&started).unwrap();
+        assert!((340..=400).contains(&elapsed), "{elapsed}");
+    }
+
+    #[test]
     fn parse_accepts_what_strptime_accepts() {
         assert_eq!(
             parse_stamp("2026-1-5T1:2:3Z"),
