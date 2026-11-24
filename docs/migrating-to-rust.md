@@ -269,7 +269,8 @@ catch-up printed as `backup: <path>`:
    and run `systemctl --user daemon-reload`.
 4. Copy the files in `<backup>/home/` that differ back into the factory home with
    `cp -p`, which keeps their modes. Leave `.env` alone unless it changed, so a
-   rotated token does not come back.
+   rotated token does not come back. `diff <backup>/home/.env <home>/.env` shows
+   whether it changed.
 
 ## Agent checklist
 
