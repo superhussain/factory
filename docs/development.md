@@ -9,7 +9,6 @@ Working on the repository itself: tests, tooling and docs. For deployment see
 - Node `>=22.18.0`, development pinned to `24.14.0` (`.node-version`)
 - pnpm `11.9.0` (`package.json` `packageManager`)
 - Rust toolchain: install rustup from https://rustup.rs. `tools/install.sh` (`tools\install.ps1` on Windows) builds the factory binary with cargo from PATH or `~/.cargo/bin`
-- Python `3.8+` only for the `tests/worker/test_*.py` suites that `node tools/local.mjs --check` runs, until they move off Python
 - Git
 
 ## Install and browser provisioning
