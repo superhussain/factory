@@ -197,7 +197,11 @@ fn build(
     let _ = writeln!(
         err,
         "install: Rust binary built in {} s",
-        round_int((host.clock)().saturating_duration_since(start).as_secs_f64())
+        round_int(
+            (host.clock)()
+                .saturating_duration_since(start)
+                .as_secs_f64()
+        )
     );
     Ok(binary)
 }
