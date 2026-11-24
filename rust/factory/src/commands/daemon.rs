@@ -2,7 +2,8 @@
 //! scheduler where it is installed. A pass runs per burst of board or backlog writes, when a local
 //! factory agent stops running, right after a pass that launched a job, and after 5 minutes with
 //! no pass. It also keeps the board mirror (`mirror.rs`) current from the socket's rows frames and
-//! serves it to this host's commands.
+//! serves it to this host's commands, and syncs this host's active job folders with R2 as they
+//! change (`job_sync.rs`).
 
 use std::collections::hash_map::RandomState;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -23,6 +24,7 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{HandshakeError, Message, WebSocket};
 
 use crate::cli::Call;
+use crate::commands::job_sync;
 use crate::commands::mirror::{self, Mirror};
 use crate::shared::conf::read_conf;
 use crate::shared::exit::{fail, Res};
@@ -166,6 +168,13 @@ fn run(home: &Path) -> Res<()> {
         "factory daemon: watching {url}; log {}",
         home.join("logs").join("daemon").display()
     );
+    let sync_home = home.clone();
+    let syncer = job_sync::spawn(
+        &home,
+        board.clone(),
+        signal_stop,
+        Arc::new(move |msg: &str| log_line(&sync_home, msg)),
+    );
     let terminal = io::stderr().is_terminal();
     serve(
         &url,
@@ -200,6 +209,7 @@ fn run(home: &Path) -> Res<()> {
         },
     );
     mirror::unlisten(&home);
+    let _ = syncer.join();
     Ok(())
 }
 

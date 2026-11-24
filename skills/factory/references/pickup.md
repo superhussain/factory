@@ -404,6 +404,17 @@ daemon is the host's only pickup scheduler and no pickup timer exists.
 - On a cron-only host the crontab's `@reboot` and `*/5` lines only start a dead
   daemon; they never run pickup. launchd, systemd and the Windows loop restart
   it themselves.
+- The daemon also syncs the folders of active jobs (past idea, not merged or
+  closed) that exist on this host. It scans them every 2 s and pushes a folder
+  through `push`'s own code once it has been still for 3 s and differs from its
+  last sync. It pulls a job when its board row changes, ignoring the claim
+  heartbeat. A conflict keeps the local file, saves `<file>.remote` and goes to
+  the daemon log. A failed push or pull retries after 60 s, doubling to 30
+  minutes, and stops once the job is merged or closed. The daemon and a manual
+  `push` or `pull` take the job's `.sync.lock` in turn. `factory push` on a folder
+  that matches its last sync returns without a request while the daemon runs, so
+  it no longer prints `remote newer`; the daemon pulls on the next row change.
+  An old folder on a host for a job still active pushes its unpushed edits too.
 - A manual `pickup` beside the daemon, or a leftover timer during migration, is
   safe: pickup takes no host lock, but each claim is a board compare-and-swap
   under a fresh session tag, so two runs never claim the same idea.

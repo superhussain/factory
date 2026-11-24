@@ -147,6 +147,9 @@ reads and writes them, and job folders go up by hand:
 - `pull "$SLUG/<id>"` downloads what changed in R2 and keeps local edits, and
   `sync "$SLUG"` does that for every job of the project that is not `merged` or
   `closed`. Pull a finished job by id.
+- Where the daemon runs, it pushes a changed job folder about 3 s after its
+  last write and pulls a job when its board row changes, with the same rules.
+  Still run `push` after writing; with the daemon synced it returns at once.
 - When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
   the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
   each file. `push` never uploads a `.remote`, and refuses the file until a human

@@ -38,6 +38,11 @@ pub fn r2_target(target: &str, need_job: bool) -> Res<(PathBuf, String, String)>
     Ok((home, slug.to_string(), job_id.to_string()))
 }
 
+/// Whether slug and job_id name a job folder `r2_target` would accept.
+pub fn valid_job_target(slug: &str, job_id: &str) -> bool {
+    SLUG.is_full(slug) && !bad_job_id(job_id, cfg!(windows))
+}
+
 /// Windows drops a trailing dot from a path name, so there `a.` would name the folder `a`.
 fn bad_job_id(job_id: &str, windows: bool) -> bool {
     !JOB_ID.is_full(job_id) || job_id.contains("..") || windows && job_id.ends_with('.')

@@ -6,6 +6,7 @@ pub mod claims;
 pub mod daemon;
 pub mod install;
 pub mod intake;
+pub mod job_sync;
 pub mod lookup;
 pub mod mirror;
 pub mod ops;
