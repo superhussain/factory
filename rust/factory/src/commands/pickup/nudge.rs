@@ -121,6 +121,20 @@ pub(super) fn claimed_here(j: &Value, device: &str) -> bool {
         && get_str(j, "project").is_some_and(|p| SLUG.is_full(p))
 }
 
+/// True when the daemon's heartbeat refreshed the job's claim within IDLE_NUDGE_MINUTES: seen
+/// is that recent and newer than the job's updated stamp, which `hold` and board writes move with
+/// it. The heartbeat refreshes an idle agent only while a subagent it waits on runs.
+pub(super) fn beating(j: &Value) -> bool {
+    let seen = j
+        .get("claim")
+        .filter(|c| c.is_object())
+        .and_then(|c| stamp_of(c.get("seen")));
+    seen.is_some_and(|seen| {
+        seen >= unix_now() - IDLE_NUDGE_MINUTES * 60
+            && stamp_of(j.get("updated")).is_none_or(|updated| seen > updated)
+    })
+}
+
 /// Nudge the idle Paseo agent of an in-flight job claimed on this host once its worktree and
 /// board job sit unchanged for IDLE_NUDGE_MINUTES, and move it to needs-human when they stay
 /// unchanged that long again.
@@ -174,7 +188,8 @@ pub(super) fn idle_watch_pass(
             .as_str()
             .and_then(|a| status_of(&statuses, a))
             .as_deref()
-            == Some("idle");
+            == Some("idle")
+            && !beating(j);
         if !idle {
             if prev.as_object().is_some_and(|p| !p.is_empty()) {
                 watch.insert(job_id.into(), prev);

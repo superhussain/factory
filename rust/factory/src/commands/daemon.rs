@@ -30,7 +30,6 @@ use crate::shared::exit::{fail, Res};
 use crate::shared::fs::is_link;
 use crate::shared::home::factory_home;
 use crate::shared::http::{access_message, api_url, token_message};
-use crate::shared::proc::{capture, which};
 use crate::shared::py::os_error;
 use crate::shared::time::{format_stamp, now, unix_now};
 
@@ -178,6 +177,7 @@ fn run(home: &Path) -> Res<()> {
         home.join("logs").join("daemon").display()
     );
     let terminal = io::stderr().is_terminal();
+    let mut heart = crate::commands::heartbeat::Heart::default();
     serve(
         &url,
         &headers,
@@ -199,6 +199,7 @@ fn run(home: &Path) -> Res<()> {
         &mut |_| {
             cap_log(&home.join("logs").join("daemon.log"));
             let _ = std::fs::write(lock_dir(&home).join(LAST_PASS_FILE), now() + "\n");
+            heart.before_pass(&home, &|msg| log_line(&home, msg));
             let (code, stopped, launched) = run_pickup(&exe, &home, signal_stop);
             log_line(&home, &format!("pickup exited {code}"));
             if !terminal {
@@ -333,16 +334,7 @@ fn running_agents() -> Option<Vec<String>> {
     if cfg!(test) {
         return None;
     }
-    let exe = which("paseo")?.to_string_lossy().into_owned();
-    let home = std::env::var("PASEO_HOME").unwrap_or_default();
-    let mut argv = vec![exe.as_str(), "ls", "-g", "--json"];
-    if !home.is_empty() {
-        argv.extend(["--home", home.as_str()]);
-    }
-    let r = capture(&argv, None, &[], Some(Duration::from_secs(20))).ok()?;
-    let agents: serde_json::Value = serde_json::from_str(&r.stdout)
-        .ok()
-        .filter(|_| r.code == 0)?;
+    let agents = crate::shared::paseo::paseo_ls(&[])?;
     Some(factory_running(&agents))
 }
 
@@ -1766,5 +1758,101 @@ mod tests {
             took >= t.silence && took < Duration::from_millis(290),
             "{took:?}"
         );
+    }
+
+    /// Each pass refreshes live claims first, in one board write: the first pass writes the two
+    /// live sessions' seen in one PATCH and leaves the dead one, and the next pass, which reads
+    /// them fresh, writes nothing and never asks paseo.
+    #[test]
+    fn each_pass_refreshes_live_claims_once() {
+        use crate::commands::heartbeat::{report, tests as hb, Heart};
+        let old = hb::minutes_ago(30);
+        let fresh = hb::minutes_ago(0);
+        let jobs = |seen: &str| {
+            vec![
+                hb::job(
+                    "001-a",
+                    "build",
+                    hb::claim("mac", "s1", seen),
+                    Some((hb::SERVER, "a1")),
+                ),
+                hb::job(
+                    "002-b",
+                    "build",
+                    hb::claim("mac", "s2", &old),
+                    Some((hb::SERVER, "dead")),
+                ),
+                hb::job(
+                    "003-c",
+                    "review",
+                    hb::claim("mac", "s3", seen),
+                    Some((hb::SERVER, "orch")),
+                ),
+            ]
+        };
+        let mut after = hb::board_of(jobs(&fresh));
+        after["jobs"][1]["claim"]["seen"] = hb::minutes_ago(5).into();
+        let (api_origin, requests) = crate::shared::http::tests::serve(vec![
+            hb::get(&hb::board_of(jobs(&old))),
+            (200, "{}", vec![]),
+            hb::get(&after),
+        ]);
+        let home = home("heartbeat", &api_origin);
+        let origin = quiet();
+        let fake = hb::Fake::new(
+            serde_json::json!([
+                hb::agent("a1", "running", "factory 001-a"),
+                hb::agent("dead", "closed", "factory 002-b"),
+                hb::agent("orch", "idle", "factory 003-c"),
+                hb::agent("sub", "running", "x"),
+            ]),
+            vec![(
+                "orch",
+                serde_json::json!([hb::agent("sub", "running", "x")]),
+            )],
+        );
+        let mut heart = Heart::default();
+        let headers = access_headers(&home, &origin).unwrap();
+        let mut passes = Vec::new();
+        serve(
+            &host_url(&origin),
+            &headers,
+            &TEST,
+            &home.join(".env"),
+            None,
+            no_stop,
+            &|msg| log_line(&home, msg),
+            &|| None,
+            &mut |reason| {
+                let result = heart.beat_with(
+                    &home,
+                    "mac",
+                    hb::SERVER,
+                    &|p| fake.list(p),
+                    &crate::shared::http::api,
+                );
+                report(result, &|msg| log_line(&home, msg));
+                passes.push(reason.to_string());
+                // The first pass reports a launch, so a second follows at min_gap.
+                if passes.len() == 2 {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(true)
+                }
+            },
+        );
+        assert_eq!(passes, ["connect", "room left"]);
+        // Pass one lists the agents and asks for the idle orchestrator's children; pass two
+        // finds every claim fresh and asks nothing.
+        assert_eq!(fake.asked.borrow().len(), 2);
+        let requests = requests.lock().unwrap();
+        let methods: Vec<&str> = requests.iter().map(|r| r.method.as_str()).collect();
+        assert_eq!(methods, ["GET", "PATCH", "GET"]);
+        let log = log_text(&home);
+        assert!(
+            log.contains(" heartbeat: refreshed seen on 001-a 003-c\n"),
+            "{log}"
+        );
+        assert_eq!(log.matches("heartbeat:").count(), 1, "{log}");
     }
 }
