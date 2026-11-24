@@ -114,7 +114,7 @@ const INPUTS = {
     "{workspaceRoot}/tests/tools/test_paseo_stalls.py",
     "{workspaceRoot}/skills/factory/runtime/paseo_stalls.py",
     "{workspaceRoot}/tests/tools/test_pr_screenshots.py",
-    "{workspaceRoot}/tests/tools/test_secret_scan.py",
+    "{workspaceRoot}/tests/tools/secret-scan.test.mjs",
     "{workspaceRoot}/tests/tools/test_stage_notes_check.py",
     "{workspaceRoot}/docs/repo-security.md",
     "{workspaceRoot}/skills/factory/runtime/pr_screenshots.py",
@@ -191,7 +191,7 @@ test("no target command invokes Python and nx.json declares no lint or format co
 
 test("nx.json carries no credential-shaped strings", () => {
   assert.doesNotMatch(
-    nxText.replaceAll("tests/tools/test_secret_scan.py", ""),
+    nxText.replaceAll("tests/tools/secret-scan.test.mjs", ""),
     /token|secret|password|api[_-]?key|credential|bearer/i,
   );
   assert.doesNotMatch(nxText, /\b[0-9a-f]{32,}\b/i);

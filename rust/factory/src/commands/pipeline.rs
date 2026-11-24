@@ -2199,7 +2199,7 @@ const PROTECTED_PATHS: &[&str] = &[
     "tools/verify.py",
     "tests/cli/support.py",
     "tests/support/*",
-    "tools/secret-scan.py",
+    "tools/secret-scan.mjs",
     "pnpm-workspace.yaml",
     "*/pnpm-workspace.yaml",
     "*.npmrc",
@@ -6479,7 +6479,7 @@ mod tests {
                 "tests/support/browser-server.mjs",
                 "docs/trust.md",
                 "pnpm-lock.yaml",
-                "tools/secret-scan.py",
+                "tools/secret-scan.mjs",
                 "pnpm-workspace.yaml",
                 "paseo-plugin/pnpm-workspace.yaml",
                 ".npmrc",
@@ -6503,7 +6503,7 @@ mod tests {
                     "pnpm-workspace.yaml",
                     "tests/cli/support.py",
                     "tests/support/browser-server.mjs",
-                    "tools/secret-scan.py",
+                    "tools/secret-scan.mjs",
                     "tools/verify.py",
                 ]
             );

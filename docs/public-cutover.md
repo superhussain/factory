@@ -14,7 +14,7 @@ runtime, so run them from commit `3e510927` if you ever need them again:
 
 ## Before you start
 
-- Job 680 (release audit and `tools/secret-scan.py`) is merged to `main`.
+- Job 680 (release audit and the secret scan) is merged to `main`.
 - Job 681 (README quickstart and `docs/cloudflare.md`) is merged to `main`.
 - You have the values for the `deploy-main` workflow in hand: the
   `CLOUDFLARE_API_TOKEN` secret and the `FACTORY_DEPLOY_PROFILE` variable
@@ -48,7 +48,7 @@ Every check prints `[ok]` or `[fail]`:
 | jobs | the runtime's `builds <project>` lists an in-flight or stale job |
 | PRs | `OWNER/factory` has an open pull request |
 | archive name | `OWNER/factory-private` already exists |
-| gitleaks | `tools/secret-scan.py` reports findings |
+| gitleaks | `tools/secret-scan.mjs` reports findings |
 | names | a secret or variable the workflows use is missing |
 | checkout | a `--checkout` path is dirty |
 
