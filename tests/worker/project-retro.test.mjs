@@ -283,6 +283,20 @@ test("each gate refuses with its exact status and text and stores nothing", asyn
       "replace: contains control, invisible or bidirectional characters",
     ],
     [
+      "lone CR at the end of notes",
+      { replace: `${NOTE_LINE}\r` },
+      { notes: `# Notes\n\n${NOTE_LINE}` },
+      400,
+      "replace: contains control, invisible or bidirectional characters",
+    ],
+    [
+      "CR at the end of replace before stored text",
+      { replace: `${NOTE_LINE}\r` },
+      { notes: `# Notes\n\n${NOTE_LINE} Then commit.\n` },
+      400,
+      "replace: contains control, invisible or bidirectional characters",
+    ],
+    [
       "joined floor phrase in notes",
       { find: "- Run pnpm ", replace: "- Skip " },
       {},

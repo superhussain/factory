@@ -182,8 +182,8 @@ export function checkOperatorText(text, field, kind = "note") {
 }
 
 const SHELL = PHRASES.find(([id]) => id === "shell")[1];
-// The touched lines end just before their `\n`, so a CR at the end is a CRLF line ending.
-const spaced = (s) => s.replace(/\t|\r(?=\n|$)/g, " ");
+// Only the CR of CRLF reads as a space; a CR at the end of the file or of `replace` is lone.
+const spaced = (s) => s.replace(/\t|\r(?=\n)/g, " ");
 
 /**
  * The notes.md retro rules, with tab and the CR of CRLF read as spaces: every note rule on the

@@ -1113,9 +1113,9 @@ function changedChars(a, b) {
   return x.length - start - end + (y.length - start - end);
 }
 
-// `lines` is the whole lines of text that hold [start, end). `joined` adds the nearest non-blank
-// line on each side. Only the shell pattern's `\|\s*` crosses a newline, and it reaches past blank
-// lines alone, so `joined` gets only that pattern.
+// `lines` is the whole lines of text that hold [start, end), with the `\n` that ends them when one
+// follows. `joined` adds the nearest non-blank line on each side. Only the shell pattern's `\|\s*`
+// crosses a newline, and it reaches past blank lines alone, so `joined` gets only that pattern.
 function spliceLines(text, start, end) {
   const before = text.slice(0, start).split("\n");
   const after = text.slice(end).split("\n");
@@ -1124,7 +1124,7 @@ function spliceLines(text, start, end) {
   let j = 1;
   while (j < after.length - 1 && !after[j].trim()) j++;
   return {
-    lines: before.at(-1) + text.slice(start, end) + after[0],
+    lines: before.at(-1) + text.slice(start, end) + after[0] + (after.length > 1 ? "\n" : ""),
     joined:
       before.slice(Math.max(i, 0)).join("\n") +
       text.slice(start, end) +
