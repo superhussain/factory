@@ -5,7 +5,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
+import { pathToFileURL } from "node:url";
 import {
   loadProfile,
   main,
@@ -17,16 +18,24 @@ import {
 const FIXTURES = join(ROOT, "tests", "fixtures");
 const VALID = join(FIXTURES, "deployment-valid.json");
 const INVALID = join(FIXTURES, "deployment-invalid.json");
-const CONFIG = join(ROOT, ".build", "wrangler.production.json");
-const CONNECTION = join(ROOT, ".build", "connection.json");
+// This file's own build folder, so parallel runs and the assets target never race on the repo's .build.
+const BUILD = mkdtempSync(join(tmpdir(), "deploy-test-build-"));
+after(() => rmSync(BUILD, { recursive: true, force: true }));
+const CONFIG = join(BUILD, "wrangler.production.json");
+const CONNECTION = join(BUILD, "connection.json");
 const base = () => JSON.parse(readFileSync(VALID, "utf8"));
 
 // Node warns on stderr when FORCE_COLOR and NO_COLOR are both set, as CI sets FORCE_COLOR, so
 // children run without either and stderr holds only the tool's own output.
 const { FORCE_COLOR: _forceColor, NO_COLOR: _noColor, ...CHILD_ENV } = process.env;
 
+// The CLI as its own process, with main writing to BUILD.
+const CLI = `import { main } from ${JSON.stringify(pathToFileURL(join(ROOT, "tools", "deploy.mjs")).href)};
+const [build, ...argv] = process.argv.slice(1);
+process.exitCode = await main(argv, { build });`;
+
 const runCli = (args, cwd = ROOT) =>
-  spawnSync(process.execPath, [join(ROOT, "tools", "deploy.mjs"), ...args], {
+  spawnSync(process.execPath, ["--input-type=module", "-e", CLI, BUILD, ...args], {
     cwd,
     encoding: "utf8",
     env: CHILD_ENV,
@@ -309,7 +318,10 @@ async function quiet(fn) {
 test("deploy runs prepare, dry-run, inspect, then deploy", async (t) => {
   if (!existsSync(join(ROOT, "node_modules", ".bin", "wrangler"))) return t.skip("no wrangler");
   const calls = [];
-  assert.equal(await quiet(() => main(["deploy", "--profile", VALID], fakes(calls))), 0);
+  assert.equal(
+    await quiet(() => main(["deploy", "--profile", VALID], { ...fakes(calls), build: BUILD })),
+    0,
+  );
   assert.deepEqual(
     calls.map((c) => c[0]),
     ["prepare", "wrangler", "inspect", "wrangler"],
@@ -323,7 +335,12 @@ test("a failed dry-run or inspection never deploys", async (t) => {
   if (!existsSync(join(ROOT, "node_modules", ".bin", "wrangler"))) return t.skip("no wrangler");
   for (const options of [{ dryRun: 1 }, { inspect: false }]) {
     const calls = [];
-    assert.equal(await quiet(() => main(["deploy", "--profile", VALID], fakes(calls, options))), 1);
+    assert.equal(
+      await quiet(() =>
+        main(["deploy", "--profile", VALID], { ...fakes(calls, options), build: BUILD }),
+      ),
+      1,
+    );
     assert.equal(calls.filter((c) => c[0] === "wrangler").length, 1);
   }
 });
@@ -331,7 +348,10 @@ test("a failed dry-run or inspection never deploys", async (t) => {
 test("the dry-run command stops after inspection", async (t) => {
   if (!existsSync(join(ROOT, "node_modules", ".bin", "wrangler"))) return t.skip("no wrangler");
   const calls = [];
-  assert.equal(await quiet(() => main(["dry-run", "--profile", VALID], fakes(calls))), 0);
+  assert.equal(
+    await quiet(() => main(["dry-run", "--profile", VALID], { ...fakes(calls), build: BUILD })),
+    0,
+  );
   assert.deepEqual(
     calls.map((c) => c[0]),
     ["prepare", "wrangler", "inspect"],
