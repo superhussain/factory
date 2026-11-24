@@ -26,6 +26,7 @@ use crate::cli::Call;
 use crate::commands::mirror::{self, Mirror};
 use crate::shared::conf::read_conf;
 use crate::shared::exit::{fail, Res};
+use crate::shared::fs::is_link;
 use crate::shared::home::factory_home;
 use crate::shared::http::{access_message, api_url, token_message};
 use crate::shared::proc::{capture, which};
@@ -209,14 +210,29 @@ fn run(home: &Path) -> Res<()> {
 const LOG_CAP: u64 = 5 << 20;
 const LOG_KEEP: u64 = 1 << 20;
 
+#[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
+const O_NOFOLLOW: i32 = 0o100000;
+#[cfg(all(
+    target_os = "linux",
+    not(any(target_arch = "aarch64", target_arch = "arm"))
+))]
+const O_NOFOLLOW: i32 = 0o400000;
+#[cfg(target_os = "macos")]
+const O_NOFOLLOW: i32 = 0x100;
+
 /// Trims the service log at path to its last LOG_KEEP bytes, from a line start, once it passes
 /// LOG_CAP. launchd, systemd and cron open it for append, so the daemon's writes go on at the new
-/// end. Windows' `>>` keeps its own offset, so the log there stays as it is.
+/// end. Windows' `>>` keeps its own offset, so the log there stays as it is. A link there is left
+/// alone, so the trim never truncates another file.
 fn cap_log(path: &Path) {
-    if cfg!(windows) {
+    if cfg!(windows) || is_link(path).unwrap_or(true) {
         return;
     }
-    let Ok(mut file) = OpenOptions::new().read(true).write(true).open(path) else {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, O_NOFOLLOW);
+    let Ok(mut file) = options.open(path) else {
         return;
     };
     let len = file.metadata().map_or(0, |m| m.len());
@@ -1478,6 +1494,20 @@ mod tests {
         std::fs::write(&path, &line).unwrap();
         cap_log(&path);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), line);
+    }
+
+    /// A daemon.log that is a symlink is not followed, so its target keeps every byte.
+    #[cfg(unix)]
+    #[test]
+    fn service_log_link_is_left_alone() {
+        let dir = temp_dir("daemon-log-link");
+        let target = dir.join("other.txt");
+        let text = "y".repeat((LOG_CAP + 10) as usize);
+        std::fs::write(&target, &text).unwrap();
+        let path = dir.join("daemon.log");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        cap_log(&path);
+        assert_eq!(std::fs::metadata(&target).unwrap().len(), text.len() as u64);
     }
 
     #[test]
