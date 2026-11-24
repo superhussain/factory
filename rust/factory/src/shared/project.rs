@@ -412,4 +412,67 @@ mod tests {
         );
         fs::remove_dir_all(home).unwrap();
     }
+
+    /// Ported from tests/cli/test_factory.py's released-hold cases: hold refuses through this guard
+    /// when the project folder, the sync manifest or a conflict copy is a link, or a round folder
+    /// cannot be listed, and leaves the link and its target alone.
+    #[cfg(unix)]
+    #[test]
+    fn job_folder_refuses_project_manifest_and_conflict_links_and_unlistable_rounds() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let home = temp_dir("project-jobs-links");
+        let folder = home.join("jobs/s/1-a");
+        fs::create_dir_all(folder.join("round-1")).unwrap();
+        fs::write(folder.join("round-1/review-code.md"), "VERDICT: PASS\n").unwrap();
+        let refused = |want: &str| {
+            let e = safe_job_folder(&home, "s", "1-a").unwrap_err();
+            assert_eq!(e.code, 6, "{}", e.stderr);
+            assert!(e.stderr.contains(want), "{}", e.stderr);
+        };
+
+        fs::rename(home.join("jobs/s"), home.join("real-s")).unwrap();
+        symlink(home.join("real-s"), home.join("jobs/s")).unwrap();
+        refused("jobs/s is a symlink or junction: factory job paths must be real directories");
+        assert!(home.join("jobs/s").is_symlink());
+        fs::remove_file(home.join("jobs/s")).unwrap();
+        fs::rename(home.join("real-s"), home.join("jobs/s")).unwrap();
+
+        fs::write(home.join("outside-manifest.json"), "{}\n").unwrap();
+        symlink(
+            home.join("outside-manifest.json"),
+            folder.join(".sync.json"),
+        )
+        .unwrap();
+        refused("1-a/.sync.json is a symlink or junction inside the job folder");
+        assert!(folder.join(".sync.json").is_symlink());
+        fs::remove_file(folder.join(".sync.json")).unwrap();
+
+        let conflict = folder.join("round-1/review-code.md.remote");
+        symlink(home.join("no-such.remote"), &conflict).unwrap();
+        refused("review-code.md.remote is a symlink or junction inside the job folder");
+        assert!(conflict.is_symlink());
+        fs::remove_file(&conflict).unwrap();
+        assert!(safe_job_folder(&home, "s", "1-a").is_ok());
+
+        // A traversal-only round folder lists as empty, so it must fail rather than read as no artifacts.
+        let round = folder.join("round-1");
+        fs::set_permissions(&round, fs::Permissions::from_mode(0o111)).unwrap();
+        let listable = fs::read_dir(&round).is_ok();
+        let result = safe_job_folder(&home, "s", "1-a");
+        fs::set_permissions(&round, fs::Permissions::from_mode(0o755)).unwrap();
+        if !listable {
+            let e = result.unwrap_err();
+            assert_eq!(e.code, 6);
+            assert!(
+                e.stderr.contains("cannot inspect job paths"),
+                "{}",
+                e.stderr
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(round.join("review-code.md")).unwrap(),
+            "VERDICT: PASS\n"
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
 }

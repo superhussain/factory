@@ -61,7 +61,7 @@ device data. Locked integrity for the reviewed hook-bearing packages:
 | Verification | `tests/worker/`, `tests/browser/`, hosted `tests/support/`, hosted fixtures, `tests/tools/`. |
 | Documentation | `README.md`, `docs/architecture.md`, `docs/cloudflare.md`, `docs/device.md`, `docs/integrations.md`, `THIRD_PARTY_NOTICES.md`. |
 
-Source merge (Git), installed skill refresh (`tools/install.py`) and hosted
+Source merge (Git), installed skill refresh (`tools/install.sh`) and hosted
 deployment (`tools/deploy.py deploy`) are three distinct operations. None runs a
 migration or reset; installing or deploying never rewrites existing state.
 
@@ -155,7 +155,7 @@ returns 404.
 | --- | --- | --- |
 | `GET /api/halt` | any verified principal | the stop record, or `{"halted":false}`; a service never sees a person's email |
 | `PUT /api/halt` | person: set or clear; service token: set only | writes `halt.json`; a repeat set writes nothing |
-| `POST /api/trials/resume/<slug>` | person with `{}` or `{instruction}`; bound host with `{instruction}` (1 to 500 characters) | sets `resumed` and `resumed_by` on the project's unresumed reverted `trials` and returns `{"resumed": n}`; writes nothing when `n` is 0. A board `PUT` or `PATCH` cannot change or drop an unresumed revert, set `resumed` or `resumed_by`, or settle or drop an open trial unless the write is settle-shaped (`checkTrialSettle`) |
+| `POST /api/trials/resume/<slug>` | person with `{}` or `{instruction}`; bound host with `{instruction}` (1 to 500 characters) | sets `resumed` and `resumed_by` on the project's unresumed reverted `trials` and returns `{"resumed": n}`; writes nothing when `n` is 0. A board `PUT` or `PATCH` cannot change or drop an unresumed revert, set `resumed` or `resumed_by`, or settle or drop a well-shaped open trial (`trialMisshapen`) unless the write is settle-shaped (`checkTrialSettle`) |
 
 Retro digest routes store one redacted JSON-lines file per host per day at
 `retro/<id>/<date>.jsonl`, where the date is the host's local date. The bound

@@ -1,0 +1,1 @@
+factory.py: {home}/suggest-options-2.json: suggestions[0].options: must be a list of 2-3 items; nothing admitted

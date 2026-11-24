@@ -1,0 +1,1 @@
+factory.py: {home}/suggest-options-8.json: suggestions[0].options[1].detail: must not hold control characters or line breaks; nothing admitted

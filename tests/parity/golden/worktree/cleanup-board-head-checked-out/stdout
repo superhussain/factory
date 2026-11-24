@@ -1,0 +1,8 @@
+{
+  "removed": [
+    "prompts {home}/prompts/sample/001-test"
+  ],
+  "left": [
+    "branch factory/001-test: checked out in /srv/elsewhere"
+  ]
+}

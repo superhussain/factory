@@ -39,7 +39,7 @@ check.
 
 A new device takes three steps:
 
-1. Install the skill with `tools/install.py` (see `docs/device.md`).
+1. Install the skill with `tools/install.sh` (`tools\install.ps1` on Windows; see `docs/device.md`).
 2. Run `/factory init`.
 3. Set `api_url` in config.md and `FACTORY_ACCESS_CLIENT_ID` and `FACTORY_ACCESS_CLIENT_SECRET` in `.env`, then
    run `/factory init` again in each project.

@@ -1,0 +1,82 @@
+{
+  "name": "pilot",
+  "a": {
+    "jobs": 6,
+    "merged": 6,
+    "closed": 0,
+    "needs_human": 0,
+    "escalated": 0,
+    "mean_review_rounds": 2.0,
+    "changes_verdicts": 0,
+    "stuck_resumes": 0,
+    "follow_ups_7d": {
+      "rework_of": [],
+      "surfaced": [],
+      "unknown_window": 0
+    },
+    "skipped_steps": {
+      "missing_round_review": [],
+      "missing_decision": [],
+      "pr_before_approve": []
+    },
+    "coverage_unknown": 6,
+    "finished": 6,
+    "rounds": {
+      "n": 6,
+      "median": 2.0,
+      "mad": 1.0
+    },
+    "tokens": {
+      "n": 6,
+      "median": 115.0,
+      "mad": 15.0
+    }
+  },
+  "b": {
+    "jobs": 5,
+    "merged": 5,
+    "closed": 0,
+    "needs_human": 0,
+    "escalated": 0,
+    "mean_review_rounds": 1.6,
+    "changes_verdicts": 0,
+    "stuck_resumes": 0,
+    "follow_ups_7d": {
+      "rework_of": [],
+      "surfaced": [],
+      "unknown_window": 0
+    },
+    "skipped_steps": {
+      "missing_round_review": [],
+      "missing_decision": [],
+      "pr_before_approve": []
+    },
+    "coverage_unknown": 5,
+    "finished": 5,
+    "rounds": {
+      "n": 5,
+      "median": 1,
+      "mad": 0
+    },
+    "tokens": {
+      "n": 5,
+      "median": 320,
+      "mad": 10
+    }
+  },
+  "comparison": {
+    "min_finished": 5,
+    "verdict": "compared",
+    "reason": "needs 5 finished jobs per arm: a has 6, b has 5",
+    "rounds": {
+      "diff": -1.0,
+      "noise": 1.0,
+      "reads": "no difference"
+    },
+    "tokens": {
+      "diff": 205.0,
+      "noise": 15.0,
+      "reads": "b higher"
+    }
+  }
+}

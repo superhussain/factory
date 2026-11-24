@@ -1,0 +1,1 @@
+factory.py: only a signed-in person, or a paired host passing a person's instruction, resumes stage-note trials

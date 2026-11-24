@@ -1,0 +1,3 @@
+added factory: Lesson: Worker route changes run pnpm test:protocol; pnpm test skips them. with context
+link: {api}/#/backlog/32384b8e273a
+held factory: Lesson: Worker route changes run pnpm test:protocol; pnpm test skips them. for review: lesson cards always wait for a person

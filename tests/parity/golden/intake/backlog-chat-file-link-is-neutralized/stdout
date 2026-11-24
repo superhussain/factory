@@ -1,0 +1,6 @@
+{
+  "id": "004-guard-the-ls",
+  "project": "sample",
+  "decision": "approved",
+  "line": "- [ ] sample: Guard the ls alias"
+}

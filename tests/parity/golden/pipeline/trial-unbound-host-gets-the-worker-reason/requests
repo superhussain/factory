@@ -1,0 +1,1 @@
+{"body": "{\"instruction\": \"Owner asked in chat to resume factory trials\"}", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "content-type": "application/json", "user-agent": "factory"}, "method": "POST", "path": "/api/trials/resume/factory"}

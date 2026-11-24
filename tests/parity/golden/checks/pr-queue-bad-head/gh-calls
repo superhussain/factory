@@ -1,0 +1,1 @@
+{"argv": ["pr", "view", "https://github.com/example/sample/pull/44", "--json", "headRefOid,baseRefName,id"]}

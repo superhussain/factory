@@ -1,0 +1,1 @@
+{"argv": ["-C", "/srv/sample", "rev-parse", "--git-common-dir"]}

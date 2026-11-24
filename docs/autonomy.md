@@ -28,9 +28,11 @@ All of these run through `factory` on a device.
 Loosening (`resume`, `allow`, `approve`) needs an interactive terminal and a typed
 confirmation, or for `approve` a relayed chat message (`suggest approve --chat-file`), as
 [chat decisions](../skills/factory/references/chat-decisions.md) says. Tightening never does.
-The terminal check stops a script, not an agent, which can fake a terminal with a
-pseudo-terminal such as `script -qc`. So no agent runs `autonomy resume`, `allow`, `restore`
-or `promote`; the installed SKILL.md says so.
+The terminal check stops a script, not an agent, which can fake a terminal with
+`script -qc`. So the Rust runtime also refuses `resume`, `allow`, `restore` and `promote`
+when `CLAUDECODE`, `AI_AGENT`, `PASEO_AGENT_ID` or `OPENCODE_TERMINAL` is set, and exits 2.
+An agent can still unset them, so the installed SKILL.md rule stays: no agent runs these
+commands.
 A missing `autonomy` record means paused, with an empty allowlist.
 
 ## What admission checks
@@ -358,11 +360,14 @@ open for the next settle until it is 28 days old. A 409 (paused autonomy or an i
 pipeline), 412 (a moved base) or 429 (the daily cap) leaves it open at any age, so the next
 settle tries again. A `revert-failed` trial neither blocks
 admit nor counts toward the pause. A revert counts toward the daily retro cap. The board keeps
-open records, every unresumed revert and the newest 20 other settled ones. Settle skips malformed records, including
-one whose `opened` is not a board timestamp, and drops non-dict entries from `trials`
+open records, every unresumed revert and the newest 20 other settled ones. Settle skips malformed records and drops an open one
+whose `opened` is not a board timestamp or whose `version` is not a whole number
+(`trial_misshapen`). It also drops non-dict entries from `trials`
 when it writes the board.
 - **Settle-shaped.** The Worker's `checkTrialSettle` refuses, with 400, a board `PUT` or
-  `PATCH` that changes a stored `open` trial any way `trial settle` would not. Every key
+  `PATCH` that changes a stored `open` trial any way `trial settle` would not.
+  `checkTrialSettle` does not guard an open record that `trialMisshapen` flags, so
+  `trial settle` can drop it. Every key
   outside `status`, `settled`, `arms`, `reads` and `revert_version` stays equal, a settled
   record's `settled` is a board timestamp, and the written record must pass:
 
@@ -376,6 +381,7 @@ when it writes the board.
 | `kept` | each arm has 5 `merged` or `closed` jobs of the project on the stored board, started at or after `opened`, and no read is `b higher` |
 | any other status | never |
 
+- **Host trust.** `kept` counts only rows already on the stored board, so one write cannot add finished rows and settle on them. A bound host can still add five `merged` rows per arm in one write and settle `kept` in the next. The Worker accepts this. `stage`, `started` and `project` are host-written, and the Worker has no GitHub access or stage history to check a merge. A fake `kept` only ends a trial early and skips a possible revert, since a 28-day `inconclusive` also keeps the edit.
 - **Pause.** Two reverted trials without `resumed` pause a project's stage-note edits.
   Settle then prints
   `stage-note trials paused for <slug> after 2 reverts; a person runs trial resume <slug>`,

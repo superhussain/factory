@@ -1,0 +1,6 @@
+earned autonomy for jobs merged in the last 90 days
+thresholds: 20 scanned jobs, no reverts, rework at most 10%, mean rounds at most 1.75, CHANGES at most 10%
+project  class     jobs  held  reworked  reverted  unscanned  rounds  changes  recommend
+alpha    internal    20    20         0         0          0     1.7       9%  automerge
+alpha: recommend merge auto
+report only: a person changes Merge under Settings, Pipeline; nothing was written

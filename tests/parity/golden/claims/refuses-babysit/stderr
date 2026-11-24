@@ -1,0 +1,1 @@
+factory.py: only the dashboard and factory.py control set babysit; a session clears it with null. To relay a person's chat, run factory.py control <job-id> babysit --chat-file <file>

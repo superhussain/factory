@@ -1,0 +1,1 @@
+factory.py: {home}/retro/bad-missing-fix/reply.json: findings[0]: needs keys ['category', 'cost', 'count', 'fix', 'project', 'root_cause', 'sessions', 'title'], may have ['fixed_by']; nothing written

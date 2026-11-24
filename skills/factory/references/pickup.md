@@ -12,7 +12,7 @@ Paste this prompt into a coding agent running on the host, such as Paseo, Claude
 Set up automatic factory pickup on this host. You are a coding agent on the machine that should pick up ideas. Work through these steps in order.
 
 1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: SKILL/runtime/factory pickup setup On Windows the binary is SKILL\runtime\factory.exe; use that spelling in every command below.
-   If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with python3 tools/install.py --destination <skills folder> --replace from a clone of the factory repo, then start again.
+   If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with sh tools/install.sh <skills folder> (tools\install.ps1 on Windows) from a clone of the factory repo, then start again.
 2. It prints 7 numbered checks, each ok or missing, with a fix under each missing one. Fix checks 1 to 6 in order. After each fix, run pickup setup again.
    - home: run the doctor line it prints. If the factory home or its credentials are missing, stop and tell me. Never print or copy values from the .env file.
    - device: add a device: line inside the frontmatter of config.md in the factory home, with a short name for this host.
@@ -29,7 +29,7 @@ A stored Paseo or Claude schedule prompt does not pick up ideas, so do not creat
 
 When the installed skill is older than this setup, run
 `<installed-skill>/runtime/factory catch-up`, or install with
-`tools/install.py` if no skill exists yet. Catch-up backs up the skill, timer and
+`tools/install.sh` if no skill exists yet. Catch-up backs up the skill, timer and
 home config, installs origin's skill and rewrites the pickup timer through it.
 On a host with the daemon service installed, it removes a leftover pickup timer
 instead and prints `pickup timer: replaced by the daemon`. It never installs the

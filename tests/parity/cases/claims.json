@@ -1641,6 +1641,146 @@
       "exit": 0
     },
     {
+      "id": "claims/handoff-cas-retry-keeps-new-owner",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"],
+            "stdout": "factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "ls-remote",
+              "origin",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "env": { "FACTORY_SESSION": "s1" },
+      "routes": {
+        "GET /api/board": [
+          [
+            200,
+            "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"paseo\":{\"server\":\"srv-mac\",\"agent\":\"agent-1\"}}]}\n"
+          ],
+          [
+            200,
+            "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"paseo\":{\"server\":\"srv-mac\",\"agent\":\"agent-1\"}}]}\n"
+          ],
+          [
+            200,
+            "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"receiver\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"paseo\":{\"server\":\"srv-mac\",\"agent\":\"agent-1\"}}]}\n"
+          ]
+        ],
+        "PUT /api/board": [412, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_cas_retry_cannot_release_new_owner"
+    },
+    {
+      "id": "claims/handoff-state-change-during-upload-keeps-claim",
+      "argv": ["--home", "{home}", "handoff", "sample/001-test"],
+      "home": "claims-hold",
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "branch", "--show-current"],
+            "stdout": "factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain"],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "HEAD"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "ls-remote",
+              "origin",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/factory/001-test\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "env": { "FACTORY_SESSION": "s1" },
+      "routes": {
+        "GET /api/board": [
+          [
+            200,
+            "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"paseo\":{\"server\":\"srv-mac\",\"agent\":\"agent-1\"}}]}\n"
+          ],
+          [
+            200,
+            "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"review\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"},\"paseo\":{\"server\":\"srv-mac\",\"agent\":\"agent-1\"}}]}\n"
+          ]
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "handoff.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [200, ""]
+      },
+      "exit": 6,
+      "from": "tests/cli/test_factory.py::FactoryTest.test_state_change_during_upload_does_not_release_claim"
+    },
+    {
       "id": "claims/board-tracer-mirrors-stage",
       "argv": ["--home", "{home}", "board", "{home}", "001-sample"],
       "home": "tracer-mirror",

@@ -1,0 +1,6 @@
+{"argv": ["-C", "home/checkout", "ls-remote", "--heads", "origin", "refs/heads/factory/*"]}
+{"argv": ["-C", "home/bare", "ls-remote", "--heads", "origin", "refs/heads/factory/*"]}
+{"argv": ["-C", "/srv/example/paseo/factory-1998-lost", "rev-parse", "--git-common-dir"]}
+{"argv": ["-C", "home/bare", "rev-parse", "--git-common-dir"]}
+{"argv": ["-C", "home/checkout", "rev-parse", "--git-common-dir"]}
+{"argv": ["-C", "/srv/example/paseo/factory-1997-gone", "rev-parse", "--git-common-dir"]}

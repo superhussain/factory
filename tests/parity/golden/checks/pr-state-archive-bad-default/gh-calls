@@ -1,0 +1,1 @@
+{"argv": ["api", "repos/example-upstream/sample", "--jq", ".default_branch"]}

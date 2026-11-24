@@ -1,6 +1,6 @@
 //! `install --source <checkout> --destination <skills root> [--replace]`: copy the checkout's
-//! factory skill, with the Rust binary built from that checkout, into the skills root. A port of
-//! `tools/install.py` that keeps its checks, messages and atomic swap.
+//! factory skill, with the Rust binary built from that checkout, into the skills root, behind an
+//! atomic swap.
 
 #[cfg(test)]
 use std::cell::RefCell;
@@ -283,7 +283,7 @@ fn drop_legacy(destination: &Path, out: &mut dyn Write, err: &mut dyn Write) -> 
     if !linked(&path)? {
         let _ = writeln!(
             err,
-            "install.py: {} is a folder, not a link; remove it by hand so agents load only factory",
+            "install: {} is a folder, not a link; remove it by hand so agents load only factory",
             path.display()
         );
         return Ok(());
@@ -325,9 +325,9 @@ pub(crate) fn install_skill(
     let result = attempt_install(&mut attempt, &source, destination, replace, build, out, err);
     let mut stderr = match &result {
         Ok(_) => String::new(),
-        Err(Why::Fail(m)) => format!("install.py: {m}\n"),
+        Err(Why::Fail(m)) => format!("install: {m}\n"),
         Err(Why::Unsafe) => format!(
-            "install.py: {}: cannot safely install factory\n",
+            "install: {}: cannot safely install factory\n",
             attempt.current.display()
         ),
         Err(Why::Exit(e)) => e.stderr.clone(),
@@ -347,7 +347,7 @@ pub(crate) fn install_skill(
     })();
     if cleaned.is_err() {
         stderr.push_str(&format!(
-            "install.py: {}: cannot clean this installation attempt\n",
+            "install: {}: cannot clean this installation attempt\n",
             destination.display()
         ));
     }
@@ -502,7 +502,7 @@ fn attempt_install(
             Err(_) => {
                 let _ = writeln!(
                     err,
-                    "install.py: could not remove {}; remove it by hand",
+                    "install: could not remove {}; remove it by hand",
                     backup.display()
                 );
             }
@@ -745,7 +745,7 @@ mod tests {
         assert_eq!(
             t.refused(&t.checkout, &t.destination, false),
             format!(
-                "install.py: {}: existing install differs; use --replace explicitly\n",
+                "install: {}: existing install differs; use --replace explicitly\n",
                 t.target().display()
             )
         );
@@ -781,7 +781,7 @@ mod tests {
         assert_eq!(
             err,
             format!(
-                "install.py: could not remove {}; remove it by hand\n",
+                "install: could not remove {}; remove it by hand\n",
                 backups[0].display()
             )
         );
@@ -806,7 +806,7 @@ mod tests {
         assert_eq!(
             t.refused(&t.checkout, &t.destination, false),
             format!(
-                "install.py: {}: cannot safely install factory\n",
+                "install: {}: cannot safely install factory\n",
                 lock.display()
             )
         );
@@ -966,7 +966,7 @@ mod tests {
         assert_eq!(
             err,
             format!(
-                "install.py: {} is a folder, not a link; remove it by hand so agents load only factory\n",
+                "install: {} is a folder, not a link; remove it by hand so agents load only factory\n",
                 folder.display()
             )
         );
@@ -979,7 +979,7 @@ mod tests {
         assert_eq!(
             t.refused(&t.checkout, &t.destination, false),
             format!(
-                "install.py: {}: cannot safely install factory\n",
+                "install: {}: cannot safely install factory\n",
                 folder.display()
             )
         );
@@ -1086,6 +1086,120 @@ mod tests {
             &["--source", "/s", "--replace", "--replace"],
         ] {
             assert_eq!(parse(&args(bad)), None, "{bad:?}");
+        }
+    }
+
+    /// The deprecated runtime/factory.py stub runs the binary beside it under sh and under Python,
+    /// and picks factory.exe when Python reports Windows: argv, stdin and the exit code pass through.
+    #[test]
+    fn factory_py_stub_runs_the_binary_beside_it() {
+        let root = temp_dir("factory-py-stub");
+        let runtime = root.join("runtime");
+        fs::create_dir_all(&runtime).unwrap();
+        let stub = runtime.join("factory.py");
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        fs::copy(repo.join("skills/factory/runtime/factory.py"), &stub).unwrap();
+        for name in ["factory", "factory.exe"] {
+            script(
+                &runtime.join(name),
+                &format!("printf '{name}:%s|' \"$@\"; cat; exit 7\n"),
+            );
+        }
+        let text = stub.to_string_lossy().into_owned();
+        let windows = format!(
+            "import os, runpy, sys; os.name = 'nt'; sys.argv = [{text:?}, 'a', 'b c']; runpy.run_path({text:?}, run_name='__main__')"
+        );
+        for (argv, binary) in [
+            (vec!["sh", &text, "a", "b c"], "factory"),
+            (vec!["python3", &text, "a", "b c"], "factory"),
+            (vec!["python3", "-c", &windows], "factory.exe"),
+        ] {
+            let mut child = std::process::Command::new(argv[0])
+                .args(&argv[1..])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            child.stdin.take().unwrap().write_all(b"piped").unwrap();
+            let p = child.wait_with_output().unwrap();
+            let err = String::from_utf8(p.stderr).unwrap();
+            assert_eq!(p.status.code(), Some(7), "{argv:?}");
+            assert_eq!(
+                String::from_utf8(p.stdout).unwrap(),
+                format!("{binary}:a|{binary}:b c|piped"),
+                "{argv:?}"
+            );
+            assert!(
+                err.starts_with("factory.py is deprecated and runs "),
+                "{argv:?}"
+            );
+            assert!(err.contains("FACTORY_RUNTIME=python is gone"), "{argv:?}");
+        }
+        // With a binary that is not executable, then with none, one line names the installer and
+        // nothing runs.
+        for missing in [false, true] {
+            for name in ["factory", "factory.exe"] {
+                if missing {
+                    fs::remove_file(runtime.join(name)).unwrap();
+                } else {
+                    fs::set_permissions(runtime.join(name), fs::Permissions::from_mode(0o644))
+                        .unwrap();
+                }
+            }
+            for argv in [
+                vec!["sh", &text, "a"],
+                vec!["python3", &text, "a"],
+                vec!["python3", "-c", &windows],
+            ] {
+                let p = std::process::Command::new(argv[0])
+                    .args(&argv[1..])
+                    .stdin(std::process::Stdio::null())
+                    .output()
+                    .unwrap();
+                let err = String::from_utf8(p.stderr).unwrap();
+                assert_eq!(
+                    (p.status.code(), p.stdout.len()),
+                    (Some(127), 0),
+                    "{argv:?}"
+                );
+                assert_eq!(err.lines().count(), 1, "{argv:?}: {err}");
+                assert!(
+                    err.starts_with("factory.py: no factory binary at ")
+                        && err.contains("sh tools/install.sh <skills folder>"),
+                    "{argv:?}: {err}"
+                );
+            }
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Ported from tests/cli/test_roles.py: security-relevant rules the shipped prompts must keep.
+    /// Whitespace is collapsed where the files wrap lines freely.
+    #[test]
+    fn prompts_keep_their_security_contracts() {
+        let read = |rel: &str| {
+            fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../skills/factory")
+                    .join(rel),
+            )
+            .unwrap()
+        };
+        let flat = |text: String| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let skill = read("SKILL.md");
+        let approver = flat(read("agents/factory-approver.md"));
+        let feature = flat(read("references/commands/feature.md"));
+        assert!(skill.contains("- No agent runs `autonomy resume`, `autonomy allow`, `autonomy restore` or `autonomy promote`,\n"));
+        assert!(skill.contains("`script -qc`"));
+        assert!(approver.contains("**Protected paths.** Read the newest `round-N/review-plan.json` the listing shows. Its `protected` list names the branch's CI, check, hook and test-config files. For each path, ESCALATE with a sign-off bullet that names it, or APPROVE only after you justify it under a `## Protected paths` heading in decision.md, one bullet per path: the path, the spec task that names it, and why every check stays at least as strict. A path no spec task names is ESCALATE. When `protected` is null or no plan file exists, apply this rule to every such file in the diff."));
+        for rule in [
+            "Its `protected` list stays in `round-N/review-plan.json` for the approver.",
+            "Run `\"$RUNTIME\" review-floor \"$SLUG/<id>\"`. A non-zero exit puts its stderr line in the board `note`, and the build goes ahead. Set stage `build`",
+            "CHANGES is a normal fix round: run `\"$RUNTIME\" review-floor \"$SLUG/<id>\"` before sending the builder `decision.md`.",
+            "start no pre-review or review round and keep the tier. Before either patch below, reduce the line. `<kind>` is the builder's kind when it is `secret`, `tool`, `network` or `service`, else `unknown`. `<what is missing>` is only the name of the missing piece: the first env var, command, host or service the line names, without quotes or backticks and cut at its first `=`. Write `unnamed` instead when that name is not 1 to 64 characters of letters, digits, `_`, `.` or `-`, or holds a run of 16 or more letters and digits that mixes both. Never copy any other word of the line, a value, a token or a URL into `note` or `needs`.",
+        ] {
+            assert!(feature.contains(rule), "{rule}");
         }
     }
 }

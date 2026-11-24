@@ -1,0 +1,2 @@
+{"body": "", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "user-agent": "factory"}, "method": "GET", "path": "/api/jobs/sample/001-test/?etags=1"}
+{"body": "Build log, edited here.\n", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "content-type": "application/x-www-form-urlencoded", "if-match": "\"b1\"", "user-agent": "factory"}, "method": "PUT", "path": "/api/jobs/sample/001-test/build.md"}

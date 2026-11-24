@@ -9,6 +9,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 import tempfile
 import threading
@@ -21,6 +22,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "tests" / "fixtures" / "project-settings.md"
 PROJECT = "/api/projects/settings-sample.md"
 OWNED = ("http://127.0.0.1:8220", "http://127.0.0.1:8221")
+# The last commit whose skill held the Python runtime these suites import.
+LEGACY_RUNTIME = "3e5109271ad9c963c3d0b9e4ec377dd24132ec3d"
 
 
 def test_url():
@@ -38,10 +41,14 @@ def install_cli(test_case):
     # installer's link guard correctly refuses symlinked parents, so resolve first.
     destination = Path(temp.name).resolve() / "installed"
     # These suites import the Python runtime, so a plain copy of the skill stands in for factory install,
-    # which builds the Rust binary and has its own tests.
+    # which builds the Rust binary and has its own tests. The Python runtime left the skill, so its last
+    # version comes from Git history until these suites move to the binary.
     shutil.copytree(ROOT / "skills" / "factory", destination / "factory",
                     ignore=shutil.ignore_patterns("__pycache__"))
     installed = destination / "factory" / "runtime" / "factory.py"
+    legacy = f"{LEGACY_RUNTIME}:skills/factory/runtime/factory.py"
+    installed.write_bytes(subprocess.run(["git", "-C", str(ROOT), "show", legacy],
+                                         check=True, capture_output=True).stdout)
     if not installed.is_file() or not str(installed).startswith(str(destination)):
         raise AssertionError("the tested CLI must be the installed copy, not the checkout")
     spec = importlib.util.spec_from_file_location("factory_installed", installed)

@@ -1,0 +1,2 @@
+factory.py: PR #42 was 1 commit behind main; gh pr update-branch merged main into it, so checks run again on the new head.
+factory.py: still waiting for checks on the updated head

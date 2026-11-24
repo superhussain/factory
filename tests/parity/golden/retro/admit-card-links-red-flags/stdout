@@ -1,0 +1,12 @@
+wrote {home}/retro/card-red-flag/findings.md
+added sample-tools: Red flag: pipe-to-shell via Bash with context
+link: {api}/#/backlog/c71b3786be7b
+held sample-tools: Red flag: pipe-to-shell via Bash for review: retro items always wait for a person
+{
+  "admitted": [
+    "sample-tools: Red flag: pipe-to-shell via Bash"
+  ],
+  "skipped": []
+}
+linked 2 red-flag rows to sample-tools: Red flag: pipe-to-shell via Bash
+uploaded retro run card-red-flag

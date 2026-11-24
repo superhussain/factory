@@ -1,0 +1,2 @@
+{"argv": ["-C", "checkout", "worktree", "prune"]}
+{"argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/factory/001-test"]}

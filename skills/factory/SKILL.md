@@ -1,7 +1,7 @@
 ---
 name: factory
 description: Use for /factory commands, factory dashboard tasks, and continuing or handing a factory job between Claude, OpenCode, and other coding agents. Captures ideas before project registration, then runs spec, build, four reviews, approval, PR and merge. Registers projects with init; handoff and resume preserve an existing job.
-compatibility: Requires git and gh, plus a Rust toolchain (rustup) to build the binary, and Python 3.8+ for tools/install.py and the other tools/*.py scripts; network access to the configured factory HTTPS API and project Git/gh remotes.
+compatibility: Requires git and gh, plus a Rust toolchain (rustup) to build the binary; network access to the configured factory HTTPS API and project Git/gh remotes.
 ---
 
 # Software factory
@@ -391,7 +391,8 @@ Every job field, with an example row and who writes it, is in [board fields](ref
 - Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
   at `pr-open` until its parent merges and it is retargeted to `$BASE`. Wait for
   checks with `"$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0: they
-  passed, or the repo has none. On a PR behind `$BASE`, it runs
+  passed, or the repo has none. It records that head as `checked_head`, and
+  `pr-merge` merges only that head. On a PR behind `$BASE`, it runs
   `gh pr update-branch` and rechecks the new head. Exit 3: still pending; run it
   again. Exit 1 names failing checks. Exit 4: no open PR. Exit 5: no usable gh
   reply. Exit 6: `gh pr update-branch` failed; treat it as a merge conflict.

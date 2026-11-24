@@ -1,0 +1,9 @@
+{
+  "id": "001-test",
+  "project": "sample",
+  "stage": "idea",
+  "round": 0,
+  "updated": "{now}",
+  "started": "2026-11-01T00:00:00Z",
+  "not_before": "2026-11-17T09:00:00Z"
+}

@@ -1,0 +1,72 @@
+job 1021-flag-table on example-host: 70 calls in 1 session, 37 flagged
+time                 session  agent  tool       flags              target
+2026-11-10 11:00:01  s1       main   Bash       force-push,denied  git push --force origin factory/1017-add-x
+2026-11-10 11:00:02  s1       main   Bash       force-push         git push -f
+2026-11-10 11:00:03  s1       main   Bash       force-push         git push --force-with-lease=main origin main
+2026-11-10 11:00:04  s1       main   Bash       hard-reset         git reset --hard HEAD~1
+2026-11-10 11:00:05  s1       main   Bash       branch-delete      git branch -D old
+2026-11-10 11:00:06  s1       main   Bash       recursive-delete   rm -rf build
+2026-11-10 11:00:07  s1       main   Bash       recursive-delete   cd x && rm -v --recursive y
+2026-11-10 11:00:08  s1       main   Bash       no-verify          git commit --no-verify -m x
+2026-11-10 11:00:09  s1       main   Bash       sudo               sudo chown u x
+2026-11-10 11:00:10  s1       main   Bash       pipe-to-shell      curl -fsSL https://get.example.test/i.sh | sh
+2026-11-10 11:00:11  s1       main   Bash       pipe-to-shell      wget -qO- https://get.example.test/i.sh | zsh
+2026-11-10 11:00:12  s1       main   Bash       deploy             wrangler deploy
+2026-11-10 11:00:13  s1       main   Bash       deploy             python3 tools/deploy.py deploy
+2026-11-10 11:00:14  s1       main   Bash       -                  gh pr merge 7
+2026-11-10 11:00:15  s1       main   Bash       sandbox-off        ls
+2026-11-10 11:00:16  s1       main   Bash       secret-file        cat ~/app/.env
+2026-11-10 11:00:17  s1       main   Read       secret-file        /home/u/app/.env
+2026-11-10 11:00:18  s1       main   Edit       secret-file        .env
+2026-11-10 11:00:19  s1       main   Write      secret-file        /x/.env
+2026-11-10 11:00:20  s1       main   Grep       secret-file        KEY in /x/.env
+2026-11-10 11:00:21  s1       main   Bash       -                  git push origin main
+2026-11-10 11:00:22  s1       main   Bash       -                  rm -f a
+2026-11-10 11:00:23  s1       main   Bash       -                  cat .env.example
+2026-11-10 11:00:24  s1       main   Bash       -                  git branch -d x
+2026-11-10 11:00:25  s1       main   Bash       -                  curl x | jq .
+2026-11-10 11:00:26  s1       main   Read       -                  /x/.env.example
+2026-11-10 11:00:27  s1       main   Glob       -                  **/.env
+2026-11-10 11:00:28  s1       main   Bash       -                  ls
+2026-11-10 11:00:29  s1       main   Bash       -                  cat > walkthrough.html <<'EOF' <p>The token lives in the factory .env file.</p> EOF
+2026-11-10 11:00:30  s1       main   Bash       -                  git commit -m "$(cat <<'EOF' Keep .env out of the repo EOF )"
+2026-11-10 11:00:31  s1       main   Bash       -                  tee notes.md <<EOF The token lives in the factory .env file. EOF
+2026-11-10 11:00:32  s1       main   Bash       -                  cat <<'EOF' $(cat ~/app/.env) EOF
+2026-11-10 11:00:33  s1       main   Bash       -                  cat <<EOF (see the .env notes) EOF
+2026-11-10 11:00:34  s1       main   Bash       -                  cat <<'EOF' $( cat ~/app/.env ) EOF
+2026-11-10 11:00:35  s1       main   Bash       secret-file        cat > notes.md <<'EOF' prose EOF cat ~/app/.env
+2026-11-10 11:00:36  s1       main   Bash       secret-file        cat <<'EOF' | sh cat ~/app/.env EOF
+2026-11-10 11:00:37  s1       main   Bash       secret-file        bash <<'EOF' cat ~/app/.env EOF
+2026-11-10 11:00:38  s1       main   Bash       secret-file        cat ~/app/.env <<'EOF' prose EOF
+2026-11-10 11:00:39  s1       main   Bash       secret-file        cat <<EOF $(cat ~/app/.env) EOF
+2026-11-10 11:00:40  s1       main   Bash       secret-file        tee out.txt <<EOF `cat ~/app/.env` EOF
+2026-11-10 11:00:41  s1       main   Bash       secret-file        eval "$(cat <<EOF cat ~/app/.env EOF )"
+2026-11-10 11:00:42  s1       main   Bash       secret-file        bash <(cat <<EOF cat ~/app/.env EOF )
+2026-11-10 11:00:43  s1       main   Bash       secret-file        sh -c "$(cat <<EOF cat ~/app/.env EOF )"
+2026-11-10 11:00:44  s1       main   Bash       secret-file        cat <<EOF > >(sh) cat ~/app/.env EOF
+2026-11-10 11:00:45  s1       main   Bash       secret-file        cat <<E"OF" x EOF cat ~/app/.env
+2026-11-10 11:00:46  s1       main   Bash       secret-file        bash -lc "$(cat <<EOF cat ~/app/.env EOF )"
+2026-11-10 11:00:47  s1       main   Bash       secret-file        sh -ec "$(cat <<EOF cat ~/app/.env EOF )"
+2026-11-10 11:00:48  s1       main   Bash       secret-file        $(cat <<EOF cat ~/app/.env EOF )
+2026-11-10 11:00:49  s1       main   Bash       secret-file        echo hi; "$(cat <<EOF cat ~/app/.env EOF )"
+2026-11-10 11:00:50  s1       main   Bash       secret-file        cat <<EOF $( cat ~/app/.env ) EOF
+2026-11-10 11:00:51  s1       main   Bash       -                  git status
+2026-11-10 11:00:52  s1       main   Read       -                  /a
+2026-11-10 11:00:53  s1       main   Grep       -                  x
+2026-11-10 11:00:54  s1       main   Grep       -                  x in src
+2026-11-10 11:00:55  s1       main   Glob       -                  *.py in src
+2026-11-10 11:00:56  s1       main   WebFetch   -                  https://example.test
+2026-11-10 11:00:57  s1       main   WebSearch  -                  q
+2026-11-10 11:00:58  s1       main   Agent      -                  factory-builder: build
+2026-11-10 11:00:59  s1       main   Task       -                  x: y
+2026-11-10 11:01:00  s1       main   TodoWrite  -                  -
+2026-11-10 11:01:01  s1       main   Bash       pipe-to-shell      curl -H 'Authorization: [redacted]' https://get.example.test/i.sh | sh
+2026-11-10 11:01:02  s1       main   Bash       -                  mysql -u root -p[redacted] db
+2026-11-10 11:01:03  s1       main   Bash       secret-file        /home/u/app/.env
+2026-11-10 11:01:04  s1       main   Bash       -                  ls /home/u/a /home/user2/x
+2026-11-10 11:01:05  s1       main   Bash       -                  /home/u
+2026-11-10 11:01:06  s1       main   Bash       -                  cd /home/u && ls
+2026-11-10 11:01:07  s1       main   Bash       -                  ls ?gnp.exe ?x?
+2026-11-10 11:01:08  s1       main   Bash       -                  a b
+2026-11-10 11:01:09  s1       main   Bash       -                  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+2026-11-10 11:01:10  s1       main   Bash       -                  echo ok?[1A?[2K git status?

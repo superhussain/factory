@@ -281,7 +281,7 @@ fn short(s: &str) -> String {
 
 // ---- the five Python functions
 
-/// (slug, repo) of the first paths.md checkout, by slug, that holds the factory installer and skill.
+/// (slug, repo) of the first paths.md checkout, by slug, that holds the factory crate and skill.
 fn catch_up_repo(home: &Path) -> Res<(String, PathBuf)> {
     let mut paths: Vec<(String, String)> = Vec::new();
     for (slug, repo) in read_paths(home)? {
@@ -294,7 +294,7 @@ fn catch_up_repo(home: &Path) -> Res<(String, PathBuf)> {
     for (slug, repo) in paths {
         let repo = PathBuf::from(repo);
         if CHECKOUT_SLUG.is_full(&slug)
-            && repo.join("tools").join("install.py").is_file()
+            && repo.join("rust").join("Cargo.toml").is_file()
             && repo
                 .join("skills")
                 .join("factory")
@@ -310,32 +310,24 @@ fn catch_up_repo(home: &Path) -> Res<(String, PathBuf)> {
     ))
 }
 
-/// The interpreter that runs a Python bundle: python3, or the py launcher on Windows.
-fn python() -> Vec<String> {
-    if cfg!(windows) {
-        vec!["py".into(), "-3".into()]
-    } else {
-        vec!["python3".into()]
-    }
-}
-
-/// The argv prefix that runs an installed bundle: its bundle.json entry when valid, else its runtime.
+/// The argv prefix that runs an installed bundle: its bundle.json entry when valid, else its binary.
 fn catch_up_entry(skill: &Path) -> Vec<String> {
     if let Some(entry) = crate::shared::home::bundle_entry(skill) {
         return entry;
     }
-    let mut argv = python();
-    argv.push(
-        skill
-            .join("runtime")
-            .join("factory.py")
-            .to_string_lossy()
-            .into_owned(),
-    );
-    argv
+    let binary = if cfg!(windows) {
+        "factory.exe"
+    } else {
+        "factory"
+    };
+    vec![skill
+        .join("runtime")
+        .join(binary)
+        .to_string_lossy()
+        .into_owned()]
 }
 
-/// {commit, tree} from the bundle.json install.py writes in skill, or None. A Rust build adds entry
+/// {commit, tree} from the bundle.json `factory install` writes in skill, or None. A Rust build adds entry
 /// and binary_sha256 beside them.
 fn bundle_stamp(skill: &Path) -> Option<Value> {
     crate::commands::setup::stamp_of(&loads(&read_text(&skill.join("bundle.json")).ok()?).ok()?)
@@ -1007,8 +999,8 @@ mod tests {
                 root.join("origin.git"),
                 root.join("checkout"),
             );
-            fs::create_dir_all(src.join("tools")).unwrap();
-            fs::copy(repo.join("tools/install.py"), src.join("tools/install.py")).unwrap();
+            fs::create_dir_all(src.join("rust")).unwrap();
+            fs::copy(repo.join("rust/Cargo.toml"), src.join("rust/Cargo.toml")).unwrap();
             copy_tree(&repo.join("skills/factory"), &src.join("skills/factory")).unwrap();
             fs::create_dir_all(src.join(".github/workflows")).unwrap();
             fs::write(
@@ -1361,7 +1353,7 @@ mod tests {
             )
         };
         sh_git(&t.checkout, &["checkout", "-q", "--detach"]);
-        fs::write(t.checkout.join("tools/install.py"), "# local edit\n").unwrap();
+        fs::write(t.checkout.join("rust/Cargo.toml"), "# local edit\n").unwrap();
         fs::write(t.checkout.join("untracked.txt"), "synthetic\n").unwrap();
         for why in ["detached HEAD", "dirty", "on branch topic"] {
             if why == "dirty" {
@@ -1565,11 +1557,12 @@ mod tests {
 
         let folder = t.root.join("entries");
         fs::create_dir(&folder).unwrap();
-        let fallback = [
-            python(),
-            vec![text(&folder.join("runtime/factory.py")).to_string()],
-        ]
-        .concat();
+        let binary = if cfg!(windows) {
+            "factory.exe"
+        } else {
+            "factory"
+        };
+        let fallback = vec![text(&folder.join("runtime").join(binary)).to_string()];
         assert_eq!(catch_up_entry(&folder), fallback);
         fs::write(
             folder.join("bundle.json"),
@@ -2119,7 +2112,7 @@ mod tests {
         assert_eq!((code, err.as_str()), (1, ""));
         let lines: Vec<&str> = out.lines().collect();
         assert!(
-            lines.iter().any(|l| l.starts_with("skill: install.py: ")
+            lines.iter().any(|l| l.starts_with("skill: install: ")
                 && l.ends_with("/src/skills/factory: cannot safely install factory")),
             "{out}"
         );
