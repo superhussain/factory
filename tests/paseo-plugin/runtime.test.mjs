@@ -57,12 +57,15 @@ test("an entry outside the skill or of the wrong shape is ignored", () => {
   assert.deepEqual(runtimeCommand("/s", "linux", broken), ["/s/runtime/factory"]);
 });
 
-test("without a binary the error names /factory catch-up", () => {
+test("without a binary the error names the installer", () => {
   const files = skill({ "/s/bundle.json": BUNDLE, "/s/runtime/factory.py": "" });
-  assert.throws(() => runtimeCommand("/s", "linux", files), /\/factory catch-up/);
+  assert.throws(
+    () => runtimeCommand("/s", "linux", files),
+    /sh tools\/install\.sh <skills folder>/,
+  );
   assert.throws(
     () => runtimeCommand("C:\\s", "win32", skill({ "C:\\s\\runtime\\factory": "" })),
-    /\/factory catch-up/,
+    /sh tools\/install\.sh <skills folder>/,
   );
 });
 

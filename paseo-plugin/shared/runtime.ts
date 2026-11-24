@@ -28,7 +28,8 @@ function bundleEntry(text: string | null): string[] | null {
 }
 
 // The command that runs the binary, then the factory command's own arguments: bundle.json's entry, else
-// runtime/factory(.exe). Throws an error naming /factory catch-up when the install has no binary.
+// runtime/factory(.exe). Throws an error naming the installer when the install has no binary;
+// /factory catch-up cannot help there, since it runs the binary.
 export function runtimeCommand(skill: string, platform: string, files: SkillFiles): string[] {
   const sep = platform === "win32" ? "\\" : "/";
   const at = (rel: string) => [skill, ...rel.split("/")].join(sep);
@@ -37,5 +38,7 @@ export function runtimeCommand(skill: string, platform: string, files: SkillFile
   for (const [program, ...args] of [entry ?? [], [binary]]) {
     if (program && files.exists(at(program))) return [at(program), ...args];
   }
-  throw new Error(`factory: no binary in ${skill}; run /factory catch-up to install it`);
+  throw new Error(
+    `factory: no binary in ${skill}; from a factory checkout run sh tools/install.sh <skills folder> (tools\\install.ps1 on Windows)`,
+  );
 }
