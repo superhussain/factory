@@ -2,6 +2,7 @@
 // Cloudflare Access guards every path. Devices authenticate with a service token.
 import { authenticate } from "./access.ts";
 import {
+  checkNoteSplice,
   checkOperatorText,
   effectivePipeline,
   RETRO_STAGES,
@@ -1112,20 +1113,23 @@ function changedChars(a, b) {
   return x.length - start - end + (y.length - start - end);
 }
 
-// The whole lines of text that hold [start, end), plus the nearest non-blank line on each side.
-// Only the shell pattern's `\|\s*` crosses a newline, and it reaches past blank lines alone.
-function touchedLines(text, start, end) {
+// `lines` is the whole lines of text that hold [start, end). `joined` adds the nearest non-blank
+// line on each side. Only the shell pattern's `\|\s*` crosses a newline, and it reaches past blank
+// lines alone, so `joined` gets only that pattern.
+function spliceLines(text, start, end) {
   const before = text.slice(0, start).split("\n");
   const after = text.slice(end).split("\n");
   let i = before.length - 2;
   while (i > 0 && !before[i].trim()) i--;
   let j = 1;
   while (j < after.length - 1 && !after[j].trim()) j++;
-  return (
-    before.slice(Math.max(i, 0)).join("\n") +
-    text.slice(start, end) +
-    after.slice(0, j + 1).join("\n")
-  );
+  return {
+    lines: before.at(-1) + text.slice(start, end) + after[0],
+    joined:
+      before.slice(Math.max(i, 0)).join("\n") +
+      text.slice(start, end) +
+      after.slice(0, j + 1).join("\n"),
+  };
 }
 
 // The runtime's MAX_EXPLORER_PROJECTS: a longer allowlist makes the autonomy record malformed.
@@ -1310,11 +1314,12 @@ async function projectRetroPut(request, env, principal, slug, name) {
   );
   if (recent.length >= RETRO_EDITS_PER_DAY)
     return reply(`retro edit cap: ${RETRO_EDITS_PER_DAY} per file per day`, 429);
+  const span = spliceLines(next, start, start + body.replace.length);
   const error =
     (name === "project.md" ? validateProjectDocument(next) : validateProjectMarkdown(next)) ??
     checkOperatorText(next, "project document", "document") ??
     (name === "notes.md"
-      ? checkOperatorText(touchedLines(next, start, start + body.replace.length), "replace", "note")
+      ? checkNoteSplice(span.lines, span.joined, body.replace, "replace")
       : null) ??
     checkSummary(body.summary);
   if (error) return reply(error, 400);
