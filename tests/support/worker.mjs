@@ -112,10 +112,13 @@ export function memoryRoom(
   const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
   const db = new DatabaseSync(":memory:");
   let alarm = null;
+  // Work units a budget test pins: SQL rows the room reads, and bytes crossing the RPC stub.
+  const work = { sqlRows: 0, rpcBytes: 0 };
   const storage = {
     sql: {
       exec(query, ...bindings) {
         const rows = db.prepare(query).all(...bindings);
+        work.sqlRows += rows.length;
         return { toArray: () => rows };
       },
     },
@@ -143,7 +146,9 @@ export function memoryRoom(
     (name) =>
     async (...args) => {
       calls.push(name);
-      return structuredClone(await object[name](...structuredClone(args)));
+      const out = await object[name](...structuredClone(args));
+      work.rpcBytes += JSON.stringify(args).length + (JSON.stringify(out) ?? "").length;
+      return structuredClone(out);
     };
   const stub = {
     fetch,
@@ -157,6 +162,8 @@ export function memoryRoom(
     namespace: { idFromName: (name) => ({ name }), get: () => stub },
     object,
     calls,
+    work,
+    stub,
     alarm: () => alarm,
     async runAlarm() {
       alarm = null;
