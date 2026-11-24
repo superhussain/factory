@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use crate::cli::Call;
 use crate::commands::pipeline::decision_verdict;
 use crate::shared::board::{dump_board, load_board, read_board};
-use crate::shared::consts::{IDEA, JOB_REL, TERMINAL};
+use crate::shared::consts::{IDEA, JOB_REL, NOTE_SECRETS, TERMINAL};
 use crate::shared::exit::{fail, Exit, Res};
 use crate::shared::fs::{is_link, read_text, write_atomic};
 use crate::shared::home::factory_home;
@@ -479,7 +479,9 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
     // last sync has nothing to send.
     let folder = safe_job_folder(&home, &slug, &job_id)?;
     if crate::commands::daemon::running(&home) == Some(true) && locally_synced(&folder) {
-        println!("pushed 0 files: the daemon already synced {slug}/{job_id}");
+        println!(
+            "pushed 0 files: the daemon already synced {slug}/{job_id}; run pull for R2 changes"
+        );
         return Ok(());
     }
     push_job(&home, &slug, &job_id, &mut io::stdout()).map(|_| ())
@@ -515,7 +517,8 @@ pub(crate) fn locally_synced(folder: &Path) -> bool {
 /// The job's sync lock: an exclusive lock on the job folder itself, held while a push or pull
 /// reads and rewrites the folder and its manifest, so the daemon and a command never interleave
 /// on one job. It leaves no file behind. None when the folder doesn't exist yet, so there is
-/// nothing local to race on, and on Windows, which runs no daemon and can't open a folder as a file.
+/// nothing local to race on. None on Windows too: std can't open a folder as a file there, and
+/// the daemon runs job sync only on Unix, so no second writer exists to exclude.
 fn job_lock(home: &Path, slug: &str, job_id: &str) -> Res<Option<fs::File>> {
     let folder = safe_job_folder(home, slug, job_id)?;
     if cfg!(windows) || !folder.is_dir() {
@@ -526,9 +529,34 @@ fn job_lock(home: &Path, slug: &str, job_id: &str) -> Res<Option<fs::File>> {
     Ok(Some(file))
 }
 
-/// Pushes one job's changed files, writing what `factory push` prints to out. Returns how many
-/// files it uploaded, or exit 6 with each conflict's R2 copy saved beside its file.
-pub(crate) fn push_job(home: &Path, slug: &str, job_id: &str, out: &mut dyn Write) -> Res<usize> {
+/// Why a job file must not be uploaded, or None. Text files are checked against NOTE_SECRETS,
+/// and a pattern that can't finish reading the text refuses it too. Images are not text.
+fn secret_refusal(rel: &str, data: &[u8]) -> Option<String> {
+    if [".png", ".jpg", ".jpeg", ".gif", ".webp"]
+        .iter()
+        .any(|ext| rel.ends_with(ext))
+    {
+        return None;
+    }
+    let text = String::from_utf8_lossy(data);
+    NOTE_SECRETS
+        .iter()
+        .find_map(|p| match p.search_or_err(&text) {
+            Ok(None) => None,
+            Ok(Some(_)) => Some("it looks like it holds a secret".to_string()),
+            Err(reason) => Some(reason),
+        })
+}
+
+/// Pushes one job's changed files, writing what `factory push` prints to out. Returns the files
+/// it uploaded, or exit 6 with each conflict's R2 copy saved beside its file, or naming each file
+/// it refused because it looks like it holds a secret.
+pub(crate) fn push_job(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    out: &mut dyn Write,
+) -> Res<Vec<String>> {
     let _lock = job_lock(home, slug, job_id)?;
     let (folder, mut manifest, remote) = sync_state(home, slug, job_id)?;
     let goal_pending = folder.join(".goal-pending");
@@ -540,7 +568,8 @@ pub(crate) fn push_job(home: &Path, slug: &str, job_id: &str, out: &mut dyn Writ
         .filter(|(rel, p)| {
             fs::symlink_metadata(p).is_ok_and(|m| m.is_file()) && JOB_REL.is_full(rel)
         });
-    let (mut pushed, mut conflicts, mut spec_stale) = (0, Vec::new(), false);
+    let (mut pushed, mut conflicts, mut refused, mut spec_stale) =
+        (Vec::new(), Vec::new(), Vec::new(), false);
     for (rel, path) in rels {
         let data = fs::read(&path).map_err(|e| os_fail(e, &path))?;
         let entry = manifest.get(&rel).filter(|e| truthy(Some(*e))).cloned();
@@ -573,6 +602,13 @@ pub(crate) fn push_job(home: &Path, slug: &str, job_id: &str, out: &mut dyn Writ
             )? {
                 conflicts.push(rel);
             }
+            continue;
+        }
+        // Checked before every upload: the daemon pushes seconds after a write, so a draft with a
+        // secret in it would otherwise reach R2 before anyone could remove it.
+        if let Some(reason) = secret_refusal(&rel, &data) {
+            writeln!(out, "{rel}: not uploaded: {reason}").ok();
+            refused.push(rel);
             continue;
         }
         let cond = match &entry {
@@ -619,7 +655,7 @@ pub(crate) fn push_job(home: &Path, slug: &str, job_id: &str, out: &mut dyn Writ
             rel.clone(),
             json!({"etag": strong(tag), "sha256": sha(&data)}),
         );
-        pushed += 1;
+        pushed.push(rel.clone());
         // Marked at once, so a later file's failure still leaves the board write due.
         for (name, marker) in [
             ("spec.md", &goal_pending),
@@ -633,7 +669,7 @@ pub(crate) fn push_job(home: &Path, slug: &str, job_id: &str, out: &mut dyn Writ
     let pending = goal_pending;
     let goal_due = pending.exists();
     save_manifest(&folder, &manifest)?;
-    writeln!(out, "pushed {pushed} files").ok();
+    writeln!(out, "pushed {} files", pushed.len()).ok();
     let spec = folder.join("spec.md");
     if goal_due && spec.exists() && !conflicts.iter().any(|c| c == "spec.md") && !spec_stale {
         let text = read_text(&spec).map_err(|e| os_fail(e, &spec))?;
@@ -657,6 +693,15 @@ pub(crate) fn push_job(home: &Path, slug: &str, job_id: &str, out: &mut dyn Writ
     if !conflicts.is_empty() {
         return Err(conflict_exit(&conflicts));
     }
+    if !refused.is_empty() {
+        return Err(fail(
+            format!(
+                "refused {}: each looks like it holds a secret, so nothing of it was uploaded. Remove the secret, then push again",
+                refused.join(", ")
+            ),
+            6,
+        ));
+    }
     Ok(pushed)
 }
 
@@ -666,9 +711,18 @@ pub fn push(call: &Call) -> Res<()> {
 
 /// Download what changed in R2 and keep local edits. (summary line, conflicted files).
 pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Vec<String>)> {
+    pull_job_files(home, slug, job_id).map(|(line, conflicts, _)| (line, conflicts))
+}
+
+/// `pull_job`, also returning the files it downloaded.
+pub(crate) fn pull_job_files(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+) -> Res<(String, Vec<String>, Vec<String>)> {
     let _lock = job_lock(home, slug, job_id)?;
     let (folder, mut manifest, remote) = sync_state(home, slug, job_id)?;
-    let (mut got, mut unpushed, mut conflicts) = (0, Vec::new(), Vec::new());
+    let (mut got, mut unpushed, mut conflicts) = (Vec::new(), Vec::new(), Vec::new());
     for (rel, tag) in &remote {
         let path = folder.join(rel);
         let data = local_bytes(&path);
@@ -709,7 +763,7 @@ pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Ve
                 continue;
             }
             write_atomic(&path, &body).map_err(|e| os_fail(e, &path))?;
-            got += 1;
+            got.push(rel.clone());
         } else if entry.is_some() && stored("etag") == Some(&tag_value) {
             unpushed.push(rel.clone());
         } else if reconcile(
@@ -725,14 +779,14 @@ pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Ve
         }
     }
     save_manifest(&folder, &manifest)?;
-    let mut line = format!("pulled {got} files");
+    let mut line = format!("pulled {} files", got.len());
     if !unpushed.is_empty() {
         line += &format!(", unpushed: {}", unpushed.join(", "));
     }
     if !conflicts.is_empty() {
         line += &format!(", conflict: {}", conflicts.join(", "));
     }
-    Ok((line, conflicts))
+    Ok((line, conflicts, got))
 }
 
 pub fn pull(call: &Call) -> Res<()> {
@@ -1284,6 +1338,91 @@ mod tests {
             .unwrap()
             .is_empty());
         assert!(job_lock(&home, "alpha", "043-missing").unwrap().is_none());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn decision_pending_survives_a_later_failure() {
+        use crate::shared::http::tests::serve;
+        let board = r#"{"updated":"","jobs":[{"id":"042-sample-export","project":"alpha","stage":"needs-human"}]}"#;
+        // decision.md goes up, then the image after it is refused, so the push stops early.
+        let (origin, seen) = serve(vec![
+            (200, "[]", vec![]),
+            (200, "", vec![("ETag", "\"d1\"")]),
+            (413, "image over 5 MiB", vec![]),
+        ]);
+        let home = job_home(
+            "sync-decision-pending",
+            &origin,
+            &[("decision.md", DECISION), ("shot.png", b"png")],
+        );
+        let folder = home.join("jobs/alpha/042-sample-export");
+        let mut out = Vec::new();
+        assert!(push_job(&home, "alpha", "042-sample-export", &mut out).is_err());
+        assert!(folder.join(".decision-pending").exists());
+        assert!(!locally_synced(&folder));
+        // The next push adopts R2's matching decision.md and still records the verdict.
+        let (origin, seen2) = serve(vec![
+            (200, r#"[{"name":"decision.md","etag":"\"d1\""}]"#, vec![]),
+            (
+                200,
+                std::str::from_utf8(DECISION).unwrap(),
+                vec![("ETag", "\"d1\"")],
+            ),
+            (200, "", vec![("ETag", "\"p1\"")]),
+            (200, board, vec![("ETag", "\"b1\"")]),
+            (200, "{}", vec![("ETag", "\"b2\"")]),
+        ]);
+        fs::write(
+            home.join("config.md"),
+            format!("---\napi_url: {origin}\n---\n"),
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        push_job(&home, "alpha", "042-sample-export", &mut out).unwrap();
+        assert!(String::from_utf8(out)
+            .unwrap()
+            .contains("recorded the decision.md verdict"));
+        assert!(!folder.join(".decision-pending").exists());
+        assert_eq!(seen.lock().unwrap().len(), 3);
+        assert_eq!(seen2.lock().unwrap()[4].path, "/api/board");
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn goal_pending_is_marked_mid_push() {
+        use crate::shared::http::tests::serve;
+        // spec.md goes up, then the next file's PUT fails before the loop ends.
+        let (origin, _seen) = serve(vec![
+            (200, "[]", vec![]),
+            (200, "", vec![("ETag", "\"s1\"")]),
+        ]);
+        let home = job_home(
+            "sync-goal-pending",
+            &origin,
+            &[("spec.md", b"## Goal\nShip it.\n"), ("z.md", b"z\n")],
+        );
+        let folder = home.join("jobs/alpha/042-sample-export");
+        assert!(push_job(&home, "alpha", "042-sample-export", &mut Vec::new()).is_err());
+        assert!(folder.join(".goal-pending").exists());
+        assert!(!locally_synced(&folder));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn manual_push_refuses_a_secret() {
+        use crate::shared::http::tests::serve;
+        let (origin, seen) = serve(vec![(200, "[]", vec![])]);
+        let home = job_home(
+            "sync-push-secret",
+            &origin,
+            &[("notes.md", b"-----BEGIN RSA PRIVATE KEY-----\n")],
+        );
+        let mut out = Vec::new();
+        let e = push_job(&home, "alpha", "042-sample-export", &mut out).unwrap_err();
+        assert_eq!(e.code, 6);
+        assert!(e.stderr.contains("refused notes.md"), "{}", e.stderr);
+        assert_eq!(seen.lock().unwrap().len(), 1);
         fs::remove_dir_all(home).unwrap();
     }
 
