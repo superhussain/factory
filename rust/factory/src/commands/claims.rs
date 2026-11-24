@@ -45,8 +45,14 @@ pub(crate) fn new_session() {
             RandomState::new().build_hasher().finish() & 0xff_ffff
         );
         std::env::set_var("FACTORY_SESSION", &tag);
-        eprintln!("new session {tag}: pass --session {tag} to every later claim, next, hold, and board call");
+        eprintln!("{}", new_session_notice(&tag));
     }
+}
+
+fn new_session_notice(tag: &str) -> String {
+    format!(
+        "new session {tag}: pass --session {tag} to every later claim, next, hold, and board call"
+    )
 }
 
 /// <home>/paseo-claims/<job-id>/<agent>, the marker that this host's Paseo session claimed the job.
@@ -1868,6 +1874,14 @@ mod tests {
             new_session();
             assert_eq!(std::env::var("FACTORY_SESSION").unwrap(), "kept");
         });
+    }
+
+    #[test]
+    fn new_session_notice_names_the_tag_and_the_calls_that_reuse_it() {
+        assert_eq!(
+            new_session_notice("0a1b2c"),
+            "new session 0a1b2c: pass --session 0a1b2c to every later claim, next, hold, and board call"
+        );
     }
 
     const UNRESOLVED: &str = "factory.py: factory home must be absolute. Nothing was written.\n";
