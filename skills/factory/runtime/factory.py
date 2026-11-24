@@ -13735,7 +13735,7 @@ def bench_arm(folder, cases):
 
 
 BENCH_REPLAY_SECONDS = 3600
-BENCH_REPLAY_TOOLS = ("Read", "Grep", "Glob", "Write", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+BENCH_REPLAY_TOOLS = ("Read", "Grep", "Glob", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
                       "Bash(git blame:*)")
 BENCH_REPLAY_DENIED = ("Bash(git *--out*)",)
 
@@ -13820,6 +13820,14 @@ def bench_replay_prompt(row, tmp, base, role):
     return "\n".join(lines) + "\n"
 
 
+def bench_review_rule(path):
+    """The allow rule that lets the replayed reviewer write only path, in Claude Code's //absolute form."""
+    p = path.as_posix()
+    if re.match(r"[A-Za-z]:/", p):
+        p = f"/{p[0].lower()}{p[2:]}"
+    return f"Edit(/{p})"
+
+
 def bench_session_usage(session):
     """{model: {kind: tokens}} summed over one Claude Code session's main transcript and its subagents."""
     root, totals = retro_transcripts(), {}
@@ -13863,7 +13871,8 @@ def bench_replay_case(row, arm, role, model, agents):
         session = str(uuid.uuid4())
         argv = [shutil.which("claude"), "-p", "--agent", f"factory-{role}", "--agents", agents, "--session-id", session,
                 "--setting-sources", "", "--permission-mode", "dontAsk", "--allowedTools", *BENCH_REPLAY_TOOLS,
-                "--disallowedTools", *BENCH_REPLAY_DENIED, "--add-dir", str(tmp / "job")]
+                bench_review_rule(tmp / "job" / "round-1" / name), "--disallowedTools", *BENCH_REPLAY_DENIED,
+                "--add-dir", str(tmp / "job")]
         argv += ["--model", model] if model else []
         out.mkdir(parents=True, exist_ok=True)
         start, code = time.monotonic(), None
