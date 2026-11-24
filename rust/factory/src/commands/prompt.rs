@@ -10,8 +10,8 @@ use crate::shared::board::{lead_of, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{
     tag_lookalike, BABYSIT_SENTENCE, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS,
-    NOTE_TAG, PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE, SLUG, STEER_AT, STEER_MAX,
-    STEER_SENTENCE,
+    NOTE_TAG, PIPELINE_GATES, PIPELINE_STAGES, PREFERENCES_SENTENCE, PROJECT_SLUG, STEER_AT,
+    STEER_MAX, STEER_SENTENCE,
 };
 use crate::shared::exit::{fail, Exit, Res};
 use crate::shared::fs::{
@@ -425,7 +425,7 @@ fn trial_valid(t: &Value) -> bool {
     let Some(version) = t.get("version").and_then(int_text) else {
         return false;
     };
-    SLUG.is_full(project)
+    PROJECT_SLUG.is_full(project)
         && t.get("champion_version")
             .and_then(int_text)
             .is_some_and(|v| !v.starts_with('-'))
@@ -782,8 +782,10 @@ mod tests {
     #[test]
     fn malformed_trial_is_ignored() {
         let data = json!({"trials": [trial(json!({"id": "sample-spec-v9"})), trial(json!({"stage": "../x"})),
-                                     trial(json!({"project": "../sample"})), trial(json!({"champion_version": "7"}))]});
+                                     trial(json!({"project": "../sample"})), trial(json!({"champion_version": "7"})),
+                                     trial(json!({"project": "café"}))]});
         assert!(open_trial_for(&data, "sample", "spec").is_none());
+        assert!(open_trial_for(&data, "café", "spec").is_none());
         assert!(
             open_trial_for(&json!({ "trials": [trial(json!({}))] }), "sample", "spec").is_some()
         );
