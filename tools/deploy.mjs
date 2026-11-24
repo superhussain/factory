@@ -235,7 +235,7 @@ export function loadProfile(path) {
 }
 
 const ascii = (s) =>
-  s.replace(/[\u0080-\uffff]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+  s.replace(/[\u007f-\uffff]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 
 function sortKeys(v) {
   if (Array.isArray(v)) return v.map(sortKeys);
