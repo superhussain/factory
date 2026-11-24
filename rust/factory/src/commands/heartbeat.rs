@@ -629,9 +629,10 @@ pub(crate) mod tests {
         let (origin, seen) = serve(vec![get(&one), get(&one), get(&two), get(&two), get(&two)]);
         let home = home_for("heartbeat-reprobe", &origin);
         let fake = Fake::new(json!([agent("a", "closed", "factory 001-a")]), vec![]);
-        let reprobe = Duration::from_millis(300);
-        let mut heart = Heart::every(reprobe);
-        let mut beat = || {
+        // A reprobe that never comes for the skips, then none at all for the reread, so no
+        // assertion waits on the clock.
+        let mut heart = Heart::every(Duration::MAX);
+        let beat = |heart: &mut Heart| {
             let ids = heart
                 .beat_with(
                     &home,
@@ -644,12 +645,16 @@ pub(crate) mod tests {
             assert!(ids.is_empty());
             fake.asked.borrow().len()
         };
-        assert_eq!(beat(), 1);
-        assert_eq!(beat(), 1, "same due claims: no read");
-        assert_eq!(beat(), 2, "a new due claim reads again");
-        assert_eq!(beat(), 2);
-        std::thread::sleep(reprobe);
-        assert_eq!(beat(), 3, "past reprobe the same claims read again");
+        assert_eq!(beat(&mut heart), 1);
+        assert_eq!(beat(&mut heart), 1, "same due claims: no read");
+        assert_eq!(beat(&mut heart), 2, "a new due claim reads again");
+        assert_eq!(beat(&mut heart), 2);
+        heart.reprobe = Duration::ZERO;
+        assert_eq!(
+            beat(&mut heart),
+            3,
+            "past reprobe the same claims read again"
+        );
         assert_eq!(seen.lock().unwrap().len(), 5);
     }
 
