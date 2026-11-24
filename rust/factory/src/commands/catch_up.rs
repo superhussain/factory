@@ -2022,7 +2022,7 @@ mod tests {
     fn launchd_bootstrap_failure_is_a_failed_step() {
         let t = T::new("restart-launchd-bootstrap");
         t.daemon(Some("launchd"), false);
-        t.launchd_calls(
+        let calls = t.launchd_calls(
             &["factory.daemon"],
             (0, ""),
             (5, "Bootstrap failed: 5: Input/output error\n"),
@@ -2034,6 +2034,13 @@ mod tests {
             lines.contains(&"daemon: restart failed: launchctl bootstrap exited 5: Bootstrap failed: 5: Input/output error".to_string()),
             "{lines:?}"
         );
+        // Error 5 gets one retry before the failure stands.
+        let bootstraps = calls
+            .borrow()
+            .iter()
+            .filter(|a| a[1] == "bootstrap")
+            .count();
+        assert_eq!(bootstraps, 2);
     }
 
     /// A loaded retro-push timer that runs the binary reloads after a new skill, so launchd takes
