@@ -270,12 +270,14 @@ catch-up printed as `backup: <path>`:
 
 Run each step in order. Compare the output with the expected column. Stop at the
 first mismatch and report the step, the command and its full output. `$SKILL` is
-the installed skill folder and `$RT` is `$SKILL/runtime/factory`. Use
-`factory.exe` and PowerShell paths on Windows.
+the installed skill folder and `$RT` is `$SKILL/runtime/factory`. `<runtime>` is
+`$RT` when `bundle.json` has `entry`, otherwise `python3 $SKILL/runtime/factory.py`.
+Use `factory.exe` and PowerShell paths on Windows.
 
 1. **Find the skill.** `readlink -f ~/.claude/skills/factory`, or the
    `--destination` your host uses. Expect a folder that holds `SKILL.md`. Set
-   `$SKILL` to it.
+   `$SKILL` to it. No folder means a fresh host. Pause intake from the dashboard,
+   skip to step 4 and take the Fresh install path.
 2. **Pause intake.** `<runtime> halt status`. Expect `"halted": true`. If it is not, run
    `<runtime> halt set --reason "migrating <host> to Rust"` and check again. Never
    clear the halt.
