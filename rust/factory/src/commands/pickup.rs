@@ -2828,8 +2828,20 @@ pub(crate) fn spawn_daemon() -> Result<(), String> {
         .filter(|l| unit_line(l, &DAEMON))
         .find_map(|l| l.strip_prefix("*/5 * * * * "))
         .ok_or("no */5 daemon line in the crontab")?;
-    let mut cmd = Command::new("sh");
+    // Only what cron gives a job, so no token or session variable of the caller reaches the
+    // daemon or its pickup children.
+    let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    let logname = std::env::var("LOGNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_default();
+    let mut cmd = Command::new("/bin/sh");
     cmd.args(["-c", command])
+        .env_clear()
+        .env("HOME", &home)
+        .env("LOGNAME", logname)
+        .env("SHELL", "/bin/sh")
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(&home)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -19943,9 +19955,14 @@ exit "$archive_code"
             );
             let bin = ds.fx.root.join("factory");
             let marker = ds.fx.root.join("started");
+            let part = ds.fx.root.join("started.part");
             fs::write(
                 &bin,
-                format!("#!/bin/sh\necho \"$@\" > '{}'\n", marker.display()),
+                format!(
+                    "#!/bin/sh\n{{ echo \"$@\"; pwd; env | cut -d= -f1 | sort; }} > '{0}'\nmv '{0}' '{1}'\n",
+                    part.display(),
+                    marker.display()
+                ),
             )
             .unwrap();
             fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
@@ -19958,8 +19975,21 @@ exit "$archive_code"
             while !marker.exists() && start.elapsed() < Duration::from_secs(10) {
                 std::thread::sleep(Duration::from_millis(20));
             }
-            std::thread::sleep(Duration::from_millis(100));
-            assert_eq!(fs::read_to_string(&marker).unwrap(), "--home /h daemon\n");
+            let text = fs::read_to_string(&marker).unwrap();
+            let mut lines = text.lines();
+            assert_eq!(lines.next(), Some("--home /h daemon"));
+            // It runs in the user's home with only cron's variables, none of the caller's.
+            let home = std::env::home_dir().unwrap();
+            assert_eq!(lines.next(), Some(home.to_str().unwrap()));
+            let cron = [
+                "HOME", "LOGNAME", "OLDPWD", "PATH", "PWD", "SHELL", "SHLVL", "_",
+            ];
+            let names: Vec<&str> = lines.collect();
+            assert!(names.iter().all(|n| cron.contains(n)), "{names:?}");
+            assert!(
+                names.contains(&"HOME") && names.contains(&"PATH"),
+                "{names:?}"
+            );
         }
 
         #[cfg(unix)]
