@@ -1050,6 +1050,37 @@ mod tests {
     }
 
     #[test]
+    fn push_target_skips_decision_on_conflict() {
+        use crate::shared::http::tests::serve;
+        let (origin, seen) = serve(vec![
+            (200, r#"[{"name":"decision.md","etag":"\"d0\""}]"#, vec![]),
+            (412, "", vec![]),
+            (200, "CHANGES\nR2 copy\n", vec![("ETag", "\"d1\"")]),
+        ]);
+        let state = json!({"decision.md": {"etag": "\"d0\"", "sha256": sha(b"old\n")}});
+        let home = job_home(
+            "sync-push-conflict",
+            &origin,
+            &[
+                ("decision.md", DECISION),
+                (".sync.json", dumps(&state, INDENT2_SORTED).as_bytes()),
+            ],
+        );
+        let e = push_with_home(&home, "alpha/042-sample-export").unwrap_err();
+        assert_eq!(e.code, 6);
+        assert!(e.stderr.contains("conflict in decision.md"));
+        assert_eq!(
+            fs::read(home.join("jobs/alpha/042-sample-export/decision.md.remote")).unwrap(),
+            b"CHANGES\nR2 copy\n"
+        );
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 3);
+        assert_eq!(seen[1].header("If-Match"), Some("\"d0\""));
+        assert!(seen.iter().all(|s| s.path != "/api/board"));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
     fn push_clears_decision_without_a_verdict() {
         let stored = r#"{"updated":"","jobs":[{"id":"042-sample-export","project":"alpha","decision":{"verdict":"APPROVE","decider":"model","at":"x"},"stage":"build"}]}"#;
         let (text, changed) =
