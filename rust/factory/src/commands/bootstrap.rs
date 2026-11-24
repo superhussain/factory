@@ -74,8 +74,9 @@ pub(crate) struct Host<'a> {
     pub input: &'a mut dyn FnMut(&mut dyn Write, &str) -> Option<String>,
     /// The token from a hidden prompt, or None at end of input.
     pub secret: &'a mut dyn FnMut(&mut dyn Write, &str) -> Option<String>,
-    /// argv, its cwd, and whether to capture its output (else it inherits this terminal).
-    pub run: &'a mut dyn FnMut(&[String], Option<&Path>, bool) -> Out,
+    /// argv, its cwd, whether to capture its output (else it inherits this terminal), and
+    /// variables added to its environment.
+    pub run: &'a mut dyn FnMut(&[String], Option<&Path>, bool, &[(&str, &str)]) -> Out,
     pub device: String,
     pub token_env: Option<String>,
     /// This binary, which `init` runs as.
@@ -107,27 +108,31 @@ pub fn bootstrap(call: &Call) -> Res<()> {
         let _ = writeln!(out);
         line
     };
-    let mut run = |argv: &[String], cwd: Option<&Path>, captured: bool| -> Out {
-        if captured {
-            let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
-            return capture(&argv, cwd, &[], None).unwrap_or_else(|e| Out {
-                code: 127,
+    let mut run =
+        |argv: &[String], cwd: Option<&Path>, captured: bool, env: &[(&str, &str)]| -> Out {
+            if captured {
+                let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
+                return capture(&argv, cwd, env, None).unwrap_or_else(|e| Out {
+                    code: 127,
+                    stdout: String::new(),
+                    stderr: e.to_string(),
+                });
+            }
+            let mut command = Command::new(&argv[0]);
+            command
+                .args(&argv[1..])
+                .stdin(Stdio::null())
+                .envs(env.iter().copied());
+            if let Some(cwd) = cwd {
+                command.current_dir(cwd);
+            }
+            let code = command.status().map_or(127, |s| s.code().unwrap_or(1));
+            Out {
+                code,
                 stdout: String::new(),
-                stderr: e.to_string(),
-            });
-        }
-        let mut command = Command::new(&argv[0]);
-        command.args(&argv[1..]).stdin(Stdio::null());
-        if let Some(cwd) = cwd {
-            command.current_dir(cwd);
-        }
-        let code = command.status().map_or(127, |s| s.code().unwrap_or(1));
-        Out {
-            code,
-            stdout: String::new(),
-            stderr: String::new(),
-        }
-    };
+                stderr: String::new(),
+            }
+        };
     let mut host = Host {
         out: &mut stdout,
         input: &mut input,
@@ -181,7 +186,7 @@ pub(crate) fn run_bootstrap(
             write_if_changed(&saved_path, &answers)?;
             let token = read_token(host)?;
             let mut client = api(&token);
-            return up(host, &answers, &mut *client, root);
+            return up(host, &answers, &mut *client, root, &token);
         }
         let answers = validate_answers(&read_json(&saved_path)?)?;
         let token = read_token(host)?;
@@ -631,7 +636,7 @@ fn run_init(host: &mut Host, origin: &str) -> Done<PathBuf> {
             "--connection".into(),
             connection.to_string_lossy().into_owned(),
         ];
-        (host.run)(&argv, Some(&empty), true)
+        (host.run)(&argv, Some(&empty), true, &[])
     });
     let _ = fs::remove_file(&connection);
     let _ = fs::remove_dir(&empty);
@@ -960,7 +965,8 @@ fn embed_origins(value: &Value) -> Done<bool> {
     Ok(!list.is_empty())
 }
 
-fn up(host: &mut Host, answers: &Value, api: &mut Api, root: &Path) -> Done<()> {
+/// token reaches the deploy child too, since Wrangler reads CLOUDFLARE_API_TOKEN from its environment.
+fn up(host: &mut Host, answers: &Value, api: &mut Api, root: &Path, token: &str) -> Done<()> {
     let account = str_of(answers, "account_id").to_string();
     let hostname = str_of(answers, "hostname").to_string();
     let origin = format!("https://{hostname}");
@@ -1044,7 +1050,7 @@ fn up(host: &mut Host, answers: &Value, api: &mut Api, root: &Path) -> Done<()> 
         "--profile".into(),
         path.to_string_lossy().into_owned(),
     ];
-    if (host.run)(&argv, None, false).code != 0 {
+    if (host.run)(&argv, None, false, &[("CLOUDFLARE_API_TOKEN", token)]).code != 0 {
         return Err(cf(
             "tools/deploy.mjs deploy failed; fix the cause above, then rerun up",
         ));
@@ -1404,7 +1410,7 @@ mod tests {
         root: PathBuf,
         home: PathBuf,
         fake: Rc<RefCell<Fake>>,
-        runs: Rc<RefCell<Vec<(Vec<String>, Option<PathBuf>)>>>,
+        runs: Rc<RefCell<Vec<(Vec<String>, Option<PathBuf>, Vec<(String, String)>)>>>,
     }
 
     impl T {
@@ -1444,9 +1450,17 @@ mod tests {
                 Some(API_TOKEN.to_string())
             };
             let (fake, runs) = (self.fake.clone(), self.runs.clone());
-            let mut run = move |argv: &[String], cwd: Option<&Path>, _captured: bool| -> Out {
+            let mut run = move |argv: &[String],
+                                cwd: Option<&Path>,
+                                _captured: bool,
+                                env: &[(&str, &str)]|
+                  -> Out {
+                let env = env
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
                 runs.borrow_mut()
-                    .push((argv.to_vec(), cwd.map(Path::to_path_buf)));
+                    .push((argv.to_vec(), cwd.map(Path::to_path_buf), env));
                 let ok = |stdout: String| Out {
                     code: 0,
                     stdout,
@@ -1726,6 +1740,9 @@ mod tests {
                 t.root.join("deploy/profile.json").to_string_lossy().into()
             ]
         );
+        let token = [("CLOUDFLARE_API_TOKEN".to_string(), API_TOKEN.to_string())];
+        assert!(runs[0].2.is_empty(), "init gets no token");
+        assert_eq!(runs[1].2, token, "the deploy child gets the token");
         let posts: Vec<String> = t
             .fake
             .borrow()
@@ -1751,6 +1768,11 @@ mod tests {
             false,
         );
         assert_eq!(code, 0, "{err}");
+        assert_eq!(
+            t.runs.borrow()[1].2,
+            [("CLOUDFLARE_API_TOKEN".to_string(), API_TOKEN.to_string())],
+            "a token typed at the prompt reaches the deploy child"
+        );
         let expected = [
             "Your account ID is on any domain's Overview page",
             &format!("Cloudflare account ID: {ACCOUNT}"),
