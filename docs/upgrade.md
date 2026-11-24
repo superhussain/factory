@@ -33,7 +33,7 @@ These are host-local files; the server does not hold device credentials.
 ```sh
 mise install
 mise exec -- pnpm install --frozen-lockfile
-mise exec -- python3 tools/verify.py all
+mise exec -- node tools/verify.mjs all
 ```
 
 The `hosted` group exercises assets, auth, protocol, local integration, browser

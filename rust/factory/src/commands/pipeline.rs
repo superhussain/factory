@@ -2196,7 +2196,7 @@ const PROTECTED_PATHS: &[&str] = &[
     "*.mise.toml",
     "*.oxfmtrc*",
     "nx.json",
-    "tools/verify.py",
+    "tools/verify.mjs",
     "tests/cli/support.py",
     "tests/support/*",
     "tools/secret-scan.mjs",
@@ -6474,7 +6474,7 @@ mod tests {
                 "mise.toml",
                 ".oxfmtrc.json",
                 "nx.json",
-                "tools/verify.py",
+                "tools/verify.mjs",
                 "tests/cli/support.py",
                 "tests/support/browser-server.mjs",
                 "docs/trust.md",
@@ -6504,7 +6504,7 @@ mod tests {
                     "tests/cli/support.py",
                     "tests/support/browser-server.mjs",
                     "tools/secret-scan.mjs",
-                    "tools/verify.py",
+                    "tools/verify.mjs",
                 ]
             );
         }

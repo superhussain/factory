@@ -110,7 +110,7 @@ const INPUTS = {
   verify: [
     "default",
     "shared",
-    "{workspaceRoot}/tests/tools/test_verify.py",
+    "{workspaceRoot}/tests/tools/verify.test.mjs",
     "{workspaceRoot}/tests/tools/test_paseo_stalls.py",
     "{workspaceRoot}/skills/factory/runtime/paseo_stalls.py",
     "{workspaceRoot}/tests/tools/test_pr_screenshots.py",

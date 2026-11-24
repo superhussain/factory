@@ -56,20 +56,21 @@ The pnpm scripts are the source of truth (`package.json`):
 
 Type checking is allowlisted per module: `mise exec -- pnpm run check:types` runs `tsc --strict` over the converted modules only (`worker/access.ts` today). Modules join the allowlist by adding them to `tsconfig.json` `include` as they are converted.
 
-`tools/verify.py` composes them into three fixed groups:
+`tools/verify.mjs` composes them into three fixed groups:
 
 ```sh
-python3 tools/verify.py device    # cargo test of the rust/ crate
-mise exec -- python3 tools/verify.py hosted    # the six pnpm scripts above, in order
-mise exec -- python3 tools/verify.py all       # device then hosted, each leaf once
+mise exec -- node tools/verify.mjs device    # cargo test of the rust/ crate
+mise exec -- node tools/verify.mjs hosted    # the six pnpm scripts above, in order
+mise exec -- node tools/verify.mjs all       # device then hosted, each leaf once
 ```
 
 `--json` prints a one-line pass/fail summary as the last stdout line. The first
 failing command stops the run with exit 1; invalid arguments or a missing pnpm
-exit 2. The `device` group and the installed bundle need no Node, pnpm or mise.
+exit 2. The installed bundle needs no Node, pnpm or mise. On a host without Node, the
+`device` group is `cargo test --locked --manifest-path rust/Cargo.toml` run by hand.
 
 CI runs the same leaves once each in one Ubuntu pull-request workflow with
-parallel jobs, and `verify.py all` is never a second CI run. The `targets` job
+parallel jobs, and `verify.mjs all` is never a second CI run. The `targets` job
 runs `format:check`, the workflow contracts and the affected `auth`, `protocol`,
 `assets`, `deploy`, `local` and `verify` targets. Four
 `browser` jobs each run the affected `browser` target on a quarter of the
@@ -114,7 +115,7 @@ ports, so the two never contend for a port. Their inputs cover
 `nx` is a pinned devDependency. Task results cache locally under the ignored
 `.nx/cache`; `pnpm exec nx reset` clears them and `pnpm exec nx show projects`
 lists the three projects. The `rust/` crate is not an Nx project: CI builds and tests it
-in its own jobs, and `tools/verify.py device` runs its `cargo test`. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
+in its own jobs, and `tools/verify.mjs device` runs its `cargo test`. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
 
 ## Parity harness
 
