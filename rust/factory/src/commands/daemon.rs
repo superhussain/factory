@@ -29,7 +29,6 @@ use crate::shared::exit::{fail, Res};
 use crate::shared::fs::is_link;
 use crate::shared::home::factory_home;
 use crate::shared::http::{access_message, api_url, token_message};
-use crate::shared::proc::{capture, which};
 use crate::shared::py::os_error;
 use crate::shared::time::now;
 
@@ -260,16 +259,7 @@ fn running_agents() -> Option<Vec<String>> {
     if cfg!(test) {
         return None;
     }
-    let exe = which("paseo")?.to_string_lossy().into_owned();
-    let home = std::env::var("PASEO_HOME").unwrap_or_default();
-    let mut argv = vec![exe.as_str(), "ls", "-g", "--json"];
-    if !home.is_empty() {
-        argv.extend(["--home", home.as_str()]);
-    }
-    let r = capture(&argv, None, &[], Some(Duration::from_secs(20))).ok()?;
-    let agents: serde_json::Value = serde_json::from_str(&r.stdout)
-        .ok()
-        .filter(|_| r.code == 0)?;
+    let agents = crate::shared::paseo::paseo_ls(&[])?;
     Some(factory_running(&agents))
 }
 

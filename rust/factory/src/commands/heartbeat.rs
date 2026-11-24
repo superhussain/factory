@@ -11,7 +11,6 @@
 use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::path::Path;
-use std::time::Duration;
 
 use serde_json::Value;
 
@@ -22,7 +21,6 @@ use crate::shared::consts::TERMINAL;
 use crate::shared::exit::Res;
 use crate::shared::home::device_name;
 use crate::shared::paseo::paseo_server;
-use crate::shared::proc::{capture, which};
 use crate::shared::time::{now, parse_stamp, unix_now};
 
 const PARENT_AGENT: &str = "paseo.parent-agent-id";
@@ -53,7 +51,13 @@ pub(crate) fn report(result: Res<Vec<String>>, log: &dyn Fn(&str)) {
 /// One heartbeat for home, as device on Paseo server: the ids whose seen it refreshed, in board
 /// order. Nothing is written, and paseo is not asked, when no claim is due.
 pub(crate) fn beat(home: &Path, device: &str, server: &str) -> Res<Vec<String>> {
-    beat_with(home, device, server, &paseo_list, &crate::shared::http::api)
+    beat_with(
+        home,
+        device,
+        server,
+        &|| crate::shared::paseo::paseo_ls(&[]),
+        &crate::shared::http::api,
+    )
 }
 
 /// `beat` with the Paseo list and Worker client injected.
@@ -148,18 +152,6 @@ fn live_agents(list: &Value, server: &str) -> HashSet<String> {
         }
     }
     live
-}
-
-/// This host's `paseo ls -g --json` list, or None when paseo can't answer.
-fn paseo_list() -> Option<Value> {
-    let exe = which("paseo")?.to_string_lossy().into_owned();
-    let home = std::env::var("PASEO_HOME").unwrap_or_default();
-    let mut argv = vec![exe.as_str(), "ls", "-g", "--json"];
-    if !home.is_empty() {
-        argv.extend(["--home", home.as_str()]);
-    }
-    let r = capture(&argv, None, &[], Some(Duration::from_secs(20))).ok()?;
-    serde_json::from_str(&r.stdout).ok().filter(|_| r.code == 0)
 }
 
 #[cfg(test)]
