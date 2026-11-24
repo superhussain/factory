@@ -1,5 +1,5 @@
-// A device socket on /events/host under Miniflare gets only "changed" frames for
-// board and backlog writes, and the room's ping auto-response.
+// A device socket on /events/host under Miniflare gets rows frames for board writes that
+// have one, "changed" for the rest and for backlog writes, and the room's ping auto-response.
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -55,7 +55,7 @@ function frames(socket) {
     queue.length ? Promise.resolve(queue.shift()) : new Promise((resolve) => waiters.push(resolve));
 }
 
-test("a host socket gets changed frames, never rows, and pong for ping", async () => {
+test("a host socket gets rows frames, changed frames, and pong for ping", async () => {
   const dir = await mkdtemp(join(tmpdir(), "factory-host-events-"));
   const worker = await startHostWorker(dir);
   try {
@@ -79,11 +79,22 @@ test("a host socket gets changed frames, never rows, and pong for ping", async (
     assert.equal(created.status, 200);
     assert.equal(await next(), board);
 
-    const updated = await put("/api/board", JSON.stringify({ jobs: [] }), "application/json", {
-      "If-Match": created.headers.get("ETag"),
-    });
+    const row = { id: "001-a", stage: "idea" };
+    const updated = await put(
+      "/api/board",
+      JSON.stringify({ updated: "2026-11-23T00:00:00Z", jobs: [row] }),
+      "application/json",
+      { "If-Match": created.headers.get("ETag") },
+    );
     assert.equal(updated.status, 200);
-    assert.equal(await next(), board);
+    assert.deepEqual(JSON.parse(await next()), {
+      type: "rows",
+      etag: updated.headers.get("ETag"),
+      prev: created.headers.get("ETag"),
+      updated: "2026-11-23T00:00:00Z",
+      rows: [row],
+      removed: [],
+    });
 
     const backlog = await put("/api/backlog", "# Backlog\n", "text/markdown", {
       "If-None-Match": "*",

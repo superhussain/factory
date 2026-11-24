@@ -5,9 +5,9 @@ use std::path::Path;
 
 use serde_json::{json, Map, Value};
 
+use super::board_client;
 use super::consts::{BATCH_REF, IDEA, TERMINAL};
 use super::exit::{fail, Res};
-use super::http::api;
 use super::pyjson::{dumps, loads, COMPACT};
 use super::pyval::{py_str, truthy};
 use super::time::now;
@@ -23,14 +23,9 @@ pub fn dump_board(v: &Value) -> String {
     dumps(v, COMPACT) + "\n"
 }
 
+/// The board, from the daemon's mirror when it has one, else from the Worker.
 pub fn read_board(home: &Path) -> Res<Value> {
-    let r = api(home, "GET", "/api/board", None, &[200, 404], &[])?;
-    let text = if r.status == 200 {
-        Some(r.text()?)
-    } else {
-        None
-    };
-    load_board(text.as_deref())
+    load_board(board_client::read(home)?.text.as_deref())
 }
 
 /// RFC 7386 merge patch: null removes a key.

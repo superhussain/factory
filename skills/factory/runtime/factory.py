@@ -102,6 +102,13 @@
                                             one JSON line of pr, status and detail; enqueued exits 0,
                                             failed or refused 1, pending after 120 seconds 3, a bad or
                                             stacked pr 4, a gh problem 5
+  factory.py pr-merge <project-slug>/<job-id>
+                                            check the job PR can merge, then merge it pinned to the checked
+                                            head, or queue it when the repo has a merge queue: one JSON line
+                                            of pr, status and detail; merged or enqueued exits 0, blocked,
+                                            draft or refused 1, behind or unknown 3, a bad or stacked pr 4,
+                                            a gh problem 5, a conflict 6, an escalated job 7, an autonomy
+                                            hold 8
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
@@ -13728,7 +13735,9 @@ def bench_arm(folder, cases):
 
 
 BENCH_REPLAY_SECONDS = 3600
-BENCH_REPLAY_TOOLS = ("Read", "Grep", "Glob", "Write", "Bash(git:*)")
+BENCH_REPLAY_TOOLS = ("Read", "Grep", "Glob", "Write", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+                      "Bash(git blame:*)")
+BENCH_REPLAY_DENIED = ("Bash(git *--out*)",)
 
 
 def bench_replay_plan(home, cases):
@@ -13767,6 +13776,23 @@ def bench_replay_plan(home, cases):
     return rows
 
 
+def bench_replay_agents(home, role):
+    """The --agents JSON holding the factory-<role> agent file, with its tools and model, which claude cannot find with no setting sources."""
+    config = home / "config.md"
+    meta = frontmatter(config)[0] if config.exists() else {}
+    path = Path(meta.get("claude_agents_dir") or Path.home() / ".claude/agents") / f"factory-{role}.md"
+    agent, body = frontmatter(path) if path.is_file() else ({}, "")
+    if not agent.get("description"):
+        fail(f"bench: replay needs the factory-{role} agent at {path}", 4)
+    entry = {"description": agent["description"], "prompt": body}
+    tools = [t.strip() for t in agent.get("tools", "").split(",") if t.strip()]
+    if tools:
+        entry["tools"] = tools
+    if agent.get("model"):
+        entry["model"] = agent["model"]
+    return json.dumps({f"factory-{role}": entry})
+
+
 def bench_have_commit(checkout, oid):
     """True when checkout holds commit oid, fetching it from origin once when it does not."""
     def have():
@@ -13792,8 +13818,8 @@ def bench_replay_prompt(row, tmp, base, role):
     lines += [f"Round folder: {job / 'round-1'}", f"Your file: {job / 'round-1' / f'{role}.md'}", "",
               "This is a reviewer benchmark replay. The pull request already merged; review it as if it were open. "
               f"There is no branch factory/{row['id']}: run git diff {base}...{row['head']} wherever your "
-              "instructions name the branch diff. There is no pre-review.md, and Bash runs only git. "
-              "Write only Your file."]
+              "instructions name the branch diff. There is no pre-review.md, and Bash runs only git diff, git log, "
+              "git show and git blame. Write only Your file."]
     return "\n".join(lines) + "\n"
 
 
@@ -13814,7 +13840,7 @@ def bench_session_usage(session):
     return totals
 
 
-def bench_replay_case(row, arm, role, model):
+def bench_replay_case(row, arm, role, model, agents):
     """(True, line) when the reviewer wrote its review into arm/<id>, (None, line) when one is already
     there, (False, line) when the case failed. run.json and replay.log stay once claude ran."""
     out, name, checkout = Path(arm) / row["id"], f"{role}.md", row["checkout"]
@@ -13826,7 +13852,7 @@ def bench_replay_case(row, arm, role, model):
     base = git(checkout, "merge-base", f"{row['merge']}^1", row["head"])
     if not base:
         return False, f"no merge base of {row['merge']}^1 and {row['head']} in {checkout}"
-    tmp =Path(tempfile.mkdtemp(prefix=f"factory-bench-{row['id']}-"))
+    tmp = Path(tempfile.mkdtemp(prefix=f"factory-bench-{row['id']}-")).resolve()
     added = subprocess.run(["git", "-C", str(checkout), "worktree", "add", "--detach", str(tmp / "wt"), row["head"]],
                            capture_output=True)
     if added.returncode:
@@ -13838,8 +13864,9 @@ def bench_replay_case(row, arm, role, model):
             if (row["job"] / doc).is_file():
                 shutil.copyfile(row["job"] / doc, tmp / "job" / doc)
         session = str(uuid.uuid4())
-        argv = [shutil.which("claude"), "-p", "--agent", f"factory-{role}", "--session-id", session,
-                "--permission-mode", "dontAsk", "--allowedTools", *BENCH_REPLAY_TOOLS, "--add-dir", str(tmp / "job")]
+        argv = [shutil.which("claude"), "-p", "--agent", f"factory-{role}", "--agents", agents, "--session-id", session,
+                "--setting-sources", "", "--strict-mcp-config", "--permission-mode", "dontAsk", "--allowedTools",
+                *BENCH_REPLAY_TOOLS, "--disallowedTools", *BENCH_REPLAY_DENIED, "--add-dir", str(tmp / "job")]
         argv += ["--model", model] if model else []
         out.mkdir(parents=True, exist_ok=True)
         start, code = time.monotonic(), None
@@ -13900,12 +13927,14 @@ def bench_replay(*args):
         fail(f"bench: {arm} is not a folder", 2)
     if not shutil.which("claude"):
         fail("bench: replay needs claude on PATH", 4)
-    rows = bench_replay_plan(factory_home(), cases)
+    home = factory_home()
+    rows = bench_replay_plan(home, cases)
+    agents = bench_replay_agents(home, role)
     counts = {True: 0, None: 0, False: 0}
     for row in rows:
         if not (arm / row["id"] / f"{role}.md").exists():
             print(f"{row['id']}: running {role} ...", flush=True)
-        ok, line = bench_replay_case(row, arm, role, model)
+        ok, line = bench_replay_case(row, arm, role, model, agents)
         counts[ok] += 1
         print(f"{row['id']}: {'failed: ' if ok is False else ''}{line}", flush=True)
     print(f"replayed {counts[True]}, skipped {counts[None]}, failed {counts[False]} of {len(rows)} cases "

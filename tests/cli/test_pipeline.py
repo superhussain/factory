@@ -167,12 +167,12 @@ class PipelineTest(IsolatedTestCase):
     def test_skill_rechecks_the_pipeline_before_every_merge(self):
         text = " ".join((SKILL / "SKILL.md").read_text(encoding="utf-8").split())
         merge = text.split("- Merging an APPROVE PR:")[1].split(" - Jobs at `pr-open`")[0]
-        self.assertIn('Immediately before every `gh pr merge`, run `factory pipeline "$SLUG"` again', merge)
+        self.assertIn('Immediately before every `pr-merge`, run `factory pipeline "$SLUG"` again', merge)
         self.assertIn("When `$PIPELINE.merge` is `human`, patch `automerge` false", merge)
-        self.assertLess(merge.index("factory pipeline"), merge.index('`gh pr merge <n>'))
+        self.assertLess(merge.index("factory pipeline"), merge.index('pr-merge "$SLUG/<id>"'))
         recover = " ".join((SKILL / "references/commands/recover.md").read_text(encoding="utf-8").split())
         row = recover.split("| pr-open, `automerge` true |")[1].split(" |")[0]
-        self.assertIn('re-running `factory pipeline "$SLUG"` right before `gh pr merge`', row)
+        self.assertIn('re-running `factory pipeline "$SLUG"` right before `pr-merge`', row)
         self.assertIn("`merge` `human` holds the PR for a person with `automerge` false", row)
 
     def test_skill_pipes_the_board_patch(self):

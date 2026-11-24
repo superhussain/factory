@@ -1,4 +1,5 @@
 pub mod board;
+pub mod board_client;
 pub mod build;
 pub mod conf;
 pub mod consts;

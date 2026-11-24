@@ -6,6 +6,7 @@ pub mod daemon;
 pub mod install;
 pub mod intake;
 pub mod lookup;
+pub mod mirror;
 pub mod ops;
 pub mod pickup;
 pub mod pipeline;

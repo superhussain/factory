@@ -10,11 +10,11 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use crate::cli::Call;
+use crate::shared::board_client;
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{contained, is_link, resolve};
 use crate::shared::home::device_name;
-use crate::shared::http::api;
 use crate::shared::proc::{capture, git, git_ok, origin_git, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
 use crate::shared::py::{is_space, os_error, strip};
@@ -1072,7 +1072,7 @@ fn pr_merged_head(home: &Path, pr: &str) -> Option<String> {
 
 /// The board's jobs, or why they could not be read.
 fn board_jobs(home: &Path) -> Result<Vec<Value>, String> {
-    let r = match api(home, "GET", "/api/board", None, &[200, 404], &[]) {
+    let r = match board_client::read(home) {
         Ok(r) => r,
         Err(e) => {
             let reason =
@@ -1087,10 +1087,11 @@ fn board_jobs(home: &Path) -> Result<Vec<Value>, String> {
             });
         }
     };
-    if r.status != 200 || r.body.is_empty() {
+    let text = r.text.unwrap_or_default();
+    if text.is_empty() {
         return Ok(Vec::new());
     }
-    let board = String::from_utf8(r.body).ok().and_then(|t| loads(&t).ok());
+    let board = loads(&text).ok();
     match board
         .as_ref()
         .and_then(|b| b.get("jobs"))

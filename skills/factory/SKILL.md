@@ -401,13 +401,17 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   Exit 8: earned autonomy holds the class after a revert; checks already set
   automerge false and needs. Stop.
   Never poll `gh pr checks` in a loop or with `--watch`.
-  Immediately before every `gh pr merge`, run `factory pipeline "$SLUG"` again
+  Immediately before every `pr-merge`, run `factory pipeline "$SLUG"` again
   and use that fresh `$PIPELINE`. A non-zero exit moves the job to `needs-human` as
   Pipeline configuration describes, and nothing merges. When `$PIPELINE.merge` is
   `human`, patch `automerge` false and `needs` as in Shipping, and do not merge.
   Otherwise retarget any PR stacked on this one to `$BASE`, and run
-  `gh pr merge <n> -R "$REPO" --merge --delete-branch` as its own command. Move the
-  job to `merged`, then run `cleanup`. A failing check or a merge conflict goes back to the builder as a
+  `"$RUNTIME" pr-merge "$SLUG/<id>"` as its own command, never a bare `gh pr merge`.
+  `merged`: move the job to `merged`, then run `cleanup`. `enqueued`: leave it at
+  `pr-open` with note `queued: <detail>`. Exit 6: the conflict goes back to the
+  builder as a rework. Exit 3: run `checks` again, then `pr-merge`. Exit 1: move the
+  job to `needs-human` with `detail` as the note. Exits 4, 5, 7 and 8 act as they do
+  for `checks`. A failing check or a merge conflict goes back to the builder as a
   rework with the log. A second failure moves the job to `needs-human`.
   With a stacked rider, `board` moves it out of the batch at `pr-open` with the job's
   `automerge` and `escalated`. Merge its PR the same way, move it to `merged`, and

@@ -2036,7 +2036,64 @@ fn bench_warn(line: &str) {
     #[cfg(not(test))]
     eprintln!("{line}");
 }
-const BENCH_REPLAY_TOOLS: [&str; 5] = ["Read", "Grep", "Glob", "Write", "Bash(git:*)"];
+const BENCH_REPLAY_TOOLS: [&str; 8] = [
+    "Read",
+    "Grep",
+    "Glob",
+    "Write",
+    "Bash(git diff:*)",
+    "Bash(git log:*)",
+    "Bash(git show:*)",
+    "Bash(git blame:*)",
+];
+const BENCH_REPLAY_DENIED: [&str; 1] = ["Bash(git *--out*)"];
+
+/// The --agents JSON holding the factory-<role> agent file, with its tools and model, which claude cannot find with no setting sources.
+fn bench_replay_agents(home: &Path, role: &str) -> Res<String> {
+    let config = home.join("config.md");
+    let meta = if config.exists() {
+        frontmatter(&config)
+            .map_err(|e| fail(os_error(&e, Some(&config)), 1))?
+            .0
+    } else {
+        Vec::new()
+    };
+    let dir = match fm_get(&meta, "claude_agents_dir") {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => std::env::home_dir()
+            .unwrap_or_default()
+            .join(".claude/agents"),
+    };
+    let path = dir.join(format!("factory-{role}.md"));
+    let (agent, body) = if path.is_file() {
+        frontmatter(&path).map_err(|e| fail(os_error(&e, Some(&path)), 1))?
+    } else {
+        (Vec::new(), String::new())
+    };
+    let Some(description) = fm_get(&agent, "description").filter(|d| !d.is_empty()) else {
+        return Err(fail(
+            format!(
+                "bench: replay needs the factory-{role} agent at {}",
+                path.display()
+            ),
+            4,
+        ));
+    };
+    let mut entry = json!({"description": description, "prompt": body});
+    let tools: Vec<&str> = fm_get(&agent, "tools")
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+    if !tools.is_empty() {
+        entry["tools"] = json!(tools);
+    }
+    if let Some(model) = fm_get(&agent, "model").filter(|m| !m.is_empty()) {
+        entry["model"] = json!(model);
+    }
+    Ok(dumps(&json!({ format!("factory-{role}"): entry }), DEFAULT))
+}
 
 /// True when checkout holds commit oid, fetching it from origin once when it does not.
 fn bench_have_commit(checkout: &Path, oid: &str) -> bool {
@@ -2089,7 +2146,7 @@ fn bench_replay_prompt(row: &ReplayRow, tmp: &Path, base: &str, role: &str) -> S
         format!("Round folder: {}", job.join("round-1").display()),
         format!("Your file: {}", job.join("round-1").join(format!("{role}.md")).display()),
         String::new(),
-        format!("This is a reviewer benchmark replay. The pull request already merged; review it as if it were open. There is no branch factory/{}: run git diff {base}...{} wherever your instructions name the branch diff. There is no pre-review.md, and Bash runs only git. Write only Your file.", row.id, row.head),
+        format!("This is a reviewer benchmark replay. The pull request already merged; review it as if it were open. There is no branch factory/{}: run git diff {base}...{} wherever your instructions name the branch diff. There is no pre-review.md, and Bash runs only git diff, git log, git show and git blame. Write only Your file.", row.id, row.head),
     ]);
     lines.join("\n") + "\n"
 }
@@ -2200,6 +2257,7 @@ fn bench_replay_case(
     arm: &Path,
     role: &str,
     model: Option<&str>,
+    agents: &str,
 ) -> Res<(Option<bool>, String)> {
     let (out, name, checkout) = (arm.join(&row.id), format!("{role}.md"), &row.checkout);
     if out.join(&name).exists() {
@@ -2227,6 +2285,7 @@ fn bench_replay_case(
     }
     let tmp = temp_root()?.join(format!("factory-bench-{}-{}", row.id, &uuid4()[..8]));
     fs::create_dir(&tmp).map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
+    let tmp = resolve(&tmp).map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
     let (dir, wt) = (checkout.to_string_lossy().into_owned(), tmp.join("wt"));
     let wt_text = wt.to_string_lossy().into_owned();
     let added = capture(
@@ -2262,8 +2321,13 @@ fn bench_replay_case(
             "-p",
             "--agent",
             &format!("factory-{role}"),
+            "--agents",
+            agents,
             "--session-id",
             &session,
+            "--setting-sources",
+            "",
+            "--strict-mcp-config",
             "--permission-mode",
             "dontAsk",
             "--allowedTools",
@@ -2272,6 +2336,8 @@ fn bench_replay_case(
         .map(|s| s.to_string())
         .collect();
         argv.extend(BENCH_REPLAY_TOOLS.iter().map(|s| s.to_string()));
+        argv.push("--disallowedTools".to_string());
+        argv.extend(BENCH_REPLAY_DENIED.iter().map(|s| s.to_string()));
         argv.extend(["--add-dir".to_string(), job_dir]);
         if let Some(model) = model {
             argv.extend(["--model".to_string(), model.to_string()]);
@@ -2393,14 +2459,16 @@ fn bench_replay(args: &[String]) -> Res<()> {
     if which("claude").is_none() {
         return Err(fail("bench: replay needs claude on PATH", 4));
     }
-    let rows = bench_replay_plan(&factory_home()?, &cases)?;
+    let home = factory_home()?;
+    let rows = bench_replay_plan(&home, &cases)?;
+    let agents = bench_replay_agents(&home, role)?;
     let (mut wrote, mut skipped, mut failed) = (0, 0, 0);
     let model = get("--model");
     for row in &rows {
         if !arm.join(&row.id).join(format!("{role}.md")).exists() {
             bench_say(&format!("{}: running {role} ...", row.id));
         }
-        let (ok, line) = bench_replay_case(row, arm, role, model)?;
+        let (ok, line) = bench_replay_case(row, arm, role, model, &agents)?;
         match ok {
             Some(true) => wrote += 1,
             None => skipped += 1,
@@ -3005,6 +3073,7 @@ exit "${FAKE_EXIT:-0}"
     pub(super) const REVIEW: &str =
         "VERDICT: CHANGES\n\n- `worker/export.js:44` drops the header row.\n";
     pub(super) const RUNNING: &str = "1018-add-y: running review-code ...\n";
+    pub(super) const AGENTS: &str = r#"{"factory-review-code": {"description": "Code reviewer.", "prompt": "Review the diff.\n", "tools": ["Read", "Grep", "Glob", "Bash", "Write"], "model": "opus"}}"#;
 
     pub(super) fn summary(wrote: u32, skipped: u32, failed: u32) -> String {
         format!(
@@ -3031,6 +3100,7 @@ exit "${FAKE_EXIT:-0}"
         pub repo: PathBuf,
         pub home: PathBuf,
         pub project: PathBuf,
+        pub agent: PathBuf,
         pub job: PathBuf,
         pub cases: PathBuf,
         pub arm: PathBuf,
@@ -3076,7 +3146,21 @@ exit "${FAKE_EXIT:-0}"
             fs::create_dir_all(home.join("projects")).unwrap();
             let project = home.join("projects/alpha.md");
             fs::write(&project, "---\nrepo: example/alpha\n---\n").unwrap();
-            fs::write(home.join("config.md"), "---\ndevice: host-a\n---\n").unwrap();
+            fs::write(
+                home.join("config.md"),
+                format!(
+                    "---\ndevice: host-a\nclaude_agents_dir: {}\n---\n",
+                    root.join("agents").display()
+                ),
+            )
+            .unwrap();
+            let agent = root.join("agents/factory-review-code.md");
+            fs::create_dir(root.join("agents")).unwrap();
+            fs::write(
+                &agent,
+                "---\ndescription: Code reviewer.\ntools: Read, Grep, Glob, Bash, Write\nmodel: opus\n---\nReview the diff.\n",
+            )
+            .unwrap();
             fs::write(
                 home.join("paths.md"),
                 format!("---\nalpha: {}\n---\n", repo.display()),
@@ -3149,6 +3233,7 @@ exit "${FAKE_EXIT:-0}"
                 repo,
                 home,
                 project,
+                agent,
                 job,
                 cases,
                 log,
@@ -3321,8 +3406,13 @@ mod bench_replay_test {
                 "-p",
                 "--agent",
                 "factory-review-code",
+                "--agents",
+                AGENTS,
                 "--session-id",
                 &session,
+                "--setting-sources",
+                "",
+                "--strict-mcp-config",
                 "--permission-mode",
                 "dontAsk",
                 "--allowedTools",
@@ -3330,7 +3420,12 @@ mod bench_replay_test {
                 "Grep",
                 "Glob",
                 "Write",
-                "Bash(git:*)",
+                "Bash(git diff:*)",
+                "Bash(git log:*)",
+                "Bash(git show:*)",
+                "Bash(git blame:*)",
+                "--disallowedTools",
+                "Bash(git *--out*)",
                 "--add-dir",
                 &job,
                 "--model",
@@ -3354,7 +3449,7 @@ mod bench_replay_test {
                 format!("Round folder: {}", tmp.join("job/round-1").display()),
                 format!("Your file: {}", tmp.join("job/round-1/review-code.md").display()),
                 String::new(),
-                format!("This is a reviewer benchmark replay. The pull request already merged; review it as if it were open. There is no branch factory/1018-add-y: run git diff {}...{} wherever your instructions name the branch diff. There is no pre-review.md, and Bash runs only git. Write only Your file.\n", b.base, b.head),
+                format!("This is a reviewer benchmark replay. The pull request already merged; review it as if it were open. There is no branch factory/1018-add-y: run git diff {}...{} wherever your instructions name the branch diff. There is no pre-review.md, and Bash runs only git diff, git log, git show and git blame. Write only Your file.\n", b.base, b.head),
             ]
             .join("\n")
         );
@@ -3372,6 +3467,41 @@ mod bench_replay_test {
         assert!(!call.stdin.contains("Project documents"));
         assert_eq!(b.run_json()["model"], Value::Null);
         assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_agent_without_tools() {
+        let b = Bench::new("no-tools");
+        fs::write(
+            &b.agent,
+            "---\ndescription: Code reviewer.\nmodel: opus\n---\nReview the diff.\n",
+        )
+        .unwrap();
+        assert_eq!(b.replay(&["--role", "review-code"]).0, 0);
+        let argv = b.call().unwrap().argv;
+        let at = argv.iter().position(|a| a == "--agents").unwrap();
+        let agents: Value = serde_json::from_str(&argv[at + 1]).unwrap();
+        assert_eq!(
+            agents["factory-review-code"],
+            json!({"description": "Code reviewer.", "prompt": "Review the diff.\n", "model": "opus"})
+        );
+    }
+
+    #[test]
+    fn test_temp_root_resolved() {
+        let b = Bench::new("temp-root");
+        let (real, link) = (b.root.join("real-tmp"), b.root.join("tmp-link"));
+        fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        crate::shared::fs::TEMP_ROOT.with(|r| *r.borrow_mut() = Some(link));
+        let code = b.replay(&["--role", "review-code"]).0;
+        crate::shared::fs::TEMP_ROOT.with(|r| *r.borrow_mut() = None);
+        assert_eq!(code, 0);
+        let call = b.call().unwrap();
+        let at = call.argv.iter().position(|a| a == "--add-dir").unwrap();
+        let add_dir = PathBuf::from(&call.argv[at + 1]);
+        assert_eq!(add_dir.parent().unwrap().parent().unwrap(), real);
+        assert_eq!(add_dir.parent(), call.cwd.parent());
     }
 
     #[test]
@@ -3559,6 +3689,19 @@ mod bench_replay_error_test {
             "{flags:?}"
         );
         assert!(b.call().is_none());
+    }
+
+    #[test]
+    fn test_missing_agent() {
+        let b = Bench::new("missing-agent");
+        let message = format!(
+            "bench: replay needs the factory-review-code agent at {}",
+            b.agent.display()
+        );
+        fs::write(&b.agent, "---\nmodel: opus\n---\nReview the diff.\n").unwrap();
+        assert_fails(&b, None, &["--role", "review-code"], 4, &message);
+        fs::remove_file(&b.agent).unwrap();
+        assert_fails(&b, None, &["--role", "review-code"], 4, &message);
     }
 
     #[test]

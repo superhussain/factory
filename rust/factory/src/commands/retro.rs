@@ -19,6 +19,7 @@ use crate::commands::intake::{
     BACKLOG_SUFFIX, MAX_OPEN_PER_PROJECT, MAX_PER_DAY, RETRO_MARK, SUGGESTION_SCHEMA,
 };
 use crate::shared::board::{dump_board, load_board};
+use crate::shared::board_client;
 use crate::shared::conf::{fm_get, frontmatter, read_env_ordered};
 use crate::shared::consts::{
     tag_lookalike, IDEA, NOTE_INVISIBLE, NOTE_LINK, NOTE_PHRASES, NOTE_SECRETS, NOTE_TAG,
@@ -2123,9 +2124,7 @@ fn int_text(text: &str) -> Res<i64> {
 /// A saved stage-note edit opens a trial, and no stage-note edit is sent while its stage has an
 /// open trial or its project's trials are paused.
 fn apply_edits(home: &Path, run: &str, edits: &[Value], agg: &mut Value) -> Res<Vec<Value>> {
-    let mut board = load_board(Some(
-        &api(home, "GET", "/api/board", None, &[200], &[])?.text()?,
-    ))?;
+    let mut board = load_board(Some(&board_client::read_text(home)?))?;
     let autonomy = load_autonomy(&board);
     if autonomy["paused"] != json!(false) {
         println!("autonomy is paused; no pipeline edit");
@@ -3066,9 +3065,7 @@ fn queue_lessons(home: &Path, agg: &Value, cards: &Value) -> Res<()> {
             continue;
         }
         if autonomy.is_none() {
-            let board = load_board(Some(
-                &api(home, "GET", "/api/board", None, &[200], &[])?.text()?,
-            ))?;
+            let board = load_board(Some(&board_client::read_text(home)?))?;
             autonomy = Some(load_autonomy(&board));
         }
         if autonomy.as_ref().unwrap()["paused"] != false {
@@ -3195,9 +3192,7 @@ fn backlog_admit(cards: &Value, outcomes: &mut Vec<(String, String)>) -> Res<()>
             ));
         }
     }
-    let data = load_board(Some(
-        &api(&home, "GET", "/api/board", None, &[200], &[])?.text()?,
-    ))?;
+    let data = load_board(Some(&board_client::read_text(&home)?))?;
     if load_autonomy(&data)["paused"] != false {
         return Err(fail("autonomy is paused; nothing admitted", 3));
     }
