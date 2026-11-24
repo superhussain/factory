@@ -212,11 +212,15 @@ catch-up removes it and prints `pickup timer: replaced by the daemon`.
 To go back to the timer, run `daemon setup --uninstall`. It puts the pickup timer
 back before it removes the service.
 
-### The retro push timer stays
+### The retro push timer goes too
 
-The daily `retro push` timer is separate from the daemon. Keep it. Its lines are
-in [the schedules reference](../skills/factory/references/schedules.md#daily-retro-push).
-Point it at the binary as the next section shows.
+The daemon pushes the retro digest at the timer's times, so the host has no
+`retro push` timer either. `daemon setup --install` removes it with the same
+backup, and catch-up removes a survivor and prints
+`retro-push timer: replaced by the daemon`. `daemon setup --uninstall` puts it
+back. A host without the daemon keeps the timer its
+[schedules reference](../skills/factory/references/schedules.md#daily-retro-push)
+lines set up; point it at the binary as the next section shows.
 
 ## Update old automations
 
