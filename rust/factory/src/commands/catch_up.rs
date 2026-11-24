@@ -504,8 +504,10 @@ fn to_binary(text: &str, kind: &str, binary: &str) -> String {
     } else {
         format!("\"{binary}\"")
     };
-    // cmd expands %name% and systemd expands %-specifiers and $VARIABLES, so they stay literal.
+    // cmd expands %name%, cron turns % into a newline even inside quotes, and systemd expands
+    // %-specifiers and $VARIABLES, so they stay literal.
     let shown = match kind {
+        "sh" => shown.replace('%', "\\%"),
         "cmd" => shown.replace('%', "%%"),
         "systemd" => shown.replace('%', "%%").replace('$', "$$"),
         _ => shown,
@@ -2485,6 +2487,14 @@ mod tests {
                 "/home/u/$x/factory"
             ),
             "30 8 * * * '/home/u/$x/factory' retro push\n"
+        );
+        assert_eq!(
+            to_binary(
+                "30 8 * * * python3 /s/runtime/factory.py retro push\n",
+                "sh",
+                "/home/u/100%/factory"
+            ),
+            "30 8 * * * '/home/u/100\\%/factory' retro push\n"
         );
         assert_eq!(
             to_binary(
