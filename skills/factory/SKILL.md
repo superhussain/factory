@@ -263,7 +263,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
 
 ## Rules
 
-- Before each role dispatch, run `"$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`. For via paseo, record after the worker exists, with `--paseo-agent <agent-id>`.
+- Before each role dispatch, run `"$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`. `<via>` is `native` for a direct Claude Code subagent, else `paseo`, `launcher`, `general` or `direct`. For via paseo, record after the worker exists, with `--paseo-agent <agent-id>`.
   After hold, record the orchestrator once when no orchestrator row carries this session.
 - Agents get context from files, not the conversation. Build every agent prompt with
   `"$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] --out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`

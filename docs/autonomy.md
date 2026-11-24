@@ -363,7 +363,7 @@ admit nor counts toward the pause. A revert counts toward the daily retro cap. T
 open records, every unresumed revert and the newest 20 other settled ones. Settle skips malformed records and drops an open one
 whose `opened` is not a board timestamp or whose `version` is not a whole number
 (`trial_misshapen`).
-Settle prints `dropped malformed open trial records: <n> (<ids>; opened is not a board timestamp or version is not a whole number)`, with each id escaped and `(no id)` for a record without one.
+Settle prints `dropped malformed open trial records: <n> (<ids>; opened is not a board timestamp or version is not a whole number)`, with each id quoted and escaped as Rust's `{:?}` writes it, and an unquoted `(no id)` for a record without one.
 It also drops non-dict entries from `trials`
 when it writes the board.
 - **Settle-shaped.** The Worker's `checkTrialSettle` refuses, with 400, a board `PUT` or
