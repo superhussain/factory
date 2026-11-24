@@ -111,10 +111,6 @@ fn build(
     } else {
         host.home.join(".cache").join("huss-skills").join("factory")
     };
-    // A per-user target folder keeps dependencies compiled across catch-up's fresh source worktrees.
-    let target = (host.var)("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| cache.join("cargo-target"));
     let files = build_inputs(checkout)?;
     let mut key = Sha256::new();
     for (rel, data) in &files {
@@ -166,7 +162,16 @@ fn build(
         let _ = writeln!(err, "install: Rust binary from {}", own.display());
         return Ok(binary);
     }
-    make_dirs(&target).map_err(|e| os_error(&e, Some(&target)))?;
+    // A per-user target folder keeps dependencies compiled across catch-up's fresh source worktrees.
+    // The binary is read back from it, so the default one must be private like bin and build-src.
+    let target = match (host.var)("CARGO_TARGET_DIR") {
+        Some(own) => {
+            let own = PathBuf::from(own);
+            make_dirs(&own).map_err(|e| os_error(&e, Some(&own)))?;
+            own
+        }
+        None => private_dir(&cache.join("cargo-target"))?,
+    };
     // One stable source path keeps cargo's incremental artifacts valid from one checkout to the next.
     let src = private_dir(&cache.join("build-src"))?;
     let lock_path = src.join(LOCK);
@@ -861,6 +866,26 @@ pub(crate) mod tests {
         fs::set_permissions(root.join("elsewhere"), fs::Permissions::from_mode(0o700)).unwrap();
         std::os::unix::fs::symlink(root.join("elsewhere"), root.join("link")).unwrap();
         assert!(private_dir(&root.join("link")).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_open_default_cargo_target_is_refused() {
+        let root = temp_dir("build-open-target");
+        let checkout = checkout(&root);
+        fake_rustc(&root.join("bin"), "1.100.0");
+        let cargo = fake_cargo(&root, "stub");
+        let target = root.join(".cache/huss-skills/factory/cargo-target");
+        fs::create_dir_all(&target).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            rust_binary(&checkout, &host(&root, &[], Some(cargo)), &mut Vec::new()),
+            Err(format!(
+                "Rust build failed ({} is not a private folder)",
+                target.display()
+            ))
+        );
+        assert!(!root.join("runs").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }
