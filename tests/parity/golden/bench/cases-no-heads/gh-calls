@@ -1,0 +1,1 @@
+{"argv": ["api", "graphql", "-f", "query=query { repository(owner: \"example\", name: \"alpha\") { p8: pullRequest(number: 8) { state headRefOid } p9: pullRequest(number: 9) { state headRefOid } } }"]}

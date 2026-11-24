@@ -1,0 +1,13 @@
+{
+  "id": "001-test",
+  "project": "sample",
+  "stage": "pr-open",
+  "round": 0,
+  "updated": "{now}",
+  "started": "2026-11-01T00:00:00Z",
+  "paseo": {
+    "server": "srv-mac",
+    "agent": "agent-own"
+  },
+  "note": "upstream PR ready"
+}

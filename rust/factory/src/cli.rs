@@ -233,7 +233,6 @@ pub fn main(args: Vec<OsString>) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::pyre::{Flags, Pattern};
 
     fn args(list: &[&str]) -> Vec<OsString> {
         list.iter().map(OsString::from).collect()
@@ -242,45 +241,6 @@ mod tests {
     #[test]
     fn usage_has_python_prefix() {
         assert!(USAGE.starts_with("factory.py: usage:\n"));
-    }
-
-    #[test]
-    fn table_matches_factory_py() {
-        static ROW: Pattern = Pattern::new(
-            r#"(?:COMMANDS\[)?"([a-z-]+)"\]?(?::| =) \((\w+), (\d+), ([^)]+)\)"#,
-            Flags::NONE,
-        );
-        let src = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../skills/factory/runtime/factory.py"
-        ))
-        .unwrap();
-        let start = src.find("COMMANDS = {").unwrap();
-        let end = src.find("def main(argv=None)").unwrap();
-        let python: Vec<(String, usize, usize)> = ROW
-            .find_iter(&src[start..end])
-            .map(|m| {
-                let c = ROW.fullmatch(m.as_str()).unwrap();
-                let hi = match c.get(4).unwrap().as_str() {
-                    "sys.maxsize" => usize::MAX,
-                    "1 + MAX_RIDERS" => 1 + MAX_RIDERS,
-                    n => n.parse().unwrap(),
-                };
-                (
-                    c.get(1).unwrap().as_str().to_string(),
-                    c.get(3).unwrap().as_str().parse().unwrap(),
-                    hi,
-                )
-            })
-            .collect();
-        // pr-merge is Rust-only: its spec rules out a Python command.
-        let rust: Vec<(String, usize, usize)> = COMMANDS
-            .iter()
-            .filter(|(n, ..)| *n != "pr-merge")
-            .map(|(n, _, lo, hi)| (n.to_string(), *lo, *hi))
-            .collect();
-        assert_eq!(python.len(), 69);
-        assert_eq!(rust, python);
     }
 
     #[test]

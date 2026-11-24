@@ -1,0 +1,3 @@
+job 1017-add-x on parity: 2 transcripts
+model            input  output  cache_write  cache_read
+claude-opus-5-5  1,100  45,000      205,000   3,200,000

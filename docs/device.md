@@ -2,15 +2,13 @@
 
 ## Prerequisites and copy installation
 
-Use a Rust toolchain (rustup), Git and Python 3.8+. Python is required only for `tools/install.py` and the other `tools/*.py` scripts. Install rustup from https://rustup.rs. The installer builds the factory binary with cargo from PATH or
-`~/.cargo/bin`. Without cargo it installs only the Python runtime, `runtime/factory.py` run with `python3`
-(`py -3` on Windows), and no `runtime/factory` binary, so the `runtime/factory` commands below do not exist
-until job 2222. No pip, npm, daemon or native agent runtime is required
+Use a Rust toolchain (rustup) and Git. Install rustup from https://rustup.rs. The installer builds the factory binary with cargo from PATH or
+`~/.cargo/bin`, and stops with an install hint when cargo is missing. No Python, pip, npm or native agent runtime is required
 for the device CLI. The repository installer copies only the self-contained skill.
-Choose an absolute destination directory, then run from this checkout:
+Choose an absolute skills root, then run from this checkout:
 
 ```text
-python3 tools/install.py --destination <absolute-directory>
+sh tools/install.sh <absolute-directory>
 ```
 
 The installed skill is `<absolute-directory>/factory`. Load its SKILL.md through
@@ -20,7 +18,7 @@ your agent runtime, or invoke its binary directly from any working directory:
 <installed-skill>/runtime/factory init
 ```
 
-On Windows the binary is `<installed-skill>\runtime\factory.exe`. Quote paths containing spaces. Use `py -3` instead of `python3` for `tools/install.py`.
+On Windows the binary is `<installed-skill>\runtime\factory.exe`. Quote paths containing spaces. Run `tools\install.ps1 <absolute-directory>` instead of `tools/install.sh`.
 
 Use this installer on every host.
 
@@ -28,18 +26,18 @@ The copied bundle works when the source checkout is unavailable. It includes all
 templates, nine canonical role bodies, execution references and optional prompts.
 There are no repository-relative runtime reads or runtime dependency downloads.
 
-An identical install is a no-content-change success. A differing existing install
-requires explicit replacement:
+An identical install is a no-content-change success. `tools/install.sh` always passes
+`--replace`, so a differing existing install is replaced:
 
 ```text
-python3 tools/install.py --destination <absolute-directory> --replace
+<installed-skill>/runtime/factory install --source <checkout> --destination <absolute-directory> --replace
 ```
 
 Replacement moves the old bundle to `factory.backup-<uuid>` beside the installed
 directory, switches in the new one, then deletes that backup and prints
 `removed <path>`. A failed switch restores the old bundle. If the delete fails,
 the install still succeeds and warns
-`install.py: could not remove <path>; remove it by hand`. It never merges trees
+`install: could not remove <path>; remove it by hand`. It never merges trees
 or deletes older backups. Copy out any local edits before `--replace`. A completed
 sibling stage is switched only after validation. Pause other installers and
 editors during replacement. `.factory-install.lock` serializes cooperating
@@ -51,12 +49,11 @@ The installer touches no device state, native roles or schedules. It leaves othe
 
 Once a skill is installed, run `<installed-skill>/runtime/factory catch-up`
 on each host instead of rerunning the installer by hand. It backs up first, installs
-origin's skill with origin's `tools/install.py`, and has the new bundle rewrite the
-pickup timer. The timer command comes from the installed `bundle.json`: its optional
+origin's skill with the binary built from origin's `rust/` crate, and has the new bundle
+rewrite the pickup timer. The timer command comes from the installed `bundle.json`: its
 `entry` key, a list whose first item is a path relative to the skill, names the
-program to run. Without it, as in a bundle installed where cargo was missing, catch-up runs
-the bundle's `runtime/factory.py` with Python. See [upgrade.md](upgrade.md) for the backup
-folder and how to restore it.
+program to run. Without it, catch-up runs the bundle's `runtime/factory` binary. See
+[upgrade.md](upgrade.md) for the backup folder and how to restore it.
 
 Where the daemon service is installed (`<installed-skill>/runtime/factory daemon setup --install`),
 the daemon is the pickup scheduler and the host has no pickup timer: catch-up removes a
@@ -364,7 +361,7 @@ A `gh pr merge` in the main session carries no flag, since the orchestrator merg
 
 - It matches `gh pr merge`, or `gh api` with `PUT` on `pulls/<n>/merge`, as a command's first word or after `;`, `&`, `|`, `(`, `$(`, a backtick or a newline. A `VAR=value`, `sudo`, `env`, `command`, `exec`, `time`, `if`, `then`, `else`, `elif`, `do` or `!` prefix may come first. It also matches the factory runtime's `pr-merge` subcommand, as in `"$RUNTIME" pr-merge factory/1017-add-x`, when the program is a quoted word, a `$NAME` variable, or a path whose last part is `factory`.
 - It skips `cat` and `tee` heredoc bodies the way `secret-file` does. It also skips text in single quotes, and text in double quotes that holds no `$(` or backtick, so a grep pattern or a commit message does not flag.
-- A merge inside `bash -c` or `eval` does not flag. The Python runtime still matches the raw text.
+- A merge inside `bash -c` or `eval` does not flag.
 
 `secret-file` skips the body of a `cat` or `tee` heredoc with no pipe after it, so writing about `.env` does not flag. A heredoc fed to a shell or interpreter, and every other line, still flags. That includes output run through `eval`, `-c` or a combined flag such as `-lc`, `<(` or `>(`, a `$(cat <<EOF` used as the command itself, and every body line inside a `$(` that spans lines, a delimiter with quotes inside it such as `E"OF"`, and lines an unquoted heredoc expands with `$(` or a backtick. A body written to a file and run later, such as `cat > s.sh <<EOF` then `bash s.sh`, is beyond a per-call heuristic.
 
@@ -757,17 +754,10 @@ Other selections are `none`, `claude` and `opencode`. See
 [integrations](integrations.md) for native activation, opaque headers and optional
 schedules. Installation, initialization and adoption never weaken security policies.
 
-The `CI` workflow runs parallel Ubuntu 22.04/Python 3.12 jobs on pull requests, and its
-`python` job runs the device suite. The `tools/*.py` scripts
-support Python 3.8+. The following additional platform checks can run locally.
-`FactoryTest.test_released_hold_fails_on_real_windows_junction` runs on Windows
-and is skipped elsewhere. POSIX-only permission cases
-`FactoryTest.test_released_hold_fails_on_unlistable_round_directory`,
-`FactoryTest.test_released_hold_fails_on_unreadable_job_folder_hiding_a_link` and
-`LocationTest.test_unreadable_metadata_and_unlistable_tree` run as non-root on
-Linux/macOS and skip Windows. `LocationTest.test_pointer_and_metadata_links_refused_but_home_alias_allowed`
-and `LocationTest.test_unreadable_pointer_and_trusted_default_alias` use POSIX
-symlinks/permissions; Windows owns the real junction case. Legacy symlink cases
-run on POSIX and also on Windows when native symlink creation is available.
-`PaseoStallsTest.test_list_reports_only_idle_claude_limit_stalls` and `PaseoStallsTest.test_dateless_reset_anchors_on_message_time` skip where `zoneinfo` cannot resolve `UTC` (Python 3.8, or no zone data); `PaseoStallsTest.test_missing_zoneinfo_leaves_stalls_out` covers that path on every host.
+The `CI` workflow runs parallel Ubuntu 22.04 jobs on pull requests. Its `rust-test` job runs the
+binary's unit tests, `rust-check` type-checks the `aarch64-apple-darwin` and `x86_64-pc-windows-gnu`
+targets, and `parity` compares the built binary with the golden files. The `tools/*.py` scripts
+support Python 3.8+. `tests/tools/test_paseo_stalls.py` skips its two zone cases where `zoneinfo`
+cannot resolve `UTC` (Python 3.8, or no zone data); `test_missing_zoneinfo_leaves_stalls_out`
+covers that path on every host.
 Do not skip a case when running on its owning platform.

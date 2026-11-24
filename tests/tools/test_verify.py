@@ -6,7 +6,6 @@ inside a test.
 import importlib.util
 import io
 import json
-import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -26,10 +25,8 @@ def ids(calls):
         command = call.args[0]
         if command[1:2] == ["run"]:
             result.append(command[2])
-        elif "tests/tools" in command:
-            result.append("install-unittest")
         else:
-            result.append("cli-unittest")
+            result.append("rust-test")
     return result
 
 
@@ -40,14 +37,11 @@ class SelectionTest(unittest.TestCase):
             code = verify.main(list(argv))
         return code, run, out.getvalue()
 
-    def test_device_group_runs_fixed_unittest_commands(self):
+    def test_device_group_runs_cargo_test(self):
         code, run, _ = self.run_main("device")
         self.assertEqual(code, 0)
         commands = [call.args[0] for call in run.call_args_list]
-        self.assertEqual(commands, [
-            [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests/cli", "-p", "test_*.py"],
-            [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests/tools", "-p", "test_install.py"],
-        ])
+        self.assertEqual(commands, [["cargo", "test", "--locked", "--manifest-path", "rust/Cargo.toml"]])
         for call in run.call_args_list:
             self.assertEqual(call.kwargs["cwd"], verify.ROOT)
             self.assertEqual(call.kwargs["env"]["PYTHONDONTWRITEBYTECODE"], "1")
@@ -66,8 +60,8 @@ class SelectionTest(unittest.TestCase):
         code, run, _ = self.run_main("all")
         self.assertEqual(code, 0)
         self.assertEqual(ids(run.call_args_list),
-                         ["cli-unittest", "install-unittest", *HOSTED_SCRIPTS])
-        self.assertEqual(len(run.call_args_list), 8)
+                         ["rust-test", *HOSTED_SCRIPTS])
+        self.assertEqual(len(run.call_args_list), 7)
 
     def test_missing_pnpm_fails_closed_for_hosted(self):
         for group in ("hosted", "all"):
@@ -83,7 +77,7 @@ class SelectionTest(unittest.TestCase):
         with mock.patch("shutil.which", side_effect=AssertionError("pnpm resolved")):
             code, run, _ = self.run_main("device")
         self.assertEqual(code, 0)
-        self.assertEqual(len(run.call_args_list), 2)
+        self.assertEqual(len(run.call_args_list), 1)
 
 
 class ArgumentTest(unittest.TestCase):
@@ -98,7 +92,7 @@ class ArgumentTest(unittest.TestCase):
 
 class PropagationTest(unittest.TestCase):
     def run_with_failure(self, group, failing_index):
-        codes = [0] * 8
+        codes = [0] * 7
         codes[failing_index] = 3
         with mock.patch("subprocess.run") as run, redirect_stdout(io.StringIO()):
             run.side_effect = [mock.Mock(returncode=code) for code in codes]
@@ -131,8 +125,7 @@ class JsonTest(unittest.TestCase):
             "group": "device",
             "status": "pass",
             "results": [
-                {"id": "cli-unittest", "exit_code": 0},
-                {"id": "install-unittest", "exit_code": 0},
+                {"id": "rust-test", "exit_code": 0},
             ],
         })
 
@@ -145,7 +138,7 @@ class JsonTest(unittest.TestCase):
             "version": 1,
             "group": "device",
             "status": "fail",
-            "results": [{"id": "cli-unittest", "exit_code": 1}],
+            "results": [{"id": "rust-test", "exit_code": 1}],
         })
 
 

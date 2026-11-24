@@ -1,0 +1,8 @@
+{
+  "removed": [],
+  "left": [
+    "worktree {home}/worktrees/sample/001-test: stub: no recorded response for git -C checkout worktree remove {home}/worktrees/sample/001-test",
+    "branch factory/001-test: kept because its worktree remains",
+    "prompts {home}/prompts/sample/001-test: kept because its worktree remains"
+  ]
+}

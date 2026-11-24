@@ -1,0 +1,43 @@
+{
+  "cases": 2,
+  "defects": 3,
+  "weights": {
+    "high": 3,
+    "medium": 2,
+    "low": 1
+  },
+  "arms": [
+    {
+      "arm": "partial",
+      "weighted_recall": 0.5,
+      "caught": 1,
+      "severity": {
+        "high": {
+          "caught": 1,
+          "of": 1
+        },
+        "medium": {
+          "caught": 0,
+          "of": 1
+        },
+        "low": {
+          "caught": 0,
+          "of": 1
+        }
+      },
+      "missed": [
+        "1018-add-y docs/device.md:12-12",
+        "1019-add-z worker/board.js:88-95"
+      ],
+      "tokens": 250000,
+      "seconds": 300,
+      "runs": 1,
+      "missing": [
+        "1019-add-z"
+      ],
+      "no_run": [
+        "1019-add-z"
+      ]
+    }
+  ]
+}

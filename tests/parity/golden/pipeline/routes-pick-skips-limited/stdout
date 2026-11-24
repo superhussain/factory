@@ -1,0 +1,6 @@
+{
+  "route": "beta",
+  "provider": "provider-b",
+  "runtime": "provider-b",
+  "model": "vendor/model-b[1m]"
+}

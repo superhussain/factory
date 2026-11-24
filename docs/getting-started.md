@@ -23,14 +23,14 @@ Open the origin and sign in with an allowed email, such as `ada@example.test`. T
 ## 3. Install the skill on this computer
 
 ```sh
-python3 tools/install.py --destination "$HOME/.claude/skills"
+sh tools/install.sh "$HOME/.claude/skills"
 FACTORY="$HOME/.claude/skills/factory/runtime/factory"
 "$FACTORY" init --agents claude
 ```
 
 - The destination is the skills root your agent reads. Use `$HOME/.agents/skills` for a shared folder.
 - `--agents` takes `claude`, `opencode`, `both` or `none`.
-- On Windows the binary is `...\runtime\factory.exe`. Use `py -3` instead of `python3` for `tools/install.py`.
+- On Windows the binary is `...\runtime\factory.exe`. Run `tools\install.ps1` instead of `tools/install.sh`.
 - Run steps 3 to 5 in the same terminal. In a new terminal, set `FACTORY` again first.
 
 See [device.md](device.md) for the full device setup.

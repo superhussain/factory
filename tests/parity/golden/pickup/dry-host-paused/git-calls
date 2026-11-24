@@ -1,0 +1,4 @@
+{"argv": ["-C", "/", "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main"]}
+{"argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/remotes/origin/main"]}
+{"argv": ["-C", "/", "rev-parse", "--verify", "-q", "refs/heads/main"]}
+{"argv": ["-C", "/", "rev-list", "--max-parents=0", "refs/heads/main"]}

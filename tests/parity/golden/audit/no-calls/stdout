@@ -1,0 +1,2 @@
+job 1099-empty-job on example-host: 0 calls in 2 sessions, 0 flagged
+time  session  agent  tool  flags  target

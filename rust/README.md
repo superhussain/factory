@@ -1,16 +1,16 @@
 # factory, in Rust
 
-`rust/factory` is a port of `skills/factory/runtime/factory.py`. Python stays the oracle: the parity harness runs each case on both and compares exit code, stdout, stderr, the home tree, tool calls and Worker requests (see `docs/development.md`, Parity harness). `tools/install.py` builds the binary into the installed skill as `runtime/factory`, and `factory.py` hands off to it when it is there.
+`rust/factory` is the factory CLI. It began as a port of the Python `factory.py`, which is gone; that runtime's output survives as the parity harness's golden files, and the harness compares the binary's exit code, stdout, stderr, home tree, tool calls and Worker requests with them (see `docs/development.md`, Parity harness). `tools/install.sh` and `tools/install.ps1` build the binary and run its `install`, which copies it into the installed skill as `runtime/factory`.
 
 ```sh
 cd rust && cargo build --profile host --locked && cargo test --locked
-python3 tests/parity/run.py --bin rust/target/host/factory --ids rust/parity
+python3 tests/parity/run.py --bin rust/target/host/factory
 ```
 
 ## Build speed
 
-- `cargo build --profile host` is the fast local loop. The `host` profile inherits `release` without LTO, with 256 codegen units and incremental builds, so most one-file changes rebuild in seconds. An edit that shifts lines in a very large file such as `pickup.rs` still takes about 25 s. CPU-heavy commands such as `retro digest` use about 6% more CPU than `release`; startup is the same. `tools/install.py` and CI build it; `release` stays for any binary published later.
-- `tools/install.py` builds in one private folder, `~/.cache/huss-skills/factory/build-src` (`%LOCALAPPDATA%\huss-skills\factory\build-src` on Windows), with targets in `cargo-target` beside it. Before each build it syncs `rust/` and every file the crate names in `include_str!` or `include_bytes!`, rewriting only files whose bytes differ, so incremental artifacts survive catch-up's fresh worktrees. A `.build.lock` there keeps two installs from building at once.
+- `cargo build --profile host` is the fast local loop. The `host` profile inherits `release` without LTO, with 256 codegen units and incremental builds, so most one-file changes rebuild in seconds. An edit that shifts lines in a very large file such as `pickup.rs` still takes about 25 s. CPU-heavy commands such as `retro digest` use about 6% more CPU than `release`; startup is the same. `factory install` and CI build it; `release` stays for any binary published later.
+- `factory install` builds in one private folder, `~/.cache/huss-skills/factory/build-src` (`%LOCALAPPDATA%\huss-skills\factory\build-src` on Windows), with targets in `cargo-target` beside it. Before each build it syncs `rust/` and every file the crate names in `include_str!` or `include_bytes!`, rewriting only files whose bytes differ, so incremental artifacts survive catch-up's fresh worktrees. A `.build.lock` there keeps two installs from building at once.
 - Built binaries sit in `bin/<key>/factory` beside those folders, the newest 3 kept. The key is a sha256 over every synced file's path and content hash, `rustc -vV` (toolchain version and host triple) and the profile. When the key and the stored binary's sha256 match, the install copies it and runs no cargo. stderr says `install: Rust binary from cache <key8>` or `install: Rust binary built in <n> s`.
 - To clear the cache, delete `bin`, `build-src` and `cargo-target` under `~/.cache/huss-skills/factory`. The next install rebuilds from cold.
 

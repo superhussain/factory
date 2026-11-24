@@ -1,0 +1,4 @@
+{"body": "", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "user-agent": "factory"}, "method": "GET", "path": "/api/halt"}
+{"body": "", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "user-agent": "factory"}, "method": "GET", "path": "/api/board"}
+{"body": "", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "user-agent": "factory"}, "method": "GET", "path": "/api/pipeline/effective/alpha"}
+{"body": "", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "user-agent": "factory"}, "method": "GET", "path": "/api/hosts"}

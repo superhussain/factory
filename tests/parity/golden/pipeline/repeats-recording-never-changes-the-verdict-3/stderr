@@ -1,0 +1,2 @@
+factory.py: GET {api}/api/board returned 500: boom
+factory.py: 042-csv-export repeats were not recorded on the board; the review loop goes on

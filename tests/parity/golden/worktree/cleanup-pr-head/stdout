@@ -1,0 +1,7 @@
+{
+  "removed": [
+    "branch factory/001-test",
+    "prompts {home}/prompts/sample/001-test"
+  ],
+  "left": []
+}

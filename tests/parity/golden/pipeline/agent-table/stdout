@@ -1,0 +1,6 @@
+stage   role          harness   via     model            effort  count
+idea    orchestrator  claude    paseo   claude-opus-5-5  medium  1
+spec    spec          claude    native  claude-opus-5-5  medium  1
+build   build         opencode  native  glm-5.3-flash    high    1
+build   orchestrator  opencode  paseo   glm-5.3-flash    high    1
+review  review-code   opencode  native  gpt-6.1-sol      high    1

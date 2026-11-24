@@ -1,0 +1,1 @@
+{"version": 1, "home": "", "api_url": "", "checks": [{"name": "location", "status": "fail", "message": "Invalid factory location."}]}

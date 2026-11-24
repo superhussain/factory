@@ -1,0 +1,6 @@
+{
+  "id": "004-store-imported-recipes",
+  "project": "sample",
+  "decision": "approved",
+  "line": "- [ ] sample: Store imported recipes (sub-job-of 041-recipe-import)"
+}

@@ -1,0 +1,1 @@
+{"argv": ["-C", "/srv/sample", "fetch", "origin", "+refs/heads/main:refs/remotes/origin/main"]}

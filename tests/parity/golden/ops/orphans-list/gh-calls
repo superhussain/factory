@@ -1,0 +1,1 @@
+{"argv": ["pr", "list", "-R", "example/factory", "--state", "open", "--json", "number,headRefName,url", "--limit", "500"]}

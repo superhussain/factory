@@ -1,0 +1,6 @@
+job 1020-odd-calls on example-host: 4 calls in 1 session, 1 flagged
+time                 session  agent   tool  flags     target
+2026-11-10 10:00:00  s1       main    Bash  -         gh pr merge 7
+2026-11-10 10:00:01  s1       main    Bash  -         echo ok?[1A?[2K git status
+2026-11-10 10:00:02  s1       x?[2Ky  Bash  pr-merge  gh pr merge 7
+2026-11-10 10:00:03  s1       x?[2Ky  Bash  -         ls

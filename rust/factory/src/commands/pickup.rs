@@ -1382,7 +1382,7 @@ fn host_os() -> &'static str {
     }
 }
 
-/// {commit, tree} from the bundle.json install.py writes beside the runtime, or None.
+/// {commit, tree} from the bundle.json `factory install` writes beside the runtime, or None.
 fn bundle_stamp() -> Option<Value> {
     #[cfg(test)]
     if let Some(f) = fake!(bundle_stamp) {

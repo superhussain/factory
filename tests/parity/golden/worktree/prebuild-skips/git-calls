@@ -1,0 +1,10 @@
+{"argv": ["-C", "checkout", "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main"]}
+{"argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"]}
+{"argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"]}
+{"argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/factory/001-test"]}
+{"argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"]}
+{"argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/factory/001-test"]}
+{"argv": ["-C", "checkout", "ls-remote", "origin", "refs/heads/factory/001-test"]}
+{"argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/remotes/origin/factory/001-test"]}
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "diff", "--no-ext-diff", "--no-textconv", "--quiet", "refs/remotes/origin/main", "--", ":(glob)*mise*", ":(glob)*mise*/**", ":(glob).config/*mise*", ":(glob).config/*mise*/**", ".tool-versions", ".npmrc", "pnpm-workspace.yaml", ":(glob)sample/*mise*", ":(glob)sample/*mise*/**", ":(glob)sample/.config/*mise*", ":(glob)sample/.config/*mise*/**", "sample/.tool-versions", "sample/.npmrc", "sample/pnpm-workspace.yaml", "sample/pnpm-lock.yaml", "sample/package.json", "sample/.pnpmfile.cjs", "sample/.pnpmfile.mjs"]}
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "status", "--porcelain", "--untracked-files=all", "--ignored", "--", ":(glob)*mise*", ":(glob)*mise*/**", ":(glob).config/*mise*", ":(glob).config/*mise*/**", ".tool-versions", ".npmrc", "pnpm-workspace.yaml", ":(glob)sample/*mise*", ":(glob)sample/*mise*/**", ":(glob)sample/.config/*mise*", ":(glob)sample/.config/*mise*/**", "sample/.tool-versions", "sample/.npmrc", "sample/pnpm-workspace.yaml", "sample/pnpm-lock.yaml", "sample/package.json", "sample/.pnpmfile.cjs", "sample/.pnpmfile.mjs"]}

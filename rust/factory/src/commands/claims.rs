@@ -2014,4 +2014,75 @@ mod tests {
         );
         assert!(truthy(Some(&json!(0.5))) && truthy(Some(&json!([0]))));
     }
+
+    /// Ported from tests/cli/test_stage_guard.py AutomergeGuardTest: automerge true needs a readable,
+    /// regular decision.md on this host whose first line is APPROVE.
+    #[cfg(unix)]
+    #[test]
+    fn automerge_guard_refusals() {
+        let home = temp_dir("claims-automerge-guard");
+        let job = "042-sample-export";
+        let folder = home.join("jobs/sample").join(job);
+        let found = json!({"id": job, "project": "sample", "stage": "pr-open"});
+        let patch = |v: Value| v.as_object().unwrap().clone();
+        let set = patch(json!({"stage": "pr-open", "automerge": true}));
+        let why = |found: &Value, p: &Map<String, Value>| move_refusal(&home, job, Some(found), p);
+        let refused = |why: &str| {
+            Some(format!(
+                "{job} cannot set automerge true: {why} Nothing was written."
+            ))
+        };
+        assert_eq!(
+            why(&found, &set),
+            refused("decision.md is not on this host. Run factory.py pull sample/042-sample-export, then retry.")
+        );
+        fs::create_dir_all(&folder).unwrap();
+        for (text, head) in [
+            ("APPROVED\n", "'APPROVED'"),
+            (
+                "\n  ESCALATE: code reviewer asked for a person\nmore\n",
+                "'ESCALATE: code reviewer asked for a pers'",
+            ),
+        ] {
+            fs::write(folder.join("decision.md"), text).unwrap();
+            assert_eq!(
+                why(&found, &set),
+                refused(&format!("decision.md starts with {head}, not APPROVE."))
+            );
+        }
+        fs::write(folder.join("decision.md"), b"\xff\xfe").unwrap();
+        assert_eq!(
+            why(&found, &set),
+            refused("its decision.md cannot be read.")
+        );
+        fs::remove_file(folder.join("decision.md")).unwrap();
+        fs::write(home.join("elsewhere.md"), "APPROVE\n").unwrap();
+        std::os::unix::fs::symlink(home.join("elsewhere.md"), folder.join("decision.md")).unwrap();
+        assert_eq!(
+            why(&found, &set),
+            refused("its decision.md cannot be read.")
+        );
+        fs::remove_file(folder.join("decision.md")).unwrap();
+        let projectless = json!({"id": job, "stage": "pr-open"});
+        let no_project = refused("it has no project, so there is no decision.md to check.");
+        assert_eq!(why(&projectless, &set), no_project);
+        assert_eq!(
+            why(
+                &projectless,
+                &patch(json!({"automerge": true, "project": "../beta"}))
+            ),
+            no_project
+        );
+        fs::write(
+            folder.join("decision.md"),
+            "APPROVE\nA person approved this job with /factory approve.\n",
+        )
+        .unwrap();
+        assert_eq!(why(&found, &set), None);
+        fs::remove_file(folder.join("decision.md")).unwrap();
+        for value in [json!(false), Value::Null] {
+            assert_eq!(why(&found, &patch(json!({"automerge": value}))), None);
+        }
+        fs::remove_dir_all(home).unwrap();
+    }
 }

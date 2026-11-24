@@ -1,0 +1,1 @@
+factory.py: conflict in sample/001-test/build.md: changed both here and in R2. Local copies were kept and nothing was overwritten. R2's copy of each is saved beside it as <file>.remote. Merge it into the local file and delete the .remote, then push. For an image, keep one copy: delete the .remote, or move it over the image

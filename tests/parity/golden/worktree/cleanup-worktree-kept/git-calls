@@ -1,0 +1,1 @@
+{"argv": ["-C", "checkout", "worktree", "remove", "{home}/worktrees/sample/001-test"]}

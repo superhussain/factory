@@ -52,8 +52,8 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory` once p
 - Check: `ls` the chosen destination.
 - Ask, Runtime: "Which agent runs factory work here?" Options: Claude Code (Recommended), OpenCode, Both, Other.
 - Ask, Skills: "Install the skill to which folder?" Options: `$HOME/.claude/skills` (Recommended), `$HOME/.agents/skills`, Other.
-- Then run `python3 tools/install.py --destination <dir>`.
-- On a differing install, ask Replace: "Replace the installed copy? A backup is kept." Options: Replace (Recommended), Keep.
+- If `<dir>/factory` exists, ask Replace: "Replace the installed copy? A backup is kept." Options: Replace (Recommended), Keep.
+- Unless they keep it, run `sh tools/install.sh <dir>` (`tools\install.ps1 <dir>` on Windows). It always replaces a differing install.
 - Then run `"$FACTORY" init --agents <choice>`.
 
 ## 5. Check

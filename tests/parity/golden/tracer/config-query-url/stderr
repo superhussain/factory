@@ -1,0 +1,1 @@
+factory.py: {home}/tracer.json: sample.url must be https, or http only for localhost or 127.0.0.1, with no credentials, query or fragment

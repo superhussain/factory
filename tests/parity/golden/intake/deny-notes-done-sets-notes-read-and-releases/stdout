@@ -1,0 +1,18 @@
+{
+  "id": "007-csv-export",
+  "project": "alpha",
+  "title": "Export the board as CSV and PDF",
+  "idea": "export the board as CSV and PDF",
+  "stage": "closed",
+  "updated": "{now}",
+  "done": "2026-01-01T00:00:00Z",
+  "note": "denied from the backlog",
+  "capture_id": "c007-csv-export",
+  "backlog": {
+    "line": "- [ ] alpha: export the board as CSV and PDF",
+    "decision": "denied",
+    "at": "2026-01-01T00:00:00Z",
+    "notes": "Too big. Queue two items instead: CSV export of the board, then PDF export.",
+    "notes_read": "{now}"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "id": "001-test",
+  "project": "sample",
+  "stage": "build",
+  "round": 0,
+  "updated": "{now}",
+  "started": "2026-11-01T00:00:00Z",
+  "claim": {
+    "device": "parity",
+    "session": "sender",
+    "since": "2026-11-01T00:00:00Z",
+    "seen": "{now}"
+  },
+  "refs": [
+    {
+      "id": "411-sample-lead",
+      "kind": "batched-into"
+    },
+    {
+      "id": "400-sample-old",
+      "kind": "follow-up-of"
+    }
+  ]
+}

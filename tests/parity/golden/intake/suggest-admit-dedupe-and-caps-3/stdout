@@ -1,0 +1,9 @@
+{
+  "admitted": [],
+  "skipped": [
+    {
+      "title": "Item 5",
+      "reason": "open cap"
+    }
+  ]
+}

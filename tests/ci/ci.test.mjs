@@ -67,7 +67,6 @@ test("ci aggregates every job and skips only cancelled runs", () => {
   assert.deepEqual(workflow.jobs.ci.needs, [
     "plan",
     "targets",
-    "python",
     "browser",
     "paseo-plugin",
     "rust-build",
@@ -82,7 +81,7 @@ test("the aggregate names each job in RESULTS", () => {
   const step = workflow.jobs.ci.steps.find((entry) => entry.name === "All CI jobs passed");
   assert.equal(
     step.env.RESULTS,
-    "plan=${{ needs.plan.result }} targets=${{ needs.targets.result }} python=${{ needs.python.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }} rust-build=${{ needs.rust-build.result }} rust-test=${{ needs.rust-test.result }} rust-check=${{ needs.rust-check.result }} parity=${{ needs.parity.result }}",
+    "plan=${{ needs.plan.result }} targets=${{ needs.targets.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }} rust-build=${{ needs.rust-build.result }} rust-test=${{ needs.rust-test.result }} rust-check=${{ needs.rust-check.result }} parity=${{ needs.parity.result }}",
   );
 });
 
@@ -101,9 +100,9 @@ const runAggregate = (job, name, env) => {
 
 test("the aggregate step fails on any non-success result", () => {
   const run = (RESULTS, env = {}) => runAggregate("ci", "All CI jobs passed", { RESULTS, ...env });
-  assert.equal(run("plan=success targets=success python=success browser=success").status, 0);
+  assert.equal(run("plan=success targets=success browser=success").status, 0);
   for (const result of ["failure", "cancelled", "skipped"]) {
-    const outcome = run(`targets=success python=success browser=${result}`);
+    const outcome = run(`targets=success browser=${result}`);
     assert.equal(outcome.status, 1, result);
     assert.ok(outcome.stdout.includes(`browser: ${result}`), result);
     assert.ok(outcome.stderr.includes(`CI job browser finished as ${result}`), result);
@@ -139,7 +138,6 @@ test("the plan keys the whole merge tree and the rust inputs, and lookups never 
     "skills",
     "tools",
     "worker/admission.js",
-    "tests/cli/support.py",
     "tests/fixtures",
     ".github/workflows/ci.yml",
   ]) {
@@ -156,7 +154,7 @@ test("the plan keys the whole merge tree and the rust inputs, and lookups never 
   for (const job of ["rust-build", "rust-test", "rust-check", "parity"]) {
     assert.ok(saves[0].if.includes(`needs.${job}.result == 'success'`), job);
   }
-  for (const job of ["targets", "python", "browser", "paseo-plugin"]) {
+  for (const job of ["targets", "browser", "paseo-plugin"]) {
     assert.equal(workflow.jobs[job].if, "needs.plan.outputs.all != 'true'", job);
   }
 });
@@ -167,21 +165,8 @@ test("targets restores the browser cache read-only", () => {
   assert.ok(uses("browser").includes("actions/cache"));
 });
 
-test("the python job keeps .nx per pull request and falls back to main", () => {
-  const steps = workflow.jobs.python.steps;
-  const cache = steps.find((step) => action(step) === "actions/cache");
-  const prefix = "nx-${{ runner.os }}-pr${{ github.event.pull_request.number }}-";
-  const suffix = "-${{ github.run_id }}-${{ github.run_attempt }}";
-  assert.equal(cache.with.path, ".nx");
-  assert.ok(cache.with.key.startsWith(prefix));
-  assert.ok(cache.with.key.endsWith(suffix));
-  assert.deepEqual(cache.with["restore-keys"].trim().split("\n"), [
-    `${cache.with.key.slice(0, -suffix.length)}-`,
-    "nx-${{ runner.os }}-main-${{ hashFiles('pnpm-lock.yaml') }}-",
-  ]);
-  const index = (name) => steps.findIndex((step) => step.name === name);
-  assert.ok(steps.indexOf(cache) < index("Adopt the restored Nx database"));
-  assert.ok(index("Adopt the restored Nx database") < index("Python suites"));
+test("no job runs the Python CLI suites and the workflow reads no secret", () => {
+  assert.equal(workflow.jobs.python, undefined);
   const raw = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
   assert.doesNotMatch(raw, /secrets\./);
 });
@@ -214,7 +199,6 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
   assert.deepEqual(runs(build), [
     "rustup toolchain install",
     "cargo build --profile host --locked",
-    "python3 tests/parity/startup.py --bin rust/target/host/factory",
     [
       'cargo_home="${CARGO_HOME:-$HOME/.cargo}"',
       'rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"',

@@ -1,0 +1,1 @@
+factory.py: 009-escalated cannot set automerge true: decision.md starts with 'ESCALATE: risky', not APPROVE. Nothing was written.

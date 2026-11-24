@@ -1,0 +1,1 @@
+factory.py: {home}/suggest-options-13.json: suggestions[0].options[0]: needs keys ['cons', 'detail', 'key', 'label', 'pros']; nothing admitted

@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { factoryInbox, type InboxEvent } from "../shared/inbox";
-import { isStartFailure, runtimeCommands, type SkillFiles } from "../shared/runtime";
+import { runtimeCommand, type SkillFiles } from "../shared/runtime";
 
 const SKILL_PATHS = [".claude/skills/factory", ".agents/skills/factory"];
 
@@ -28,23 +28,26 @@ export function findSkill(home = homedir()): string | null {
 }
 
 export async function readInbox(skill: string): Promise<InboxEvent | null> {
-  for (const [command, ...args] of runtimeCommands(skill, process.platform, files)) {
-    let stdout: string;
-    try {
-      ({ stdout } = await execCommand(command, [...args, "inbox"], {
-        timeout: 30_000,
-        maxBuffer: 1_048_576,
-      }));
-    } catch (error) {
-      if (isStartFailure(error)) continue;
-      return null;
-    }
-    try {
-      const parsed = factoryInbox.event.safeParse(JSON.parse(stdout));
-      return parsed.success ? parsed.data : null;
-    } catch {
-      return null;
-    }
+  let command: string, args: string[];
+  try {
+    [command, ...args] = runtimeCommand(skill, process.platform, files);
+  } catch (error) {
+    console.error((error as Error).message);
+    return null;
   }
-  return null;
+  let stdout: string;
+  try {
+    ({ stdout } = await execCommand(command, [...args, "inbox"], {
+      timeout: 30_000,
+      maxBuffer: 1_048_576,
+    }));
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = factoryInbox.event.safeParse(JSON.parse(stdout));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }

@@ -1,0 +1,179 @@
+{
+  "cases": 1,
+  "defects": 1,
+  "weights": {
+    "high": 3,
+    "medium": 2,
+    "low": 1
+  },
+  "arms": [
+    {
+      "arm": "match-0",
+      "weighted_recall": 1.0,
+      "caught": 1,
+      "severity": {
+        "high": {
+          "caught": 1,
+          "of": 1
+        },
+        "medium": {
+          "caught": 0,
+          "of": 0
+        },
+        "low": {
+          "caught": 0,
+          "of": 0
+        }
+      },
+      "missed": [],
+      "tokens": 0,
+      "seconds": 0,
+      "runs": 0,
+      "missing": [],
+      "no_run": [
+        "1018-add-y"
+      ]
+    },
+    {
+      "arm": "match-1",
+      "weighted_recall": 1.0,
+      "caught": 1,
+      "severity": {
+        "high": {
+          "caught": 1,
+          "of": 1
+        },
+        "medium": {
+          "caught": 0,
+          "of": 0
+        },
+        "low": {
+          "caught": 0,
+          "of": 0
+        }
+      },
+      "missed": [],
+      "tokens": 0,
+      "seconds": 0,
+      "runs": 0,
+      "missing": [],
+      "no_run": [
+        "1018-add-y"
+      ]
+    },
+    {
+      "arm": "match-2",
+      "weighted_recall": 0.0,
+      "caught": 0,
+      "severity": {
+        "high": {
+          "caught": 0,
+          "of": 1
+        },
+        "medium": {
+          "caught": 0,
+          "of": 0
+        },
+        "low": {
+          "caught": 0,
+          "of": 0
+        }
+      },
+      "missed": [
+        "1018-add-y worker/export.js:40-52"
+      ],
+      "tokens": 0,
+      "seconds": 0,
+      "runs": 0,
+      "missing": [],
+      "no_run": [
+        "1018-add-y"
+      ]
+    },
+    {
+      "arm": "match-3",
+      "weighted_recall": 0.0,
+      "caught": 0,
+      "severity": {
+        "high": {
+          "caught": 0,
+          "of": 1
+        },
+        "medium": {
+          "caught": 0,
+          "of": 0
+        },
+        "low": {
+          "caught": 0,
+          "of": 0
+        }
+      },
+      "missed": [
+        "1018-add-y worker/export.js:40-52"
+      ],
+      "tokens": 0,
+      "seconds": 0,
+      "runs": 0,
+      "missing": [],
+      "no_run": [
+        "1018-add-y"
+      ]
+    },
+    {
+      "arm": "match-4",
+      "weighted_recall": 1.0,
+      "caught": 1,
+      "severity": {
+        "high": {
+          "caught": 1,
+          "of": 1
+        },
+        "medium": {
+          "caught": 0,
+          "of": 0
+        },
+        "low": {
+          "caught": 0,
+          "of": 0
+        }
+      },
+      "missed": [],
+      "tokens": 0,
+      "seconds": 0,
+      "runs": 0,
+      "missing": [],
+      "no_run": [
+        "1018-add-y"
+      ]
+    },
+    {
+      "arm": "match-5",
+      "weighted_recall": 0.0,
+      "caught": 0,
+      "severity": {
+        "high": {
+          "caught": 0,
+          "of": 1
+        },
+        "medium": {
+          "caught": 0,
+          "of": 0
+        },
+        "low": {
+          "caught": 0,
+          "of": 0
+        }
+      },
+      "missed": [
+        "1018-add-y worker/export.js:40-52"
+      ],
+      "tokens": 0,
+      "seconds": 0,
+      "runs": 0,
+      "missing": [],
+      "no_run": [
+        "1018-add-y"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+factory.py: --wait takes one value from 1 to 600 seconds. usage: pr-state <project-slug>/<job-id> [--wait S]

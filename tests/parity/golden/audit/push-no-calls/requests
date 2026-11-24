@@ -1,0 +1,1 @@
+{"body": "", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "content-type": "application/x-ndjson", "user-agent": "factory"}, "method": "PUT", "path": "/api/audit/1099-empty-job/parity.jsonl"}

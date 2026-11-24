@@ -1,0 +1,2 @@
+factory home: {home}
+Set FACTORY_ACCESS_CLIENT_ID and FACTORY_ACCESS_CLIENT_SECRET in {home}/.env, then run /factory init again.
