@@ -2917,12 +2917,35 @@ mod tests {
         );
     }
 
+    /// Asserts check runs in linear time on prefix + count units + suffix, by comparing it with an
+    /// eighth of the units rather than with a wall-clock bound: linear time grows 8 times, quadratic
+    /// 64 times. Each size keeps its fastest of three interleaved runs, so machine load slows both
+    /// sizes alike and a stall in one run does not count.
+    fn assert_linear(prefix: &str, unit: &str, suffix: &str, count: usize, check: impl Fn(&str)) {
+        let small = format!("{prefix}{}{suffix}", unit.repeat(count / 8));
+        let large = format!("{prefix}{}{suffix}", unit.repeat(count));
+        let time = |text: &str| {
+            let start = std::time::Instant::now();
+            check(text);
+            start.elapsed()
+        };
+        let (mut fast_small, mut fast_large) = (std::time::Duration::MAX, std::time::Duration::MAX);
+        for _ in 0..3 {
+            fast_small = fast_small.min(time(&small));
+            fast_large = fast_large.min(time(&large));
+        }
+        assert!(
+            fast_large < fast_small * 32,
+            "{prefix}{unit}: {fast_small:?} for {} units, {fast_large:?} for {count}",
+            count / 8
+        );
+    }
+
     #[test]
     fn runs_output_is_linear() {
-        let start = std::time::Instant::now();
-        let text = format!(" -{}!", "c".repeat(100_000));
-        assert!(AUDIT_RUNS_OUTPUT.search(&text).is_none());
-        assert!(start.elapsed().as_secs_f64() < 1.0);
+        assert_linear(" -", "c", "!", 100_000, |text| {
+            assert!(AUDIT_RUNS_OUTPUT.search(text).is_none())
+        });
     }
 
     #[test]
@@ -3035,31 +3058,31 @@ mod tests {
 
     #[test]
     fn pr_merge_is_linear() {
-        for text in [
-            format!(";{}", "a=".repeat(50_000)),
-            format!("gh api {}", "x".repeat(100_000)),
-            "(a=".repeat(33_000),
-            "(gh api ".repeat(12_500),
-            "{gh api {a}".repeat(9_000),
-            "`a=".repeat(33_000),
-            "\n".repeat(100_000),
-            "\nenv".repeat(25_000),
-            "\na=".repeat(33_000),
-            format!("({}", "a/".repeat(50_000)),
-            "(a/".repeat(33_000),
-            "($a ".repeat(25_000),
-            "sudo -E ".repeat(25_000),
-            "xargs -n1 ".repeat(20_000),
-            ";a=\"$(".repeat(25_000),
-            "a=\"$(x)\" ".repeat(20_000),
-            "gh -R ".repeat(25_000),
-            "gh api pulls/$".repeat(15_000),
-            "($a/".repeat(30_000),
+        for (prefix, unit, count) in [
+            (";", "a=", 50_000),
+            ("gh api ", "x", 100_000),
+            ("", "(a=", 33_000),
+            ("", "(gh api ", 12_500),
+            ("", "{gh api {a}", 9_000),
+            ("", "`a=", 33_000),
+            ("", "\n", 100_000),
+            ("", "\nenv", 25_000),
+            ("", "\na=", 33_000),
+            ("(", "a/", 50_000),
+            ("", "(a/", 33_000),
+            ("", "($a ", 25_000),
+            ("", "sudo -E ", 25_000),
+            ("", "xargs -n1 ", 20_000),
+            ("", ";a=\"$(", 25_000),
+            ("", "a=\"$(x)\" ", 20_000),
+            ("", "gh -R ", 25_000),
+            ("", "gh api pulls/$", 15_000),
+            ("", "($a/", 30_000),
         ] {
-            let start = std::time::Instant::now();
-            let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text));
-            assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
-            assert!(start.elapsed().as_secs_f64() < 1.0);
+            assert_linear(prefix, unit, "", count, |text| {
+                let stripped = audit_strip_quotes(&audit_strip_data_heredocs(text));
+                assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
+            });
         }
     }
 
