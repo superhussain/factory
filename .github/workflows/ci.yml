@@ -74,7 +74,7 @@ jobs:
           key: browser-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             browser-${{ runner.os }}-
-      # assets runs a browser test, so this job provisions the browser too; only the browser shards save its cache.
+      # assets runs a browser test, so this job provisions the browser too; only warm.yml saves its cache.
       - run: node tests/browser/provision.mjs
       - run: pnpm run format:check
       # Workflow-only changes select no Nx target; the workflow contracts always run.
@@ -114,9 +114,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
-      FACTORY_BROWSER_SHARD: ${{ matrix.shard }}/4
+      FACTORY_BROWSER_SHARD: ${{ matrix.shard }}/8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -131,8 +131,9 @@ jobs:
           else
             echo "apps_changed=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Cache browser provision
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # warm.yml saves the provision from main, so a PR never adds its own copy to the cache budget.
+      - name: Restore browser provision
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .context/browser
           key: browser-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}

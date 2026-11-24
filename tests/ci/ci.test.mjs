@@ -1,4 +1,4 @@
-// Contract guard for the pull-request workflow: parallel jobs, four browser
+// Contract guard for the pull-request workflow: parallel jobs, eight browser
 // shards, and one `ci` aggregate that fails unless every job succeeded.
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -15,8 +15,8 @@ const fixture = JSON.parse(
   readFileSync(new URL("../fixtures/browser-cases.json", import.meta.url), "utf8"),
 );
 
-test("the four shards are disjoint, non-empty and cover every case", () => {
-  const shards = [1, 2, 3, 4].map((n) => selectShard(fixture, `${n}/4`));
+test("the eight shards are disjoint, non-empty and cover every case", () => {
+  const shards = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => selectShard(fixture, `${n}/8`));
   for (const shard of shards) {
     assert.ok(shard.suites.length >= 1);
     assert.ok(shard.nodeTests.length >= 1);
@@ -38,11 +38,11 @@ test("a bad shard value throws naming the variable", () => {
   }
 });
 
-test("the browser job is a four-shard matrix that keeps running on failure", () => {
+test("the browser job is an eight-shard matrix that keeps running on failure", () => {
   const { browser } = workflow.jobs;
-  assert.deepEqual(browser.strategy.matrix.shard, [1, 2, 3, 4]);
+  assert.deepEqual(browser.strategy.matrix.shard, [1, 2, 3, 4, 5, 6, 7, 8]);
   assert.equal(browser.strategy["fail-fast"], false);
-  assert.equal(browser.env.FACTORY_BROWSER_SHARD, "${{ matrix.shard }}/4");
+  assert.equal(browser.env.FACTORY_BROWSER_SHARD, "${{ matrix.shard }}/8");
 });
 
 test("the targets job provisions the browser before running Nx", () => {
@@ -159,10 +159,12 @@ test("the plan keys the whole merge tree and the rust inputs, and lookups never 
   }
 });
 
-test("targets restores the browser cache read-only", () => {
-  const uses = (job) => workflow.jobs[job].steps.map(action);
-  assert.ok(uses("targets").includes("actions/cache/restore"));
-  assert.ok(uses("browser").includes("actions/cache"));
+test("targets and browser restore the browser cache read-only", () => {
+  for (const job of ["targets", "browser"]) {
+    const uses = workflow.jobs[job].steps.map(action);
+    assert.ok(uses.includes("actions/cache/restore"), job);
+    assert.ok(!uses.includes("actions/cache") && !uses.includes("actions/cache/save"), job);
+  }
 });
 
 test("rust-build caches the binary under the rust key, and targets restores it or builds it on a miss", () => {
