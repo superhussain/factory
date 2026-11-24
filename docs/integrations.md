@@ -140,20 +140,6 @@ bucket as `<project>/<label>/<12 hex>-<name>` (project `other` when `--project` 
 and prints one `<file>` and URL on the configured public origin per line. Any failure exits 1,
 and build-tab evidence stays the fallback. The [device token](cloudflare.md#device-token) covers these uploads.
 
-`tools/copy-pr-screenshots.py` copies older screenshots from `<source>/factory-<job-id>/` into
-their project folders, using the same four `<home>/.env` keys.
-`plan --home <factory home> --source-project <source> --out <plan.tsv>` lists the old keys and
-writes a `source`, `destination`, `reason` TSV. A key goes to `<project>/factory-<job-id>/...`
-when exactly one `<home>/jobs/<project>/<job-id>/` folder holds a file. `<source>` jobs stay in
-place, and no match or several matches go to `other`. Review the plan, then run
-`apply --home <factory home> --source-project <source> --plan <plan.tsv>`. It only copies. It
-never overwrites an existing key and never deletes, so old links keep working. Each copy is
-checked byte for byte against its new URL on the configured public origin, and any `exists-different`, `mismatch` or `failed` row
-exits 1. Each request waits up to 300 seconds. A `failed` row gets a fourth column naming the
-step and cause, such as `source read: timed out after 300 s`. `plan` skips, and `apply`
-rejects, any key with a `.` or `..` segment. Run it from the main checkout, never a job
-worktree, so the token only runs merged code.
-
 ## Paseo plugin
 
 The `factory` Paseo plugin in `paseo-plugin/` adds a Factory row to the Paseo sidebar. The row opens your dashboard on a Paseo screen, and a Session app link in it opens the agent in the same Paseo window.
