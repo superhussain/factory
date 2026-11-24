@@ -1245,9 +1245,11 @@ pub(crate) fn daemon_restart_argvs(
             &format!("{}.service", DAEMON.task),
         ])],
         "schtasks" => {
+            // Read the pid first: a failed read must not leave the marker behind.
+            let kill = locked_kill(home)?;
             write_stop_marker(home).map_err(|e| message(&e))?;
             let mut argvs = vec![argv(&["schtasks", "/End", "/TN", DAEMON.task])];
-            argvs.extend(locked_kill(home)?);
+            argvs.extend(kill);
             argvs.push(argv(&["schtasks", "/Run", "/TN", DAEMON.task]));
             argvs
         }

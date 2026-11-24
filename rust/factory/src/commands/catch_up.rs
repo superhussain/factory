@@ -2334,6 +2334,29 @@ mod tests {
         );
     }
 
+    /// A pid file caught empty between the new daemon's lock and its write fails the restart
+    /// before the stop marker is written or /End runs.
+    #[test]
+    fn unreadable_pid_fails_the_windows_restart_before_the_marker() {
+        let t = T::new("restart-schtasks-empty-pid");
+        t.daemon(Some("schtasks"), false);
+        let marker = crate::commands::daemon::stop_marker(&t.home);
+        daemon_runs(&t.home);
+        fs::write(marker.parent().unwrap().join("daemon.pid"), "").unwrap();
+        let calls = t.service_calls(0, "", false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1, "{lines:?}");
+        assert!(
+            lines.contains(
+                &"daemon: restart failed: a daemon runs, but its pid file holds no valid pid"
+                    .to_string()
+            ),
+            "{lines:?}"
+        );
+        assert!(calls.borrow().is_empty(), "{:?}", calls.borrow());
+        assert!(!marker.exists(), "the stop marker was left behind");
+    }
+
     /// On cron, catch-up ends the running daemon, waits for its lock to go, starts the new binary
     /// itself and reports its pid; with no daemon running it leaves the start to the crontab.
     #[test]
