@@ -19,7 +19,7 @@ use crate::shared::board::{dump_board, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{JOB_ID, NEW_JOB_ID, PASEO_ID, ROUTE_MODEL, SLUG};
 use crate::shared::exit::{exit, fail, Res};
-use crate::shared::fs::{read_text, resolve, temp_root};
+use crate::shared::fs::{create_dir_private, read_text, resolve, temp_root};
 use crate::shared::home::{device_name, factory_home};
 use crate::shared::http::{access_message, api, cas};
 use crate::shared::paseo::paseo_server;
@@ -2297,7 +2297,7 @@ fn bench_replay_case(
         ));
     }
     let tmp = temp_root()?.join(format!("factory-bench-{}-{}", row.id, &uuid4()[..8]));
-    fs::create_dir(&tmp).map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
+    create_dir_private(&tmp).map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
     let tmp = resolve(&tmp).map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
     let (dir, wt) = (checkout.to_string_lossy().into_owned(), tmp.join("wt"));
     let wt_text = wt.to_string_lossy().into_owned();
@@ -3336,6 +3336,7 @@ mod bench_replay_fixture {
 cat > "$FAKE_LOG.stdin"
 printf '%s\n' "$@" > "$FAKE_LOG.argv"
 pwd > "$FAKE_LOG.cwd"
+ls -ld .. > "$FAKE_LOG.parent"
 printf '%s' "$CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS" > "$FAKE_LOG.ceiling"
 sleep "${FAKE_SLEEP:-0}"
 [ -n "$FAKE_DIRTY" ] && : > dirty.txt
@@ -3656,6 +3657,14 @@ mod bench_replay_test {
             [("example/alpha".to_string(), vec![18], "host-a".to_string())]
         );
         assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_temp_folder_is_private() {
+        let b = Bench::new("private-temp");
+        assert_eq!(b.replay(&["--role", "review-code"]).0, 0);
+        let parent = fs::read_to_string(format!("{}.parent", b.log.display())).unwrap();
+        assert!(parent.starts_with("drwx------"), "{parent}");
     }
 
     #[test]
