@@ -13,7 +13,7 @@
 import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
@@ -56,10 +56,32 @@ async function benchSteps(env, runs) {
   await time("R2 put", () => env.BUCKET.put("bench-scratch.json", bytes));
   return out;
 }
-// The room with three bench calls: its SQLite row counters, an R2 copy now with the put's wall
-// time apart from the room's own, and the board text built anew. performance.now() in workerd
-// moves in whole milliseconds, so the text build runs 20 times.
+// The room with four bench calls: its SQLite row counters, an R2 copy now with the put's wall
+// time apart from the room's own, the board text built anew, and an eviction. performance.now()
+// in workerd moves in whole milliseconds, so the text build runs 20 times.
 export class BenchRoom extends BenchBase {
+  // Drops the store and its memo, as production's hibernation does between reads a minute apart.
+  boardEvict() {
+    this.store = undefined;
+    return true;
+  }
+  // The room's own mean milliseconds for a warm read() (the boardRead RPC), and for its R2 head
+  // alone, which every read starts with.
+  async boardReadTimed() {
+    const board = this.board();
+    await board.read();
+    const time = async (fn) => {
+      const t = performance.now();
+      for (let i = 0; i < 20; i++) await fn();
+      return (performance.now() - t) / 20;
+    };
+    return { read: await time(() => board.read()), head: await time(() => board.env.BUCKET.head("board.json")) };
+  }
+  // Waits for a read's R2 copy, which runs after the read answers.
+  async boardSettle() {
+    await this.board().inflight;
+    return true;
+  }
   boardWork() {
     return { ...this.board().work };
   }
@@ -86,19 +108,20 @@ export class BenchRoom extends BenchBase {
     board.env = { ...board.env, BUCKET: bucket };
     return { room: total - putMs, put: putMs };
   }
-  boardTextTimed() {
+  // The bytes a GET of a new version sends: built from the pages since job 2280, or before it
+  // the board text joined from them and encoded.
+  async boardTextTimed() {
     const board = this.board();
     const state = board.state();
-    let text = "";
     const t = performance.now();
     for (let i = 0; i < 20; i++) {
-      board.memo = { etag: null, text: "" };
-      text = board.text(state);
+      if (board.build) await board.build(state).arrayBuffer();
+      else {
+        board.memo = { etag: null, text: "" };
+        new TextEncoder().encode(board.text(state));
+      }
     }
-    const build = (performance.now() - t) / 20;
-    const e = performance.now();
-    for (let i = 0; i < 20; i++) new TextEncoder().encode(text);
-    return { build, encode: (performance.now() - e) / 20 };
+    return { build: (performance.now() - t) / 20 };
   }
 }
 const room = (env) => env.BoardEvents.get(env.BoardEvents.idFromName("main"));
@@ -110,6 +133,12 @@ export default {
     if (url.pathname === "/bench/work") return Response.json(await room(env).boardWork());
     if (url.pathname === "/bench/flush") return Response.json(await room(env).boardFlushTimed());
     if (url.pathname === "/bench/text") return Response.json(await room(env).boardTextTimed());
+    if (url.pathname === "/bench/readtimed")
+      return Response.json(await room(env).boardReadTimed());
+    if (url.pathname === "/bench/read")
+      return Response.json((await room(env).boardRead())?.text.length ?? 0);
+    if (url.pathname === "/bench/settle") return Response.json(await room(env).boardSettle());
+    if (url.pathname === "/bench/evict") return Response.json(await room(env).boardEvict());
     return serveFactory(request, { ...env, config }, principal, ctx);
   },
 };
@@ -140,13 +169,20 @@ export async function bundle(dir) {
   return result.outputFiles[0].text;
 }
 
-// CPU seconds the workerd processes this Node process started have used so far.
+// CPU seconds the workerd processes this Node process started have used so far. Under WSL's
+// glibc workaround workerd runs as ld-linux. ps counts whole seconds, so Linux reads /proc's
+// clock ticks (1/100 s) instead.
 function workerdCpu() {
-  const lines = execFileSync("ps", ["-A", "-o", "ppid=,time=,comm="], { encoding: "utf8" });
+  const lines = execFileSync("ps", ["-A", "-o", "pid=,ppid=,time=,comm="], { encoding: "utf8" });
   let total = 0;
   for (const line of lines.split("\n")) {
-    const [ppid, time, comm] = line.trim().split(/\s+/);
-    if (Number(ppid) !== process.pid || !comm?.endsWith("workerd")) continue;
+    const [pid, ppid, time, comm] = line.trim().split(/\s+/);
+    if (Number(ppid) !== process.pid || !/workerd$|^ld-linux/.test(comm ?? "")) continue;
+    if (existsSync(`/proc/${pid}/stat`)) {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1].split(" ");
+      total += (Number(stat[11]) + Number(stat[12])) / 100;
+      continue;
+    }
     const parts = time.split(":").map(Number);
     total += parts.reduce((acc, n) => acc * 60 + n, 0);
   }
@@ -283,11 +319,28 @@ export async function roomWork(rows, script) {
       }),
     );
     claimed.claim = { device: "mac-a" };
-    await measure("GET /board.json, new version", get);
+    // The first GET of a new version builds it and copies those bytes to R2 after it answers.
+    const getCopied = async () => {
+      await get();
+      await json("/bench/settle");
+    };
+    await measure("GET /board.json, new version, with its copy", getCopied);
     await measure("GET /board.json, same version", get);
+    // Production evicts the hibernating room between GETs a minute apart, memo and all.
+    await touch(1);
+    await json("/bench/evict");
+    await measure("GET /board.json after a PATCH, room evicted, with its copy", getCopied);
+    await json("/bench/evict");
+    await measure("GET /board.json after the copy, room evicted", get);
+    // The alarm copies a version no read has built, so it builds it.
+    await touch(1);
+    await json("/bench/evict");
     let copy;
-    await measure("R2 copy (alarm)", async () => (copy = await json("/bench/flush")));
+    await measure("R2 copy (alarm), building the board", async () => {
+      copy = await json("/bench/flush");
+    });
     const text = await json("/bench/text");
+    const warm = await json("/bench/readtimed");
     const etag = async () => (await mf.dispatchFetch(ORIGIN + "/board.json")).headers.get("ETag");
     const doc = JSON.parse(await get());
     await measure("full PUT, one row changed", async () =>
@@ -319,8 +372,9 @@ export async function roomWork(rows, script) {
       ms: {
         "room: R2 copy without the put": copy.room,
         "room: R2 copy, the put's wall time": copy.put,
-        "room: build board text (GET of a new version)": text.build,
-        "room: encode board text (GET body or R2 put)": text.encode,
+        "room: board bytes for a new version (GET body or R2 put)": text.build,
+        "room: warm boardRead, wall": warm.read,
+        "room: its R2 head alone, wall": warm.head,
       },
     };
   } finally {
@@ -370,12 +424,36 @@ export async function benchMiniflare(rows, runs, script) {
     };
     const cached = await perRequest(runs, get);
     out["workerd CPU: GET /board.json, same version"] = cached.cpu;
-    // A GET after each PATCH reads a new version, which the room builds once.
+    // The boardRead RPC behind readSlim and readBoardJson, on a version the room holds warm.
+    const warmRead = async () => (await mf.dispatchFetch(`${origin}/bench/read`)).arrayBuffer();
+    out["workerd CPU: boardRead RPC, same version"] = (await perRequest(runs, warmRead)).cpu;
+    // A GET after each PATCH reads a new version, which the room builds once. Since job 2280
+    // that GET also copies the version to R2 after it answers; settle waits for the copy.
+    const settle = async () => (await mf.dispatchFetch(`${origin}/bench/settle`)).arrayBuffer();
     const both = await perRequest(runs, async () => {
       await patchRows(1)();
       await get();
+      await settle();
     });
-    out["workerd CPU: GET /board.json after a PATCH"] = both.cpu - out["workerd CPU: PATCH 1 row"];
+    out["workerd CPU: GET /board.json after a PATCH, with its copy"] =
+      both.cpu - out["workerd CPU: PATCH 1 row"];
+    // Production evicts the hibernating room between GETs a minute apart, so its memo is gone.
+    const evict = async () => (await mf.dispatchFetch(`${origin}/bench/evict`)).arrayBuffer();
+    const evicted = async () => {
+      await evict();
+      await get();
+    };
+    const fresh = await perRequest(runs, async () => {
+      await patchRows(1)();
+      await evicted();
+      await settle();
+    });
+    out["workerd CPU: GET /board.json after a PATCH and eviction, with its copy"] =
+      fresh.cpu - out["workerd CPU: PATCH 1 row"];
+    await (await mf.dispatchFetch(`${origin}/bench/flush`)).arrayBuffer();
+    out["workerd CPU: GET /board.json after eviction, rows copied"] = (
+      await perRequest(runs, evicted)
+    ).cpu;
     return out;
   } finally {
     await mf.dispose();

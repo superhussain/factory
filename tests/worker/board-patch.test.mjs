@@ -62,7 +62,7 @@ function setup(board = { updated: "2026-11-19T11:00:00Z", jobs: [BUILD, SPEC] })
     );
   // Before its first request the room has not read R2, and seeds with R2's version.
   const etag = () => room?.etag() ?? bucket.objects.get("board.json").httpEtag;
-  const stored = () =>
+  const stored = async () =>
     room ? room.stored() : JSON.parse(bucket.objects.get("board.json").bytes.toString());
   return { bucket, notified, waited, patch, etag, stored };
 }
@@ -73,7 +73,10 @@ each("commits a new row", async () => {
   assert.equal(response.status, 200);
   assert.equal(await response.text(), "ok");
   assert.equal(response.headers.get("ETag"), s.etag());
-  assert.deepEqual(s.stored(), { updated: "2026-11-19T12:00:00Z", jobs: [BUILD, SPEC, IDEA] });
+  assert.deepEqual(await s.stored(), {
+    updated: "2026-11-19T12:00:00Z",
+    jobs: [BUILD, SPEC, IDEA],
+  });
   assert.deepEqual(s.notified, ["https://board-events.invalid/notify?key=board.json"]);
   assert.equal(s.waited.length, 0);
 
@@ -83,14 +86,17 @@ each("commits a new row", async () => {
     rows: [{ id: BUILD.id, expect: BUILD, row: asked }],
   });
   assert.equal(push.status, 200);
-  assert.deepEqual(s.stored(), { updated: "2026-11-19T12:00:00Z", jobs: [asked, SPEC, IDEA] });
+  assert.deepEqual(await s.stored(), {
+    updated: "2026-11-19T12:00:00Z",
+    jobs: [asked, SPEC, IDEA],
+  });
   assert.equal(s.waited.length, 1, "a row that starts waiting on you sends a push");
 
   const gone = await s.patch({
     rows: [{ id: SPEC.id, expect: { stage: "spec", ...SPEC }, row: null }],
   });
   assert.equal(gone.status, 200, "expect matches by canonical JSON, whatever the key order");
-  assert.deepEqual(s.stored().jobs, [asked, IDEA]);
+  assert.deepEqual((await s.stored()).jobs, [asked, IDEA]);
 });
 
 each("an unchanged read row is a no-op that still conflicts when stale", async () => {
@@ -99,7 +105,7 @@ each("an unchanged read row is a no-op that still conflicts when stale", async (
   const done = { ...BUILD, stage: "review" };
   const ok = await s.patch({ rows: [{ id: BUILD.id, expect: BUILD, row: done }, read] });
   assert.equal(ok.status, 200);
-  assert.deepEqual(s.stored().jobs, [done, SPEC]);
+  assert.deepEqual((await s.stored()).jobs, [done, SPEC]);
 
   const moved = { ...SPEC, stage: "build" };
   await s.patch({ rows: [{ id: SPEC.id, expect: SPEC, row: moved }] });
@@ -142,7 +148,7 @@ each("reads", async () => {
   const done = { ...BUILD, stage: "review" };
   const ok = await s.patch({ rows: [{ id: BUILD.id, expect: BUILD, row: done }], reads });
   assert.equal(ok.status, 200, "150 reads commit, past the 100-entry rows cap");
-  assert.deepEqual(s.stored().jobs, [done, ...held]);
+  assert.deepEqual((await s.stored()).jobs, [done, ...held]);
 
   const before = s.etag();
   const stale = [...reads];
@@ -296,7 +302,7 @@ test("retries (r2)", async () => {
   };
   const response = await s.patch({ updated: "2026-11-19T12:00:00Z", rows: [add()] });
   assert.equal(response.status, 200);
-  assert.deepEqual(s.stored().jobs, [{ ...BUILD, note: "host" }, SPEC, IDEA]);
+  assert.deepEqual((await s.stored()).jobs, [{ ...BUILD, note: "host" }, SPEC, IDEA]);
 
   const busy = setup();
   let puts = 0;
@@ -361,7 +367,7 @@ each("shape", async () => {
   empty.bucket.objects.delete("board.json");
   const first = await empty.patch({ updated: "2026-11-19T12:00:00Z", rows: [add()] });
   assert.equal(first.status, 200, "a missing board is created");
-  assert.deepEqual(empty.stored(), { updated: "2026-11-19T12:00:00Z", jobs: [IDEA] });
+  assert.deepEqual(await empty.stored(), { updated: "2026-11-19T12:00:00Z", jobs: [IDEA] });
   assert.equal(
     (
       await serveFactory(

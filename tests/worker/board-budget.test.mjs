@@ -11,8 +11,10 @@ const [today, doubled] = [await roomWork(2300, script), await roomWork(4600, scr
 const op = (work, prefix) => Object.entries(work.rows).find(([name]) => name.startsWith(prefix))[1];
 
 // Requests a day at 2026-11-23's live rate (job 2233's tail): 5,900 PATCHes and 8,500 full
-// board GETs, every GET taken as a new version. A claim with reads is one PATCH in ten, the
-// alarm copies at most once per FLUSH_MS (30 s), and the archive pass runs hourly.
+// board GETs. One PATCH in ten is a claim with reads, counted at its own cost within the 5,900.
+// The alarm is set at most once per FLUSH_MS (30 s), and the archive pass runs hourly. Each
+// version is built and copied to R2 at most once, by its first read or else by the alarm, so a
+// day holds at most one copy per PATCH; every other GET streams R2's copy.
 const DAY = {
   patch: 5900,
   claim: 590,
@@ -21,21 +23,20 @@ const DAY = {
   archive: 24,
 };
 
+const costlier = (a, b) => ({
+  read: Math.max(a.read, b.read),
+  written: Math.max(a.written, b.written),
+});
+
 function projection(work, rate) {
   const n = (name) => DAY[name] * rate;
   const parts = [
-    [n("patch"), op(work, "PATCH 1 row")],
+    [n("patch") - n("claim"), op(work, "PATCH 1 row")],
     [n("claim"), op(work, "PATCH claim")],
-    [n("get"), op(work, "GET /board.json, new version")],
-    // The bench's copy ran on text a GET had built; a copy that builds it adds a GET's reads.
-    [
-      Math.min(DAY.copy, n("patch")),
-      {
-        read: op(work, "R2 copy").read + op(work, "GET /board.json, new version").read,
-        written: op(work, "R2 copy").written,
-      },
-    ],
-    // Each copy's setAlarm writes the room's alarm, which no cursor counts: one row written.
+    [n("get"), op(work, "GET /board.json after the copy, room evicted")],
+    // A copy costs the costlier of a first read's build and copy, and the alarm's.
+    [n("patch"), costlier(op(work, "GET /board.json after a PATCH"), op(work, "R2 copy"))],
+    // Each setAlarm writes the room's alarm, which no cursor counts: one row written.
     [Math.min(DAY.copy, n("patch")), { read: 0, written: 1 }],
     [n("archive"), op(work, "full PUT, archive pass")],
     // One seed a day, as on a deploy day.
@@ -64,11 +65,25 @@ test("a row PATCH reads and writes the same SQLite rows as the board doubles", (
 
 test("a whole-board read costs a row per page, and a same-version GET almost none", () => {
   for (const work of [today, doubled]) {
-    assert.ok(op(work, "GET /board.json, new version").read <= 45);
+    // The first GET of a version reads its pages, then copies them to R2.
+    assert.ok(op(work, "GET /board.json, new version").read <= 80);
+    assert.ok(op(work, "GET /board.json, new version").written <= 1);
     assert.ok(op(work, "GET /board.json, same version").read <= 3);
     assert.ok(op(work, "R2 copy").written <= 1);
     assert.ok(op(work, "full PUT, one row").written <= 3);
     assert.ok(op(work, "full PUT, archive pass").written <= 8);
+  }
+});
+
+// Production evicts the room between GETs a minute apart, so no memo carries a read.
+test("a GET after a PATCH in an evicted room reads its pages once; after the copy, none", () => {
+  for (const work of [today, doubled]) {
+    // Its build, then its copy's dirty pages and one state row written.
+    const built = op(work, "GET /board.json after a PATCH, room evicted");
+    assert.ok(built.read <= 80 && built.written <= 1, JSON.stringify(built));
+    // R2's copy is the board again, so its bytes stream through and no page is read.
+    const copied = op(work, "GET /board.json after the copy, room evicted");
+    assert.ok(copied.read <= 3 && copied.written === 0, JSON.stringify(copied));
   }
 });
 
