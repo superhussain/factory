@@ -705,12 +705,12 @@ pub(crate) fn push_job(
         return Err(fail(
             if refused.len() == 1 {
                 format!(
-                    "refused {}: it looks like it holds a secret and was not uploaded. Remove it, then push again",
+                    "refused {}: it looks like it holds a secret and was not uploaded. Remove the secret, then push again",
                     refused[0]
                 )
             } else {
                 format!(
-                    "refused {}: they look like they hold secrets and were not uploaded. Remove them, then push again",
+                    "refused {}: they look like they hold secrets and were not uploaded. Remove the secrets, then push again",
                     refused.join(", ")
                 )
             },
@@ -1452,7 +1452,7 @@ mod tests {
         let e = push_job(&home, "alpha", "042-sample-export", &mut Vec::new()).unwrap_err();
         assert_eq!(
             e.stderr,
-            "factory.py: refused spec.md: it looks like it holds a secret and was not uploaded. Remove it, then push again\n"
+            "factory.py: refused spec.md: it looks like it holds a secret and was not uploaded. Remove the secret, then push again\n"
         );
         assert!(folder.join(".goal-pending").exists());
         let seen = seen.lock().unwrap();
