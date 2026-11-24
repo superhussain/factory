@@ -78,6 +78,17 @@ pub(crate) fn checkout_problem(
     repo: &str,
     branch: Option<&str>,
 ) -> Res<Option<String>> {
+    checkout_problem_within(home, slug, repo, branch, "git", FETCH_TIMEOUT)
+}
+
+fn checkout_problem_within(
+    home: &Path,
+    slug: &str,
+    repo: &str,
+    branch: Option<&str>,
+    fetch_git: &str,
+    fetch_timeout: Duration,
+) -> Res<Option<String>> {
     let project = project_files(home, slug)?.0;
     let base = if project.exists() {
         let meta = frontmatter(&project).map_err(|e| os_fail(&e, &project))?.0;
@@ -92,15 +103,15 @@ pub(crate) fn checkout_problem(
     }
     // git's stderr can carry origin's URL, credentials included, so neither fetch line includes it.
     let refspec = format!("+refs/heads/{base}:refs/remotes/origin/{base}");
-    let argv = ["git", "-C", repo, "fetch", "-q", "origin", &refspec];
+    let argv = [fetch_git, "-C", repo, "fetch", "-q", "origin", &refspec];
     match capture(
         &argv,
         None,
         &[("GIT_TERMINAL_PROMPT", "0")],
-        Some(FETCH_TIMEOUT),
+        Some(fetch_timeout),
     ) {
         Err(e) if e.kind() == io::ErrorKind::TimedOut => {
-            let secs = FETCH_TIMEOUT.as_secs();
+            let secs = fetch_timeout.as_secs();
             return Ok(Some(format!(
                 "unsafe checkout: git fetch origin {base} timed out after {secs} s in {repo}"
             )));
@@ -1456,6 +1467,61 @@ mod tests {
     #[test]
     fn fetch_timeout_is_60s() {
         assert_eq!(FETCH_TIMEOUT, Duration::from_secs(60));
+    }
+
+    /// A git script that records its GIT_TERMINAL_PROMPT in `seen` and sleeps `nap` seconds. It stands in for the
+    /// fetch only, through checkout_problem_within's program argument, so no test touches PATH.
+    #[cfg(unix)]
+    fn problem_with_fake_fetch(
+        name: &str,
+        nap: u32,
+        timeout: Duration,
+    ) -> (Option<String>, String, String) {
+        let t = Lineage::new(name);
+        let (fake, seen) = (t.root.join("fake-git"), t.root.join("seen"));
+        fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\necho \"$GIT_TERMINAL_PROMPT\" > '{}'\nsleep {nap}\n",
+                seen.display()
+            ),
+        )
+        .unwrap();
+        chmod(&fake, 0o755);
+        let got = checkout_problem_within(
+            &t.home,
+            "factory",
+            &text(&t.repo),
+            None,
+            &text(&fake),
+            timeout,
+        )
+        .unwrap();
+        let prompt = fs::read_to_string(&seen).unwrap_or_default();
+        (got, prompt.trim().to_string(), text(&t.repo))
+    }
+
+    /// Ported from tests/cli/test_checkout_lineage.py: the fetch never waits on a credential prompt.
+    #[cfg(unix)]
+    #[test]
+    fn fetch_runs_without_a_terminal_prompt() {
+        let (problem, prompt, _) = problem_with_fake_fetch("wt-fetch-prompt", 0, FETCH_TIMEOUT);
+        assert_eq!(problem, None);
+        assert_eq!(prompt, "0");
+    }
+
+    /// Ported from tests/cli/test_checkout_lineage.py: a hung fetch is reported as an unsafe checkout.
+    #[cfg(unix)]
+    #[test]
+    fn hung_fetch_times_out() {
+        let (problem, _, repo) =
+            problem_with_fake_fetch("wt-fetch-hung", 5, Duration::from_secs(1));
+        assert_eq!(
+            problem,
+            Some(format!(
+                "unsafe checkout: git fetch origin main timed out after 1 s in {repo}"
+            ))
+        );
     }
 
     /// Push one more commit to origin's job branch from the seed.
