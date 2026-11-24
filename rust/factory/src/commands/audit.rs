@@ -40,7 +40,7 @@ const RETRO_DENIALS: &[&str] = &[
     "doesn't want to proceed",
     "Blocked:",
 ];
-static AUDIT_FLAGS: [(&str, Pattern); 9] = [
+static AUDIT_FLAGS: [(&str, Pattern); 8] = [
     (
         "force-push",
         Pattern::new(
@@ -85,12 +85,12 @@ static AUDIT_FLAGS: [(&str, Pattern); 9] = [
             Flags::NONE,
         ),
     ),
-    (
-        "pr-merge",
-        Pattern::new(r"\bgh\s+pr\s+merge\b", Flags::NONE),
-    ),
 ];
 static AUDIT_SECRET_FILE: Pattern = Pattern::new(r#"(?:^|[\s/'\"=])\.env(?![\w.-])"#, Flags::NONE);
+static AUDIT_PR_MERGE: Pattern = Pattern::new(
+    r"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo)[ \t]+|[A-Za-z_]\w*=[^\s;&|(){}`]*[ \t]+)*gh\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/\d+/merge\b)",
+    Flags::NONE,
+);
 static AUDIT_HEREDOC_OPEN: Pattern = Pattern::new(
     r#"(?<!<)<<(-?)\s*(['\"]?)([A-Za-z_][\w.-]*)\2"#,
     Flags::NONE,
@@ -422,7 +422,46 @@ fn audit_strip_data_heredocs(command: &str) -> String {
     out.join("\n")
 }
 
-/// The names of the risky shapes one call matches, matched on the raw target. main drops pr-merge.
+/// command with quoted text blanked, unless a double-quoted span runs $( or a backtick.
+fn audit_strip_quotes(command: &str) -> String {
+    let mut out = String::with_capacity(command.len());
+    let mut chars = command.char_indices();
+    while let Some((start, c)) = chars.next() {
+        match c {
+            '\\' => {
+                out.push(c);
+                out.extend(chars.next().map(|(_, n)| n));
+            }
+            '\'' | '"' => {
+                let mut end = None;
+                while let Some((i, n)) = chars.next() {
+                    if n == c {
+                        end = Some(i);
+                        break;
+                    }
+                    if c == '"' && n == '\\' {
+                        chars.next();
+                    }
+                }
+                let Some(end) = end else {
+                    out.push_str(&command[start..]);
+                    break;
+                };
+                let body = &command[start + 1..end];
+                if c == '"' && (body.contains("$(") || body.contains('`')) {
+                    out.push_str(&command[start..=end]);
+                } else {
+                    out.push(c);
+                    out.push(c);
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// The names of the risky shapes one call matches. pr-merge needs a merge that runs; main drops it.
 fn audit_flags(
     name: &str,
     inp: &Map<String, Value>,
@@ -432,16 +471,22 @@ fn audit_flags(
 ) -> Vec<&'static str> {
     let mut flags: Vec<&'static str> = AUDIT_FLAGS
         .iter()
-        .filter(|(flag, pattern)| {
-            name == "Bash" && !(main && *flag == "pr-merge") && pattern.search(raw).is_some()
-        })
+        .filter(|(_, pattern)| name == "Bash" && pattern.search(raw).is_some())
         .map(|(flag, _)| *flag)
         .collect();
+    let stripped = (name == "Bash").then(|| audit_strip_data_heredocs(raw));
+    if !main
+        && stripped
+            .as_ref()
+            .is_some_and(|s| AUDIT_PR_MERGE.search(&audit_strip_quotes(s)).is_some())
+    {
+        flags.push("pr-merge");
+    }
     if name == "Bash" && inp.get("dangerouslyDisableSandbox") == Some(&Value::Bool(true)) {
         flags.push("sandbox-off");
     }
     let path = match name {
-        "Bash" => Some(audit_strip_data_heredocs(raw)),
+        "Bash" => stripped,
         "Grep" => inp.get("path").and_then(Value::as_str).map(String::from),
         _ if AUDIT_FILE_TOOLS.contains(&name) => Some(raw.to_string()),
         _ => None,
@@ -2003,7 +2048,7 @@ const BENCH_REPLAY_TOOLS: [&str; 8] = [
 ];
 const BENCH_REPLAY_DENIED: [&str; 1] = ["Bash(git *--out*)"];
 
-/// The --agents JSON holding the factory-<role> agent file, which claude cannot find with no setting sources.
+/// The --agents JSON holding the factory-<role> agent file, with its tools and model, which claude cannot find with no setting sources.
 fn bench_replay_agents(home: &Path, role: &str) -> Res<String> {
     let config = home.join("config.md");
     let meta = if config.exists() {
@@ -2035,6 +2080,15 @@ fn bench_replay_agents(home: &Path, role: &str) -> Res<String> {
         ));
     };
     let mut entry = json!({"description": description, "prompt": body});
+    let tools: Vec<&str> = fm_get(&agent, "tools")
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+    if !tools.is_empty() {
+        entry["tools"] = json!(tools);
+    }
     if let Some(model) = fm_get(&agent, "model").filter(|m| !m.is_empty()) {
         entry["model"] = json!(model);
     }
@@ -2273,6 +2327,7 @@ fn bench_replay_case(
             &session,
             "--setting-sources",
             "",
+            "--strict-mcp-config",
             "--permission-mode",
             "dontAsk",
             "--allowedTools",
@@ -2770,6 +2825,65 @@ mod tests {
     }
 
     #[test]
+    fn pr_merge_executed_only() {
+        let flags = |command: &str| {
+            let inp = json!({ "command": command });
+            let inp = inp.as_object().unwrap();
+            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false)
+        };
+        for command in [
+            "cat >> build.md <<'EOF'\nNext: orchestrator runs gh pr merge 7\nEOF",
+            "grep -n \"gh pr merge\" docs/device.md",
+            "echo 'gh pr merge 7'",
+            "git commit -m \"say gh pr merge\"",
+            "gh api repos/o/r/pulls/7/merge",
+        ] {
+            assert!(flags(command).is_empty(), "{command}");
+        }
+        for command in [
+            "gh pr merge 7 --merge",
+            "gh api -X PUT repos/o/r/pulls/7/merge",
+            "cd x && gh pr merge 7",
+            "GH_TOKEN=x gh pr merge 7",
+            "out=$(gh pr merge 7)",
+            "bash <<EOF\ngh pr merge 7\nEOF",
+            "{ gh pr merge 7; }",
+            "x=`gh pr merge 7`",
+            "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge",
+        ] {
+            assert_eq!(flags(command), ["pr-merge"], "{command}");
+        }
+        assert_eq!(
+            flags(&format!("{}x\ngh pr merge 7", "\n".repeat(30_000))),
+            ["pr-merge"]
+        );
+        assert_eq!(
+            flags("gh pr merge 7 && git push --force"),
+            ["force-push", "pr-merge"]
+        );
+    }
+
+    #[test]
+    fn pr_merge_is_linear() {
+        for text in [
+            format!(";{}", "a=".repeat(50_000)),
+            format!("gh api {}", "x".repeat(100_000)),
+            "(a=".repeat(33_000),
+            "(gh api ".repeat(12_500),
+            "{gh api {a}".repeat(9_000),
+            "`a=".repeat(33_000),
+            "\n".repeat(100_000),
+            "\nenv".repeat(25_000),
+            "\na=".repeat(33_000),
+        ] {
+            let start = std::time::Instant::now();
+            let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text));
+            assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
+            assert!(start.elapsed().as_secs_f64() < 1.0);
+        }
+    }
+
+    #[test]
     fn push_trims_oldest() {
         let lines: Vec<String> = (0..6).map(|n| format!("{{\"row\": {n}}}\n")).collect();
         let full: usize = lines.iter().map(String::len).sum();
@@ -2959,7 +3073,7 @@ exit "${FAKE_EXIT:-0}"
     pub(super) const REVIEW: &str =
         "VERDICT: CHANGES\n\n- `worker/export.js:44` drops the header row.\n";
     pub(super) const RUNNING: &str = "1018-add-y: running review-code ...\n";
-    pub(super) const AGENTS: &str = r#"{"factory-review-code": {"description": "Code reviewer.", "prompt": "Review the diff.\n", "model": "opus"}}"#;
+    pub(super) const AGENTS: &str = r#"{"factory-review-code": {"description": "Code reviewer.", "prompt": "Review the diff.\n", "tools": ["Read", "Grep", "Glob", "Bash", "Write"], "model": "opus"}}"#;
 
     pub(super) fn summary(wrote: u32, skipped: u32, failed: u32) -> String {
         format!(
@@ -3044,7 +3158,7 @@ exit "${FAKE_EXIT:-0}"
             fs::create_dir(root.join("agents")).unwrap();
             fs::write(
                 &agent,
-                "---\ndescription: Code reviewer.\nmodel: opus\n---\nReview the diff.\n",
+                "---\ndescription: Code reviewer.\ntools: Read, Grep, Glob, Bash, Write\nmodel: opus\n---\nReview the diff.\n",
             )
             .unwrap();
             fs::write(
@@ -3298,6 +3412,7 @@ mod bench_replay_test {
                 &session,
                 "--setting-sources",
                 "",
+                "--strict-mcp-config",
                 "--permission-mode",
                 "dontAsk",
                 "--allowedTools",
@@ -3352,6 +3467,24 @@ mod bench_replay_test {
         assert!(!call.stdin.contains("Project documents"));
         assert_eq!(b.run_json()["model"], Value::Null);
         assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_agent_without_tools() {
+        let b = Bench::new("no-tools");
+        fs::write(
+            &b.agent,
+            "---\ndescription: Code reviewer.\nmodel: opus\n---\nReview the diff.\n",
+        )
+        .unwrap();
+        assert_eq!(b.replay(&["--role", "review-code"]).0, 0);
+        let argv = b.call().unwrap().argv;
+        let at = argv.iter().position(|a| a == "--agents").unwrap();
+        let agents: Value = serde_json::from_str(&argv[at + 1]).unwrap();
+        assert_eq!(
+            agents["factory-review-code"],
+            json!({"description": "Code reviewer.", "prompt": "Review the diff.\n", "model": "opus"})
+        );
     }
 
     #[test]
