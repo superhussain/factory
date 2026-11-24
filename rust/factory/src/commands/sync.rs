@@ -1000,6 +1000,55 @@ mod tests {
         fs::remove_dir_all(home).unwrap();
     }
 
+    const DECISION: &[u8] = b"APPROVE\nA person approved this job with /factory approve.\n";
+
+    #[test]
+    fn push_target_records_decision() {
+        use crate::shared::http::tests::serve;
+        let board = r#"{"updated":"2026-11-23T14:00:00Z","jobs":[{"id":"042-sample-export","project":"alpha","stage":"needs-human"}]}"#;
+        let (origin, seen) = serve(vec![
+            (200, "[]", vec![]),
+            (200, "", vec![("ETag", "\"d1\"")]),
+            (200, board, vec![("ETag", "\"b1\"")]),
+            (200, "{}", vec![("ETag", "\"b2\"")]),
+        ]);
+        let home = job_home("sync-push-decision", &origin, &[("decision.md", DECISION)]);
+        push_with_home(&home, "alpha/042-sample-export").unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 4);
+        assert_eq!(
+            (
+                seen[1].method.as_str(),
+                seen[1].path.as_str(),
+                seen[1].header("If-None-Match")
+            ),
+            (
+                "PUT",
+                "/api/jobs/alpha/042-sample-export/decision.md",
+                Some("*")
+            )
+        );
+        assert_eq!(seen[1].body, DECISION);
+        assert_eq!(
+            (
+                seen[3].method.as_str(),
+                seen[3].path.as_str(),
+                seen[3].header("If-Match")
+            ),
+            ("PUT", "/api/board", Some("\"b1\""))
+        );
+        let put = loads(std::str::from_utf8(&seen[3].body).unwrap()).unwrap();
+        let decision = &put["jobs"][0]["decision"];
+        assert_eq!(
+            (&decision["verdict"], &decision["decider"]),
+            (&json!("APPROVE"), &json!("person"))
+        );
+        let manifest =
+            read_text(&home.join("jobs/alpha/042-sample-export/.sync.json")).unwrap();
+        assert_eq!(loads(&manifest).unwrap()["decision.md"]["etag"], "\"d1\"");
+        fs::remove_dir_all(home).unwrap();
+    }
+
     #[test]
     fn push_clears_decision_without_a_verdict() {
         let stored = r#"{"updated":"","jobs":[{"id":"042-sample-export","project":"alpha","decision":{"verdict":"APPROVE","decider":"model","at":"x"},"stage":"build"}]}"#;
