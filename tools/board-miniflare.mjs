@@ -123,6 +123,14 @@ export class BenchRoom extends BenchBase {
     }
     return { build: (performance.now() - t) / 20 };
   }
+  // Builds the slim body of the current version n times, as a slim read's miss does since job
+  // 2284; false before it.
+  async boardSlimBuild(n) {
+    const board = this.board();
+    if (!board.buildSlim) return false;
+    for (let i = 0; i < n; i++) await board.buildSlim(board.state()).arrayBuffer();
+    return true;
+  }
 }
 const room = (env) => env.BoardEvents.get(env.BoardEvents.idFromName("main"));
 export default {
@@ -133,6 +141,8 @@ export default {
     if (url.pathname === "/bench/work") return Response.json(await room(env).boardWork());
     if (url.pathname === "/bench/flush") return Response.json(await room(env).boardFlushTimed());
     if (url.pathname === "/bench/text") return Response.json(await room(env).boardTextTimed());
+    if (url.pathname === "/bench/slimbuild")
+      return Response.json(await room(env).boardSlimBuild(Number(url.searchParams.get("n"))));
     if (url.pathname === "/bench/readtimed")
       return Response.json(await room(env).boardReadTimed());
     if (url.pathname === "/bench/read")
@@ -332,6 +342,14 @@ export async function roomWork(rows, script) {
     await measure("GET /board.json after a PATCH, room evicted, with its copy", getCopied);
     await json("/bench/evict");
     await measure("GET /board.json after the copy, room evicted", get);
+    // The dashboard's slim read: joined from the pages once per version, then from the memo,
+    // until an eviction drops it.
+    const slim = () => json("/board.json?view=slim");
+    await touch(1);
+    await measure("GET slim, new version", slim);
+    await measure("GET slim, same version", slim);
+    await json("/bench/evict");
+    await measure("GET slim, room evicted", slim);
     // The alarm copies a version no read has built, so it builds it.
     await touch(1);
     await json("/bench/evict");
@@ -454,6 +472,26 @@ export async function benchMiniflare(rows, runs, script) {
     out["workerd CPU: GET /board.json after eviction, rows copied"] = (
       await perRequest(runs, evicted)
     ).cpu;
+    // The dashboard's slim read: a same-version read the room (or, before job 2284, the Worker's
+    // isolate) serves from its memo, and the first read after a PATCH, which builds it.
+    const getSlim = async () => {
+      const res = await mf.dispatchFetch(`${origin}/board.json?view=slim`);
+      if (res.status !== 200) throw new Error(`GET slim ${res.status}`);
+      await res.arrayBuffer();
+    };
+    out["workerd CPU: GET slim, same version"] = (await perRequest(runs, getSlim)).cpu;
+    const slimMiss = await perRequest(runs, async () => {
+      await patchRows(1)();
+      await getSlim();
+    });
+    out["workerd CPU: GET slim after a PATCH (miss)"] =
+      slimMiss.cpu - out["workerd CPU: PATCH 1 row"];
+    // The room's build alone, with no request around it: the CPU a miss adds in the room.
+    const built = workerdCpu();
+    const slimBuilt = await (await mf.dispatchFetch(`${origin}/bench/slimbuild?n=${runs}`)).json();
+    out["workerd CPU: room slim build alone"] = slimBuilt
+      ? ((workerdCpu() - built) * 1000) / runs
+      : 0;
     return out;
   } finally {
     await mf.dispose();
