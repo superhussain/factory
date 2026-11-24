@@ -2683,6 +2683,106 @@ mod tests {
             )]
         );
     }
+    /// A repo whose commits carry the given Unix dates, and the helpers to add commits to it.
+    #[cfg(unix)]
+    fn dated_repo(name: &str) -> std::path::PathBuf {
+        let dir = crate::shared::fs::temp_dir(name);
+        dated_git(&dir, 0, &["init", "-q"]);
+        dir
+    }
+
+    #[cfg(unix)]
+    fn dated_git(dir: &Path, date: i64, args: &[&str]) -> String {
+        let when = format!("@{date} +0000");
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+            .args(args)
+            .env("GIT_AUTHOR_DATE", &when)
+            .env("GIT_COMMITTER_DATE", &when)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}");
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    #[cfg(unix)]
+    fn dated_commit(dir: &Path, date: i64, file: &str, message: &str) -> String {
+        std::fs::write(dir.join(file), format!("{message}\n")).unwrap();
+        dated_git(dir, date, &["add", "-A"]);
+        dated_git(dir, date, &["commit", "-q", "-m", message]);
+        dated_git(dir, date, &["rev-parse", "HEAD"])
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rework_ref() {
+        let dir = dated_repo("outcome-rework-ref");
+        dated_commit(&dir, 1_000, "x.txt", "start");
+        let merge = dated_commit(&dir, 2_000, "x.txt", "add x");
+        dated_git(
+            &dir,
+            2_000,
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &["1022-redo-x".into()]),
+            ("reworked".into(), vec!["rework-of 1022-redo-x".into()])
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fix_after_seven_days_holds() {
+        let dir = dated_repo("outcome-fix-after-seven");
+        let t0 = 1_767_600_000;
+        dated_commit(&dir, t0 - 100, "w.txt", "start");
+        let merge = dated_commit(&dir, t0, "w.txt", "add w");
+        dated_commit(&dir, t0 + 7 * 86_400 + 1, "w.txt", "Fix w");
+        dated_git(
+            &dir,
+            t0,
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &[]),
+            ("held".into(), vec![])
+        );
+        let dir = dated_repo("outcome-fix-on-seven");
+        dated_commit(&dir, t0 - 100, "w.txt", "start");
+        let merge = dated_commit(&dir, t0, "w.txt", "add w");
+        let fix = dated_commit(&dir, t0 + 7 * 86_400, "w.txt", "Fix w");
+        dated_git(
+            &dir,
+            t0,
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &[]),
+            ("reworked".into(), vec![format!("commit {}", &fix[..12])])
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fix_before_the_merge_holds() {
+        let dir = dated_repo("outcome-fix-before-merge");
+        let t0 = 1_767_600_000;
+        dated_commit(&dir, t0 - 100, "x.txt", "start");
+        let merge = dated_commit(&dir, t0, "x.txt", "add x");
+        dated_commit(&dir, t0 - 3_600, "x.txt", "fix x early");
+        dated_git(
+            &dir,
+            t0,
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &[]),
+            ("held".into(), vec![])
+        );
+    }
+
     use crate::shared::pyval::py_repr;
     use serde_json::json;
 

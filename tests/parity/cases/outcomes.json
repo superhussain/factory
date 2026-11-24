@@ -563,6 +563,1339 @@
       "exit": 0
     },
     {
+      "id": "outcomes/riders-share-the-lead-result",
+      "argv": [
+        "--home",
+        "{home}",
+        "outcomes",
+        "alpha"
+      ],
+      "home": "audit-outcomes-checkout",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "stdout": "{home}/alpha\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "config",
+              "--bool",
+              "extensions.worktreeConfig"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "config",
+              "--local",
+              "--includes",
+              "--get-regexp",
+              "^(url|http)\\."
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "fetch",
+              "-q",
+              "https://github.com/example/alpha.git",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "  origin/main\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "show",
+              "-s",
+              "--format=%ct",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ],
+            "stdout": "1767600000\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "diff",
+              "--name-only",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa^1",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ],
+            "stdout": "y.txt\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "log",
+              "--no-merges",
+              "--name-only",
+              "--format=%x1e%H%x1f%ct%x1f%B%x1f",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"example\", name: \"alpha\") { p8: pullRequest(number: 8) { state mergeCommit { oid } } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p8\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}}}}",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1018-add-y",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/8"
+              },
+              {
+                "id": "1020-add-v",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/8",
+                "refs": [
+                  {
+                    "kind": "batched-into",
+                    "id": "1018-add-y"
+                  }
+                ]
+              },
+              {
+                "id": "1021-fix-y",
+                "project": "alpha",
+                "stage": "pr-open",
+                "updated": "2026-01-09T12:00:00Z",
+                "refs": [
+                  {
+                    "kind": "rework-of",
+                    "id": "1018-add-y"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          "ok"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_outcomes.py::OutcomesClassifyTest.test_riders_share_the_lead_result"
+    },
+    {
+      "id": "outcomes/other-project-still-judged",
+      "argv": [
+        "--home",
+        "{home}",
+        "outcomes"
+      ],
+      "home": "outcomes-other-project-still-judged",
+      "stubs": {
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"example\", name: \"alpha\") { p7: pullRequest(number: 7) { state mergeCommit { oid } } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p7\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}}}}",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "stdout": "{home}/alpha\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "config",
+              "--bool",
+              "extensions.worktreeConfig"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "config",
+              "--local",
+              "--includes",
+              "--get-regexp",
+              "^(url|http)\\."
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "fetch",
+              "-q",
+              "https://github.com/example/alpha.git",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "  origin/main\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "show",
+              "-s",
+              "--format=%ct",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ],
+            "stdout": "1767600000\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "diff",
+              "--name-only",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa^1",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ],
+            "stdout": "y.txt\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "log",
+              "--no-merges",
+              "--name-only",
+              "--format=%x1e%H%x1f%ct%x1f%B%x1f",
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1017-add-x",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/7"
+              },
+              {
+                "id": "1030-beta-job",
+                "project": "beta",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/beta/pull/3"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          "ok"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_outcomes.py::OutcomesUnknownTest.test_other_project_still_judged"
+    },
+    {
+      "id": "outcomes/bad-oid",
+      "argv": [
+        "--home",
+        "{home}",
+        "outcomes",
+        "alpha"
+      ],
+      "home": "audit-outcomes-checkout",
+      "stubs": {
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"example\", name: \"alpha\") { p9: pullRequest(number: 9) { state mergeCommit { oid } } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p9\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"--output=x\"}}}}}",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "stdout": "{home}/alpha\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "config",
+              "--bool",
+              "extensions.worktreeConfig"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "config",
+              "--local",
+              "--includes",
+              "--get-regexp",
+              "^(url|http)\\."
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "fetch",
+              "-q",
+              "https://github.com/example/alpha.git",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1019-add-z",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/9"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          "ok"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_outcomes.py::OutcomesUnknownTest.test_bad_oid"
+    },
+    {
+      "id": "outcomes/merge-commits-query-chunks-at-fifty",
+      "argv": [
+        "--home",
+        "{home}",
+        "outcomes",
+        "alpha"
+      ],
+      "home": "audit-outcomes-checkout",
+      "stubs": {
+        "gh": [
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"example\", name: \"alpha\") { p1: pullRequest(number: 1) { state mergeCommit { oid } } p2: pullRequest(number: 2) { state mergeCommit { oid } } p3: pullRequest(number: 3) { state mergeCommit { oid } } p4: pullRequest(number: 4) { state mergeCommit { oid } } p5: pullRequest(number: 5) { state mergeCommit { oid } } p6: pullRequest(number: 6) { state mergeCommit { oid } } p7: pullRequest(number: 7) { state mergeCommit { oid } } p8: pullRequest(number: 8) { state mergeCommit { oid } } p9: pullRequest(number: 9) { state mergeCommit { oid } } p10: pullRequest(number: 10) { state mergeCommit { oid } } p11: pullRequest(number: 11) { state mergeCommit { oid } } p12: pullRequest(number: 12) { state mergeCommit { oid } } p13: pullRequest(number: 13) { state mergeCommit { oid } } p14: pullRequest(number: 14) { state mergeCommit { oid } } p15: pullRequest(number: 15) { state mergeCommit { oid } } p16: pullRequest(number: 16) { state mergeCommit { oid } } p17: pullRequest(number: 17) { state mergeCommit { oid } } p18: pullRequest(number: 18) { state mergeCommit { oid } } p19: pullRequest(number: 19) { state mergeCommit { oid } } p20: pullRequest(number: 20) { state mergeCommit { oid } } p21: pullRequest(number: 21) { state mergeCommit { oid } } p22: pullRequest(number: 22) { state mergeCommit { oid } } p23: pullRequest(number: 23) { state mergeCommit { oid } } p24: pullRequest(number: 24) { state mergeCommit { oid } } p25: pullRequest(number: 25) { state mergeCommit { oid } } p26: pullRequest(number: 26) { state mergeCommit { oid } } p27: pullRequest(number: 27) { state mergeCommit { oid } } p28: pullRequest(number: 28) { state mergeCommit { oid } } p29: pullRequest(number: 29) { state mergeCommit { oid } } p30: pullRequest(number: 30) { state mergeCommit { oid } } p31: pullRequest(number: 31) { state mergeCommit { oid } } p32: pullRequest(number: 32) { state mergeCommit { oid } } p33: pullRequest(number: 33) { state mergeCommit { oid } } p34: pullRequest(number: 34) { state mergeCommit { oid } } p35: pullRequest(number: 35) { state mergeCommit { oid } } p36: pullRequest(number: 36) { state mergeCommit { oid } } p37: pullRequest(number: 37) { state mergeCommit { oid } } p38: pullRequest(number: 38) { state mergeCommit { oid } } p39: pullRequest(number: 39) { state mergeCommit { oid } } p40: pullRequest(number: 40) { state mergeCommit { oid } } p41: pullRequest(number: 41) { state mergeCommit { oid } } p42: pullRequest(number: 42) { state mergeCommit { oid } } p43: pullRequest(number: 43) { state mergeCommit { oid } } p44: pullRequest(number: 44) { state mergeCommit { oid } } p45: pullRequest(number: 45) { state mergeCommit { oid } } p46: pullRequest(number: 46) { state mergeCommit { oid } } p47: pullRequest(number: 47) { state mergeCommit { oid } } p48: pullRequest(number: 48) { state mergeCommit { oid } } p49: pullRequest(number: 49) { state mergeCommit { oid } } p50: pullRequest(number: 50) { state mergeCommit { oid } } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {\"p1\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000001\"}}, \"p2\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000002\"}}, \"p3\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000003\"}}, \"p4\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000004\"}}, \"p5\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000005\"}}, \"p6\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000006\"}}, \"p7\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000007\"}}, \"p8\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000008\"}}, \"p9\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000009\"}}, \"p10\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000000a\"}}, \"p11\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000000b\"}}, \"p12\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000000c\"}}, \"p13\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000000d\"}}, \"p14\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000000e\"}}, \"p15\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000000f\"}}, \"p16\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000010\"}}, \"p17\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000011\"}}, \"p18\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000012\"}}, \"p19\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000013\"}}, \"p20\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000014\"}}, \"p21\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000015\"}}, \"p22\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000016\"}}, \"p23\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000017\"}}, \"p24\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000018\"}}, \"p25\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000019\"}}, \"p26\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000001a\"}}, \"p27\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000001b\"}}, \"p28\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000001c\"}}, \"p29\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000001d\"}}, \"p30\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000001e\"}}, \"p31\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000001f\"}}, \"p32\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000020\"}}, \"p33\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000021\"}}, \"p34\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000022\"}}, \"p35\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000023\"}}, \"p36\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000024\"}}, \"p37\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000025\"}}, \"p38\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000026\"}}, \"p39\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000027\"}}, \"p40\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000028\"}}, \"p41\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000029\"}}, \"p42\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000002a\"}}, \"p43\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000002b\"}}, \"p44\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000002c\"}}, \"p45\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000002d\"}}, \"p46\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000002e\"}}, \"p47\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"000000000000000000000000000000000000002f\"}}, \"p48\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000030\"}}, \"p49\": {\"state\": \"MERGED\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000031\"}}, \"p50\": {\"state\": \"OPEN\", \"mergeCommit\": {\"oid\": \"0000000000000000000000000000000000000032\"}}}}}",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "api",
+              "graphql",
+              "-f",
+              "query=query { repository(owner: \"example\", name: \"alpha\") { p51: pullRequest(number: 51) { state mergeCommit { oid } } } }"
+            ],
+            "stdout": "{\"data\": {\"repository\": {}}}",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "rev-parse",
+              "--show-toplevel"
+            ],
+            "stdout": "{home}/alpha\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "config",
+              "--bool",
+              "extensions.worktreeConfig"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "config",
+              "--local",
+              "--includes",
+              "--get-regexp",
+              "^(url|http)\\."
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "fetch",
+              "-q",
+              "https://github.com/example/alpha.git",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000001",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000003",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000005",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000007",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000009",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "000000000000000000000000000000000000000b",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "000000000000000000000000000000000000000d",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "000000000000000000000000000000000000000f",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000011",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000013",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000015",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000017",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000019",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "000000000000000000000000000000000000001b",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "000000000000000000000000000000000000001d",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "000000000000000000000000000000000000001f",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000021",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000023",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000025",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000027",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000029",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "000000000000000000000000000000000000002b",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "000000000000000000000000000000000000002d",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "000000000000000000000000000000000000002f",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "branch",
+              "-r",
+              "--contains",
+              "0000000000000000000000000000000000000031",
+              "--list",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "3001-pr-1",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/1"
+              },
+              {
+                "id": "3002-pr-2",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/2"
+              },
+              {
+                "id": "3003-pr-3",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/3"
+              },
+              {
+                "id": "3004-pr-4",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/4"
+              },
+              {
+                "id": "3005-pr-5",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/5"
+              },
+              {
+                "id": "3006-pr-6",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/6"
+              },
+              {
+                "id": "3007-pr-7",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/7"
+              },
+              {
+                "id": "3008-pr-8",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/8"
+              },
+              {
+                "id": "3009-pr-9",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/9"
+              },
+              {
+                "id": "3010-pr-10",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/10"
+              },
+              {
+                "id": "3011-pr-11",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/11"
+              },
+              {
+                "id": "3012-pr-12",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/12"
+              },
+              {
+                "id": "3013-pr-13",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/13"
+              },
+              {
+                "id": "3014-pr-14",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/14"
+              },
+              {
+                "id": "3015-pr-15",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/15"
+              },
+              {
+                "id": "3016-pr-16",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/16"
+              },
+              {
+                "id": "3017-pr-17",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/17"
+              },
+              {
+                "id": "3018-pr-18",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/18"
+              },
+              {
+                "id": "3019-pr-19",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/19"
+              },
+              {
+                "id": "3020-pr-20",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/20"
+              },
+              {
+                "id": "3021-pr-21",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/21"
+              },
+              {
+                "id": "3022-pr-22",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/22"
+              },
+              {
+                "id": "3023-pr-23",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/23"
+              },
+              {
+                "id": "3024-pr-24",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/24"
+              },
+              {
+                "id": "3025-pr-25",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/25"
+              },
+              {
+                "id": "3026-pr-26",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/26"
+              },
+              {
+                "id": "3027-pr-27",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/27"
+              },
+              {
+                "id": "3028-pr-28",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/28"
+              },
+              {
+                "id": "3029-pr-29",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/29"
+              },
+              {
+                "id": "3030-pr-30",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/30"
+              },
+              {
+                "id": "3031-pr-31",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/31"
+              },
+              {
+                "id": "3032-pr-32",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/32"
+              },
+              {
+                "id": "3033-pr-33",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/33"
+              },
+              {
+                "id": "3034-pr-34",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/34"
+              },
+              {
+                "id": "3035-pr-35",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/35"
+              },
+              {
+                "id": "3036-pr-36",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/36"
+              },
+              {
+                "id": "3037-pr-37",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/37"
+              },
+              {
+                "id": "3038-pr-38",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/38"
+              },
+              {
+                "id": "3039-pr-39",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/39"
+              },
+              {
+                "id": "3040-pr-40",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/40"
+              },
+              {
+                "id": "3041-pr-41",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/41"
+              },
+              {
+                "id": "3042-pr-42",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/42"
+              },
+              {
+                "id": "3043-pr-43",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/43"
+              },
+              {
+                "id": "3044-pr-44",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/44"
+              },
+              {
+                "id": "3045-pr-45",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/45"
+              },
+              {
+                "id": "3046-pr-46",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/46"
+              },
+              {
+                "id": "3047-pr-47",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/47"
+              },
+              {
+                "id": "3048-pr-48",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/48"
+              },
+              {
+                "id": "3049-pr-49",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/49"
+              },
+              {
+                "id": "3050-pr-50",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/50"
+              },
+              {
+                "id": "3051-pr-51",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/51"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [
+          200,
+          "ok"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_outcomes.py::OutcomesUnknownTest.test_merge_commits_query"
+    },
+    {
       "id": "outcomes/no-done",
       "from": "round-1 review: (stamp_of(done) or cutoff) > cutoff drops a merged job with a missing or unparseable done",
       "argv": ["--home", "{home}", "outcomes"],
