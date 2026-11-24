@@ -6973,6 +6973,62 @@ mod tests {
     }
 
     #[test]
+    fn role_card_fields_pass_admission() {
+        let role = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../skills/factory/agents/factory-retro.md"
+        ))
+        .unwrap();
+        let table = role
+            .split("| Card field | Limit |\n| --- | --- |\n")
+            .nth(1)
+            .unwrap()
+            .split("\n\n")
+            .next()
+            .unwrap();
+        let names: Vec<&str> = table
+            .lines()
+            .map(|row| row.strip_prefix("| `").unwrap().split('`').next().unwrap())
+            .collect();
+        let full = json!({
+            "kind": "tooling", "title": "Guard the ls alias",
+            "summary": "The ls alias crashes without a terminal.",
+            "evidence": [{"note": "winsize_crash in tool results", "count": 253,
+                          "sessions": ["host-a/3ae1fc86-0000-4000-8000-000000000001"]}],
+            "paths": ["zsh/aliases.zsh"], "size": "S",
+            "question": "How should the alias be guarded?",
+            "options": [
+                {"key": "A", "label": "Interactive only",
+                 "detail": "Wrap the alias in an interactive check", "pros": ["One line"], "cons": []},
+                {"key": "B", "label": "Drop the alias", "detail": "Use plain ls",
+                 "pros": [], "cons": ["No colors"]}],
+            "recommend": "A", "reason": "It keeps colors for people.", "project": "sample-tools",
+            "diagram": "flowchart LR\n  A --> B"
+        });
+        let mut want: Vec<&str> = full
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut got = names.clone();
+        want.sort_unstable();
+        got.sort_unstable();
+        assert_eq!(got, want);
+        let card: serde_json::Map<String, Value> = full
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(k, _)| names.contains(&k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let doc = json!({"schema": SUGGESTION_SCHEMA, "by": "retro",
+                         "run": "20261111T090000Z-a1b2c3", "suggestions": [card]});
+        assert_eq!(check_suggestions(&doc, "retro"), None);
+        assert!(!role.contains("docs/autonomy.md"));
+    }
+
+    #[test]
     fn classify_eligible() {
         assert_eq!(
             classify("sample", &suggestion(), &allowed()),

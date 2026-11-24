@@ -1,0 +1,11 @@
+wrote {home}/retro/card-two-findings/findings.md
+added sample-tools: Guard the ls alias with context
+link: {api}/#/backlog/203ae9a4105d
+held sample-tools: Guard the ls alias for review: retro items always wait for a person
+{
+  "admitted": [
+    "sample-tools: Guard the ls alias"
+  ],
+  "skipped": []
+}
+uploaded retro run card-two-findings
