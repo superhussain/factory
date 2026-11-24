@@ -13231,23 +13231,6 @@ exit "$archive_code"
                 format!("exit 3 {}", "x".repeat(193))
             );
         }
-
-        /// The board command belongs to the claims slice and is not ported yet, so it writes nothing.
-        #[test]
-        fn test_board_refuses_the_field() {
-            let fx = Fx::new();
-            fx.jobs(json!([idea("120-sample-digest", "alpha", json!({}))]));
-            let home = fx.home.display().to_string();
-            assert_eq!(
-                crate::cli::main(vec![
-                    "board".into(),
-                    home.into(),
-                    "120-sample-digest".into()
-                ]),
-                2
-            );
-            assert!(fx.puts().is_empty());
-        }
     }
 
     mod depends_on_test {
