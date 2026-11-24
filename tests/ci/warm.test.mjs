@@ -18,6 +18,10 @@ test("warm runs on main pushes and by hand, reads only contents, and keeps the n
   assert.deepEqual(warm.on, { push: { branches: ["main"] }, workflow_dispatch: null });
   assert.deepEqual(warm.permissions, { contents: "read" });
   assert.equal(warm.concurrency["cancel-in-progress"], true);
+  // Per ref, so a manual run elsewhere never cancels main's.
+  assert.equal(warm.concurrency.group, "warm-caches-${{ github.ref }}");
+  // A manual run on another branch must not seed caches there.
+  for (const id of JOBS) assert.equal(warm.jobs[id].if, "github.ref == 'refs/heads/main'", id);
   assert.doesNotMatch(raw, /secrets\./);
   assert.deepEqual(Object.keys(warm.jobs), JOBS);
 });

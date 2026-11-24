@@ -11,12 +11,14 @@ on:
   workflow_dispatch:
 # Only main's newest head is worth caching.
 concurrency:
-  group: warm-caches
+  group: warm-caches-${{ github.ref }}
   cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   rust-build:
+    # A manual run on another branch would seed caches that branch's PRs restore.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     timeout-minutes: 8
     defaults:
@@ -49,6 +51,7 @@ jobs:
   # CI's targets builds the binary only when rust-build has not cached it yet, and never saves its rust cache,
   # so its key is saved only here.
   targets:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     timeout-minutes: 8
     defaults:
@@ -67,6 +70,7 @@ jobs:
       - name: Build the factory binary
         run: cargo build --profile host --locked
   rust-test:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     timeout-minutes: 8
     defaults:
@@ -86,6 +90,7 @@ jobs:
       - name: Build the tests
         run: cargo test --locked --no-run
   rust-check:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     timeout-minutes: 8
     defaults:
