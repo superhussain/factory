@@ -89,8 +89,9 @@ export class BoardEvents extends DurableObject {
 
   // The board store's RPC methods, which boardStore(env) calls.
   board() {
+    // A read's copy that fails is caught here; the alarm retries it.
     return (this.store ??= new BoardRows(this.ctx.storage, this.env, (promise) =>
-      this.ctx.waitUntil(promise),
+      this.ctx.waitUntil(promise.catch(() => {})),
     ));
   }
 
