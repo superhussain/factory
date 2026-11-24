@@ -539,7 +539,9 @@ fn secret_refusal(rel: &str, data: &[u8]) -> Option<String> {
         return None;
     }
     let text = String::from_utf8_lossy(data);
-    NOTE_SECRETS
+    // The token-shaped patterns only. The last one matches the Access header's bare name, which
+    // job notes and reviews quote with no value; the name alone is no credential.
+    NOTE_SECRETS[..7]
         .iter()
         .find_map(|p| match p.search_or_err(&text) {
             Ok(None) => None,
@@ -671,7 +673,13 @@ pub(crate) fn push_job(
     save_manifest(&folder, &manifest)?;
     writeln!(out, "pushed {} files", pushed.len()).ok();
     let spec = folder.join("spec.md");
-    if goal_due && spec.exists() && !conflicts.iter().any(|c| c == "spec.md") && !spec_stale {
+    // A refused spec keeps .goal-pending, so its Goal goes up once the secret is gone.
+    if goal_due
+        && spec.exists()
+        && !conflicts.iter().any(|c| c == "spec.md")
+        && !refused.iter().any(|r| r == "spec.md")
+        && !spec_stale
+    {
         let text = read_text(&spec).map_err(|e| os_fail(e, &spec))?;
         record_goal(&home, &slug, &job_id, spec_goal(&text), out)?;
         match fs::remove_file(&pending) {
@@ -695,10 +703,17 @@ pub(crate) fn push_job(
     }
     if !refused.is_empty() {
         return Err(fail(
-            format!(
-                "refused {}: each looks like it holds a secret, so nothing of it was uploaded. Remove the secret, then push again",
-                refused.join(", ")
-            ),
+            if refused.len() == 1 {
+                format!(
+                    "refused {}: it looks like it holds a secret and was not uploaded. Remove it, then push again",
+                    refused[0]
+                )
+            } else {
+                format!(
+                    "refused {}: they look like they hold secrets and were not uploaded. Remove them, then push again",
+                    refused.join(", ")
+                )
+            },
             6,
         ));
     }
@@ -1406,6 +1421,43 @@ mod tests {
         assert!(push_job(&home, "alpha", "042-sample-export", &mut Vec::new()).is_err());
         assert!(folder.join(".goal-pending").exists());
         assert!(!locally_synced(&folder));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn header_name_alone_uploads_but_a_value_is_refused() {
+        let name = "CF-Access-Client-Secret";
+        assert_eq!(
+            secret_refusal("review.md", format!("Never log {name}.\n").as_bytes()),
+            None
+        );
+        let jwt = format!("{name}: eyJ{}.{}.sig\n", "a".repeat(20), "b".repeat(20));
+        assert!(secret_refusal("review.md", jwt.as_bytes()).is_some());
+        let token = format!("{name}: ghp_{}\n", "c".repeat(30));
+        assert!(secret_refusal("review.md", token.as_bytes()).is_some());
+        assert_eq!(secret_refusal("shot.png", token.as_bytes()), None);
+    }
+
+    #[test]
+    fn refused_spec_skips_the_goal_and_keeps_the_marker() {
+        use crate::shared::http::tests::serve;
+        let (origin, seen) = serve(vec![(200, "[]", vec![])]);
+        let spec = format!("## Goal\nShip ghp_{}\n", "a".repeat(30));
+        let home = job_home(
+            "sync-refused-spec",
+            &origin,
+            &[("spec.md", spec.as_bytes()), (".goal-pending", b"")],
+        );
+        let folder = home.join("jobs/alpha/042-sample-export");
+        let e = push_job(&home, "alpha", "042-sample-export", &mut Vec::new()).unwrap_err();
+        assert_eq!(
+            e.stderr,
+            "factory.py: refused spec.md: it looks like it holds a secret and was not uploaded. Remove it, then push again\n"
+        );
+        assert!(folder.join(".goal-pending").exists());
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(seen.iter().all(|r| r.path != "/api/board"));
         fs::remove_dir_all(home).unwrap();
     }
 
