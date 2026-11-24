@@ -504,6 +504,12 @@ fn to_binary(text: &str, kind: &str, binary: &str) -> String {
     } else {
         format!("\"{binary}\"")
     };
+    // cmd expands %name% and systemd expands %-specifiers and $VARIABLES, so they stay literal.
+    let shown = match kind {
+        "cmd" => shown.replace('%', "%%"),
+        "systemd" => shown.replace('%', "%%").replace('$', "$$"),
+        _ => shown,
+    };
     LINE_PY.replace_all(text, |_| shown.clone())
 }
 
@@ -2455,6 +2461,30 @@ mod tests {
                 "/b/factory"
             ),
             "ExecStart=/b/factory retro push\n"
+        );
+        assert_eq!(
+            to_binary(
+                "ExecStart=python3 /s/runtime/factory.py retro push\n",
+                "systemd",
+                "/home/u/100%$HOME/factory"
+            ),
+            "ExecStart=\"/home/u/100%%$$HOME/factory\" retro push\n"
+        );
+        assert_eq!(
+            to_binary(
+                "py -3 C:\\s\\runtime\\factory.py retro push\r\n",
+                "cmd",
+                "C:\\Users\\u\\100%PATH%\\factory.exe"
+            ),
+            "\"C:\\Users\\u\\100%%PATH%%\\factory.exe\" retro push\r\n"
+        );
+        assert_eq!(
+            to_binary(
+                "30 8 * * * python3 /s/runtime/factory.py retro push\n",
+                "sh",
+                "/home/u/$x/factory"
+            ),
+            "30 8 * * * '/home/u/$x/factory' retro push\n"
         );
         assert_eq!(
             to_binary(
