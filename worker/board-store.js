@@ -101,19 +101,20 @@ function rowColumns(row) {
 const sameColumns = (a, b) => a.num === b.num && a.capture === b.capture && a.names === b.names;
 
 // A row's entry in its page's meta, from its JSON: the byte length for an unfinished row, else
-// [length, stage, project, rank time, id key], the fields slimBoard reads. The id key is null
-// for an object id, which no other row's id equals.
+// [length, stage, project, rank time, id], the fields slimBoard reads. A missing id is left off,
+// and an object id is [], which, parsed anew each time, equals no other id, as an object does.
 function rowMeta(row, json) {
   const length = byteLength(json);
   if (!terminal(row)) return length;
   const id = row.id;
-  return [
+  const meta = [
     length,
     row.stage,
     typeof row.project === "string" ? row.project : "",
     Date.parse(row.done || row.updated) || 0,
-    id !== null && typeof id === "object" ? null : typeof id + ":" + id,
   ];
+  if (id !== undefined) meta.push(id !== null && typeof id === "object" ? [] : id);
+  return meta;
 }
 
 // A document's top-level keys in order, each with its value's JSON. An array jobs value is
@@ -738,18 +739,14 @@ export class BoardRows {
   // decoded once to fill its meta in.
   buildSlim(state) {
     const counts = Object.create(null);
-    // The SLIM_RECENT rows of each stage with the highest rank, an earlier row first on a tie, as
-    // slimBoard's stable sort picks them.
-    const top = { merged: [], closed: [] };
     const counted = { merged: new Set(), closed: new Set() };
-    // Row i sits in pages[page[i]] at bytes start[i] to end[i]; keep[i] says it goes out. Plain
-    // arrays, since an object per row costs more than the rest of the loop.
-    const pages = [],
-      page = [],
-      start = [],
-      end = [],
-      keep = [],
-      rank = [];
+    // The rows that go out, as [board position, page bytes, start, end]: every unfinished row,
+    // and the SLIM_RECENT rows of each finished stage with the highest rank, an earlier row
+    // first on a tie, as slimBoard's stable sort picks them. Only these get an array, since one
+    // per row costs more than the rest of the loop.
+    const kept = [];
+    const top = { merged: [], closed: [] };
+    let i = 0;
     for (const p of this.sql
       .exec("SELECT page, meta, CAST(json AS BLOB) AS json FROM board_pages ORDER BY page")
       .toArray()) {
@@ -766,45 +763,42 @@ export class BoardRows {
           p.page,
         );
       }
-      pages.push(bytes);
       let at = 1;
       for (const meta of metas) {
-        const i = start.length;
-        const active = typeof meta === "number";
-        page.push(pages.length - 1);
-        start.push(at);
-        at += active ? meta : meta[0];
-        end.push(at);
-        at++;
-        keep.push(active);
-        rank.push(active ? 0 : meta[3]);
-        if (active) continue;
-        const stage = meta[1],
+        const start = at;
+        if (typeof meta === "number") {
+          at += meta + 1;
+          kept.push([i++, bytes, start, start + meta]);
+          continue;
+        }
+        const length = meta[0],
+          stage = meta[1],
           project = meta[2],
-          key = meta[4];
+          rank = meta[3];
+        at += length + 1;
         const t = top[stage];
-        if (t.length < SLIM_RECENT || rank[i] > rank[t[t.length - 1]]) {
+        if (t.length < SLIM_RECENT || rank > t[t.length - 1][0]) {
           let j = t.length;
-          while (j > 0 && rank[t[j - 1]] < rank[i]) j--;
-          t.splice(j, 0, i);
+          while (j > 0 && t[j - 1][0] < rank) j--;
+          t.splice(j, 0, [rank, [i, bytes, start, start + length]]);
           if (t.length > SLIM_RECENT) t.pop();
         }
-        if (key !== null) {
-          if (counted[stage].has(key)) continue;
-          counted[stage].add(key);
-        }
+        i++;
+        // slimBoard counts each id once per stage; a row with no id has meta[4] undefined.
+        if (counted[stage].has(meta[4])) continue;
+        counted[stage].add(meta[4]);
         counts[project] ??= { merged: 0, closed: 0 };
         counts[project][stage] += 1;
       }
     }
-    for (const i of [...top.merged, ...top.closed]) keep[i] = true;
+    for (const t of Object.values(top)) for (const [, span] of t) kept.push(span);
+    kept.sort((a, b) => a[0] - b[0]);
     const head = setPair(state.head, "slim", JSON.stringify({ recent: SLIM_RECENT, counts }));
     const [open, close] = boardText(head, "\0").split("\0");
     const parts = [open];
-    for (let i = 0; i < keep.length; i++) {
-      if (!keep[i]) continue;
+    for (const [, bytes, start, end] of kept) {
       if (parts.length > 1) parts.push(",");
-      parts.push(pages[page[i]].subarray(start[i], end[i]));
+      parts.push(bytes.subarray(start, end));
     }
     parts.push(close);
     return new Blob(parts);
