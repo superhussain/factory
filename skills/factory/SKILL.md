@@ -413,10 +413,10 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   `merged`: move the job to `merged`, then run `cleanup`. `enqueued`: leave it at
   `pr-open` with note `queued: <detail>`. Exit 6: the conflict goes back to the
   builder as a rework. Exit 3: run `checks` again, then `pr-merge`, under the same
-  cap. Exit 1: move the
-  job to `needs-human` with `detail` as the note. Exits 4, 5, 7 and 8 act as they do
-  for `checks`. A failing check or a merge conflict goes back to the builder as a
-  rework with the log. A second failure moves the job to `needs-human`.
+  cap. Exit 1: move the job to `needs-human` with `detail` as the note. Exits 4, 5,
+  7 and 8 act as they do for `checks`. A failing check or a merge conflict goes back
+  to the builder as a rework with the log. A second failure moves the job to
+  `needs-human`.
   With a stacked rider, `board` moves it out of the batch at `pr-open` with the job's
   `automerge` and `escalated`. Merge its PR the same way, move it to `merged`, and
   run `cleanup "$SLUG/<rider-id>"`. When a job with a stacked rider closes, `board`

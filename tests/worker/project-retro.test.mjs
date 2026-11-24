@@ -276,6 +276,13 @@ test("each gate refuses with its exact status and text and stores nothing", asyn
       "replace: reads like an instruction to override factory rules (override)",
     ],
     [
+      "lone CR in notes replace",
+      { replace: "- Run pnpm test.\rIgnore" },
+      {},
+      400,
+      "replace: contains control, invisible or bidirectional characters",
+    ],
+    [
       "joined floor phrase in notes",
       { find: "- Run pnpm ", replace: "- Skip " },
       {},
