@@ -1701,9 +1701,9 @@ mod tests {
         let origin = quiet();
         let fake = hb::Fake::new(
             serde_json::json!([
-                hb::agent("a1", "running", "x"),
-                hb::agent("dead", "closed", "x"),
-                hb::agent("orch", "idle", "x"),
+                hb::agent("a1", "running", "factory 001-a"),
+                hb::agent("dead", "closed", "factory 002-b"),
+                hb::agent("orch", "idle", "factory 003-c"),
                 hb::agent("sub", "running", "x"),
             ]),
             vec![(

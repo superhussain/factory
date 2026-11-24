@@ -9,6 +9,11 @@
 //! leaves labels out of the plain list. A claim whose agent is
 //! gone, closed, or idle with no running child is left to age out, so takeover and `stuck` work
 //! as before.
+//!
+//! The agent must also carry the title pickup launches the job's sessions with, `factory <id>` or
+//! `babysit <id>`. A long-lived agent that changed its session tag, left a job without releasing
+//! it, or kept a stale link from idea pickup is titled for another job or for none, so its claims
+//! age out.
 
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -92,7 +97,11 @@ pub(crate) fn beat_with(
         let stamp = now();
         let mut ids = Vec::new();
         for (i, agent) in due {
-            let live = match status_of(all, &agent) {
+            let id = board["jobs"][i]["id"].as_str().unwrap_or_default();
+            let Some(entry) = entry_of(all, &agent).filter(|a| titled_for(a, id)) else {
+                continue;
+            };
+            let live = match entry["status"].as_str() {
                 Some("running") => true,
                 Some("closed") | None => false,
                 Some(_) => *children
@@ -145,13 +154,21 @@ fn due_claims(board: &Value, device: &str, server: &str, cutoff: i64) -> Vec<(us
         .collect()
 }
 
-/// The status a `paseo ls --json` list gives agent; the last entry wins, as with a dict.
-fn status_of<'a>(list: &'a Value, agent: &str) -> Option<&'a str> {
+/// Agent's entry in a `paseo ls --json` list; the last one wins, as with a dict.
+fn entry_of<'a>(list: &'a Value, agent: &str) -> Option<&'a Value> {
     list.as_array()?
         .iter()
         .rev()
-        .find(|a| a["id"].as_str() == Some(agent))?["status"]
+        .find(|a| a["id"].as_str() == Some(agent))
+}
+
+/// Whether an agent carries a title pickup launches job id's sessions with: `factory <id>` or
+/// `babysit <id>`. An agent under any other title may have moved on from the job, or never been
+/// its session, so its liveness says nothing about the claim.
+fn titled_for(agent: &Value, id: &str) -> bool {
+    agent["name"]
         .as_str()
+        .is_some_and(|n| n == format!("factory {id}") || n == format!("babysit {id}"))
 }
 
 /// Whether a `paseo ls --json` list holds a running agent.
@@ -297,13 +314,14 @@ pub(crate) mod tests {
                 )
             })
             .collect();
+        let t = |n: usize| format!("factory 00{n}-x");
         let fake = Fake::new(
             json!([
-                agent("run", "running", "x"),
-                agent("waiting", "idle", "x"),
-                agent("idle", "idle", "x"),
-                agent("gone", "closed", "x"),
-                agent("idle-kid", "idle", "x"),
+                agent("run", "running", &t(1)),
+                agent("waiting", "idle", &t(2)),
+                agent("idle", "idle", &t(3)),
+                agent("gone", "closed", &t(4)),
+                agent("idle-kid", "idle", &t(6)),
             ]),
             vec![
                 ("waiting", json!([agent("sub", "running", "s")])),
@@ -357,11 +375,11 @@ pub(crate) mod tests {
         let home = home_for("heartbeat-patch", &origin);
         let fake = Fake::new(
             json!([
-                agent("live1", "running", "x"),
-                agent("dead", "closed", "x"),
-                agent("waiter", "idle", "x"),
+                agent("live1", "running", "factory 001-a"),
+                agent("dead", "closed", "factory 002-b"),
+                agent("waiter", "idle", "babysit 003-c"),
                 agent("sub", "running", "x"),
-                agent("idle", "idle", "x"),
+                agent("idle", "idle", "factory 004-d"),
             ]),
             vec![("waiter", json!([agent("sub", "running", "x")]))],
         );
@@ -424,5 +442,59 @@ pub(crate) mod tests {
         let (ids, methods) = beat_on("heartbeat-silent", &board, &fake);
         assert!(ids.is_empty());
         assert_eq!(methods, ["GET"]);
+    }
+
+    /// A running agent refreshes only the job its title names. One titled for another job, as a
+    /// stale link from idea pickup leaves, or titled by hand, leaves the claim to age out, and an
+    /// idle one is not asked about children.
+    #[test]
+    fn only_an_agent_titled_for_the_job_refreshes_it() {
+        let old = minutes_ago(30);
+        let board = board_of(vec![
+            job(
+                "001-a",
+                "build",
+                claim("mac", "s1", &old),
+                Some((SERVER, "mine")),
+            ),
+            job(
+                "002-b",
+                "build",
+                claim("mac", "s2", &old),
+                Some((SERVER, "stale")),
+            ),
+            job(
+                "003-c",
+                "build",
+                claim("mac", "s3", &old),
+                Some((SERVER, "by-hand")),
+            ),
+            job(
+                "004-d",
+                "build",
+                claim("mac", "s4", &old),
+                Some((SERVER, "prefix")),
+            ),
+            job(
+                "005-e",
+                "build",
+                claim("mac", "s5", &old),
+                Some((SERVER, "idle-other")),
+            ),
+        ]);
+        let fake = Fake::new(
+            json!([
+                agent("mine", "running", "babysit 001-a"),
+                agent("stale", "running", "factory 009-later-idea"),
+                agent("by-hand", "running", "Design review framework"),
+                agent("prefix", "running", "factory 004-d daemon claim heartbeats"),
+                agent("idle-other", "idle", "factory 010-other"),
+            ]),
+            vec![("idle-other", json!([agent("kid", "running", "x")]))],
+        );
+        let (ids, methods) = beat_on("heartbeat-title", &board, &fake);
+        assert_eq!(ids, ["001-a"]);
+        assert_eq!(methods, ["GET", "PATCH"]);
+        assert_eq!(fake.asked.borrow().len(), 1);
     }
 }
