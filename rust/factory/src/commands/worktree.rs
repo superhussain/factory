@@ -1458,6 +1458,81 @@ mod tests {
         assert_eq!(FETCH_TIMEOUT, Duration::from_secs(60));
     }
 
+    const FAKE_GIT_CHILD: &str = "FACTORY_FAKE_GIT_CHILD";
+
+    /// Re-run this test in a child process whose PATH starts with a `git` wrapper that handles `fetch` with
+    /// `fetch_body` and passes every other call to the real git, so the parent's own git calls stay untouched.
+    #[cfg(unix)]
+    fn in_fake_git_child(name: &str, fetch_body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::var("PATH").unwrap();
+        let real = path
+            .split(':')
+            .map(|d| Path::new(d).join("git"))
+            .find(|p| p.is_file())
+            .unwrap();
+        let dir = temp_dir("fake-git");
+        let script = dir.join("git");
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = fetch ]; then\n{fetch_body}\n  fi\ndone\nexec {} \"$@\"\n",
+                real.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--nocapture"])
+            .env(FAKE_GIT_CHILD, dir.display().to_string())
+            .env("PATH", format!("{}:{path}", dir.display()))
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fetch_has_no_prompt_and_a_timeout() {
+        let name = "commands::worktree::tests::fetch_has_no_prompt_and_a_timeout";
+        let Ok(dir) = std::env::var(FAKE_GIT_CHILD) else {
+            in_fake_git_child(
+                name,
+                "    echo \"$GIT_TERMINAL_PROMPT\" > \"$(dirname \"$0\")/prompt\"",
+            );
+            return;
+        };
+        let t = Lineage::new("wt-no-prompt");
+        assert_eq!(t.problem(None), None);
+        let seen = fs::read_to_string(Path::new(&dir).join("prompt")).unwrap();
+        assert_eq!(seen.trim(), "0");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hung_fetch_times_out() {
+        let name = "commands::worktree::tests::hung_fetch_times_out";
+        if std::env::var(FAKE_GIT_CHILD).is_err() {
+            in_fake_git_child(name, "    exec sleep 300");
+            return;
+        }
+        let t = Lineage::new("wt-hung-fetch");
+        let started = std::time::Instant::now();
+        assert_eq!(
+            t.problem(None),
+            Some(format!(
+                "unsafe checkout: git fetch origin main timed out after 60 s in {}",
+                t.repo.display()
+            ))
+        );
+        assert!(started.elapsed() >= Duration::from_secs(60));
+    }
+
     /// Push one more commit to origin's job branch from the seed.
     fn push_job(t: &Lineage, message: &str) -> String {
         let branch = format!("factory/{JOB}");
