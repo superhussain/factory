@@ -147,12 +147,14 @@ class PreReviewTest(IsolatedTestCase):
                  -signal.SIGTERM, "canceled"),
                 ("transient", check("unit", "print('ECONNRESET'); raise SystemExit(1)"), 1, "transient, retried"),
                 ("deterministic", check("unit", "raise SystemExit(1)"), 1, "deterministic"))
+        real = factory.run_check
         for row, unit, exit, cell in rows:
             with self.subTest(row=row):
                 if record.exists():
                     record.unlink()
                 self.base([check("lint", "pass"), unit])
-                with mock.patch.object(factory, "PRE_REVIEW_TIMEOUT", 1):
+                with mock.patch.object(factory, "run_check", lambda argv, cwd, log, timeout: real(
+                        argv, cwd, log, 1 if row == "budget" and Path(log).name == "unit.log" else timeout)):
                     code, out, err = self.run_gate()
                 self.assertEqual((code, err), (1, ""))
                 lint, result = json.loads(out)["checks"]
