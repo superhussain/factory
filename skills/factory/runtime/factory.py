@@ -103,12 +103,12 @@
                                             failed or refused 1, pending after 120 seconds 3, a bad or
                                             stacked pr 4, a gh problem 5
   factory.py pr-merge <project-slug>/<job-id>
-                                            check the job PR can merge, then merge it pinned to the checked
-                                            head, or queue it when the repo has a merge queue: one JSON line
-                                            of pr, status and detail; merged or enqueued exits 0, blocked,
-                                            draft or refused 1, behind or unknown 3, a bad or stacked pr 4,
-                                            a gh problem 5, a conflict 6, an escalated job 7, an autonomy
-                                            hold 8
+                                            check the job PR can merge, then merge it pinned to the head
+                                            checks passed, or queue it when the repo has a merge queue: one
+                                            JSON line of pr, status and detail; merged or enqueued exits 0,
+                                            blocked, draft or refused 1, behind, unknown or a head checks
+                                            did not pass 3, a bad or stacked pr 4, a gh problem 5, a
+                                            conflict 6, an escalated job 7, an autonomy hold 8
   factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
   factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
   factory.py escalation <project-slug>/<job-id> <round>
@@ -9336,6 +9336,7 @@ def checks_cmd(target, *args):
                     print(f"{c['bucket']} {c['name']}")
                 if failing:
                     fail("failing checks: " + ", ".join(failing), 1)
+                checked_head_write(home, job_id, sha)
                 return
             if behind and sha != updated_from:
                 n = pr.rsplit("/", 1)[1]
@@ -9359,6 +9360,7 @@ def checks_cmd(target, *args):
             fail("gh api graphql never gave a usable check list", 5)
         if not checks and not problem and waited >= CHECKS_REGISTER:
             print("no checks reported")
+            checked_head_write(home, job_id, sha)
             return
         if elapsed >= timeout:
             if problem:
@@ -14150,6 +14152,18 @@ def autonomy_hold_write(home, job_id):
         patch_job(data, job_id, {"automerge": False, "needs": needs, "note": AUTONOMY_HOLD_NOTE})
         return dump_board(data), needs
     return cas(home, "/api/board", change)
+
+
+def checked_head_write(home, job_id, sha):
+    """Record the head checks passed as the job's checked_head, with no write when the row is missing or holds it."""
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None or job.get("checked_head") == sha:
+            return None, None
+        patch_job(data, job_id, {"checked_head": sha})
+        return dump_board(data), None
+    cas(home, "/api/board", change)
 
 
 def autonomy_hold_pass(home, data, dry):
