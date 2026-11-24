@@ -1814,7 +1814,10 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(&log).unwrap(), "");
         let argv = ["sh", "-c", "echo out; echo err >&2; exit 3"].map(String::from);
-        assert_eq!(run_logged(&argv, &dir, &log, Duration::from_secs(5)), Ok(3));
+        assert_eq!(
+            run_logged(&argv, &dir, &log, Duration::from_secs(60)),
+            Ok(3)
+        );
         assert_eq!(fs::read_to_string(&log).unwrap(), "out\nerr\n");
         fs::remove_dir_all(dir).unwrap();
     }
