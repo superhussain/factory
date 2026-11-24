@@ -161,6 +161,7 @@ jobs:
       - run: pnpm run test:paseo-plugin
   # The host binary keeps panic = "abort"; cargo test needs unwinding, so build and test are separate jobs.
   # rust-cache keys on Cargo.lock, Cargo.toml and rustc, so a source-only change reuses the compiled dependencies.
+  # warm.yml saves the same keys, and the incremental artifacts, from main, so a PR's first run starts warm too.
   rust-build:
     needs: plan
     if: needs.plan.outputs.all != 'true' && needs.plan.outputs.rust != 'true'

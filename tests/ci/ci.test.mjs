@@ -204,7 +204,10 @@ test("rust-build restores and saves this PR's incremental artifacts around an in
   assert.ok(cache < at("Restore incremental artifacts"));
   assert.ok(at("Restore incremental artifacts") < at("Build linux-x64"));
   assert.ok(at("Build linux-x64") < at("Save incremental artifacts"));
-  assert.equal(steps[at("Build linux-x64")].run, "CARGO_INCREMENTAL=1 cargo build --profile host --locked");
+  assert.equal(
+    steps[at("Build linux-x64")].run,
+    "CARGO_INCREMENTAL=1 cargo build --profile host --locked",
+  );
   const path = "rust/target/host/incremental";
   const prefix = "v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-";
   const key = `${prefix}\${{ github.run_id }}-\${{ github.run_attempt }}`;

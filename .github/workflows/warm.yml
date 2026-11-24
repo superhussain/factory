@@ -1,0 +1,109 @@
+# Warms the Rust caches CI restores. CI runs only on pull requests, and a PR restores caches saved on main but
+# never another PR's, so without this every PR's first run compiled every dependency from scratch.
+# rust-cache keys on the job id, the toolchain, CARGO* and RUST* variables and the manifests. Each job here has
+# its ci.yml job's id, rust-cache inputs and environment, so it saves the exact key that job looks up; a PR
+# that finds it skips its own save. tests/ci/warm.test.mjs holds the two files in step.
+name: Warm caches
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+# Only main's newest head is worth caching.
+concurrency:
+  group: warm-caches
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  rust-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v1-rust
+          workspaces: rust
+      # A PR's first rust-build restores these by prefix, as it restores its own previous run's.
+      - name: Restore incremental artifacts
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/host/incremental
+          key: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-
+      - name: Build linux-x64
+        run: CARGO_INCREMENTAL=1 cargo build --profile host --locked
+      - name: Save incremental artifacts
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/host/incremental
+          key: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+  # CI's targets builds the binary only when rust-build has not cached it yet, and never saves its rust cache,
+  # so its key is saved only here.
+  targets:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v1-rust
+          workspaces: rust
+      - name: Build the factory binary
+        run: cargo build --profile host --locked
+  rust-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v1-rust
+          workspaces: rust
+      # The compiled test dependencies are the cache; CI runs the tests.
+      - name: Build the tests
+        run: cargo test --locked --no-run
+  rust-check:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain and targets
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-darwin x86_64-pc-windows-gnu
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v1-rust
+          workspaces: rust
+      - name: Check darwin-arm64
+        run: cargo check --locked --target aarch64-apple-darwin
+      - name: Check windows-x64
+        run: cargo check --locked --target x86_64-pc-windows-gnu
