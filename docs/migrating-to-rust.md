@@ -229,13 +229,16 @@ On Windows, move `py -3` callers to `factory.exe` now.
 
 Find them:
 
-| Where                            | Find with                                                                                                 |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| crontab                          | `crontab -l \| grep factory.py`                                                                           |
-| launchd                          | `grep -l factory.py ~/Library/LaunchAgents/*.plist`                                                       |
-| Windows wrappers                 | `findstr /m factory.py %USERPROFILE%\.config\*.cmd`                                                       |
-| Windows tasks                    | `schtasks /Query /FO LIST /V \| findstr factory.py`                                                       |
-| Home config and schedule prompts | `grep -l factory.py <home>/*.md <home>/*.json`, then the same in any folder that holds your agent prompts |
+| Where                            | Find with                                                                                                                                                       |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| crontab                          | `crontab -l \| grep factory.py`                                                                                                                                 |
+| launchd                          | `grep -l factory.py ~/Library/LaunchAgents/*.plist`                                                                                                             |
+| Windows wrappers                 | `findstr /m factory.py %USERPROFILE%\.config\*.cmd`                                                                                                             |
+| Windows tasks                    | `schtasks /Query /FO LIST /V \| findstr factory.py`                                                                                                             |
+| Home config and schedule prompts | `find <home> -maxdepth 1 -type f \( -name '*.md' -o -name '*.json' \) -exec grep -l factory.py {} +`, then the same in any folder that holds your agent prompts |
+
+Each search prints the files or lines that name `factory.py`. No output means no
+matches.
 
 Fix them:
 
