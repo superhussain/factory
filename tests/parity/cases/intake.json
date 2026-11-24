@@ -12066,6 +12066,31 @@
       "from": "tests/cli/test_contract.py::LegacyCommandContractTest.test_real_builds_ideas_stuck_and_next_json_shapes"
     },
     {
+      "id": "intake/stuck-skips-a-stale-batched-rider",
+      "argv": [
+        "--home",
+        "{home}",
+        "stuck"
+      ],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "tag"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"090-sample-export-csv\",\"project\":\"sample\",\"stage\":\"build\",\"round\":1,\"updated\":\"2020-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"tag\",\"since\":\"2020-01-01T00:00:00Z\",\"seen\":\"2020-01-01T00:00:00Z\"}},{\"id\":\"091-sample-typo\",\"project\":\"sample\",\"stage\":\"build\",\"round\":1,\"updated\":\"2020-01-01T00:00:00Z\",\"refs\":[{\"id\":\"090-sample-export-csv\",\"kind\":\"batched-into\"}]}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_batch.py::BatchTest.test_stuck_and_inflight_skip_riders"
+    },
+    {
       "id": "intake/ideas-actual-missing-empty-and-conflicting-commands-keep-exit-codes",
       "argv": ["--home", "{home}", "next"],
       "home": "intake",

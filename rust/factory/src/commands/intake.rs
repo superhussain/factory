@@ -6292,6 +6292,16 @@ mod tests {
     }
 
     #[test]
+    fn stuck_and_inflight_skip_riders() {
+        let now = crate::shared::time::now();
+        let lead = json!({"id": "090-sample-export-csv", "project": "sample", "stage": "build", "round": 1, "updated": now});
+        let rider = json!({"id": "091-sample-typo", "project": "sample", "stage": "build", "round": 1, "updated": now,
+            "refs": [{"id": "090-sample-export-csv", "kind": "batched-into"}]});
+        let board = json!({"updated": "", "jobs": [lead, rider]});
+        assert_eq!(inflight_count(&board, Some("sample"), 120).unwrap(), 1);
+    }
+
+    #[test]
     fn a_string_claim_fails_unclaim_with_exit_1() {
         let board = json!({"updated": "", "jobs": [{"id": "006-b", "project": "sample", "stage": "idea", "claim": "x"}]});
         let got = malformed("unclaim-string", false, board, |home| {
