@@ -408,13 +408,19 @@ fn copy_escape_tail(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::consts::{JOB_REL, SLUG};
+    use crate::shared::consts::{JOB_REL, PROJECT_SLUG, SLUG};
 
     #[test]
     fn slug_is_unicode_and_full() {
         assert!(SLUG.is_full("é"));
         assert!(!SLUG.is_full("a\n"));
         assert!(SLUG.is_full("a-b_c"));
+    }
+
+    #[test]
+    fn project_slug_is_ascii() {
+        assert!(PROJECT_SLUG.is_full("a-b_C9"));
+        assert!(!PROJECT_SLUG.is_full("café"));
     }
 
     #[test]
