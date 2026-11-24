@@ -1,5 +1,6 @@
 # CI's rust-test shards run with nextest. A shard lasts at least as long as its slowest test, so the slow tests
-# start first instead of after the hundreds of fast ones ahead of them in name order.
+# start first instead of after the hundreds of fast ones ahead of them in name order. Shortening one of these
+# tests' waits would change what it asserts, so the 60 s test sets the floor of a rust-test run.
 
 # Waits out its 60 s fetch timeout by design.
 [[profile.default.overrides]]
