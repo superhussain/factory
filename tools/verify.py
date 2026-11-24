@@ -14,11 +14,7 @@ HOSTED_SCRIPTS = ("test:assets", "test:auth", "test:protocol", "test:local", "te
 
 def plan(group):
     """Return [(id, argv)] for a group, or None when pnpm is required but missing."""
-    discover = [sys.executable, "-B", "-m", "unittest", "discover"]
-    device = [
-        ("cli-unittest", discover + ["-s", "tests/cli", "-p", "test_*.py"]),
-        ("install-unittest", discover + ["-s", "tests/tools", "-p", "test_install.py"]),
-    ]
+    device = [("rust-test", ["cargo", "test", "--locked", "--manifest-path", "rust/Cargo.toml"])]
     if group == "device":
         return device
     pnpm = shutil.which("pnpm")

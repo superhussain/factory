@@ -1,10 +1,6 @@
 {
   "checks": [
     { "name": "lint", "run": ["mise", "exec", "--", "pnpm", "run", "lint"] },
-    { "name": "format", "run": ["mise", "exec", "--", "pnpm", "run", "format:check"] },
-    {
-      "name": "cli",
-      "run": ["python3", "-B", "-m", "unittest", "discover", "-s", "tests/cli", "-p", "test_*.py"]
-    }
+    { "name": "format", "run": ["mise", "exec", "--", "pnpm", "run", "format:check"] }
   ]
 }

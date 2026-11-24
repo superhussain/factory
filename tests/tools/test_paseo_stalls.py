@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from support import SKILL
+SKILL = Path(__file__).resolve().parents[2] / "skills" / "factory"
 
 SCRIPT = SKILL / "runtime" / "paseo_stalls.py"
 ID = "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
