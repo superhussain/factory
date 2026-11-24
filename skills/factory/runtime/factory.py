@@ -9319,6 +9319,7 @@ def checks_cmd(target, *args):
                     print(f"{c['bucket']} {c['name']}")
                 if failing:
                     fail("failing checks: " + ", ".join(failing), 1)
+                checked_head_write(home, job_id, sha)
                 return
             if behind and sha != updated_from:
                 n = pr.rsplit("/", 1)[1]
@@ -9342,6 +9343,7 @@ def checks_cmd(target, *args):
             fail("gh api graphql never gave a usable check list", 5)
         if not checks and not problem and waited >= CHECKS_REGISTER:
             print("no checks reported")
+            checked_head_write(home, job_id, sha)
             return
         if elapsed >= timeout:
             if problem:
@@ -14133,6 +14135,18 @@ def autonomy_hold_write(home, job_id):
         patch_job(data, job_id, {"automerge": False, "needs": needs, "note": AUTONOMY_HOLD_NOTE})
         return dump_board(data), needs
     return cas(home, "/api/board", change)
+
+
+def checked_head_write(home, job_id, sha):
+    """Record the head checks passed as the job's checked_head, with no write when the row is missing or holds it."""
+    def change(text):
+        data = load_board(text)
+        job = next((j for j in data["jobs"] if j.get("id") == job_id), None)
+        if job is None or job.get("checked_head") == sha:
+            return None, None
+        patch_job(data, job_id, {"checked_head": sha})
+        return dump_board(data), None
+    cas(home, "/api/board", change)
 
 
 def autonomy_hold_pass(home, data, dry):

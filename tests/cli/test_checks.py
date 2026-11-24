@@ -156,6 +156,21 @@ class ChecksTest(IsolatedTestCase):
         self.assertEqual(calls[1:3], [("pr_behind", PR), ("head_checks", PR, "a" * 40)])
         self.assertEqual(self.now, 20)
 
+    def test_passing_records_the_checked_head(self):
+        for polls, out in (([listed(("pass", "ci"))], "pass ci\n"), ([listed()], "no checks reported\n")):
+            with self.subTest(out):
+                code, printed, _, _ = self.checks(OPEN, polls, behind=[(0, NEW, "main")])
+                self.assertEqual((code, printed), (0, out))
+                puts = [json.loads(body) for method, _, _, body in self.requests if method == "PUT"]
+                self.assertEqual(len(puts), 1)
+                self.assertEqual(next(j for j in puts[0]["jobs"] if j["id"] == JOB)["checked_head"], NEW)
+
+    def test_unchanged_checked_head_makes_no_write(self):
+        code, _, _, _ = self.checks(OPEN, [listed(("pass", "ci"))], behind=[(0, NEW, "main")],
+                                    extra={"checked_head": NEW})
+        self.assertEqual(code, 0)
+        self.assertEqual([m for m, _, _, _ in self.requests if m == "PUT"], [])
+
     def test_skipping_counts_as_passing(self):
         code, out, err, _ = self.checks(OPEN, [listed(("pass", "test"), ("skipping", "lint"))])
         self.assertEqual((code, out, err), (0, "pass test\nskipping lint\n", ""))
