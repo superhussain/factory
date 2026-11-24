@@ -1,6 +1,17 @@
 {
   "checks": [
     { "name": "lint", "run": ["mise", "exec", "--", "pnpm", "run", "lint"] },
-    { "name": "format", "run": ["mise", "exec", "--", "pnpm", "run", "format:check"] }
+    { "name": "format", "run": ["mise", "exec", "--", "pnpm", "run", "format:check"] },
+    {
+      "name": "cli",
+      "run": [
+        "mise",
+        "exec",
+        "--",
+        "sh",
+        "-c",
+        "cd rust && cargo test --locked </dev/null && cargo build --profile host --locked && cd .. && node tests/parity/run.mjs --bin rust/target/host/factory"
+      ]
+    }
   ]
 }
