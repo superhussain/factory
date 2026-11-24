@@ -717,6 +717,10 @@ pub fn prompt_cmd(call: &Call) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use crate::shared::fs::temp_dir;
+    use serde_json::json;
+    use std::fs;
 
     #[test]
     #[should_panic(expected = "hit the regex backtrack limit; stopping")]
@@ -724,10 +728,6 @@ mod tests {
         crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
         check_untrusted("ghp_ eyJ plain text");
     }
-    #[cfg(unix)]
-    use crate::shared::fs::temp_dir;
-    use serde_json::json;
-    use std::fs;
 
     #[test]
     fn normpath_matches_python() {

@@ -3615,6 +3615,9 @@ fn has_envelope_tag(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::fs::temp_dir;
+    use serde_json::json;
+    use std::time::{Duration, Instant};
 
     #[test]
     #[should_panic(expected = "hit the regex backtrack limit; stopping")]
@@ -3622,9 +3625,6 @@ mod tests {
         crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
         check_untrusted("ghp_ eyJ plain text");
     }
-    use crate::shared::fs::temp_dir;
-    use serde_json::json;
-    use std::time::{Duration, Instant};
 
     const SLUG: &str = "-home-u--paseo-worktrees-ab12-factory-1017-add-x";
 

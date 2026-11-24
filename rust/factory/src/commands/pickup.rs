@@ -9464,6 +9464,12 @@ fn autonomy_hold_pass(io: &mut Io, home: &Path, data: &mut Value, dry: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use std::ffi::OsString;
+    use std::rc::Rc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Mutex, MutexGuard};
 
     #[test]
     #[should_panic(expected = "hit the regex backtrack limit; stopping")]
@@ -9471,12 +9477,6 @@ mod tests {
         crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
         check_untrusted("ghp_ eyJ plain text");
     }
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-    use std::ffi::OsString;
-    use std::rc::Rc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Mutex, MutexGuard};
 
     /// Parity writes the host-status "os" field as {os}, so only this test catches a wrong label.
     #[test]
