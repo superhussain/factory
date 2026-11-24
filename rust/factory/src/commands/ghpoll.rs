@@ -411,7 +411,11 @@ pub(crate) struct Cached {
     /// False once the daemon can't answer, so the rest of the run goes straight to gh.
     live: bool,
     every: f64,
+    /// Each key read through the daemon and the version of its last answer.
     held: HashMap<Key, u64>,
+    /// The keys read since the last sleep. Only these are waited on, so a key the command read
+    /// once, like checks' first state read, leaves the daemon's poll list.
+    read: HashSet<Key>,
 }
 
 impl Cached {
@@ -428,6 +432,7 @@ impl Cached {
             live,
             every,
             held: HashMap::new(),
+            read: HashSet::new(),
         }
     }
 
@@ -457,7 +462,10 @@ impl Cached {
         // Version 0 is an answer the daemon could not keep; the next read asks again.
         match reply["version"].as_u64()? {
             0 => self.held.remove(&key),
-            v => self.held.insert(key, v),
+            v => {
+                self.read.insert(key.clone());
+                self.held.insert(key, v)
+            }
         };
         Some(out)
     }
@@ -482,6 +490,8 @@ impl Host for Cached {
 
     fn sleep(&mut self, secs: f64) {
         let end = self.direct.monotonic() + secs;
+        let read = std::mem::take(&mut self.read);
+        self.held.retain(|k, _| read.contains(k));
         while self.live && !self.held.is_empty() {
             let left = end - self.direct.monotonic();
             if left <= 0.0 {
@@ -945,6 +955,11 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(direct_calls.load(Ordering::SeqCst), 0);
         assert!(h.live);
+        // A key read before a sleep stays held; one not read since the last sleep does not.
+        h.sleep(0.0);
+        assert_eq!(h.held.len(), 1);
+        h.sleep(0.0);
+        assert!(h.held.is_empty());
         // A write never goes to the daemon.
         h.gh(&["pr", "update-branch", PR]);
         assert_eq!(direct_calls.load(Ordering::SeqCst), 1);
