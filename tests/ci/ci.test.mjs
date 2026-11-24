@@ -169,7 +169,8 @@ test("rust-build caches the binary under the rust key, and targets restores it o
   const { targets, "rust-build": build } = workflow.jobs;
   const key = "${{ needs.plan.outputs.rust-key }}-bin";
   const binary = "rust/target/host/factory";
-  const save = build.steps.find((step) => action(step) === "actions/cache/save");
+  const save = build.steps.find((step) => step.name === "Cache the factory binary for targets");
+  assert.equal(action(save), "actions/cache/save");
   assert.deepEqual(save.with, { path: binary, key });
   const buildStep = build.steps.findIndex((step) => step.name === "Build linux-x64");
   assert.ok(build.steps.indexOf(save) > buildStep);
@@ -189,6 +190,27 @@ test("rust-build caches the binary under the rust key, and targets restores it o
   const nx = targets.steps.findIndex((step) => step.name === "Nx affected");
   assert.ok(onMiss.every((step) => targets.steps.indexOf(step) > restore));
   assert.ok(onMiss.every((step) => targets.steps.indexOf(step) < nx));
+});
+
+test("rust-build restores and saves this PR's incremental artifacts around an incremental build", () => {
+  const steps = workflow.jobs["rust-build"].steps;
+  const at = (name) => steps.findIndex((step) => step.name === name);
+  const cache = steps.findIndex((step) => action(step) === "Swatinem/rust-cache");
+  const restore = steps[at("Restore incremental artifacts")];
+  const save = steps[at("Save incremental artifacts")];
+  assert.equal(action(restore), "actions/cache/restore");
+  assert.equal(action(save), "actions/cache/save");
+  // After rust-cache, whose restore would otherwise land on top; saved before its post step cleans target.
+  assert.ok(cache < at("Restore incremental artifacts"));
+  assert.ok(at("Restore incremental artifacts") < at("Build linux-x64"));
+  assert.ok(at("Build linux-x64") < at("Save incremental artifacts"));
+  assert.equal(steps[at("Build linux-x64")].run, "CARGO_INCREMENTAL=1 cargo build --profile host --locked");
+  const path = "rust/target/host/incremental";
+  const prefix = "v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-";
+  const key = `${prefix}\${{ github.run_id }}-\${{ github.run_attempt }}`;
+  // A fresh key per run, since a saved key never changes; restore takes the newest with the toolchain's prefix.
+  assert.deepEqual(restore.with, { path, key, "restore-keys": prefix });
+  assert.deepEqual(save.with, { path, key });
 });
 
 test("no job runs the Python CLI suites or sets up Python, and the workflow reads no secret", () => {
@@ -229,7 +251,7 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
   }
   assert.deepEqual(runs(build), [
     "rustup toolchain install",
-    "cargo build --profile host --locked",
+    "CARGO_INCREMENTAL=1 cargo build --profile host --locked",
     [
       'cargo_home="${CARGO_HOME:-$HOME/.cargo}"',
       'rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"',

@@ -179,8 +179,24 @@ jobs:
         with:
           prefix-key: v1-rust
           workspaces: rust
+      # rust-cache keeps only dependencies and sets CARGO_INCREMENTAL=0, so each source change compiled the factory
+      # crate from scratch. This PR's previous build's incremental artifacts let rustc reuse the unchanged codegen
+      # units. rustc checks every artifact against the current source, compiler and dependencies, so a stale one
+      # only costs reuse; the key still pins the toolchain and lockfile so a bump starts clean.
+      - name: Restore incremental artifacts
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/host/incremental
+          key: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-
       - name: Build linux-x64
-        run: cargo build --profile host --locked
+        run: CARGO_INCREMENTAL=1 cargo build --profile host --locked
+      # Saved before rust-cache's post step, which deletes incremental artifacts from rust/target.
+      - name: Save incremental artifacts
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: rust/target/host/incremental
+          key: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
       # The rust key covers every input of this binary; the -bin suffix keeps it apart from the pass marker.
       - name: Cache the factory binary for targets
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
