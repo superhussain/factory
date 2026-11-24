@@ -2029,6 +2029,51 @@ mod tests {
         assert!(truthy(Some(&json!(0.5))) && truthy(Some(&json!([0]))));
     }
 
+    /// Ported from tests/cli/test_stage_guard.py ApproveGuardTest: moving to approve needs a latest review
+    /// round whose every verdict is PASS or SKIPPED, read from the patch when it sends rounds.
+    #[test]
+    fn approve_guard_refusals() {
+        let home = temp_dir("claims-approve-guard");
+        let job = "042-sample-export";
+        let round_1 = json!({"security": "PASS", "ux": "PASS", "ui": "SKIPPED", "code": "CHANGES"});
+        let round_2 =
+            json!({"security": "PASS", "ux": "SKIPPED", "ui": "SKIPPED", "code": "CHANGES"});
+        let pending =
+            json!({"security": "pending", "ux": "pending", "ui": "pending", "code": "pending"});
+        let patch = |v: Value| v.as_object().unwrap().clone();
+        let approve = patch(json!({"stage": "approve"}));
+        let why = |found: &Value, p: &Map<String, Value>| move_refusal(&home, job, Some(found), p);
+        let none_message = Some(format!(
+            "{job} cannot move to approve: it has no review round on the board. Nothing was written."
+        ));
+        for rounds in [None, Some(json!([])), Some(json!([round_1, "pending"]))] {
+            let mut found = json!({"id": job, "project": "factory", "stage": "review"});
+            if let Some(rounds) = rounds {
+                found["rounds"] = rounds;
+            }
+            assert_eq!(why(&found, &approve), none_message, "{found}");
+        }
+        let found = json!({"id": job, "project": "factory", "stage": "review", "rounds": [round_1, round_2]});
+        let round_2_message = Some(format!(
+            "{job} cannot move to approve: round 2 has code CHANGES. Every verdict in the latest round must be PASS or SKIPPED. Nothing was written."
+        ));
+        assert_eq!(why(&found, &approve), round_2_message);
+        let from_patch = patch(json!({"stage": "approve", "rounds": [round_1, round_2, pending]}));
+        assert_eq!(
+            why(&found, &from_patch),
+            Some(format!(
+                "{job} cannot move to approve: round 3 has security pending, ux pending, ui pending, code pending. Every verdict in the latest round must be PASS or SKIPPED. Nothing was written."
+            ))
+        );
+        let mut passing = found.clone();
+        passing["rounds"][1]["code"] = json!("PASS");
+        assert_eq!(why(&passing, &approve), None);
+        // The approve check runs before the automerge check, so no decision.md is read.
+        let both = patch(json!({"stage": "approve", "automerge": true}));
+        assert_eq!(why(&found, &both), round_2_message);
+        fs::remove_dir_all(home).unwrap();
+    }
+
     /// Ported from tests/cli/test_stage_guard.py AutomergeGuardTest: automerge true needs a readable,
     /// regular decision.md on this host whose first line is APPROVE.
     #[cfg(unix)]
