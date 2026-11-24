@@ -344,6 +344,8 @@ fn connect(
     let limit = t.connect_timeout;
     std::thread::spawn(move || {
         if wait.recv_timeout(limit) == Err(RecvTimeoutError::Timeout) {
+            // Hang up first, so a handshake that fails on the shutdown always reads as timed out.
+            drop(wait);
             let _ = watchdog.shutdown(Shutdown::Both);
         }
     });
