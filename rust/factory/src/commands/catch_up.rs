@@ -2089,6 +2089,7 @@ mod tests {
             &argvs(&[&["launchctl", "print", &target]])[0]
         );
 
+        drop(t);
         let t = T::new("retro-push-other");
         FAKES.with(|f| f.borrow_mut().scheduler = Some("launchd"));
         t.timer_calls(reply, reply_code);
