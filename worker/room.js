@@ -34,6 +34,13 @@ export class BoardEvents extends DurableObject {
       this.closeSeats((token) => token === url.searchParams.get("token"));
       return new Response(null, { status: 204 });
     }
+    // The whole board as a body, so the Worker passes its bytes through without decoding them.
+    if (request.method === "GET" && url.pathname === "/board") {
+      const board = await this.board().read();
+      return board
+        ? new Response(board.text, { headers: { ETag: board.etag } })
+        : new Response(null, { status: 404 });
+    }
     const key = url.searchParams.get("key");
     if (request.method !== "POST" || url.pathname !== "/notify" || !KEYS.includes(key))
       return new Response("not found", { status: 404 });

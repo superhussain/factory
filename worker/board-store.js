@@ -574,6 +574,12 @@ export function boardStore(env) {
   return {
     head: () => stub.boardHead(),
     read: () => stub.boardRead(),
+    body: async () => {
+      const response = await stub.fetch("https://board-events.invalid/board");
+      return response.status === 404
+        ? null
+        : { etag: response.headers.get("ETag"), body: response.body };
+    },
     rows: async (q, at) => {
       const snap = await stub.boardRows(q, at);
       if (snap?.rows)
@@ -620,6 +626,10 @@ function r2Store(env) {
     async read() {
       const object = await env.BUCKET.get(BOARD_KEY);
       return object && { etag: object.httpEtag, text: await object.text() };
+    },
+    async body() {
+      const object = await env.BUCKET.get(BOARD_KEY);
+      return object && { etag: object.httpEtag, body: object.body };
     },
     async rows(q, at) {
       if (at === undefined || last?.etag !== at) last = await load();

@@ -343,11 +343,11 @@ async function readSlim(env) {
   return slimMemo;
 }
 
-// The whole board as stored, with its version.
+// The whole board as stored, with its version. Its bytes pass through undecoded.
 async function boardGet(env, headers) {
-  const obj = await boardStore(env).read();
+  const obj = await boardStore(env).body();
   return obj
-    ? reply(obj.text, 200, "application/json", { ETag: obj.etag, ...headers })
+    ? reply(obj.body, 200, "application/json", { ETag: obj.etag, ...headers })
     : notFound();
 }
 
