@@ -4204,6 +4204,23 @@ def trial_valid(t):
             and t.get("id") == f"{t['project']}-{t['stage']}-v{t['version']}" and stamp_of(t.get("opened")) is not None)
 
 
+# The Worker's BOARD_STAMP.
+TRIAL_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", re.ASCII)
+
+
+def trial_misshapen(t):
+    """True when a trial's opened is not a board stamp or its version is not a whole number, the
+    Worker's trialMisshapen. Every record this calls misshapen, the Worker does too."""
+    v, opened = t.get("version"), t.get("opened")
+    whole = type(v) is int or (type(v) is float and v.is_integer())
+    return not whole or not isinstance(opened, str) or not TRIAL_STAMP.fullmatch(opened)
+
+
+def trial_droppable(t):
+    """True for an open trial record trial settle drops: not well formed, and misshapen."""
+    return isinstance(t, dict) and t.get("status") == "open" and not trial_valid(t) and trial_misshapen(t)
+
+
 def open_trial_for(data, slug, stage):
     """The board's open, well-formed trial for slug's stage note, or None."""
     return next((t for t in data.get("trials") or [] if trial_valid(t) and t.get("status") == "open"
@@ -14793,7 +14810,7 @@ def trial_settle(home):
     if load_autonomy(data)["paused"] is not False:
         fail("autonomy is paused; no trial settled", 3)
     trials = [t for t in data.get("trials") or [] if trial_valid(t) and t.get("status") == "open"]
-    if not trials:
+    if not trials and not any(trial_droppable(t) for t in data.get("trials") or []):
         print("no open trials")
         return
     updates = {}
@@ -14838,9 +14855,13 @@ def trial_settle(home):
         else:
             print(f"trial {tid} open: a {a['finished']} finished, b {b['finished']} finished")
 
+    dropped = []
+
     def change(text):
         data = load_board(text)
         records = [t for t in data.get("trials") or [] if isinstance(t, dict)]
+        dropped[:] = [t for t in records if trial_droppable(t)]
+        records = [t for t in records if not trial_droppable(t)]
         for t in records:
             if t.get("status") == "open" and t.get("id") in updates:
                 t.update(updates[t["id"]])
@@ -14853,6 +14874,9 @@ def trial_settle(home):
         data["updated"] = now()
         return dump_board(data), data
     data = cas(home, "/api/board", change)
+    if dropped:
+        print(f"dropped malformed open trial records: {len(dropped)} "
+              "(opened is not a board timestamp or version is not a whole number)")
     for slug in sorted({t["project"] for t in trials if updates.get(t["id"], {}).get("status") == "reverted"}):
         if trials_paused(data, slug):
             print(f"stage-note trials paused for {slug} after {TRIAL_PAUSE_REVERTS} reverts; "

@@ -6598,6 +6598,70 @@
       "from": "tests/cli/test_trial.py::TrialSettleTest.test_malformed_records_do_not_crash_settle"
     },
     {
+      "id": "pipeline/trial-misshapen-open-records-are-dropped",
+      "argv": ["--home", "{home}", "trial", "settle"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-11-12T09:00:00Z",
+            "jobs": [],
+            "trials": [
+              {
+                "project": "factory",
+                "stage": "spec",
+                "version": 11,
+                "run": "20261111T090000Z-a1b2c3",
+                "summary": "Spec note: name the test file for each criterion",
+                "champion_version": 7,
+                "champion": "Name the acceptance check for each criterion.",
+                "challenger": "Name the acceptance check for each criterion. Put the test file in the Check column.",
+                "opened": "garbage",
+                "status": "open",
+                "id": "factory-spec-v11"
+              }
+            ],
+            "autonomy": {
+              "paused": false,
+              "projects": ["factory"],
+              "self": []
+            }
+          }
+        ],
+        "PUT /api/board": [200, "ok"],
+        "GET /api/pipeline/projects/factory": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion. Put the test file in the Check column."
+            }
+          },
+          {
+            "X-Pipeline-Version": "8"
+          }
+        ],
+        "GET /api/pipeline/history/projects/factory/7": [
+          200,
+          {
+            "stage_notes": {
+              "spec": "Name the acceptance check for each criterion."
+            }
+          }
+        ],
+        "PUT /api/pipeline/retro/projects/factory": [
+          200,
+          "ok",
+          {
+            "X-Pipeline-Version": "9"
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_trial.py::TrialSettleTest.test_misshapen_open_records_are_dropped"
+    },
+    {
       "id": "pipeline/trial-no-open-trials",
       "argv": ["--home", "{home}", "trial", "settle"],
       "home": null,
