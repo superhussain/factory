@@ -80,11 +80,13 @@ pub(super) fn launcher_folders(template: &[String]) -> Vec<String> {
     folders
 }
 
-/// What a host scheduler runs for factory: the 5-minute pickup timer, or the daemon as a service
-/// that starts at login and restarts when it ends.
+/// What a host scheduler runs for factory: the 5-minute pickup timer, the daily retro-push timer,
+/// or the daemon as a service that starts at login and restarts when it ends.
 pub(crate) struct Unit {
-    /// The factory command it runs; its log is `<home>/logs/<command>.log`.
+    /// The unit's name; its log is `<home>/logs/<command>.log`.
     pub(super) command: &'static str,
+    /// The factory command words it runs.
+    pub(super) args: &'static [&'static str],
     /// The launchd label.
     pub(crate) label: &'static str,
     /// The scheduled task name, and the name of its `.cmd` and systemd unit files.
@@ -93,27 +95,56 @@ pub(crate) struct Unit {
     pub(super) noun: &'static str,
     /// The first words of the line a second install prints.
     pub(super) current: &'static str,
-    /// True for a service that starts at login and restarts, false for a 5-minute timer.
+    /// True for a service that starts at login and restarts, false for a timer.
     pub(super) keep_alive: bool,
+    /// True for a timer that runs at retro_push_times each day, false for every 5 minutes.
+    pub(super) daily: bool,
 }
 
 pub(crate) const PICKUP: Unit = Unit {
     command: "pickup",
+    args: &["pickup"],
     label: "factory.pickup",
     task: "factory-pickup",
     noun: "timer",
     current: "timer already installed",
     keep_alive: false,
+    daily: false,
 };
 
 pub(crate) const DAEMON: Unit = Unit {
     command: "daemon",
+    args: &["daemon"],
     label: "factory.daemon",
     task: "factory-daemon",
     noun: "service",
     current: "service current",
     keep_alive: true,
+    daily: false,
 };
+
+/// The daily digest push the daemon takes over where it is installed, as schedules.md sets it up.
+pub(crate) const RETRO_PUSH: Unit = Unit {
+    command: "retro-push",
+    args: &["retro", "push"],
+    label: "factory.retro-push",
+    task: "factory-retro-push",
+    noun: "timer",
+    current: "timer already installed",
+    keep_alive: false,
+    daily: true,
+};
+
+/// The local (hour, minute) times of the retro-push timer on scheduler: launchd runs it three
+/// times, so a sleeping Mac still pushes before the 09:00 aggregate; cron and Task Scheduler once,
+/// at 08:30.
+pub(crate) fn retro_push_times(scheduler: &str) -> &'static [(u32, u32)] {
+    if scheduler == "launchd" {
+        &[(6, 30), (7, 30), (8, 30)]
+    } else {
+        &[(8, 30)]
+    }
+}
 
 pub(super) fn timer_path(scheduler: &str, unit: &Unit) -> PathBuf {
     let home = std::env::home_dir().unwrap_or_default();
@@ -158,14 +189,15 @@ pub(crate) fn timer_values(home: &Path, unit: &'static Unit) -> TimerValues {
             unique.push(f);
         }
     }
+    let mut argv = vec![
+        exe.clone(),
+        "--home".into(),
+        home.to_string_lossy().into_owned(),
+    ];
+    argv.extend(unit.args.iter().map(|a| a.to_string()));
     TimerValues {
         unit,
-        argv: vec![
-            exe.clone(),
-            "--home".into(),
-            home.to_string_lossy().into_owned(),
-            unit.command.into(),
-        ],
+        argv,
         path: unique.join(if WINDOWS { ";" } else { ":" }),
         log: home
             .join("logs")
@@ -226,6 +258,10 @@ pub(super) fn timer_text(scheduler: &str, values: &TimerValues) -> String {
         if unit.keep_alive {
             return format!("@reboot {rest}\n*/5 * * * * {rest}");
         }
+        if unit.daily {
+            let (hour, minute) = retro_push_times(scheduler)[0];
+            return format!("{minute} {hour} * * * {rest}");
+        }
         return format!("*/5 * * * * {rest}");
     }
     if scheduler == "launchd" {
@@ -236,6 +272,12 @@ pub(super) fn timer_text(scheduler: &str, values: &TimerValues) -> String {
         if unit.keep_alive {
             doc["RunAtLoad"] = json!(true);
             doc["KeepAlive"] = json!(true);
+        } else if unit.daily {
+            let times: Vec<Value> = retro_push_times(scheduler)
+                .iter()
+                .map(|(hour, minute)| json!({"Hour": hour, "Minute": minute}))
+                .collect();
+            doc["StartCalendarInterval"] = Value::Array(times);
         } else {
             doc["StartInterval"] = json!(300);
         }
@@ -266,10 +308,12 @@ pub(super) fn timer_text(scheduler: &str, values: &TimerValues) -> String {
     format!("@echo off\r\nset \"PATH={path};%PATH%\"\r\n{run}\r\n")
 }
 
-/// The `schtasks /Create` arguments for a unit: every 5 minutes, or once at logon.
+/// The `schtasks /Create` arguments for a unit: every 5 minutes, daily at 08:30, or once at logon.
 pub(super) fn schtasks_schedule(unit: &Unit) -> &'static [&'static str] {
     if unit.keep_alive {
         &["/SC", "ONLOGON"]
+    } else if unit.daily {
+        &["/SC", "DAILY", "/ST", "08:30"]
     } else {
         &["/SC", "MINUTE", "/MO", "5"]
     }
@@ -287,6 +331,8 @@ pub(super) fn cron_detail(unit: &Unit) -> String {
             "crontab starts the {} at reboot and every 5 minutes",
             unit.command
         )
+    } else if unit.daily {
+        format!("crontab runs {} daily", unit.command)
     } else {
         format!("crontab runs {} every 5 minutes", unit.command)
     }
@@ -396,7 +442,14 @@ pub(super) fn unit_line(line: &str, unit: &Unit) -> bool {
                     Some(flag) if flag.starts_with("--") => {
                         rest.next();
                     }
-                    next => break next.is_some_and(|n| n == unit.command),
+                    next => {
+                        break next.is_some_and(|n| n == unit.args[0])
+                            && rest
+                                .by_ref()
+                                .take(unit.args.len() - 1)
+                                .map(String::as_str)
+                                .eq(unit.args[1..].iter().copied())
+                    }
                 }
             }
     })
@@ -1450,8 +1503,10 @@ pub(super) fn daemon_setup(
     }
     if action == ServiceAction::Install && pickup_scheduler() != "cron" {
         files.extend(timer_backup(pickup_scheduler(), &PICKUP));
+        files.extend(timer_backup(pickup_scheduler(), &RETRO_PUSH));
     }
     backup_files(io, home, files)?;
+    // The daemon pushes the retro digest too, so the retro-push timer follows the pickup timer.
     match action {
         ServiceAction::Install => {
             outln!(io, "{}", install_timer(home, scheduler, &DAEMON)?);
@@ -1460,9 +1515,19 @@ pub(super) fn daemon_setup(
                 "{}",
                 uninstall_timer(home, pickup_scheduler(), &PICKUP)?
             );
+            outln!(
+                io,
+                "retro-push timer: {}",
+                uninstall_timer(home, pickup_scheduler(), &RETRO_PUSH)?
+            );
         }
         ServiceAction::Uninstall => {
             outln!(io, "{}", install_timer(home, pickup_scheduler(), &PICKUP)?);
+            outln!(
+                io,
+                "retro-push timer: {}",
+                install_timer(home, pickup_scheduler(), &RETRO_PUSH)?
+            );
             outln!(io, "{}", uninstall_timer(home, scheduler, &DAEMON)?);
             if scheduler == "cron" || scheduler == "schtasks" {
                 if let Some(line) = stop_daemon(home) {

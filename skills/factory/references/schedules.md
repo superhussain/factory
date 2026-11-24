@@ -15,7 +15,10 @@ A failed dispatch returns its idea with `unclaim`.
 
 `schedules/retro.md` aggregates the last 3 days of every host's digest, so each host
 pushes its own daily with a model-free timer, weekends included. Every host that runs
-Claude Code sessions, the aggregating host included, installs it.
+Claude Code sessions, the aggregating host included, installs it. Where the daemon
+service runs, the daemon pushes at the times below instead, and
+`daemon setup --install` removes this timer; see
+[the daemon as scheduler](pickup.md#the-daemon-as-scheduler).
 
 Pickup also pushes this host's retro digest on its first run of each local date that
 `<home>/retro-push.json` does not record; a failed push prints one warning and the
