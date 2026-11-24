@@ -145,11 +145,15 @@ pub fn bundle_entry(skill: &Path) -> Option<Vec<String>> {
         .map(|v| v.as_str().map(String::from))
         .collect::<Option<_>>()?;
     let first = Path::new(args.first().filter(|a| !a.is_empty())?);
+    // A Windows drive-relative `C:x` is neither absolute nor rooted, but join drops the skill for it.
     if first.is_absolute()
         || first.has_root()
-        || first
-            .components()
-            .any(|c| c == std::path::Component::ParentDir)
+        || first.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir | std::path::Component::Prefix(_)
+            )
+        })
     {
         return None;
     }
@@ -377,6 +381,27 @@ mod tests {
                 "-q".into()
             ])
         );
+        fs::remove_dir_all(&skill).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bundle_entry_refuses_a_drive_relative_path() {
+        let skill =
+            std::env::temp_dir().join(format!("factory-bundle-drive-{}", std::process::id()));
+        fs::create_dir_all(&skill).unwrap();
+        for bad in [
+            r"C:factory.exe",
+            r"C:runtime\factory.exe",
+            r"\\?\C:factory.exe",
+        ] {
+            fs::write(
+                skill.join("bundle.json"),
+                json!({"commit": "c", "entry": [bad]}).to_string(),
+            )
+            .unwrap();
+            assert_eq!(bundle_entry(&skill), None, "{bad}");
+        }
         fs::remove_dir_all(&skill).unwrap();
     }
 
