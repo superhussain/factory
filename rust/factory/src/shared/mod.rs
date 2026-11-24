@@ -29,6 +29,31 @@ static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(test)]
 static TEST_ENV_HOLDER: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
+/// Runs the test `module::name` again alone in a child test process. Returns true in that child,
+/// where the test body runs, and false in the parent once the child passed. A test whose effects
+/// leak to every thread uses it: one that empties PATH, which parallel tests need to find git, or
+/// one that takes a lock whose descriptor a parallel test's fork would copy.
+#[cfg(test)]
+pub(crate) fn in_own_process(module: &str, name: &str) -> bool {
+    const ALONE: &str = "FACTORY_TEST_ALONE";
+    if std::env::var_os(ALONE).is_some() {
+        return true;
+    }
+    let test = format!("{}::{name}", module.split_once("::").unwrap().1);
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", &test, "--test-threads=1"])
+        .env(ALONE, "1")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && text.contains("1 passed"),
+        "{text}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    false
+}
+
 /// Takes TEST_ENV_LOCK, or panics naming its holder after 300 s.
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {

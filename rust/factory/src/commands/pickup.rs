@@ -15848,6 +15848,10 @@ exit "$archive_code"
 
         #[test]
         fn test_gh_pr_reports_a_timeout() {
+            // Empties PATH, so it runs alone: parallel tests need PATH to find git.
+            if !crate::shared::in_own_process(module_path!(), "test_gh_pr_reports_a_timeout") {
+                return;
+            }
             let fx = Fx::new();
             fx.set_env("PATH", fx.root.join("empty"));
             assert_eq!(gh_cli(&["view", "x"]), None);
@@ -20210,19 +20214,10 @@ exit "$archive_code"
         /// still look held after this test drops it.
         #[test]
         fn kill_refuses_pids_kill_would_misread() {
-            const ALONE: &str = "FACTORY_TEST_ALONE";
-            if std::env::var_os(ALONE).is_none() {
-                let name = format!(
-                    "{}::kill_refuses_pids_kill_would_misread",
-                    module_path!().split_once("::").unwrap().1
-                );
-                let out = std::process::Command::new(std::env::current_exe().unwrap())
-                    .args(["--exact", &name, "--test-threads=1"])
-                    .env(ALONE, "1")
-                    .output()
-                    .unwrap();
-                let text = String::from_utf8_lossy(&out.stdout);
-                assert!(out.status.success() && text.contains("1 passed"), "{text}");
+            if !crate::shared::in_own_process(
+                module_path!(),
+                "kill_refuses_pids_kill_would_misread",
+            ) {
                 return;
             }
             assert_eq!(kill_argv(0), None);

@@ -4090,6 +4090,10 @@ mod bench_replay_error_test {
 
     #[test]
     fn test_no_claude() {
+        // Empties PATH, so it runs alone: parallel tests need PATH to find git.
+        if !crate::shared::in_own_process(module_path!(), "test_no_claude") {
+            return;
+        }
         let b = Bench::new("no-claude");
         let empty = b.root.join("empty");
         fs::create_dir(&empty).unwrap();
