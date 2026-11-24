@@ -690,6 +690,74 @@ pub(crate) mod tests {
         assert_eq!(seen[1].header("Content-Type"), Some("application/json"));
     }
 
+    static READ_CACHE_TESTS: Mutex<()> = Mutex::new(());
+    const VIEW_PATH: &str = "/api/pipeline/effective/sample";
+
+    fn paths(seen: &Arc<Mutex<Vec<Seen>>>) -> Vec<String> {
+        let seen = seen.lock().unwrap();
+        seen.iter()
+            .filter(|s| s.method == "GET")
+            .map(|s| s.path.clone())
+            .collect()
+    }
+
+    #[test]
+    fn test_clears_on_pipeline_write() {
+        let _guard = READ_CACHE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (origin, seen) = serve(vec![
+            (200, "{}", vec![]),
+            (200, "", vec![]),
+            (200, "", vec![]),
+            (200, "{}", vec![]),
+            (200, "", vec![]),
+            (200, "{}", vec![]),
+        ]);
+        let home = home_for("http-read-clears", &origin);
+        let read = || api(&home, "GET", VIEW_PATH, None, &[200], &[]).unwrap();
+        let put = |path: &str| api(&home, "PUT", path, Some(b"x"), &[200], &[]).unwrap();
+        read();
+        put("/api/board");
+        read();
+        assert_eq!(paths(&seen), [VIEW_PATH]);
+        for path in ["/api/pipeline/retro/global", "/api/projects/sample.md"] {
+            put(path);
+            read();
+        }
+        assert_eq!(paths(&seen), [VIEW_PATH; 3]);
+    }
+
+    #[test]
+    fn test_404_not_cached() {
+        let _guard = READ_CACHE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (origin, seen) = serve(vec![(404, "", vec![]), (404, "", vec![])]);
+        let home = home_for("http-read-404", &origin);
+        for _ in 0..2 {
+            let e = api(&home, "GET", VIEW_PATH, None, &[200], &[]).unwrap_err();
+            assert_eq!(e.status.map(|s| s.0), Some(404));
+        }
+        assert_eq!(paths(&seen), [VIEW_PATH; 2]);
+    }
+
+    #[test]
+    fn test_expires_after_ttl() {
+        let _guard = READ_CACHE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (origin, seen) = serve(vec![(200, "{}", vec![]), (200, "{}", vec![])]);
+        let home = home_for("http-read-ttl", &origin);
+        let read = || api(&home, "GET", VIEW_PATH, None, &[200], &[]).unwrap();
+        let age = |secs: u64| {
+            let key = (origin.clone(), VIEW_PATH.to_string());
+            reads().lock().unwrap().get_mut(&key).unwrap().0 =
+                Instant::now() - Duration::from_secs(secs);
+        };
+        read();
+        age(READ_TTL - 1);
+        read();
+        assert_eq!(paths(&seen), [VIEW_PATH]);
+        age(READ_TTL);
+        read();
+        assert_eq!(paths(&seen), [VIEW_PATH; 2]);
+    }
+
     #[test]
     fn cas_strips_weak_etags_and_retries_412() {
         let (origin, seen) = serve(vec![
