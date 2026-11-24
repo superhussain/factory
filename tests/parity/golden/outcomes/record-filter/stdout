@@ -1,0 +1,5 @@
+outcomes of jobs merged in the last 90 days
+project  held  reworked  reverted  unknown
+alpha       0         0         0        3
+alpha unknown: 1017-add-x (no folder at /nonexistent-parity/alpha on parity), 1018-add-y (no folder at /nonexistent-parity/alpha on parity), 1019-add-z (PR is not in example/alpha)
+outcomes unchanged; nothing written

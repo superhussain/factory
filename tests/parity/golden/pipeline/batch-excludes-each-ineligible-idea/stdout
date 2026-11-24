@@ -1,0 +1,12 @@
+{
+  "lead": "090-sample-export-csv",
+  "riders": [],
+  "candidates": [
+    {
+      "id": "110-sample-ok",
+      "title": "Title 110-sample-ok",
+      "idea": "Title 110-sample-ok",
+      "hold": false
+    }
+  ]
+}

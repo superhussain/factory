@@ -1,0 +1,28 @@
+wrote {home}/retro/card-open-cap/findings.md
+added sample-tools: Item 0 with context
+link: {api}/#/backlog/11cdecad495f
+held sample-tools: Item 0 for review: retro items always wait for a person
+added sample-tools: Item 1 with context
+link: {api}/#/backlog/782e879524dd
+held sample-tools: Item 1 for review: retro items always wait for a person
+added sample-tools: Item 2 with context
+link: {api}/#/backlog/1c39899b022e
+held sample-tools: Item 2 for review: retro items always wait for a person
+added sample-tools: Item 3 with context
+link: {api}/#/backlog/1c878a17d0e1
+held sample-tools: Item 3 for review: retro items always wait for a person
+{
+  "admitted": [
+    "sample-tools: Item 0",
+    "sample-tools: Item 1",
+    "sample-tools: Item 2",
+    "sample-tools: Item 3"
+  ],
+  "skipped": [
+    {
+      "title": "Item 4",
+      "reason": "open cap"
+    }
+  ]
+}
+uploaded retro run card-open-cap

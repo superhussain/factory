@@ -87,9 +87,9 @@ a device write that removes an open row holding notes, and notes on riders.
 `factory board` refuses a `steer` patch with exit 2. `factory prompt ... build` wraps every
 note as data in each later build prompt, as [dashboard](dashboard.md) describes.
 `spec_approval` records who passed the spec-approval gate. The dashboard's Approve spec,
-factory.py's Tracer approval and the `/factory approve-spec` patch write it with the approval
+the factory binary's Tracer approval and the `/factory approve-spec` patch write it with the approval
 note. The Worker refuses `via: "dashboard"` from a device and any `via` without its note.
-`board` refuses a `spec_approval` patch. `factory.py job` infers it for older rows from the
+`board` refuses a `spec_approval` patch. `factory job` infers it for older rows from the
 approval notes and marks it `inferred`.
 `backlog` is set only on jobs decided from the Backlog column or `backlog decide`. It holds
 the backlog line, the decision, when it was made, and any notes typed with the decision.

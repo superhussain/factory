@@ -1,0 +1,5 @@
+{"argv": ["-C", "checkout", "worktree", "prune"]}
+{"argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/factory/001-test"]}
+{"argv": ["-C", "checkout", "merge-base", "--is-ancestor", "refs/heads/factory/001-test", "HEAD"]}
+{"argv": ["-C", "checkout", "config", "--get", "branch.factory/001-test.merge"]}
+{"argv": ["-C", "checkout", "branch", "-d", "factory/001-test"]}

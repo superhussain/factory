@@ -1,0 +1,28 @@
+{
+  "id": "001-test",
+  "project": "sample",
+  "stage": "approve",
+  "round": 2,
+  "updated": "{now}",
+  "started": "2026-11-01T00:00:00Z",
+  "claim": {
+    "device": "parity",
+    "session": "sender",
+    "since": "2026-11-01T00:00:00Z",
+    "seen": "{now}"
+  },
+  "rounds": [
+    {
+      "security": "PASS",
+      "ux": "PASS",
+      "ui": "SKIPPED",
+      "code": "CHANGES"
+    },
+    {
+      "security": "PASS",
+      "ux": "SKIPPED",
+      "ui": "SKIPPED",
+      "code": "PASS"
+    }
+  ]
+}

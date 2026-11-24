@@ -1,0 +1,1 @@
+factory.py: usage: control <job-id> <prioritize|unprioritize|pause|resume|babysit|rerun> --chat-file <file> | control <job-id> move <host> --chat-file <file> | control <job-id> close --reason-file <file> --chat-file <file>

@@ -1,0 +1,1 @@
+{"at": "{now}", "stage": "review", "round": 1, "role": "review-code", "harness": "opencode", "via": "native", "model": "gpt-6.1-sol", "effort": "high", "session": "d4e5f6"}

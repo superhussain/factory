@@ -65,6 +65,63 @@
       "from": "tests/cli/test_factory.py::AgentInstallTest.test_repeated_init_preserves_native_header_and_refreshes_body"
     },
     {
+      "id": "setup/init-agents-none",
+      "argv": ["--home", "{home}", "init", "--agents", "none"],
+      "home": null,
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_roles.py::RolesTest.test_separate_and_combined_selection_and_custom_locations"
+    },
+    {
+      "id": "setup/init-agents-claude-only",
+      "argv": ["--home", "{home}", "init", "--agents", "claude"],
+      "home": null,
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_roles.py::RolesTest.test_separate_and_combined_selection_and_custom_locations"
+    },
+    {
+      "id": "setup/init-agents-opencode-only",
+      "argv": ["--home", "{home}", "init", "--agents", "opencode"],
+      "home": null,
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_roles.py::RolesTest.test_separate_and_combined_selection_and_custom_locations"
+    },
+    {
+      "id": "setup/init-agents-custom-dirs",
+      "argv": ["--home", "{home}", "init", "--agents", "both"],
+      "home": "setup-agents-custom",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_roles.py::RolesTest.test_separate_and_combined_selection_and_custom_locations"
+    },
+    {
+      "id": "setup/init-agents-refuses-relative-dir",
+      "argv": ["--home", "{home}", "init", "--agents", "claude"],
+      "home": "setup-agents-relative",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_roles.py::RolesTest.test_source_and_destination_links_overlap_and_relative_paths_refused"
+    },
+    {
+      "id": "setup/init-agents-refuses-skill-dir",
+      "argv": ["--home", "{home}", "init", "--agents", "claude"],
+      "home": "setup-agents-skill-dir",
+      "stubs": {},
+      "skill": "{tmp}/skill",
+      "exit": 2,
+      "from": "tests/cli/test_roles.py::RolesTest.test_source_and_destination_links_overlap_and_relative_paths_refused"
+    },
+    {
+      "id": "setup/init-agents-refuses-shared-dir",
+      "argv": ["--home", "{home}", "init", "--agents", "both"],
+      "home": "setup-agents-shared",
+      "stubs": {},
+      "exit": 2,
+      "from": "tests/cli/test_roles.py::RolesTest.test_source_and_destination_links_overlap_and_relative_paths_refused"
+    },
+    {
       "id": "setup/init-register",
       "argv": ["--home", "{home}", "init", "/srv/sample"],
       "home": null,
@@ -307,6 +364,14 @@
       "from": "tests/cli/test_doctor.py::DoctorTest.test_redirect_auth_and_malformed_responses_do_not_leak_or_follow"
     },
     {
+      "id": "setup/doctor-unreachable-transport",
+      "argv": ["--home", "{home}", "doctor"],
+      "home": "setup-doctor-unreachable-transport",
+      "stubs": {},
+      "exit": 5,
+      "from": "tests/cli/test_doctor.py::DoctorTest.test_timeout_uses_30_seconds_and_sanitizes_transport_diagnostics"
+    },
+    {
       "id": "setup/doctor-no-credentials",
       "argv": ["--home", "{home}", "doctor"],
       "home": "setup-configured",
@@ -352,6 +417,25 @@
       },
       "exit": 0,
       "from": "tests/cli/test_hosts.py::PairTest.test_pair_sets_device_sends_one_post_and_one_status"
+    },
+    {
+      "id": "setup/host-pair-cached-status",
+      "argv": ["--home", "{home}", "host", "pair", "parity", "ABCDE-23456"],
+      "home": "setup-host-pair-cached",
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [200, "paired"],
+        "GET /projects.json": [200, []],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_hosts.py::PairTest.test_pair_reuses_cached_scheduler_and_last_pickup"
     },
     {
       "id": "setup/host-wrong-code",
@@ -521,6 +605,25 @@
       "routes": {},
       "exit": 5,
       "from": "tests/cli/test_with_cloudflare.py::WithCloudflareTest.test_no_token"
+    },
+    {
+      "id": "setup/cloudflare-flags-after-separator",
+      "argv": [
+        "--home",
+        "{home}",
+        "with-cloudflare",
+        "--",
+        "printf",
+        "%s\\n",
+        "--home",
+        "/h",
+        "--session",
+        "x"
+      ],
+      "home": "setup-cloudflare-flags-after-separator",
+      "stubs": {},
+      "exit": 0,
+      "from": "tests/cli/test_with_cloudflare.py::WithCloudflareTest.test_flags_after_separator"
     },
     {
       "id": "setup/explore-bad-slug",

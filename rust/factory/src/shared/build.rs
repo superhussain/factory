@@ -22,7 +22,7 @@ pub const BINARY: &str = if cfg!(windows) {
 } else {
     "runtime/factory"
 };
-/// The lock file in build-src. `tools/install.py` takes the same one, so the two never build at once.
+/// The lock file in build-src, so two installs never build at once.
 pub const LOCK: &str = ".build.lock";
 const PROFILE: &str = "host";
 /// Binaries kept in the cache, newest first.

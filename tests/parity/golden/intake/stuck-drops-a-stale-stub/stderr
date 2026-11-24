@@ -1,0 +1,4 @@
+dropped stub '002-stub': no stage, last seen 2020-01-01T00:00:00Z
+dropped stub '004-unclaimed': no stage, last seen 2020-01-02T00:00:00Z
+dropped stub None: no stage, last seen 2020-01-03T00:00:00Z
+dropped stub '005-bad\nfake': no stage, last seen 2020-01-04T00:00:00Z

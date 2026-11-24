@@ -83,7 +83,7 @@ test("install is cached, the deploy step is uncached and exact", () => {
   const setupNode = job.steps.find((entry) => action(entry) === "actions/setup-node");
   assert.equal(setupNode.with.cache, "pnpm");
   const deploy = step("Deploy");
-  assert.equal(deploy.run, "python3 tools/deploy.py deploy --profile deploy/profile.json");
+  assert.equal(deploy.run, "node tools/deploy.mjs deploy --profile deploy/profile.json");
   assert.equal(deploy.env.CLOUDFLARE_API_TOKEN, "${{ secrets.CLOUDFLARE_API_TOKEN }}");
   assert.doesNotMatch(workflowText, /actions\/cache|actions\/upload-artifact/);
 });
@@ -93,7 +93,7 @@ test("the profile is materialized at runtime from the repository variable", () =
   const materialize = step("Materialize profile");
   assert.equal(materialize.env.PROFILE_JSON, "${{ vars.FACTORY_DEPLOY_PROFILE }}");
   assert.match(materialize.run, /printf '%s\\n' "\$PROFILE_JSON" > deploy\/profile\.json/);
-  assert.match(materialize.run, /python3 tools\/deploy\.py check --profile deploy\/profile\.json/);
+  assert.match(materialize.run, /node tools\/deploy\.mjs check --profile deploy\/profile\.json/);
 });
 
 test("the reconcile step runs first and fails closed on a failed head lookup", () => {

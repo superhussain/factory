@@ -1,0 +1,4 @@
+outcomes of jobs merged in the last 90 days
+project  held  reworked  reverted  unknown
+alpha       0         0         0        1
+alpha unknown: 1019-add-z (no merge commit from GitHub)

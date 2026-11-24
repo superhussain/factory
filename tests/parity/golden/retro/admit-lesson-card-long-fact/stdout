@@ -1,0 +1,4 @@
+wrote {home}/retro/lesson-card-long-fact/findings.md
+rejected lesson_cards[0].fact: must be a string of 1-200 characters
+no suggestions
+uploaded retro run lesson-card-long-fact

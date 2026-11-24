@@ -1,0 +1,3 @@
+factory home: {home}
+project file: {home}/projects/sample.md
+checkout path: sample: /srv/sample in {home}/paths.md

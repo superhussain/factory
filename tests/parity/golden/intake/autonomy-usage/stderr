@@ -1,0 +1,1 @@
+factory.py: usage: autonomy status|pause|resume|report [<slug>]|allow <slug>|deny <slug>|self <slug>|restore <slug> internal|visible|promote <slug> internal|visible

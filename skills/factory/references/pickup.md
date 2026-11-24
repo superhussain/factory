@@ -12,7 +12,7 @@ Paste this prompt into a coding agent running on the host, such as Paseo, Claude
 Set up automatic factory pickup on this host. You are a coding agent on the machine that should pick up ideas. Work through these steps in order.
 
 1. Find the installed factory skill: the folder that holds SKILL.md and runtime/factory, often ~/.agents/skills/factory or ~/.claude/skills/factory. Below, SKILL means that folder. Run: SKILL/runtime/factory pickup setup On Windows the binary is SKILL\runtime\factory.exe; use that spelling in every command below.
-   If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with python3 tools/install.py --destination <skills folder> --replace from a clone of the factory repo, then start again.
+   If there is no such folder, or pickup setup prints a usage error instead of checks, the skill is missing or older than this setup; install or update it with sh tools/install.sh <skills folder> (tools\install.ps1 on Windows) from a clone of the factory repo, then start again.
 2. It prints 7 numbered checks, each ok or missing, with a fix under each missing one. Fix checks 1 to 6 in order. After each fix, run pickup setup again.
    - home: run the doctor line it prints. If the factory home or its credentials are missing, stop and tell me. Never print or copy values from the .env file.
    - device: add a device: line inside the frontmatter of config.md in the factory home, with a short name for this host.
@@ -29,7 +29,7 @@ A stored Paseo or Claude schedule prompt does not pick up ideas, so do not creat
 
 When the installed skill is older than this setup, run
 `<installed-skill>/runtime/factory catch-up`, or install with
-`tools/install.py` if no skill exists yet. Catch-up backs up the skill, timer and
+`tools/install.sh` if no skill exists yet. Catch-up backs up the skill, timer and
 home config, installs origin's skill and rewrites the pickup timer through it.
 On a host with the daemon service installed, it removes a leftover pickup timer
 instead and prints `pickup timer: replaced by the daemon`. It never installs the
@@ -462,8 +462,9 @@ changes nothing. Then install one timer per host.
   Deleting the file turns takeover off. A failed takeover launch leaves a claim that
   `factory stuck` recovers after `claim_stale_minutes`.
 - The adapter is an argv command with `list` and `archive <session>` verbs and JSON output;
-  a Paseo adapter ships in the bundle (a Python script, so this adapter still needs Python 3):
-  `{"version": 1, "adapter": ["python3", "<installed-skill>/runtime/paseo_stalls.py"], "takeover_minutes": 30}`.
+  the binary's `stalls` command is the Paseo adapter:
+  `{"version": 1, "adapter": ["<installed-skill>/runtime/factory", "stalls"], "takeover_minutes": 30}`
+  (`factory.exe` on Windows).
   It reports only idle, unarchived Claude limit stalls and re-checks a session before
   archiving it, so a session a human or the sweep has woken is kept.
   `archive <session> --force` archives without the stall re-check, for a moved job.
@@ -490,7 +491,7 @@ changes nothing. Then install one timer per host.
   - While that host is offline the stop waits on the board. Survivors are printed on stderr and retried next run.
 - Under the same gate, when `stalls.json` is set and the job's Paseo session ran on this host's server, the old host's `pickup` archives it with the adapter's `archive <session> --force` first. While the gate skips the stop, the session stays unarchived too. A failed archive is printed on stderr and retried next run. It archives only a session whose `<home>/paseo-claims/<job-id>/<agent>` file shows this host recorded it claiming that job; otherwise it only stops the worktree and prints a "kept session" hint on stderr. Pickup never archives an agent id the adapter would refuse. It stops the worktree and prints a "skipped archive" hint on stderr instead.
 - The "kept session" hint reads `factory.py: pickup kept session <agent> of <id>: no claim recorded on this host, archive it by hand if it still runs: paseo archive --force <agent>`. The "skipped archive" hint ends with the same command. Both put `--home <PASEO_HOME>` after `paseo` when `PASEO_HOME` is set. When `PASEO_HOME` holds an unprintable character, both leave `--home` out and put `(left out --home because PASEO_HOME has unprintable characters)` before the colon that starts the command, so the command still ends the line. Both leave the command off when the id starts with `-` or holds a character outside `A-Z`, `a-z`, `0-9`, `_` and `-`.
-- To archive a kept session, run the `adapter` argv from `stalls.json` followed by `archive <agent> --force` on the host that printed the hint. With the Paseo adapter that is `python3 <installed-skill>/runtime/paseo_stalls.py archive <agent> --force`. It accepts only ids that match `[0-9a-fA-F][0-9a-fA-F-]{7,63}`, checks the session with `paseo inspect` first, and does nothing if it is already archived. If `paseo inspect` fails or prints bad JSON, it archives anyway.
+- To archive a kept session, run the `adapter` argv from `stalls.json` followed by `archive <agent> --force` on the host that printed the hint. With the Paseo adapter that is `<installed-skill>/runtime/factory stalls archive <agent> --force`. It accepts only ids that match `[0-9a-fA-F][0-9a-fA-F-]{7,63}`, checks the session with `paseo inspect` first, and does nothing if it is already archived. If `paseo inspect` fails or prints bad JSON, it archives anyway.
 - The adapter argv only archives kept sessions. A "skipped archive" id fails the adapter's id check, so run the printed `paseo archive --force <agent>` command instead. That command calls Paseo directly, with no id check and no already-archived check. `--force` archives the session even while it is working, so check first that its work is saved or no longer needed.
 - The target host's `pickup` claims the job once, sets `move.claimed` and launches `/factory recover`. The usual gates apply: pickup on, host listed, not gated, the cap and a route.
 - `factory stuck` leaves a move with no `claimed` to its target.

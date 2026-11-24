@@ -3476,7 +3476,7 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
-fn month_days(y: i64, m: i64) -> i64 {
+pub(crate) fn month_days(y: i64, m: i64) -> i64 {
     let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
     [
         31,
@@ -3521,7 +3521,7 @@ fn shift_date(date: &str, days: i64) -> String {
 }
 
 /// `retro_when`: an ISO time with an offset, as UTC microseconds, per Python 3.8's `fromisoformat`.
-fn when(v: Option<&Value>) -> Option<i128> {
+pub(crate) fn when(v: Option<&Value>) -> Option<i128> {
     let text = v?.as_str()?.replace('Z', "+00:00");
     let s: Vec<char> = text.chars().collect();
     let digits = |from: usize, count: usize| -> Option<i128> {

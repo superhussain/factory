@@ -65,14 +65,19 @@
       "inputs": [
         "default",
         "shared",
-        "!{workspaceRoot}/tools/deploy.py",
+        "!{workspaceRoot}/tools/deploy.mjs",
         "{workspaceRoot}/tests/support/**/*",
         "{workspaceRoot}/tests/fixtures/project-documents.md",
         "{workspaceRoot}/tests/fixtures/project-document-notes.md",
         "{workspaceRoot}/tests/fixtures/project-settings.md",
         "{workspaceRoot}/worker/**/*",
         "{workspaceRoot}/web/**/*",
-        "{workspaceRoot}/tests/worker/*.py",
+        "{workspaceRoot}/tests/worker/local-http.mjs",
+        "{workspaceRoot}/tests/worker/http-v1.test.mjs",
+        "{workspaceRoot}/tests/worker/project-api.test.mjs",
+        "{workspaceRoot}/tests/worker/project-documents-api.test.mjs",
+        "{workspaceRoot}/rust/Cargo.lock",
+        "{workspaceRoot}/rust/factory/**/*",
         "{workspaceRoot}/THIRD_PARTY_NOTICES.md",
         "{workspaceRoot}/.node-version"
       ]
@@ -83,7 +88,7 @@
       "inputs": [
         "default",
         "shared",
-        "!{workspaceRoot}/tools/deploy.py",
+        "!{workspaceRoot}/tools/deploy.mjs",
         "{workspaceRoot}/tests/browser/**/*",
         "{workspaceRoot}/tests/fixtures/browser-cases.json",
         "{workspaceRoot}/tests/fixtures/inbox-count.json",
@@ -98,58 +103,18 @@
         { "env": "FACTORY_BROWSER_SHARD" }
       ]
     },
-    "cli": {
-      "cache": true,
-      "outputs": [],
-      "inputs": [
-        "default",
-        "shared",
-        "{workspaceRoot}/tests/cli/**/*",
-        "{workspaceRoot}/tests/parity/**/*",
-        "{workspaceRoot}/rust/factory/src/usage.txt",
-        "{workspaceRoot}/tools/install.py",
-        "{workspaceRoot}/tests/tools/test_install.py",
-        "{workspaceRoot}/tests/fixtures/cli-v1.json",
-        "{workspaceRoot}/tests/fixtures/inbox-count.json",
-        "{workspaceRoot}/docs/device.md",
-        "{workspaceRoot}/docs/integrations.md",
-        "{workspaceRoot}/worker/admission.js",
-        "{workspaceRoot}/.github/workflows/ci.yml",
-        "{workspaceRoot}/.github/actions/ci-setup/action.yml",
-        { "env": "FACTORY_FORBID_LITERALS_JSON" },
-        { "runtime": "python3 --version" }
-      ]
-    },
-    "install": {
-      "cache": true,
-      "outputs": [],
-      "inputs": [
-        "default",
-        "shared",
-        "{workspaceRoot}/tools/install.py",
-        "{workspaceRoot}/tests/tools/test_install.py",
-        "{workspaceRoot}/tests/cli/support.py",
-        "{workspaceRoot}/skills/**/*",
-        { "runtime": "python3 --version" }
-      ]
-    },
     "verify": {
       "cache": true,
       "outputs": [],
       "inputs": [
         "default",
         "shared",
-        "{workspaceRoot}/tests/tools/test_verify.py",
-        "{workspaceRoot}/tests/tools/test_pr_screenshots.py",
-        "{workspaceRoot}/tests/tools/test_copy_pr_screenshots.py",
-        "{workspaceRoot}/tests/tools/test_public_cutover.py",
-        "{workspaceRoot}/tests/tools/test_rewrite_pr_links.py",
-        "{workspaceRoot}/tests/tools/test_secret_scan.py",
-        "{workspaceRoot}/tests/tools/test_stage_notes_check.py",
+        "{workspaceRoot}/tests/tools/verify.test.mjs",
+        "{workspaceRoot}/tests/tools/secret-scan.test.mjs",
+        "{workspaceRoot}/tests/tools/stage-notes-check.test.mjs",
         "{workspaceRoot}/docs/repo-security.md",
-        "{workspaceRoot}/skills/factory/runtime/pr_screenshots.py",
         "{workspaceRoot}/.gitleaks.toml",
-        { "runtime": "python3 --version" }
+        { "runtime": "node --version" }
       ]
     }
   }

@@ -12066,6 +12066,24 @@
       "from": "tests/cli/test_contract.py::LegacyCommandContractTest.test_real_builds_ideas_stuck_and_next_json_shapes"
     },
     {
+      "id": "intake/stuck-skips-a-stale-batched-rider",
+      "argv": ["--home", "{home}", "stuck"],
+      "home": "intake",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "tag"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"090-sample-export-csv\",\"project\":\"sample\",\"stage\":\"build\",\"round\":1,\"updated\":\"2020-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"tag\",\"since\":\"2020-01-01T00:00:00Z\",\"seen\":\"2020-01-01T00:00:00Z\"}},{\"id\":\"091-sample-typo\",\"project\":\"sample\",\"stage\":\"build\",\"round\":1,\"updated\":\"2020-01-01T00:00:00Z\",\"refs\":[{\"id\":\"090-sample-export-csv\",\"kind\":\"batched-into\"}]}]}\n"
+        ],
+        "PUT /api/board": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_batch.py::BatchTest.test_stuck_and_inflight_skip_riders"
+    },
+    {
       "id": "intake/ideas-actual-missing-empty-and-conflicting-commands-keep-exit-codes",
       "argv": ["--home", "{home}", "next"],
       "home": "intake",
@@ -17183,6 +17201,96 @@
         ]
       },
       "exit": 5
+    },
+    {
+      "id": "intake/idea-images-retry-after-partial-push",
+      "argv": ["--home", "{home}", "idea-images", "sample/001-idea"],
+      "home": "idea-images-retry-after-partial-push",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-idea\", \"project\": \"sample\", \"stage\": \"idea\", \"idea\": \"with images\", \"idea_images\": [\"9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png\", \"5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png\"], \"capture_id\": \"11111111-1111-4111-8111-111111111111\"}]}\n"
+        ],
+        "GET /api/idea-images/9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          "fake png one\n"
+        ],
+        "GET /api/idea-images/5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png": [
+          200,
+          "fake png two\n"
+        ],
+        "GET /api/jobs/sample/001-idea/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              },
+              {
+                "name": "idea-image-5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              },
+              {
+                "name": "idea-images.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-idea/idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          ""
+        ],
+        "PUT /api/jobs/sample/001-idea/idea-image-5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png": [
+          200,
+          ""
+        ],
+        "PUT /api/jobs/sample/001-idea/idea-images.md": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::IdeaImagesTest.test_import_retries_after_a_partial_push"
+    },
+    {
+      "id": "intake/idea-images-another-device-pulls-identical-bytes-and-links",
+      "argv": ["--home", "{home}", "pull", "sample/001-idea"],
+      "home": null,
+      "stubs": {},
+      "routes": {
+        "GET /api/jobs/sample/001-idea/?etags=1": [
+          200,
+          [
+            {
+              "name": "idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png",
+              "etag": "\"9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699\""
+            },
+            {
+              "name": "idea-image-5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png",
+              "etag": "\"5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20\""
+            },
+            {
+              "name": "idea-images.md",
+              "etag": "\"abf33aa9b19850410bf644b27735ee5a1da51641efbe9c27d8817908c32db27c\""
+            }
+          ]
+        ],
+        "GET /api/jobs/sample/001-idea/idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          "fake png one\n"
+        ],
+        "GET /api/jobs/sample/001-idea/idea-image-5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png": [
+          200,
+          "fake png two\n"
+        ],
+        "GET /api/jobs/sample/001-idea/idea-images.md": [
+          200,
+          "Pasted image context for this idea:\n\n![pasted image 1](idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png)\n![pasted image 2](idea-image-5d673fdebf671dbf31af09938f39007192688fb34afba8439f3fb2dd3c9b7d20.png)\n"
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::IdeaImagesTest.test_another_device_pulls_identical_bytes_and_links"
     },
     {
       "id": "intake/idea-images-unsynced-import-exits-6",

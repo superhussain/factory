@@ -236,8 +236,22 @@ pub(crate) fn platform_agent(origin: &str) -> &'static Agent {
         .or_insert_with(|| Box::leak(Box::new(new_agent(RootCerts::PlatformVerifier, origin))))
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A test's stand-in for FALLBACK_CA_FILE, so a test can trust its own certificate.
+    static FALLBACK_CA_OVERRIDE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+fn fallback_ca_file() -> String {
+    #[cfg(test)]
+    if let Some(path) = FALLBACK_CA_OVERRIDE.with(|o| o.borrow().clone()) {
+        return path;
+    }
+    FALLBACK_CA_FILE.to_string()
+}
+
 fn fallback_agent(origin: &str) -> Option<Agent> {
-    let pem = std::fs::read(FALLBACK_CA_FILE).ok()?;
+    let pem = std::fs::read(fallback_ca_file()).ok()?;
     let certs: Vec<_> = ureq::tls::parse_pem(&pem)
         .filter_map(|item| match item {
             Ok(PemItem::Certificate(cert)) => Some(cert),
@@ -301,7 +315,7 @@ pub fn urlopen_error(e: &ureq::Error) -> String {
     printable_line(&urlopen_detail(e), 200)
 }
 
-fn send(
+pub(crate) fn send(
     agent: &Agent,
     method: &str,
     url: &str,
@@ -409,7 +423,7 @@ pub fn api(
     if result.as_ref().is_err_and(cert_error) {
         let ssl_env = std::env::var_os("SSL_CERT_FILE").is_some_and(|v| !v.is_empty())
             || std::env::var_os("SSL_CERT_DIR").is_some_and(|v| !v.is_empty());
-        let fallback = if Path::new(FALLBACK_CA_FILE).is_file() && !ssl_env {
+        let fallback = if Path::new(&fallback_ca_file()).is_file() && !ssl_env {
             fallback_agent(&key.0)
         } else {
             None
@@ -538,12 +552,21 @@ pub(crate) mod tests {
     pub(crate) fn serve(
         replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>,
     ) -> (String, Arc<Mutex<Vec<Seen>>>) {
+        serve_hooked(replies, |_| {})
+    }
+
+    /// `serve`, running `before_reply` with the request's index after the request is read and before
+    /// its reply is sent, so a test can change a file while a request is in flight.
+    pub(crate) fn serve_hooked(
+        replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>,
+        before_reply: impl Fn(usize) + Send + 'static,
+    ) -> (String, Arc<Mutex<Vec<Seen>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = seen.clone();
         std::thread::spawn(move || {
-            for (status, body, extra) in replies {
+            for (index, (status, body, extra)) in replies.into_iter().enumerate() {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut line = String::new();
@@ -576,6 +599,7 @@ pub(crate) mod tests {
                     headers,
                     body: data,
                 });
+                before_reply(index);
                 let mut head = format!("HTTP/1.0 {status} X\r\n");
                 for (k, v) in extra {
                     head.push_str(&format!("{k}: {v}\r\n"));
@@ -680,6 +704,74 @@ pub(crate) mod tests {
         assert_eq!(seen[1].header("Content-Type"), Some("application/json"));
     }
 
+    static READ_CACHE_TESTS: Mutex<()> = Mutex::new(());
+    const VIEW_PATH: &str = "/api/pipeline/effective/sample";
+
+    fn paths(seen: &Arc<Mutex<Vec<Seen>>>) -> Vec<String> {
+        let seen = seen.lock().unwrap();
+        seen.iter()
+            .filter(|s| s.method == "GET")
+            .map(|s| s.path.clone())
+            .collect()
+    }
+
+    #[test]
+    fn test_clears_on_pipeline_write() {
+        let _guard = READ_CACHE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (origin, seen) = serve(vec![
+            (200, "{}", vec![]),
+            (200, "", vec![]),
+            (200, "", vec![]),
+            (200, "{}", vec![]),
+            (200, "", vec![]),
+            (200, "{}", vec![]),
+        ]);
+        let home = home_for("http-read-clears", &origin);
+        let read = || api(&home, "GET", VIEW_PATH, None, &[200], &[]).unwrap();
+        let put = |path: &str| api(&home, "PUT", path, Some(b"x"), &[200], &[]).unwrap();
+        read();
+        put("/api/board");
+        read();
+        assert_eq!(paths(&seen), [VIEW_PATH]);
+        for path in ["/api/pipeline/retro/global", "/api/projects/sample.md"] {
+            put(path);
+            read();
+        }
+        assert_eq!(paths(&seen), [VIEW_PATH; 3]);
+    }
+
+    #[test]
+    fn test_404_not_cached() {
+        let _guard = READ_CACHE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (origin, seen) = serve(vec![(404, "", vec![]), (404, "", vec![])]);
+        let home = home_for("http-read-404", &origin);
+        for _ in 0..2 {
+            let e = api(&home, "GET", VIEW_PATH, None, &[200], &[]).unwrap_err();
+            assert_eq!(e.status.map(|s| s.0), Some(404));
+        }
+        assert_eq!(paths(&seen), [VIEW_PATH; 2]);
+    }
+
+    #[test]
+    fn test_expires_after_ttl() {
+        let _guard = READ_CACHE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (origin, seen) = serve(vec![(200, "{}", vec![]), (200, "{}", vec![])]);
+        let home = home_for("http-read-ttl", &origin);
+        let read = || api(&home, "GET", VIEW_PATH, None, &[200], &[]).unwrap();
+        let age = |secs: u64| {
+            let key = (origin.clone(), VIEW_PATH.to_string());
+            reads().lock().unwrap().get_mut(&key).unwrap().0 =
+                Instant::now() - Duration::from_secs(secs);
+        };
+        read();
+        age(READ_TTL - 1);
+        read();
+        assert_eq!(paths(&seen), [VIEW_PATH]);
+        age(READ_TTL);
+        read();
+        assert_eq!(paths(&seen), [VIEW_PATH; 2]);
+    }
+
     #[test]
     fn cas_strips_weak_etags_and_retries_412() {
         let (origin, seen) = serve(vec![
@@ -718,6 +810,155 @@ pub(crate) mod tests {
             format!("factory.py: can't reach {origin}/projects.json: <urlopen error [Errno 111] Connection refused>\n")
         );
         assert!(!e.stderr.contains("test-secret"));
+    }
+
+    /// A TLS server with a self-signed certificate that no system store trusts, from `openssl s_server`.
+    /// Panics when openssl is missing, so a host without it fails these tests instead of skipping them.
+    /// The child is killed when the guard drops.
+    struct SelfSigned {
+        origin: String,
+        cert: std::path::PathBuf,
+        child: std::process::Child,
+    }
+
+    impl Drop for SelfSigned {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    fn self_signed_server(name: &str) -> SelfSigned {
+        use std::process::{Command, Stdio};
+        let dir = temp_dir(name);
+        let (key, cert) = (dir.join("key.pem"), dir.join("cert.pem"));
+        let made = Command::new("openssl")
+            .args([
+                "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+            ])
+            .args([
+                "-subj",
+                "/CN=127.0.0.1",
+                "-addext",
+                "subjectAltName=IP:127.0.0.1",
+            ])
+            .arg("-keyout")
+            .arg(&key)
+            .arg("-out")
+            .arg(&cert)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("these TLS tests need openssl on PATH");
+        assert!(made.success(), "openssl req failed");
+        let probe = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let child = Command::new("openssl")
+            .args(["s_server", "-www", "-accept", &port.to_string()])
+            .arg("-key")
+            .arg(&key)
+            .arg("-cert")
+            .arg(&cert)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("these TLS tests need openssl on PATH");
+        for _ in 0..100 {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        SelfSigned {
+            origin: format!("https://127.0.0.1:{port}"),
+            cert,
+            child,
+        }
+    }
+
+    /// Runs one GET against the untrusted TLS server with the given CA env. The fallback bundle is the
+    /// server's own certificate when `trusted_fallback` is set, and a missing file otherwise, so a
+    /// fallback retry succeeds exactly when the client makes one.
+    fn cert_get(
+        name: &str,
+        ssl_file: &str,
+        ssl_dir: &str,
+        trusted_fallback: bool,
+    ) -> Res<Response> {
+        let server = self_signed_server(name);
+        // home_for clears temp_dir(name), which holds the server's certificate, so the home gets its own.
+        let home = home_for(&format!("{name}-home"), &server.origin);
+        let fallback = if trusted_fallback {
+            server.cert.to_string_lossy().into_owned()
+        } else {
+            server
+                .cert
+                .with_file_name("absent.pem")
+                .to_string_lossy()
+                .into_owned()
+        };
+        FALLBACK_CA_OVERRIDE.with(|o| *o.borrow_mut() = Some(fallback));
+        let _lock = crate::shared::test_env_lock();
+        let old = (
+            std::env::var_os("SSL_CERT_FILE"),
+            std::env::var_os("SSL_CERT_DIR"),
+        );
+        std::env::set_var("SSL_CERT_FILE", ssl_file);
+        std::env::set_var("SSL_CERT_DIR", ssl_dir);
+        let result = api(&home, "GET", "/api/board", None, &[200], &[]);
+        for (key, value) in [("SSL_CERT_FILE", old.0), ("SSL_CERT_DIR", old.1)] {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        FALLBACK_CA_OVERRIDE.with(|o| *o.borrow_mut() = None);
+        std::fs::remove_dir_all(home).unwrap();
+        result
+    }
+
+    #[test]
+    fn cert_error_retries_with_fallback_bundle() {
+        let response = cert_get("http-cert-retry", "", "", true).unwrap();
+        assert_eq!(response.status, 200);
+    }
+
+    // The fallback bundle trusts the server here, so a retry would return 200. Exit 5 proves the
+    // client skipped the retry because SSL_CERT_FILE or SSL_CERT_DIR is set.
+    #[test]
+    fn cert_error_respects_ssl_cert_file() {
+        let e = cert_get("http-cert-file", "/synthetic/ca.pem", "", true).unwrap_err();
+        assert_eq!(e.code, 5);
+        assert!(
+            e.stderr.contains("can't reach https://127.0.0.1:"),
+            "{}",
+            e.stderr
+        );
+    }
+
+    #[test]
+    fn cert_error_respects_ssl_cert_dir() {
+        let e = cert_get("http-cert-dir", "", "/synthetic/certs", true).unwrap_err();
+        assert_eq!(e.code, 5);
+        assert!(
+            e.stderr.contains("can't reach https://127.0.0.1:"),
+            "{}",
+            e.stderr
+        );
+    }
+
+    #[test]
+    fn cert_error_without_fallback_file_explains() {
+        let e = cert_get("http-cert-explains", "", "", false).unwrap_err();
+        assert_eq!(e.code, 5);
+        assert!(
+            e.stderr
+                .contains("Set SSL_CERT_FILE to your system CA bundle and retry."),
+            "{}",
+            e.stderr
+        );
     }
 
     #[test]

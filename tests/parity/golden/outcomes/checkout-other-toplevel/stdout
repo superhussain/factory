@@ -1,0 +1,4 @@
+outcomes of jobs merged in the last 90 days
+project  held  reworked  reverted  unknown
+alpha       0         0         0        3
+alpha unknown: 1017-add-x ({home}/alpha is not a git checkout on parity), 1018-add-y ({home}/alpha is not a git checkout on parity), 1019-add-z (PR is not in example/alpha)

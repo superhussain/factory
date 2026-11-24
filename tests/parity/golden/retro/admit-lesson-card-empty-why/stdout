@@ -1,0 +1,4 @@
+wrote {home}/retro/lesson-card-empty-why/findings.md
+rejected lesson_cards[0].why: must be a string of 1-300 characters
+no suggestions
+uploaded retro run lesson-card-empty-why

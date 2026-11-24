@@ -1,0 +1,1 @@
+factory.py: unsafe checkout: checkout factory/001-test has root dddddddddddd, which origin/main lacks, so it holds archive history; repoint it as docs/public-cutover.md "Other hosts" says

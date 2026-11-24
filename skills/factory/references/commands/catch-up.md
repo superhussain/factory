@@ -5,10 +5,12 @@ Brings this host up to date with the factory repository's main. Run
 report each line it prints.
 
 One run fetches the factory checkout's origin, backs up the installed skill, this
-host's timers and the home config to `<home>/backups/catch-up-<stamp>/`, installs
-the skill with origin's own `tools/install.py` from a temporary detached worktree,
+host's timers and the home config to `<home>/backups/catch-up-<stamp>/`, builds
+origin's binary in a temporary detached worktree and installs the skill with it,
 lets the new bundle rewrite the pickup timer, and checks the Worker's `deploy-main`
-run. The checkout is fast-forwarded only when it is clean and on its base branch.
+run. A factory timer (crontab line, `factory.*.plist`, `factory-*.service` or
+`factory-*.cmd`) or a `stalls.json` adapter that still runs `runtime/factory.py` or
+`runtime/paseo_stalls.py` is rewritten to run the binary, with one `timers:` line each. The checkout is fast-forwarded only when it is clean and on its base branch.
 A run with nothing new writes nothing and ends `catch-up: nothing new`.
 
 Exit 0 means done or nothing new, 1 a step failed, 2 bad usage or a run from the

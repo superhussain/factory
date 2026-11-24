@@ -1,0 +1,15 @@
+[
+  {
+    "route": "alpha",
+    "provider": "provider-a",
+    "model": "model-a",
+    "effort": "high",
+    "limited_until": null
+  },
+  {
+    "route": "beta",
+    "provider": "provider-b",
+    "model": "model-b",
+    "limited_until": null
+  }
+]

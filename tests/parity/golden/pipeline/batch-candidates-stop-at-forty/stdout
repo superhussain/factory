@@ -1,0 +1,246 @@
+{
+  "lead": "090-sample-export-csv",
+  "riders": [],
+  "candidates": [
+    {
+      "id": "100-sample-many",
+      "title": "Title 100-sample-many",
+      "idea": "Title 100-sample-many",
+      "hold": false
+    },
+    {
+      "id": "101-sample-many",
+      "title": "Title 101-sample-many",
+      "idea": "Title 101-sample-many",
+      "hold": false
+    },
+    {
+      "id": "102-sample-many",
+      "title": "Title 102-sample-many",
+      "idea": "Title 102-sample-many",
+      "hold": false
+    },
+    {
+      "id": "103-sample-many",
+      "title": "Title 103-sample-many",
+      "idea": "Title 103-sample-many",
+      "hold": false
+    },
+    {
+      "id": "104-sample-many",
+      "title": "Title 104-sample-many",
+      "idea": "Title 104-sample-many",
+      "hold": false
+    },
+    {
+      "id": "105-sample-many",
+      "title": "Title 105-sample-many",
+      "idea": "Title 105-sample-many",
+      "hold": false
+    },
+    {
+      "id": "106-sample-many",
+      "title": "Title 106-sample-many",
+      "idea": "Title 106-sample-many",
+      "hold": false
+    },
+    {
+      "id": "107-sample-many",
+      "title": "Title 107-sample-many",
+      "idea": "Title 107-sample-many",
+      "hold": false
+    },
+    {
+      "id": "108-sample-many",
+      "title": "Title 108-sample-many",
+      "idea": "Title 108-sample-many",
+      "hold": false
+    },
+    {
+      "id": "109-sample-many",
+      "title": "Title 109-sample-many",
+      "idea": "Title 109-sample-many",
+      "hold": false
+    },
+    {
+      "id": "110-sample-many",
+      "title": "Title 110-sample-many",
+      "idea": "Title 110-sample-many",
+      "hold": false
+    },
+    {
+      "id": "111-sample-many",
+      "title": "Title 111-sample-many",
+      "idea": "Title 111-sample-many",
+      "hold": false
+    },
+    {
+      "id": "112-sample-many",
+      "title": "Title 112-sample-many",
+      "idea": "Title 112-sample-many",
+      "hold": false
+    },
+    {
+      "id": "113-sample-many",
+      "title": "Title 113-sample-many",
+      "idea": "Title 113-sample-many",
+      "hold": false
+    },
+    {
+      "id": "114-sample-many",
+      "title": "Title 114-sample-many",
+      "idea": "Title 114-sample-many",
+      "hold": false
+    },
+    {
+      "id": "115-sample-many",
+      "title": "Title 115-sample-many",
+      "idea": "Title 115-sample-many",
+      "hold": false
+    },
+    {
+      "id": "116-sample-many",
+      "title": "Title 116-sample-many",
+      "idea": "Title 116-sample-many",
+      "hold": false
+    },
+    {
+      "id": "117-sample-many",
+      "title": "Title 117-sample-many",
+      "idea": "Title 117-sample-many",
+      "hold": false
+    },
+    {
+      "id": "118-sample-many",
+      "title": "Title 118-sample-many",
+      "idea": "Title 118-sample-many",
+      "hold": false
+    },
+    {
+      "id": "119-sample-many",
+      "title": "Title 119-sample-many",
+      "idea": "Title 119-sample-many",
+      "hold": false
+    },
+    {
+      "id": "120-sample-many",
+      "title": "Title 120-sample-many",
+      "idea": "Title 120-sample-many",
+      "hold": false
+    },
+    {
+      "id": "121-sample-many",
+      "title": "Title 121-sample-many",
+      "idea": "Title 121-sample-many",
+      "hold": false
+    },
+    {
+      "id": "122-sample-many",
+      "title": "Title 122-sample-many",
+      "idea": "Title 122-sample-many",
+      "hold": false
+    },
+    {
+      "id": "123-sample-many",
+      "title": "Title 123-sample-many",
+      "idea": "Title 123-sample-many",
+      "hold": false
+    },
+    {
+      "id": "124-sample-many",
+      "title": "Title 124-sample-many",
+      "idea": "Title 124-sample-many",
+      "hold": false
+    },
+    {
+      "id": "125-sample-many",
+      "title": "Title 125-sample-many",
+      "idea": "Title 125-sample-many",
+      "hold": false
+    },
+    {
+      "id": "126-sample-many",
+      "title": "Title 126-sample-many",
+      "idea": "Title 126-sample-many",
+      "hold": false
+    },
+    {
+      "id": "127-sample-many",
+      "title": "Title 127-sample-many",
+      "idea": "Title 127-sample-many",
+      "hold": false
+    },
+    {
+      "id": "128-sample-many",
+      "title": "Title 128-sample-many",
+      "idea": "Title 128-sample-many",
+      "hold": false
+    },
+    {
+      "id": "129-sample-many",
+      "title": "Title 129-sample-many",
+      "idea": "Title 129-sample-many",
+      "hold": false
+    },
+    {
+      "id": "130-sample-many",
+      "title": "Title 130-sample-many",
+      "idea": "Title 130-sample-many",
+      "hold": false
+    },
+    {
+      "id": "131-sample-many",
+      "title": "Title 131-sample-many",
+      "idea": "Title 131-sample-many",
+      "hold": false
+    },
+    {
+      "id": "132-sample-many",
+      "title": "Title 132-sample-many",
+      "idea": "Title 132-sample-many",
+      "hold": false
+    },
+    {
+      "id": "133-sample-many",
+      "title": "Title 133-sample-many",
+      "idea": "Title 133-sample-many",
+      "hold": false
+    },
+    {
+      "id": "134-sample-many",
+      "title": "Title 134-sample-many",
+      "idea": "Title 134-sample-many",
+      "hold": false
+    },
+    {
+      "id": "135-sample-many",
+      "title": "Title 135-sample-many",
+      "idea": "Title 135-sample-many",
+      "hold": false
+    },
+    {
+      "id": "136-sample-many",
+      "title": "Title 136-sample-many",
+      "idea": "Title 136-sample-many",
+      "hold": false
+    },
+    {
+      "id": "137-sample-many",
+      "title": "Title 137-sample-many",
+      "idea": "Title 137-sample-many",
+      "hold": false
+    },
+    {
+      "id": "138-sample-many",
+      "title": "Title 138-sample-many",
+      "idea": "Title 138-sample-many",
+      "hold": false
+    },
+    {
+      "id": "139-sample-many",
+      "title": "Title 139-sample-many",
+      "idea": "Title 139-sample-many",
+      "hold": false
+    }
+  ]
+}

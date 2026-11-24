@@ -1,4 +1,4 @@
-// Nx graph guard: the four concern projects stay script-backed and cacheable,
+// Nx graph guard: the three concern projects stay script-backed and cacheable,
 // no target command invokes Python, and nx.json carries no lint/format
 // configuration (job 108 owns those targets) or credential-shaped strings.
 import assert from "node:assert/strict";
@@ -22,13 +22,8 @@ const nxText = read("nx.json");
 const nx = JSON.parse(nxText);
 const manifest = JSON.parse(read("package.json"));
 
-const PROJECT_FILES = [
-  "worker/project.json",
-  "web/project.json",
-  "tools/project.json",
-  "skills/project.json",
-];
-const PROJECT_NAMES = ["worker-hosted", "web-dashboard", "tooling", "device-bundle"];
+const PROJECT_FILES = ["worker/project.json", "web/project.json", "tools/project.json"];
+const PROJECT_NAMES = ["worker-hosted", "web-dashboard", "tooling"];
 const TARGETS = {
   auth: "pnpm run test:auth",
   protocol: "pnpm run test:protocol",
@@ -36,8 +31,6 @@ const TARGETS = {
   deploy: "pnpm run test:deploy",
   local: "pnpm run test:local",
   browser: "pnpm run test:browser",
-  cli: "pnpm run test:cli",
-  install: "pnpm run test:install",
   verify: "pnpm run test:verify",
 };
 const OUTPUTS = {
@@ -47,8 +40,6 @@ const OUTPUTS = {
   deploy: [],
   local: [],
   browser: [],
-  cli: [],
-  install: [],
   verify: [],
 };
 const INPUTS = {
@@ -88,21 +79,26 @@ const INPUTS = {
   local: [
     "default",
     "shared",
-    "!{workspaceRoot}/tools/deploy.py",
+    "!{workspaceRoot}/tools/deploy.mjs",
     "{workspaceRoot}/tests/support/**/*",
     "{workspaceRoot}/tests/fixtures/project-documents.md",
     "{workspaceRoot}/tests/fixtures/project-document-notes.md",
     "{workspaceRoot}/tests/fixtures/project-settings.md",
     "{workspaceRoot}/worker/**/*",
     "{workspaceRoot}/web/**/*",
-    "{workspaceRoot}/tests/worker/*.py",
+    "{workspaceRoot}/tests/worker/local-http.mjs",
+    "{workspaceRoot}/tests/worker/http-v1.test.mjs",
+    "{workspaceRoot}/tests/worker/project-api.test.mjs",
+    "{workspaceRoot}/tests/worker/project-documents-api.test.mjs",
+    "{workspaceRoot}/rust/Cargo.lock",
+    "{workspaceRoot}/rust/factory/**/*",
     "{workspaceRoot}/THIRD_PARTY_NOTICES.md",
     "{workspaceRoot}/.node-version",
   ],
   browser: [
     "default",
     "shared",
-    "!{workspaceRoot}/tools/deploy.py",
+    "!{workspaceRoot}/tools/deploy.mjs",
     "{workspaceRoot}/tests/browser/**/*",
     "{workspaceRoot}/tests/fixtures/browser-cases.json",
     "{workspaceRoot}/tests/fixtures/inbox-count.json",
@@ -116,47 +112,15 @@ const INPUTS = {
     "{workspaceRoot}/.node-version",
     { env: "FACTORY_BROWSER_SHARD" },
   ],
-  cli: [
-    "default",
-    "shared",
-    "{workspaceRoot}/tests/cli/**/*",
-    "{workspaceRoot}/tests/parity/**/*",
-    "{workspaceRoot}/rust/factory/src/usage.txt",
-    "{workspaceRoot}/tools/install.py",
-    "{workspaceRoot}/tests/tools/test_install.py",
-    "{workspaceRoot}/tests/fixtures/cli-v1.json",
-    "{workspaceRoot}/tests/fixtures/inbox-count.json",
-    "{workspaceRoot}/docs/device.md",
-    "{workspaceRoot}/docs/integrations.md",
-    "{workspaceRoot}/worker/admission.js",
-    "{workspaceRoot}/.github/workflows/ci.yml",
-    "{workspaceRoot}/.github/actions/ci-setup/action.yml",
-    { env: "FACTORY_FORBID_LITERALS_JSON" },
-    { runtime: "python3 --version" },
-  ],
-  install: [
-    "default",
-    "shared",
-    "{workspaceRoot}/tools/install.py",
-    "{workspaceRoot}/tests/tools/test_install.py",
-    "{workspaceRoot}/tests/cli/support.py",
-    "{workspaceRoot}/skills/**/*",
-    { runtime: "python3 --version" },
-  ],
   verify: [
     "default",
     "shared",
-    "{workspaceRoot}/tests/tools/test_verify.py",
-    "{workspaceRoot}/tests/tools/test_pr_screenshots.py",
-    "{workspaceRoot}/tests/tools/test_copy_pr_screenshots.py",
-    "{workspaceRoot}/tests/tools/test_public_cutover.py",
-    "{workspaceRoot}/tests/tools/test_rewrite_pr_links.py",
-    "{workspaceRoot}/tests/tools/test_secret_scan.py",
-    "{workspaceRoot}/tests/tools/test_stage_notes_check.py",
+    "{workspaceRoot}/tests/tools/verify.test.mjs",
+    "{workspaceRoot}/tests/tools/secret-scan.test.mjs",
+    "{workspaceRoot}/tests/tools/stage-notes-check.test.mjs",
     "{workspaceRoot}/docs/repo-security.md",
-    "{workspaceRoot}/skills/factory/runtime/pr_screenshots.py",
     "{workspaceRoot}/.gitleaks.toml",
-    { runtime: "python3 --version" },
+    { runtime: "node --version" },
   ],
 };
 
@@ -228,7 +192,7 @@ test("no target command invokes Python and nx.json declares no lint or format co
 
 test("nx.json carries no credential-shaped strings", () => {
   assert.doesNotMatch(
-    nxText.replaceAll("tests/tools/test_secret_scan.py", ""),
+    nxText.replaceAll("tests/tools/secret-scan.test.mjs", ""),
     /token|secret|password|api[_-]?key|credential|bearer/i,
   );
   assert.doesNotMatch(nxText, /\b[0-9a-f]{32,}\b/i);

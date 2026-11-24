@@ -1,0 +1,29 @@
+{"argv": ["-C", "{home}/alpha", "rev-parse", "--show-toplevel"]}
+{"argv": ["-C", "{home}/alpha", "config", "--bool", "extensions.worktreeConfig"]}
+{"argv": ["-C", "{home}/alpha", "config", "--local", "--includes", "--get-regexp", "^(url|http)\\."]}
+{"argv": ["-C", "{home}/alpha", "fetch", "-q", "https://github.com/example/alpha.git", "+refs/heads/main:refs/remotes/origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000001", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000003", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000005", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000007", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000009", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "000000000000000000000000000000000000000b", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "000000000000000000000000000000000000000d", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "000000000000000000000000000000000000000f", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000011", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000013", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000015", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000017", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000019", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "000000000000000000000000000000000000001b", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "000000000000000000000000000000000000001d", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "000000000000000000000000000000000000001f", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000021", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000023", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000025", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000027", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000029", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "000000000000000000000000000000000000002b", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "000000000000000000000000000000000000002d", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "000000000000000000000000000000000000002f", "--list", "origin/main"]}
+{"argv": ["-C", "{home}/alpha", "branch", "-r", "--contains", "0000000000000000000000000000000000000031", "--list", "origin/main"]}

@@ -125,6 +125,7 @@ struct Fakes {
     setup_run: Option<Rc<dyn Fn(&[&str], Option<&str>) -> (i32, String)>>,
     pickup_pass: Option<Rc<dyn Fn(&mut Io, &Path) -> Res<()>>>,
     orphan_pickup_scan: Hook,
+    orphan_scan: Option<Rc<dyn Fn(&Path) -> Res<(Vec<Orphan>, Vec<String>)>>>,
     outcomes_pickup_record: Hook,
     pick_route: Option<Rc<dyn Fn(&Path) -> Res<Option<Route>>>>,
     launch_idea: Option<Launch>,
@@ -587,7 +588,7 @@ fn detach(cmd: &mut Command) {
 }
 
 #[cfg(unix)]
-fn getuid() -> u32 {
+pub(crate) fn getuid() -> u32 {
     extern "C" {
         fn getuid() -> u32;
     }
@@ -596,7 +597,7 @@ fn getuid() -> u32 {
 }
 
 #[cfg(not(unix))]
-fn getuid() -> u32 {
+pub(crate) fn getuid() -> u32 {
     0
 }
 
@@ -1382,7 +1383,7 @@ fn host_os() -> &'static str {
     }
 }
 
-/// {commit, tree} from the bundle.json install.py writes beside the runtime, or None.
+/// {commit, tree} from the bundle.json `factory install` writes beside the runtime, or None.
 fn bundle_stamp() -> Option<Value> {
     #[cfg(test)]
     if let Some(f) = fake!(bundle_stamp) {
@@ -3132,6 +3133,10 @@ struct Orphan {
 /// (orphans, skipped): factory branches on origin, open factory PRs, job worktrees and
 /// factory-<id> Paseo workspaces that no open board job owns. Only reads.
 fn orphan_scan(home: &Path) -> Res<(Vec<Orphan>, Vec<String>)> {
+    #[cfg(test)]
+    if let Some(f) = fake!(orphan_scan) {
+        return f(home);
+    }
     let board = read_board(home)?;
     let jobs: &[Value] = board["jobs"].as_array().map_or(&[], Vec::as_slice);
     let paths = paths_of(home)?;
@@ -6241,6 +6246,198 @@ fn adapter_run(adapter: &[String], extra: &[&str]) -> io::Result<Out> {
     )
 }
 
+const STALLS_USAGE: &str = "usage: factory stalls list | archive <id> [--force]\n";
+const STALLS_PASEO_SECONDS: u64 = 20;
+static STALL_LIMIT: Pattern = Pattern::new(
+    r"You['’]ve hit your (session|weekly) limit · resets (?:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2}), )?(\d{1,2})(?::(\d{2}))?(am|pm) \(([A-Za-z_]+(?:/[A-Za-z0-9_+-]+)*)\)",
+    Re::NONE,
+);
+
+/// `factory stalls`: the stall adapter pickup's stalls.json names. It reports and archives
+/// Paseo sessions stalled on a Claude usage limit. Exit 0 ok, 1 failure, 2 usage, 3 archive
+/// refused because the session is no longer stalled.
+pub fn stalls_cmd(call: &Call) -> Res<()> {
+    let args: Vec<&str> = call.args.iter().map(String::as_str).collect();
+    match args[..] {
+        ["list"] => stalls_list(),
+        ["archive", id] if ADAPTER_ID.is_full(id) => stalls_archive(id),
+        ["archive", id, "--force"] if ADAPTER_ID.is_full(id) => stalls_archive_force(id),
+        _ => Err(Exit::raw(2, STALLS_USAGE)),
+    }
+}
+
+fn stalls_fail(msg: &str) -> Exit {
+    Exit::raw(1, format!("factory stalls: {msg}\n"))
+}
+
+/// (exit code, stdout) from one paseo call, or 1 when paseo fails or is slow.
+fn stalls_paseo(args: &[&str]) -> Res<(i32, String)> {
+    let Some(program) = which("paseo") else {
+        return Err(stalls_fail("paseo is not on PATH"));
+    };
+    let program = program.to_string_lossy().into_owned();
+    let home = std::env::var("PASEO_HOME").unwrap_or_default();
+    let mut argv = vec![program.as_str()];
+    if !home.is_empty() {
+        argv.extend(["--home", home.as_str()]);
+    }
+    argv.extend(args);
+    Ok(
+        match capture(
+            &argv,
+            None,
+            &[],
+            Some(Duration::from_secs(STALLS_PASEO_SECONDS)),
+        ) {
+            Ok(out) => (out.code, out.stdout),
+            Err(_) => (1, String::new()),
+        },
+    )
+}
+
+/// (limit line groups, inspect info) while the agent sits idle and unarchived on a Claude limit
+/// line, else None.
+fn stall_of(agent: &str) -> Res<Option<(Vec<Option<String>>, Value)>> {
+    let (code, text) = stalls_paseo(&["logs", agent, "--tail", "1", "--filter", "text"])?;
+    if code != 0 {
+        return Ok(None);
+    }
+    let Some(caps) = STALL_LIMIT.fullmatch(strip(&text)) else {
+        return Ok(None);
+    };
+    let groups = (1..=7)
+        .map(|i| caps.get(i).map(|m| m.as_str().to_string()))
+        .collect();
+    let (code, raw) = stalls_paseo(&["inspect", agent, "--json"])?;
+    if code != 0 {
+        return Ok(None);
+    }
+    let Some(info) = loads(&raw).ok().filter(Value::is_object) else {
+        return Ok(None);
+    };
+    if info.get("Status") != Some(&json!("idle")) || info.get("Archived") != Some(&json!(false)) {
+        return Ok(None);
+    }
+    Ok(Some((groups, info)))
+}
+
+/// The reset instant in seconds from the limit line groups and the message time in
+/// microseconds, or None when the zone is unknown: that agent is left out.
+fn stall_reset(groups: &[Option<String>], message_us: i128) -> Option<i64> {
+    let zone = groups[6].as_deref()?;
+    let at = message_us.div_euclid(1_000_000) as i64;
+    let local = at + zone_offset(zone, at)?;
+    let (y, m, d) = civil(local.div_euclid(86_400));
+    let hour = groups[3].as_deref()?.parse::<i64>().ok()? % 12
+        + if groups[5].as_deref() == Some("pm") {
+            12
+        } else {
+            0
+        };
+    let minute: i64 = groups[4].as_deref().unwrap_or("0").parse().ok()?;
+    if hour > 23 || minute > 59 {
+        return None;
+    }
+    let wall = |y: i64, m: i64, d: i64| -> Option<i128> {
+        if d < 1 || d > crate::commands::retro::month_days(y, m) {
+            return None;
+        }
+        let utc = zone_wall_to_utc(
+            zone,
+            days_from_civil(y, m, d) * 86_400 + hour * 3600 + minute * 60,
+        )?;
+        Some(i128::from(utc) * 1_000_000)
+    };
+    let reset = match groups[1].as_deref() {
+        None => {
+            let reset = wall(y, m, d)?;
+            if reset > message_us {
+                reset
+            } else {
+                let (y, m, d) = civil(days_from_civil(y, m, d) + 1);
+                wall(y, m, d)?
+            }
+        }
+        Some(month) => {
+            let month = MONTHS.iter().position(|n| *n == month)? as i64 + 1;
+            let day: i64 = groups[2].as_deref()?.parse().ok()?;
+            let reset = wall(y, month, day)?;
+            if reset < message_us - 86_400 * 1_000_000 {
+                wall(y + 1, month, day)?
+            } else {
+                reset
+            }
+        }
+    };
+    Some(reset.div_euclid(1_000_000) as i64)
+}
+
+fn stalls_list() -> Res<()> {
+    let (code, raw) = stalls_paseo(&["ls", "-g", "--json"])?;
+    let agents = (code == 0).then(|| loads(&raw).ok()).flatten();
+    let Some(Value::Array(agents)) = agents else {
+        return Err(stalls_fail("paseo ls failed"));
+    };
+    let mut stalls = Vec::new();
+    for agent in &agents {
+        let Some(id) = get_str(agent, "id") else {
+            continue;
+        };
+        let head = get_str(agent, "provider").map_or("", |p| p.split('/').next().unwrap_or(""));
+        if agent.get("status") != Some(&json!("idle"))
+            || !(head == "claude" || head.starts_with("claude-"))
+            || !ADAPTER_ID.is_full(id)
+        {
+            continue;
+        }
+        let Some((groups, info)) = stall_of(id)? else {
+            continue;
+        };
+        let Some(message_us) = crate::commands::retro::when(info.get("UpdatedAt")) else {
+            continue;
+        };
+        let Some(reset) = stall_reset(&groups, message_us) else {
+            continue;
+        };
+        let model = info
+            .get("Model")
+            .filter(|m| truthy(Some(*m)))
+            .cloned()
+            .unwrap_or(json!(""));
+        stalls.push(json!({"session": id, "reset": format_stamp(reset),
+            "provider": info.get("Provider").cloned().unwrap_or(Value::Null), "model": model}));
+    }
+    let doc = json!({"version": 1, "stalls": stalls});
+    let _ = writeln!(io::stdout(), "{}", dumps(&doc, DEFAULT));
+    Ok(())
+}
+
+/// Archive only a session that is still stalled; a woken one exits 3 and is kept.
+fn stalls_archive(id: &str) -> Res<()> {
+    if stall_of(id)?.is_none() {
+        return Err(exit(3));
+    }
+    let (code, _) = stalls_paseo(&["archive", id])?;
+    if code != 0 {
+        return Err(stalls_fail(&format!("paseo archive exit {code}")));
+    }
+    Ok(())
+}
+
+/// Archive a session whatever it is doing, unless it is already archived.
+fn stalls_archive_force(id: &str) -> Res<()> {
+    let (code, raw) = stalls_paseo(&["inspect", id, "--json"])?;
+    let info = (code == 0).then(|| loads(&raw).ok()).flatten();
+    if info.is_some_and(|i| i.get("Archived") == Some(&json!(true))) {
+        return Ok(());
+    }
+    let (code, _) = stalls_paseo(&["archive", "--force", id])?;
+    if code != 0 {
+        return Err(stalls_fail(&format!("paseo archive exit {code}")));
+    }
+    Ok(())
+}
+
 /// The stalls from one adapter list call, or the reason it gave none.
 fn list_stalls(adapter: &[String]) -> Result<Vec<Value>, String> {
     let p = match adapter_run(adapter, &["list"]) {
@@ -9207,6 +9404,26 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Mutex, MutexGuard};
 
+    /// Parity writes the host-status "os" field as {os}, so only this test catches a wrong label.
+    #[test]
+    fn host_os_labels_each_platform() {
+        let os = host_os();
+        #[cfg(target_os = "macos")]
+        assert_eq!(os, "macOS");
+        #[cfg(windows)]
+        assert_eq!(os, "Windows");
+        #[cfg(target_os = "linux")]
+        {
+            let wsl = fs::read_to_string("/proc/sys/kernel/osrelease")
+                .unwrap_or_default()
+                .to_lowercase()
+                .contains("microsoft");
+            assert_eq!(os, if wsl { "Linux (WSL)" } else { "Linux" });
+        }
+        #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
+        assert_eq!(os, "Other");
+    }
+
     const DEVICE: &str = "host-a";
     const IDEA_TEXT: &str = "$(touch pwned)";
     const PLACEHOLDERS: [&str; 10] = [
@@ -11649,16 +11866,7 @@ exit "$archive_code"
 
         #[test]
         fn test_agent_guard_matches_the_adapter_id_rule() {
-            let source = fs::read_to_string(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../skills/factory/runtime/paseo_stalls.py"
-            ))
-            .unwrap();
-            let line = source.lines().find(|l| l.starts_with("ID_RE = ")).unwrap();
-            assert!(
-                line.contains(r#""[0-9a-fA-F][0-9a-fA-F-]{7,63}""#),
-                "{line}"
-            );
+            // `factory stalls` checks ids with the same ADAPTER_ID pickup's guard uses.
             assert!(ADAPTER_ID.is_full(AGENT) && !ADAPTER_ID.is_full("ab_cd"));
         }
 
@@ -14129,6 +14337,140 @@ exit "$archive_code"
         }
     }
 
+    mod orphan_summary_test {
+        use super::*;
+
+        fn rows(kinds: &[&'static str]) -> Vec<Orphan> {
+            kinds
+                .iter()
+                .map(|kind| Orphan {
+                    kind,
+                    name: Some("x".into()),
+                })
+                .collect()
+        }
+
+        #[test]
+        fn example_line() {
+            assert_eq!(
+                orphan_summary(&rows(&["branch", "pr", "worktree", "workspace"]), &[]),
+                "orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory.py orphans to list them"
+            );
+        }
+
+        #[test]
+        fn plurals_and_skips() {
+            let four = rows(&["branch", "branch", "workspace", "workspace"]);
+            assert_eq!(
+                orphan_summary(&four, &["prs: gh is not on PATH".to_string()]),
+                "orphan scan: 4 orphaned (2 branches, 2 Paseo workspaces), 1 source skipped; run factory.py orphans to list them"
+            );
+            let two =
+                ["prs: gh is not on PATH", "workspaces: paseo is not on PATH"].map(String::from);
+            assert_eq!(
+                orphan_summary(&[], &two),
+                "orphan scan: nothing orphaned, 2 sources skipped; run factory.py orphans to list them"
+            );
+        }
+    }
+
+    mod orphan_pickup_scan_test {
+        use super::*;
+        use std::cell::Cell;
+
+        /// Fake orphan_scan answering with one open-PR orphan (or a stop with exit 5), counting calls.
+        fn scan_fake(stop: bool) -> Rc<Cell<usize>> {
+            let calls = Rc::new(Cell::new(0));
+            let seen = calls.clone();
+            FAKES.with(|f| {
+                *f.borrow_mut() = Fakes {
+                    orphan_scan: Some(Rc::new(move |_| {
+                        seen.set(seen.get() + 1);
+                        if stop {
+                            return Err(crate::shared::exit::exit(5));
+                        }
+                        Ok((
+                            vec![Orphan {
+                                kind: "pr",
+                                name: Some("https://github.com/example/factory/pull/7".into()),
+                            }],
+                            Vec::new(),
+                        ))
+                    })),
+                    ..Fakes::default()
+                }
+            });
+            calls
+        }
+
+        fn run_scan(home: &Path) -> (String, String) {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let mut io = Io {
+                out: &mut out,
+                err: &mut err,
+            };
+            orphan_pickup_scan(&mut io, home).unwrap();
+            (
+                String::from_utf8(out).unwrap(),
+                String::from_utf8(err).unwrap(),
+            )
+        }
+
+        #[test]
+        fn once_per_local_date() {
+            let home = crate::shared::fs::temp_dir("orphan-once");
+            let calls = scan_fake(false);
+            let (utc, offset) = local_now();
+            let today = local_date(utc, offset);
+            assert_eq!(
+                run_scan(&home),
+                (
+                    "orphan scan: 1 orphaned (1 open PR); run factory.py orphans to list them\n"
+                        .to_string(),
+                    String::new()
+                )
+            );
+            assert_eq!(
+                read_json(&home.join("orphan-scan.json")).unwrap(),
+                json!({"version": 1, "date": today})
+            );
+            assert_eq!(run_scan(&home), (String::new(), String::new()));
+            assert_eq!(calls.get(), 1);
+            fs::remove_dir_all(home).unwrap();
+        }
+
+        #[test]
+        fn new_date_scans_again() {
+            let home = crate::shared::fs::temp_dir("orphan-new-date");
+            let calls = scan_fake(false);
+            fs::write(
+                home.join("orphan-scan.json"),
+                "{\"version\": 1, \"date\": \"2000-01-01\"}\n",
+            )
+            .unwrap();
+            assert_eq!(run_scan(&home).0.matches('\n').count(), 1);
+            assert_eq!(calls.get(), 1);
+            fs::remove_dir_all(home).unwrap();
+        }
+
+        #[test]
+        fn stopped_scan_costs_one_line_and_waits() {
+            let home = crate::shared::fs::temp_dir("orphan-stopped");
+            let calls = scan_fake(true);
+            assert_eq!(
+                run_scan(&home),
+                (
+                    String::new(),
+                    "factory.py: orphan scan stopped (exit 5); it runs again tomorrow\n"
+                        .to_string()
+                )
+            );
+            assert_eq!(run_scan(&home), (String::new(), String::new()));
+            assert_eq!(calls.get(), 1);
+            fs::remove_dir_all(home).unwrap();
+        }
+    }
+
     mod outcomes_pickup_hook_test {
         use super::*;
 
@@ -15774,6 +16116,35 @@ exit "$archive_code"
             assert!(!wt.exists());
             assert!(!branch_exists(&fx));
             assert_eq!(left(&fx), json!([]));
+        }
+
+        /// stop_pids gives None when lsof is missing. worktree.rs prints the "lsof not found" line
+        /// itself, so the fake only stands in for that unchecked answer.
+        #[test]
+        fn test_cleanup_without_lsof_still_removes_a_merged_job() {
+            let (fx, wt, _) = setup();
+            git_in(
+                &fx.repo_a,
+                &[
+                    &ID[..],
+                    &[
+                        "merge",
+                        "-q",
+                        "--no-ff",
+                        "-m",
+                        "merge",
+                        "factory/042-sample-export",
+                    ],
+                ]
+                .concat(),
+            );
+            fx.set_fakes(|f| f.stop_pids = Some(Rc::new(|_: &Path| None)));
+            fx.jobs(json!([closed(json!({}))]));
+            assert_eq!(
+                fx.pickup(&[]),
+                out_err(0, "cleaned up 042-sample-export alpha\n", "")
+            );
+            assert!(!wt.exists());
         }
 
         /// Rust cleanup_job cannot fail, so Python's raising cleanup_job is a fake that leaves work:
@@ -20094,6 +20465,106 @@ exit "$archive_code"
                 .unwrap()
                 .get("triage_failed_since")
                 .is_none());
+        }
+    }
+
+    mod autonomy_hold_test {
+        use super::*;
+
+        #[test]
+        fn test_pass_holds() {
+            let fx = Fx::new();
+            let visible = json!({"security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS"});
+            let reverted = json!({"id": "1019-add-z", "project": "alpha", "stage": "merged",
+                "done": "2099-01-01T00:00:00Z", "updated": "2026-01-05T10:00:00Z", "rounds": [visible],
+                "outcome": {"result": "reverted", "at": "2026-01-09T12:00:00Z", "evidence": []}});
+            let shipping = json!({"id": "1031-add-w", "project": "alpha", "stage": "pr-open",
+                "automerge": true, "pr": "https://github.com/example/alpha/pull/631",
+                "rounds": [visible], "updated": "2026-01-10T10:00:00Z"});
+            let board = json!({"updated": "2026-01-10T10:00:00Z", "jobs": [reverted, shipping]});
+            fx.jobs(board["jobs"].clone());
+            let mut data = board.clone();
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let mut io = Io {
+                out: &mut out,
+                err: &mut err,
+            };
+            autonomy_hold_pass(&mut io, &fx.home, &mut data, false).unwrap();
+            assert_eq!(
+                String::from_utf8(out).unwrap(),
+                "held 1031-add-w alpha PR #631 for a person\n"
+            );
+            assert_eq!(fx.puts().len(), 1);
+            let job = fx.job("1031-add-w");
+            assert_eq!(
+                (&job["automerge"], &job["needs"], &job["note"]),
+                (
+                    &json!(false),
+                    &json!("review and merge PR #631: earned autonomy holds alpha visible PRs after reverted 1019-add-z; a person lifts it with factory.py autonomy restore alpha visible"),
+                    &json!("earned autonomy hold: a person reviews and merges")
+                )
+            );
+            assert_eq!(
+                autonomy_holds(&board),
+                vec![(
+                    ("alpha".to_string(), "visible"),
+                    vec!["1019-add-z".to_string()]
+                )]
+            );
+        }
+    }
+
+    mod daily_tokens_test {
+        use super::*;
+
+        const MIDNIGHT: i64 = 1_767_225_600; // 2026-01-01T00:00:00Z
+
+        fn turn(id: &str, n: [i64; 4], stamp: &str) -> String {
+            json!({"type": "assistant", "isSidechain": false, "timestamp": stamp,
+                "message": {"id": id, "model": "claude-opus-5-5", "usage": {
+                "input_tokens": n[0], "output_tokens": n[1], "cache_creation_input_tokens": n[2],
+                "cache_read_input_tokens": n[3]}}})
+            .to_string()
+                + "\n"
+        }
+
+        fn seed(fx: &Fx) -> PathBuf {
+            let projects = fx.root.join("claude/projects");
+            let job = projects.join("-home-u--paseo-worktrees-ab12-factory-1017-add-x");
+            fs::create_dir_all(&job).unwrap();
+            let d2 = turn("d2", [10, 20, 30, 40], "2026-01-01T00:00:00.250Z");
+            let day = [
+                turn("d1", [1, 2, 3, 4], "2025-12-31T23:59:59.900Z"),
+                d2.clone(),
+                d2,
+            ]
+            .concat();
+            fs::write(job.join("day.jsonl"), day).unwrap();
+            fx.set_env("CLAUDE_CONFIG_DIR", fx.root.join("claude"));
+            projects
+        }
+
+        #[test]
+        fn test_outside_a_job_folder() {
+            let fx = Fx::new();
+            let projects = seed(&fx);
+            assert_eq!(daily_tokens(MIDNIGHT), Ok(60));
+            let outside = projects.join("-home-u-dev-factory");
+            fs::create_dir_all(&outside).unwrap();
+            fs::write(
+                outside.join("day.jsonl"),
+                turn("d3", [500, 0, 0, 0], "2026-01-01T01:00:00.000Z"),
+            )
+            .unwrap();
+            assert_eq!(daily_tokens(MIDNIGHT), Ok(60));
+        }
+
+        #[test]
+        fn test_no_root() {
+            let fx = Fx::new();
+            seed(&fx);
+            fx.set_env("CLAUDE_CONFIG_DIR", fx.root.join("missing"));
+            assert_eq!(daily_tokens(MIDNIGHT), Ok(0));
         }
     }
 

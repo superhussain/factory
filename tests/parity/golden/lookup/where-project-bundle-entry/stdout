@@ -1,0 +1,12 @@
+{
+  "factory": "{home}",
+  "runtime": "{bin}",
+  "project_file": "{home}/projects/sample.md",
+  "repo_path": "/srv/sample",
+  "repo": "octo/sample",
+  "base": "rust",
+  "slug": "sample",
+  "jobs": "{home}/jobs/sample",
+  "worktrees": "{home}/worktrees/sample",
+  "dashboard": "{api}/"
+}

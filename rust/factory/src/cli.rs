@@ -4,8 +4,8 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use crate::commands::{
-    audit, catch_up, checks, claims, daemon, install, intake, lookup, ops, pickup, pipeline,
-    prompt, retro, setup, sync, tracer, wait, worktree,
+    audit, bootstrap, catch_up, checks, claims, daemon, install, intake, lookup, ops, pickup,
+    pipeline, prompt, retro, screenshots, setup, sync, tracer, wait, worktree,
 };
 use crate::shared::consts::{MAX_RIDERS, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
@@ -101,6 +101,9 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
 const EXTRA: &[(&str, Handler, usize, usize)] = &[
     ("daemon", daemon::daemon, 0, 2),
     ("install", install::install, 4, 5),
+    ("stalls", pickup::stalls_cmd, 0, usize::MAX),
+    ("pr-screenshots", screenshots::pr_screenshots, 0, usize::MAX),
+    ("bootstrap", bootstrap::bootstrap, 0, usize::MAX),
 ];
 
 pub const USAGE: &str = include_str!("usage.txt");
@@ -233,7 +236,6 @@ pub fn main(args: Vec<OsString>) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::pyre::{Flags, Pattern};
 
     fn args(list: &[&str]) -> Vec<OsString> {
         list.iter().map(OsString::from).collect()
@@ -245,50 +247,34 @@ mod tests {
     }
 
     #[test]
-    fn table_matches_factory_py() {
-        static ROW: Pattern = Pattern::new(
-            r#"(?:COMMANDS\[)?"([a-z-]+)"\]?(?::| =) \((\w+), (\d+), ([^)]+)\)"#,
-            Flags::NONE,
-        );
-        let src = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../skills/factory/runtime/factory.py"
-        ))
-        .unwrap();
-        let start = src.find("COMMANDS = {").unwrap();
-        let end = src.find("def main(argv=None)").unwrap();
-        let python: Vec<(String, usize, usize)> = ROW
-            .find_iter(&src[start..end])
-            .map(|m| {
-                let c = ROW.fullmatch(m.as_str()).unwrap();
-                let hi = match c.get(4).unwrap().as_str() {
-                    "sys.maxsize" => usize::MAX,
-                    "1 + MAX_RIDERS" => 1 + MAX_RIDERS,
-                    n => n.parse().unwrap(),
-                };
-                (
-                    c.get(1).unwrap().as_str().to_string(),
-                    c.get(3).unwrap().as_str().parse().unwrap(),
-                    hi,
-                )
-            })
-            .collect();
-        // pr-merge is Rust-only: its spec rules out a Python command.
-        let rust: Vec<(String, usize, usize)> = COMMANDS
-            .iter()
-            .filter(|(n, ..)| *n != "pr-merge")
-            .map(|(n, _, lo, hi)| (n.to_string(), *lo, *hi))
-            .collect();
-        assert_eq!(python.len(), 69);
-        assert_eq!(rust, python);
-    }
-
-    #[test]
     fn daemon_is_binary_only() {
         assert!(handler_for("daemon", 0).is_some());
         assert!(handler_for("daemon", 2).is_some());
         assert!(handler_for("daemon", 3).is_none());
         assert!(!USAGE.contains("daemon"));
+    }
+
+    #[test]
+    fn binary_only_commands_print_their_own_usage() {
+        let stderr = |list: &[&str]| run(args(list)).unwrap_err().stderr;
+        for list in [
+            &["stalls"][..],
+            &["stalls", "archive", "a1b2c3d4e5", "--force", "x"],
+        ] {
+            assert_eq!(
+                stderr(list),
+                "usage: factory stalls list | archive <id> [--force]\n"
+            );
+        }
+        for list in [
+            &["bootstrap"][..],
+            &["bootstrap", "plan", "--answers", "a", "b"],
+        ] {
+            assert_eq!(
+                stderr(list),
+                "usage: factory bootstrap <up|down|plan --answers <file>>\n"
+            );
+        }
     }
 
     #[test]

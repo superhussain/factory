@@ -1,0 +1,18 @@
+{
+  "orphans": [
+    {
+      "kind": "worktree",
+      "project": "factory",
+      "job": "2031-stale-banner",
+      "name": "{home}/worktrees/factory/2031-stale-banner",
+      "reason": "job merged"
+    }
+  ],
+  "skipped": [
+    "branches factory: git ls-remote failed (exit 128)",
+    "prs factory: gh pr list failed (exit 1)",
+    "branches bare: git ls-remote failed (exit 127)",
+    "prs bare: the project file names no repo",
+    "workspaces: paseo workspace ls failed (exit 3)"
+  ]
+}

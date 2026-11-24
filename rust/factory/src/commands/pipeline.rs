@@ -1373,6 +1373,14 @@ fn trial_droppable(t: &Value) -> bool {
     t.is_object() && str_of(t, "status") == Some("open") && !trial_valid(t) && trial_misshapen(t)
 }
 
+/// A dropped trial record's id for the settle line, escaped, or "(no id)" when it has no non-empty string id.
+fn trial_drop_label(t: &Value) -> String {
+    match str_of(t, "id") {
+        Some(id) if !id.is_empty() => id.escape_debug().to_string(),
+        _ => "(no id)".to_string(),
+    }
+}
+
 /// The board's open, well-formed trial for slug's stage note, or None.
 #[allow(dead_code)]
 fn open_trial_for<'a>(data: &'a Value, slug: &str, stage: &str) -> Option<&'a Value> {
@@ -1622,7 +1630,7 @@ fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
         }
         updates.push((tid.to_string(), update));
     }
-    let mut dropped = 0;
+    let mut dropped: Vec<String> = Vec::new();
     let data = cas(home, "/api/board", |text| {
         let mut data = load_board(text)?;
         let (gone, mut records): (Vec<Value>, Vec<Value>) = data
@@ -1633,7 +1641,7 @@ fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
             .filter(|t| t.is_object())
             .cloned()
             .partition(trial_droppable);
-        dropped = gone.len();
+        dropped = gone.iter().map(trial_drop_label).collect();
         for t in records.iter_mut() {
             if str_of(t, "status") != Some("open") {
                 continue;
@@ -1670,11 +1678,12 @@ fn trial_settle(home: &Path, o: &mut Out) -> Res<()> {
         data["updated"] = json!(now());
         Ok((Some(dump_board(&data)), data))
     })?;
-    if dropped > 0 {
+    if !dropped.is_empty() {
         writeln!(
             o.out,
-            "dropped malformed open trial records: {dropped} \
-             (opened is not a board timestamp or version is not a whole number)"
+            "dropped malformed open trial records: {} ({}; opened is not a board timestamp or version is not a whole number)",
+            dropped.len(),
+            dropped.join(", ")
         )
         .unwrap();
     }
@@ -2196,10 +2205,9 @@ const PROTECTED_PATHS: &[&str] = &[
     "*.mise.toml",
     "*.oxfmtrc*",
     "nx.json",
-    "tools/verify.py",
-    "tests/cli/support.py",
+    "tools/verify.mjs",
     "tests/support/*",
-    "tools/secret-scan.py",
+    "tools/secret-scan.mjs",
     "pnpm-workspace.yaml",
     "*/pnpm-workspace.yaml",
     "*.npmrc",
@@ -5807,6 +5815,21 @@ mod tests {
                    "autonomy": {"paused": false, "projects": ["factory"], "self": []}})
         }
 
+        #[test]
+        fn trial_drop_label_names_the_id() {
+            assert_eq!(
+                trial_drop_label(&json!({"id": "factory-spec-v10"})),
+                "factory-spec-v10"
+            );
+            assert_eq!(trial_drop_label(&json!({})), "(no id)");
+            assert_eq!(trial_drop_label(&json!({"id": ""})), "(no id)");
+            assert_eq!(trial_drop_label(&json!({"id": 42})), "(no id)");
+            assert_eq!(
+                trial_drop_label(&json!({"id": "bad\u{1b}[31m"})),
+                "bad\\u{1b}[31m"
+            );
+        }
+
         fn arm_ids(trial_id: &str, arm: &str, count: usize) -> Vec<String> {
             (2100..)
                 .map(|n| format!("{n}-job"))
@@ -6472,12 +6495,11 @@ mod tests {
                 "mise.toml",
                 ".oxfmtrc.json",
                 "nx.json",
-                "tools/verify.py",
-                "tests/cli/support.py",
+                "tools/verify.mjs",
                 "tests/support/browser-server.mjs",
                 "docs/trust.md",
                 "pnpm-lock.yaml",
-                "tools/secret-scan.py",
+                "tools/secret-scan.mjs",
                 "pnpm-workspace.yaml",
                 "paseo-plugin/pnpm-workspace.yaml",
                 ".npmrc",
@@ -6499,10 +6521,9 @@ mod tests {
                     "paseo-plugin/package.json",
                     "paseo-plugin/pnpm-workspace.yaml",
                     "pnpm-workspace.yaml",
-                    "tests/cli/support.py",
                     "tests/support/browser-server.mjs",
-                    "tools/secret-scan.py",
-                    "tools/verify.py",
+                    "tools/secret-scan.mjs",
+                    "tools/verify.mjs",
                 ]
             );
         }

@@ -2,6 +2,7 @@
 // board.json into board-archive.json, writing the archive first so a lost board race
 // leaves copies, never a loss. Reads hide any archive row whose id is still on the board.
 import { validatePipeline } from "./admission.js";
+import { boardStore, readBoardJson } from "./board-store.js";
 import { announce } from "./events.js";
 
 export const ARCHIVE_KEY = "board-archive.json";
@@ -126,7 +127,7 @@ export async function runArchive(env, now) {
   const pipeline = await readJson(env, "pipeline/global.json");
   if (!pipeline || validatePipeline(pipeline.data) || !pipeline.data.archive)
     return { status: "off", moved: [] };
-  const board = await readJson(env, "board.json");
+  const board = await readBoardJson(env);
   const jobs = jobsOf(board);
   if (!jobs) return { status: "none", moved: [] };
   const archive = await readJson(env, ARCHIVE_KEY);
@@ -157,9 +158,8 @@ export async function runArchive(env, now) {
     jobs: jobs.filter((j) => !ids.has(j.id)),
     archived: nextArchived(board.data.archived, moved),
   };
-  const written = await env.BUCKET.put("board.json", JSON.stringify(next) + "\n", {
-    onlyIf: new Headers({ "If-Match": board.etag }),
-    httpMetadata: { contentType: "application/json" },
+  const written = await boardStore(env).replace(JSON.stringify(next) + "\n", {
+    ifMatch: board.etag,
   });
   if (!written) {
     return conflict(
@@ -193,7 +193,7 @@ export async function archiveGet(request, env) {
   const q = params.get("q");
   if (q !== null && ([...q].length < 1 || [...q].length > 200))
     return reply("q: must be 1 to 200 characters", 400);
-  const boardIds = new Set((jobsOf(await readJson(env, "board.json")) ?? []).map((j) => j?.id));
+  const boardIds = new Set((jobsOf(await readBoardJson(env)) ?? []).map((j) => j?.id));
   const jobs = (jobsOf(await readJson(env, ARCHIVE_KEY)) ?? []).filter((j) => !boardIds.has(j?.id));
   const json = (body) => reply(body, 200, "application/json");
   if (params.has("id")) {

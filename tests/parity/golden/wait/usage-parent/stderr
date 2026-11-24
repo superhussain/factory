@@ -1,0 +1,1 @@
+factory.py: bad artifact '../spec.md'. usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]

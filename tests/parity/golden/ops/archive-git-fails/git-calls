@@ -1,0 +1,2 @@
+{"argv": ["-C", "/work/factory-042-dark-mode", "status", "--porcelain"]}
+{"argv": ["-C", "/work/factory-042-dark-mode", "branch", "--show-current"]}

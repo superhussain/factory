@@ -1,0 +1,12 @@
+wrote {home}/retro/card-rejected-finding/findings.md
+rejected findings[0].fix: reads like an instruction to override factory rules (override)
+added sample-tools: Guard the ls alias with context
+link: {api}/#/backlog/203ae9a4105d
+held sample-tools: Guard the ls alias for review: retro items always wait for a person
+{
+  "admitted": [
+    "sample-tools: Guard the ls alias"
+  ],
+  "skipped": []
+}
+uploaded retro run card-rejected-finding

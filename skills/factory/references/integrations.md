@@ -51,9 +51,9 @@ Four reviews, fresh approval and existing budgets remain mandatory.
 Paseo is optional. `PASEO_HOME` selects its local data directory and
 `PASEO_AGENT_ID` identifies an existing session. Valid v1 `paseo` board metadata
 is retained, and local dead-session detection remains available when configured.
-Without it, claims and stale-minute checks still work. The bundle also ships
-`runtime/paseo_stalls.py`, the optional Paseo stall adapter that `factory pickup`
-uses to take over sessions stalled on a Claude usage limit; see references/pickup.md.
+Without it, claims and stale-minute checks still work. The binary's `factory stalls`
+command is the optional Paseo stall adapter that `factory pickup` uses to take over
+sessions stalled on a Claude usage limit; see references/pickup.md.
 
 `factory archive-workspace <slug>/<id>` runs as the last step of a merged or closed job.
 It archives the session's Paseo workspace only when the job is at `merged` or `closed`, the
@@ -87,8 +87,8 @@ entry under `autoMode.allow` in their settings:
 "Run factory archive-workspace <slug>/<id> or factory cleanup <slug>/<id> on a merged or closed factory job. These remove only worktrees the factory pipeline created (a factory-<id> Paseo workspace or the job's worktree under the factory home, and that job's private prompt folder under prompts/<slug>/<id>, refusing a link). archive-workspace archives a merged or closed job's own factory-<id> workspace whatever its git state and reports leftovers first, cleanup refuses a dirty worktree and keeps unmerged branches, and neither forces."
 ```
 
-`runtime/pr_screenshots.py` uploads PR screenshots to the configured R2 bucket:
-`python3 <installed-skill>/runtime/pr_screenshots.py --home <factory home> [--project <slug>] <label> <file>...`.
+`factory pr-screenshots` uploads PR screenshots to the configured R2 bucket:
+`<installed-skill>/runtime/factory pr-screenshots --home <factory home> [--project <slug>] <label> <file>...`.
 It reads `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PR_SCREENSHOTS_BUCKET` and
 `PR_SCREENSHOTS_ORIGIN` from `<home>/.env` and prints one URL on the configured public
 origin per file. Use it only when the project's PRs section names it;

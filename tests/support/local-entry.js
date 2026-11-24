@@ -7,7 +7,7 @@
 // A drill request may send X-Factory-Test-Read-Delay to put a cancellable timer before its R2 get.
 import { serveFactory } from "../../worker/index.js";
 
-export { BoardEvents } from "../../worker/events.js";
+export { BoardEvents } from "../../worker/room.js";
 
 const READ_DELAY = "X-Factory-Test-Read-Delay";
 

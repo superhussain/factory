@@ -23,7 +23,6 @@ jobs:
     environment: production
     timeout-minutes: 15
     env:
-      PYTHONDONTWRITEBYTECODE: '1'
       WRANGLER_SEND_METRICS: 'false'
     steps:
       - name: Reconcile with origin/main
@@ -51,9 +50,6 @@ jobs:
           # rather than this run; it is always a reviewed main commit.
           ref: ${{ steps.reconcile.outputs.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.12'
       - name: Check deployment inputs
         env:
           PROFILE_JSON: ${{ vars.FACTORY_DEPLOY_PROFILE }}
@@ -69,13 +65,6 @@ jobs:
             missing=1
           fi
           exit "$missing"
-      - name: Materialize profile
-        env:
-          PROFILE_JSON: ${{ vars.FACTORY_DEPLOY_PROFILE }}
-        run: |
-          mkdir -p deploy
-          printf '%s\n' "$PROFILE_JSON" > deploy/profile.json
-          python3 tools/deploy.py check --profile deploy/profile.json
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           run_install: false
@@ -87,8 +76,15 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
+      - name: Materialize profile
+        env:
+          PROFILE_JSON: ${{ vars.FACTORY_DEPLOY_PROFILE }}
+        run: |
+          mkdir -p deploy
+          printf '%s\n' "$PROFILE_JSON" > deploy/profile.json
+          node tools/deploy.mjs check --profile deploy/profile.json
       - run: pnpm install --frozen-lockfile
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: python3 tools/deploy.py deploy --profile deploy/profile.json
+        run: node tools/deploy.mjs deploy --profile deploy/profile.json

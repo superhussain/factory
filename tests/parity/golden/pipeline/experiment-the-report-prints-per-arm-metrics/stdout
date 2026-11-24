@@ -1,0 +1,92 @@
+{
+  "name": "pilot",
+  "a": {
+    "jobs": 2,
+    "merged": 1,
+    "closed": 0,
+    "needs_human": 0,
+    "escalated": 0,
+    "mean_review_rounds": 1.5,
+    "changes_verdicts": 1,
+    "stuck_resumes": 2,
+    "follow_ups_7d": {
+      "rework_of": [
+        "024-rework"
+      ],
+      "surfaced": [
+        "025-surfaced"
+      ],
+      "unknown_window": 2
+    },
+    "skipped_steps": {
+      "missing_round_review": [],
+      "missing_decision": [],
+      "pr_before_approve": []
+    },
+    "coverage_unknown": 0,
+    "finished": 1,
+    "rounds": {
+      "n": 2,
+      "median": 1.5,
+      "mad": 0.5
+    },
+    "tokens": {
+      "n": 0,
+      "median": null,
+      "mad": null
+    }
+  },
+  "b": {
+    "jobs": 4,
+    "merged": 0,
+    "closed": 1,
+    "needs_human": 0,
+    "escalated": 1,
+    "mean_review_rounds": 1.0,
+    "changes_verdicts": 2,
+    "stuck_resumes": 0,
+    "follow_ups_7d": {
+      "rework_of": [],
+      "surfaced": [],
+      "unknown_window": 0
+    },
+    "skipped_steps": {
+      "missing_round_review": [
+        "017-skipped"
+      ],
+      "missing_decision": [
+        "014-inline-images"
+      ],
+      "pr_before_approve": [
+        "017-skipped"
+      ]
+    },
+    "coverage_unknown": 2,
+    "finished": 1,
+    "rounds": {
+      "n": 2,
+      "median": 1.0,
+      "mad": 0.0
+    },
+    "tokens": {
+      "n": 0,
+      "median": null,
+      "mad": null
+    }
+  },
+  "comparison": {
+    "min_finished": 5,
+    "verdict": "inconclusive",
+    "reason": "needs 5 finished jobs per arm: a has 1, b has 1",
+    "rounds": {
+      "diff": null,
+      "noise": null,
+      "reads": "inconclusive"
+    },
+    "tokens": {
+      "diff": null,
+      "noise": null,
+      "reads": "inconclusive"
+    }
+  }
+}

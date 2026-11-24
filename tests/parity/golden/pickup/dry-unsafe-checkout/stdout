@@ -1,0 +1,2 @@
+skip 001-alpha alpha: unsafe checkout: git fetch origin main failed in / (exit 127)
+host parity: would launch 0

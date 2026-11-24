@@ -88,7 +88,7 @@ static AUDIT_FLAGS: [(&str, Pattern); 8] = [
 ];
 static AUDIT_SECRET_FILE: Pattern = Pattern::new(r#"(?:^|[\s/'\"=])\.env(?![\w.-])"#, Flags::NONE);
 static AUDIT_PR_MERGE: Pattern = Pattern::new(
-    r#"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo)[ \t]+|[A-Za-z_]\w*=[^\s;&|(){}`]*[ \t]+)*(?:gh\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/\d+/merge\b)|(?:""|''|\$\{?[A-Za-z_]\w*\}?|(?:[^\s;&|(){}`'"]*/)?factory)[ \t]+pr-merge(?![\w-]))"#,
+    r#"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo|xargs)(?:[ \t]+-[^\s;&|(){}`]*)*[ \t]+|[A-Za-z_]\w*=(?:"\$\([^()\n`"]*\)"|[^\s;&|(){}`]*)[ \t]+)*(?:gh(?:[ \t]+(?:-R|--repo)(?:[ \t]+|=)[^\s;&|(){}`]+)?\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/(?:\d+|\$\{?[A-Za-z_]\w*\}?)/merge\b)|(?:""|''|\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_])[^\s;&|(){}`'"]*|(?:[^\s;&|(){}`'"]*/)?factory)[ \t]+pr-merge(?![\w-]))"#,
     Flags::NONE,
 );
 static AUDIT_HEREDOC_OPEN: Pattern = Pattern::new(
@@ -422,7 +422,7 @@ fn audit_strip_data_heredocs(command: &str) -> String {
     out.join("\n")
 }
 
-/// command with quoted text blanked, unless a double-quoted span runs $( or a backtick.
+/// command with quoted text blanked, unless a double-quoted span runs $( or a backtick; a quoted word with no space or separator loses only its quotes.
 fn audit_strip_quotes(command: &str) -> String {
     let mut out = String::with_capacity(command.len());
     let mut chars = command.char_indices();
@@ -450,6 +450,10 @@ fn audit_strip_quotes(command: &str) -> String {
                 let body = &command[start + 1..end];
                 if c == '"' && (body.contains("$(") || body.contains('`')) {
                     out.push_str(&command[start..=end]);
+                } else if !body.is_empty()
+                    && !body.contains(|b: char| b.is_whitespace() || ";&|()<>`".contains(b))
+                {
+                    out.push_str(body);
                 } else {
                     out.push(c);
                     out.push(c);
@@ -2683,6 +2687,106 @@ mod tests {
             )]
         );
     }
+    /// A repo whose commits carry the given Unix dates, and the helpers to add commits to it.
+    #[cfg(unix)]
+    fn dated_repo(name: &str) -> std::path::PathBuf {
+        let dir = crate::shared::fs::temp_dir(name);
+        dated_git(&dir, 0, &["init", "-q"]);
+        dir
+    }
+
+    #[cfg(unix)]
+    fn dated_git(dir: &Path, date: i64, args: &[&str]) -> String {
+        let when = format!("@{date} +0000");
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+            .args(args)
+            .env("GIT_AUTHOR_DATE", &when)
+            .env("GIT_COMMITTER_DATE", &when)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{args:?}");
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    #[cfg(unix)]
+    fn dated_commit(dir: &Path, date: i64, file: &str, message: &str) -> String {
+        std::fs::write(dir.join(file), format!("{message}\n")).unwrap();
+        dated_git(dir, date, &["add", "-A"]);
+        dated_git(dir, date, &["commit", "-q", "-m", message]);
+        dated_git(dir, date, &["rev-parse", "HEAD"])
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rework_ref() {
+        let dir = dated_repo("outcome-rework-ref");
+        dated_commit(&dir, 1_000, "x.txt", "start");
+        let merge = dated_commit(&dir, 2_000, "x.txt", "add x");
+        dated_git(
+            &dir,
+            2_000,
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &["1022-redo-x".into()]),
+            ("reworked".into(), vec!["rework-of 1022-redo-x".into()])
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fix_after_seven_days_holds() {
+        let dir = dated_repo("outcome-fix-after-seven");
+        let t0 = 1_767_600_000;
+        dated_commit(&dir, t0 - 100, "w.txt", "start");
+        let merge = dated_commit(&dir, t0, "w.txt", "add w");
+        dated_commit(&dir, t0 + 7 * 86_400 + 1, "w.txt", "Fix w");
+        dated_git(
+            &dir,
+            t0,
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &[]),
+            ("held".into(), vec![])
+        );
+        let dir = dated_repo("outcome-fix-on-seven");
+        dated_commit(&dir, t0 - 100, "w.txt", "start");
+        let merge = dated_commit(&dir, t0, "w.txt", "add w");
+        let fix = dated_commit(&dir, t0 + 7 * 86_400, "w.txt", "Fix w");
+        dated_git(
+            &dir,
+            t0,
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &[]),
+            ("reworked".into(), vec![format!("commit {}", &fix[..12])])
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fix_before_the_merge_holds() {
+        let dir = dated_repo("outcome-fix-before-merge");
+        let t0 = 1_767_600_000;
+        dated_commit(&dir, t0 - 100, "x.txt", "start");
+        let merge = dated_commit(&dir, t0, "x.txt", "add x");
+        dated_commit(&dir, t0 - 3_600, "x.txt", "fix x early");
+        dated_git(
+            &dir,
+            t0,
+            &["update-ref", "refs/remotes/origin/main", "HEAD"],
+        );
+        assert_eq!(
+            outcome_of(&dir, "main", &merge, &[]),
+            ("held".into(), vec![])
+        );
+    }
+
     use crate::shared::pyval::py_repr;
     use serde_json::json;
 
@@ -2853,6 +2957,8 @@ mod tests {
             "factory pr-merge factory/1017-add-x",
             "cd x && \"$RUNTIME\" pr-merge factory/1017-add-x",
             "exec \"$RUNTIME\" pr-merge factory/1017-add-x",
+            "\"$HOME/bin/runtime\" pr-merge factory/1017-add-x",
+            "\"$R/factory.py\" pr-merge x",
         ] {
             assert_eq!(flags(command), ["pr-merge"], "{command}");
         }
@@ -2868,6 +2974,14 @@ mod tests {
     }
 
     #[test]
+    fn documented_command_not_flagged() {
+        let command = "python3 ~/.claude/skills/factory/runtime/factory.py with-cloudflare -- sh -c 'printf \"Authorization: Bearer %s\\n\" \"$CLOUDFLARE_API_TOKEN\" | curl -H @- https://api.cloudflare.com/client/v4/user/tokens/verify'";
+        let inp = json!({ "command": command });
+        let inp = inp.as_object().unwrap();
+        assert!(audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false).is_empty());
+    }
+
+    #[test]
     fn pr_merge_executed_only() {
         let flags = |command: &str| {
             let inp = json!({ "command": command });
@@ -2880,6 +2994,8 @@ mod tests {
             "echo 'gh pr merge 7'",
             "git commit -m \"say gh pr merge\"",
             "gh api repos/o/r/pulls/7/merge",
+            "gh api \"repos/o/r/pulls/$N/merge\"",
+            "grep -n \"pr-merge\" f",
         ] {
             assert!(flags(command).is_empty(), "{command}");
         }
@@ -2893,6 +3009,16 @@ mod tests {
             "{ gh pr merge 7; }",
             "x=`gh pr merge 7`",
             "gh api -X PUT repos/{owner}/{repo}/pulls/7/merge",
+            "gh api -X PUT \"repos/o/r/pulls/7/merge\"",
+            "gh api -X PUT repos/o/r/pulls/$N/merge",
+            "gh \"pr\" merge 7",
+            "xargs gh pr merge",
+            "gh -R o/r pr merge 7",
+            "GH_TOKEN=\"$(cat t)\" gh pr merge 7",
+            "gh api -X PUT repos/o/r/pulls/${N}/merge",
+            "gh api -X PUT \"repos/{owner}/{repo}/pulls/7/merge\"",
+            "echo 7 | xargs -n1 gh pr merge",
+            "gh --repo=o/r pr merge 7",
         ] {
             assert_eq!(flags(command), ["pr-merge"], "{command}");
         }
@@ -2904,6 +3030,7 @@ mod tests {
             flags("gh pr merge 7 && git push --force"),
             ["force-push", "pr-merge"]
         );
+        assert_eq!(flags("sudo -E gh pr merge 7"), ["sudo", "pr-merge"]);
     }
 
     #[test]
@@ -2921,6 +3048,13 @@ mod tests {
             format!("({}", "a/".repeat(50_000)),
             "(a/".repeat(33_000),
             "($a ".repeat(25_000),
+            "sudo -E ".repeat(25_000),
+            "xargs -n1 ".repeat(20_000),
+            ";a=\"$(".repeat(25_000),
+            "a=\"$(x)\" ".repeat(20_000),
+            "gh -R ".repeat(25_000),
+            "gh api pulls/$".repeat(15_000),
+            "($a/".repeat(30_000),
         ] {
             let start = std::time::Instant::now();
             let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text));
@@ -3010,6 +3144,103 @@ mod tests {
             (vec![(OPUS.to_string(), [10, 20, 30, 40])], 0)
         );
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_sweep_session_counts_each_subagent_once() {
+        const OPUS: &str = "claude-opus-5-5";
+        let _lock = crate::shared::test_env_lock();
+        let root = std::env::temp_dir().join(format!("audit-sweep-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let projects = root.join("claude/projects");
+        let home = root.join("home");
+        let prompt = |text: String| {
+            json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}})
+                .to_string()
+                + "\n"
+        };
+        let write = |rel: &str, text: String| {
+            let path = projects.join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, text).unwrap();
+        };
+        let h = home.display();
+        let wt = "-home-u--paseo-worktrees-ab12-factory-1017-add-x";
+        write(&format!("{wt}/s1.jsonl"), prompt("build it".into()));
+        write(
+            &format!("{wt}/s1/subagents/agent-a1.jsonl"),
+            prompt("review it".into()),
+        );
+        write("-home-u-dev-factory/o1.jsonl", prompt("orchestrate".into()));
+        write(
+            "-home-u-dev-factory/o1/subagents/agent-b1.jsonl",
+            prompt(format!(
+                "Your full prompt is in {h}/prompts/alpha/1017-add-x/spec.txt"
+            )),
+        );
+        write(
+            "-home-u-dev-factory/o1/subagents/agent-b2.jsonl",
+            prompt(format!("Job folder: {h}/jobs/alpha/1017-add-xy")),
+        );
+        write(
+            "-home-u-dev-factory/o2.jsonl",
+            prompt(format!("Sweep {h}/jobs/alpha/1017-add-x"))
+                + &turn("m7", OPUS, [1, 1, 1, 1], false, None),
+        );
+        write(
+            "-home-u-dev-factory/o2/subagents/agent-c1.jsonl",
+            prompt(format!("Prompt: {h}/prompts/alpha/1017-add-x/b.txt")),
+        );
+        write(
+            "-home-u-dev-factory/o2/subagents/agent-c2.jsonl",
+            prompt(format!("Prompt: {h}/prompts/alpha/1018-add-y/b.txt")),
+        );
+        let saved = std::env::var_os("CLAUDE_CONFIG_DIR");
+        std::env::set_var("CLAUDE_CONFIG_DIR", root.join("claude"));
+        let found = |job: &str| -> std::collections::BTreeSet<(String, bool)> {
+            usage_transcripts(&home, "alpha", job)
+                .unwrap()
+                .into_iter()
+                .map(|(p, main)| {
+                    (
+                        p.strip_prefix(&projects)
+                            .unwrap()
+                            .to_string_lossy()
+                            .replace('\\', "/"),
+                        main,
+                    )
+                })
+                .collect()
+        };
+        let (first, second) = (found("1017-add-x"), found("1018-add-y"));
+        match saved {
+            Some(v) => std::env::set_var("CLAUDE_CONFIG_DIR", v),
+            None => std::env::remove_var("CLAUDE_CONFIG_DIR"),
+        }
+        let want = |items: &[(&str, bool)]| -> std::collections::BTreeSet<(String, bool)> {
+            items.iter().map(|(p, m)| (p.to_string(), *m)).collect()
+        };
+        assert_eq!(
+            first,
+            want(&[
+                (
+                    "-home-u--paseo-worktrees-ab12-factory-1017-add-x/s1.jsonl",
+                    true
+                ),
+                (
+                    "-home-u--paseo-worktrees-ab12-factory-1017-add-x/s1/subagents/agent-a1.jsonl",
+                    false
+                ),
+                ("-home-u-dev-factory/o1/subagents/agent-b1.jsonl", false),
+                ("-home-u-dev-factory/o2.jsonl", true),
+                ("-home-u-dev-factory/o2/subagents/agent-c1.jsonl", false),
+            ])
+        );
+        assert_eq!(
+            second,
+            want(&[("-home-u-dev-factory/o2/subagents/agent-c2.jsonl", false)])
+        );
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

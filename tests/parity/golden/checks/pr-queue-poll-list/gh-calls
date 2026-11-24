@@ -1,0 +1,4 @@
+{"argv": ["pr", "view", "https://github.com/example/sample/pull/44", "--json", "headRefOid,baseRefName,id"]}
+{"argv": ["api", "graphql", "-f", "query=mutation($id:ID!,$sha:GitObjectID!){enqueuePullRequest(input:{pullRequestId:$id,expectedHeadOid:$sha}){mergeQueueEntry{state position}}}", "-f", "id=PR_node44", "-f", "sha=0123456789abcdef0123456789abcdef01234567"]}
+{"argv": ["api", "-X", "PUT", "repos/example/sample/pulls/44/merge-async", "-f", "sha=0123456789abcdef0123456789abcdef01234567", "-f", "merge_action=merge_queue"]}
+{"argv": ["api", "repos/example/sample/pulls/44/merge-async/0190a1b2-0000-4000-8000-0000000000aa"]}

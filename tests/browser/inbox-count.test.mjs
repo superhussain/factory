@@ -1,5 +1,4 @@
-// The dashboard Inbox badge against the shared fixture that tests/cli/test_inbox.py also reads,
-// so the runtime count and the dashboard count cannot drift apart.
+// The dashboard Inbox badge against the shared fixture the removed Python CLI tests also read.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";

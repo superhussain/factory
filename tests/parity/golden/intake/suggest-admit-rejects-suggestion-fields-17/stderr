@@ -1,0 +1,1 @@
+factory.py: {home}/suggest-fields-17.json: suggestions[0]: needs keys ['evidence', 'kind', 'options', 'paths', 'question', 'reason', 'recommend', 'size', 'summary', 'title'], may have ['diagram']; nothing admitted

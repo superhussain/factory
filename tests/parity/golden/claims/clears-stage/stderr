@@ -1,0 +1,1 @@
+factory.py: a board write cannot clear 001-test's stage. Close the job with {"stage": "closed"} instead. Nothing was written.

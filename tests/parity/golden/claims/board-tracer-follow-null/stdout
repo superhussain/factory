@@ -1,0 +1,10 @@
+{
+  "id": "001-sample",
+  "project": "sample",
+  "stage": "spec",
+  "jira": "PLAN-1234",
+  "title": "Sample feature",
+  "updated": "{now}",
+  "started": "2026-11-01T00:00:00Z",
+  "tracer": {}
+}

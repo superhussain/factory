@@ -4,12 +4,13 @@ This page takes you from a deployed instance to a first merged job, then lists w
 
 ## 1. Deploy your instance
 
-From a checkout of this repository, run the three commands in the [README](../README.md):
+From the root of a checkout of this repository, run the four commands in the [README](../README.md):
 
 ```sh
 mise install
 mise exec -- pnpm install --frozen-lockfile
-mise exec -- python3 tools/bootstrap.py up
+sh tools/install.sh "$HOME/.claude/skills"
+mise exec -- "$HOME/.claude/skills/factory/runtime/factory" bootstrap up
 ```
 
 `up` asks for your account ID, zone, hostname and allowed emails. See [cloudflare.md](cloudflare.md#guided-setup) for the token permissions. It prints `Factory is live at https://factory.example.test`, then the next steps.
@@ -23,14 +24,14 @@ Open the origin and sign in with an allowed email, such as `ada@example.test`. T
 ## 3. Install the skill on this computer
 
 ```sh
-python3 tools/install.py --destination "$HOME/.claude/skills"
+sh tools/install.sh "$HOME/.claude/skills"
 FACTORY="$HOME/.claude/skills/factory/runtime/factory"
 "$FACTORY" init --agents claude
 ```
 
 - The destination is the skills root your agent reads. Use `$HOME/.agents/skills` for a shared folder.
 - `--agents` takes `claude`, `opencode`, `both` or `none`.
-- On Windows the binary is `...\runtime\factory.exe`. Use `py -3` instead of `python3` for `tools/install.py`.
+- On Windows the binary is `...\runtime\factory.exe`. Run `tools\install.ps1` instead of `tools/install.sh`.
 - Run steps 3 to 5 in the same terminal. In a new terminal, set `FACTORY` again first.
 
 See [device.md](device.md) for the full device setup.
@@ -90,7 +91,7 @@ The second route is New idea on the board, then `/factory idea <id>` or automati
 | Want | Where | Read |
 | --- | --- | --- |
 | Hold PRs for a person, change review rounds, require spec approval, add stage notes, including Babysit PR instructions | Settings, Pipeline | [autonomy.md](autonomy.md) |
-| Add another computer | `bootstrap.py up` on it, then Settings, Hosts | [device.md](device.md#host-registration) |
+| Add another computer | `factory bootstrap up` on it, then Settings, Hosts | [device.md](device.md#host-registration) |
 | Let hosts pick up ideas on a timer | `factory pickup setup` on each host, then `pickup setup --install` | [pickup.md](../skills/factory/references/pickup.md) |
 | Let a model triage the backlog | Settings, Pipeline, Backlog triage | [autonomy.md](autonomy.md#backlog-triage) |
 | Archive finished jobs | Settings, Pipeline, Archive old jobs | [configuration.md](configuration.md) |

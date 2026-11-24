@@ -1,0 +1,11 @@
+factory.py: context file {home}/backlog-bad8.md: question 2 is not in the needs.md question format
+a context file looks like this:
+Recommend: approve
+
+Why this line is worth building, in one or more lines.
+
+## Question: Which option?
+What the person decides.
+Pick: one
+- Option A (recommended): what it does
+- Option B: what it does
