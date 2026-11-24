@@ -294,10 +294,18 @@ pub fn device_name(home: &Path) -> String {
     }
 }
 
+/// FACTORY_SESSION, or "" when unset. A non-UTF-8 value reads lossily, so it stays set and fails
+/// the tag check instead of passing as no session.
+pub fn env_session() -> String {
+    std::env::var_os("FACTORY_SESSION")
+        .map(|v| v.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 /// (device, session, claim_stale_minutes) this process claims jobs as.
 pub fn holder(home: &Path) -> Res<(String, String, u32)> {
     let (config, meta) = config_meta(home)?;
-    let session = std::env::var("FACTORY_SESSION").unwrap_or_default();
+    let session = env_session();
     if !session.is_empty() && !SLUG.is_full(&session) {
         return Err(fail(
             format!(
