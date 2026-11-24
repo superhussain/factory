@@ -105,15 +105,11 @@
         "default",
         "shared",
         "{workspaceRoot}/tests/tools/verify.test.mjs",
-        "{workspaceRoot}/tests/tools/test_paseo_stalls.py",
-        "{workspaceRoot}/skills/factory/runtime/paseo_stalls.py",
-        "{workspaceRoot}/tests/tools/test_pr_screenshots.py",
         "{workspaceRoot}/tests/tools/secret-scan.test.mjs",
         "{workspaceRoot}/tests/tools/stage-notes-check.test.mjs",
         "{workspaceRoot}/docs/repo-security.md",
-        "{workspaceRoot}/skills/factory/runtime/pr_screenshots.py",
         "{workspaceRoot}/.gitleaks.toml",
-        { "runtime": "python3 --version" }
+        { "runtime": "node --version" }
       ]
     }
   }

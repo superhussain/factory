@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::commands::{
     audit, catch_up, checks, claims, daemon, install, intake, lookup, ops, pickup, pipeline,
-    prompt, retro, setup, sync, tracer, wait, worktree,
+    prompt, retro, screenshots, setup, sync, tracer, wait, worktree,
 };
 use crate::shared::consts::{MAX_RIDERS, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
@@ -101,6 +101,8 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
 const EXTRA: &[(&str, Handler, usize, usize)] = &[
     ("daemon", daemon::daemon, 0, 2),
     ("install", install::install, 4, 5),
+    ("stalls", pickup::stalls_cmd, 1, 3),
+    ("pr-screenshots", screenshots::pr_screenshots, 0, usize::MAX),
 ];
 
 pub const USAGE: &str = include_str!("usage.txt");

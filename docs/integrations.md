@@ -132,8 +132,8 @@ and agent app/web links belong to hosted deployment configuration, not fresh
 device config. A project may opt into its own image publisher; absence never
 blocks ordinary review/PR evidence. Never publish secrets or user data.
 
-`<installed-skill>/runtime/pr_screenshots.py` uploads PR screenshots on any host with the installed skill:
-`python3 <installed-skill>/runtime/pr_screenshots.py --home <factory home> [--project <slug>] <label> <file>...`.
+`factory pr-screenshots` uploads PR screenshots on any host with the installed skill:
+`<installed-skill>/runtime/factory pr-screenshots --home <factory home> [--project <slug>] <label> <file>...`.
 It reads `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PR_SCREENSHOTS_BUCKET` and
 `PR_SCREENSHOTS_ORIGIN` (an `https://` origin) from `<home>/.env`, stores each image in that
 bucket as `<project>/<label>/<12 hex>-<name>` (project `other` when `--project` is omitted)

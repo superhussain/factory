@@ -98,7 +98,7 @@ Keep the same token on each device that manages the instance. Agents there can t
 
    On Windows run `<installed-skill>\runtime\factory.exe` for the first part and use `py -3` for `tools/bootstrap.py`.
 
-   `pr_screenshots.py` reads the key from `.env` itself. The Workers R2 Storage Edit permission covers its uploads.
+   `factory pr-screenshots` reads the key from `.env` itself. The Workers R2 Storage Edit permission covers its uploads.
 4. Revoke the old token. If `.env` held a narrower token before, delete it under My Profile, API Tokens after one screenshot upload and one `up` rerun pass with the new token.
 
 Roll the token in My Profile, API Tokens on any suspected exposure, then repeat step 2 on each device that holds it and rerun `up` to check. This token can delete the Worker, DNS records and Access policies, so keep it only on devices you trust with the instance.

@@ -1,0 +1,603 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "stalls/list-reports-only-idle-claude-limit-stalls",
+      "argv": [
+        "stalls",
+        "list"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": [
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "ls",
+              "-g",
+              "--json"
+            ],
+            "stdout": "[{\"id\":\"4cec0a47-1d21-4115-945b-9e7dfb668ef4\",\"status\":\"idle\",\"provider\":\"claude/model-a\"},{\"id\":\"aaaaaaaab-bbbbbbbbccccddddeeeeffff\",\"status\":\"idle\",\"provider\":\"claude/model-a\"},{\"id\":\"bbbb1111-2222-4333-8444-555566667777\",\"status\":\"running\",\"provider\":\"claude/model-a\"},{\"id\":\"cccc2222-3333-8444-9555-666677778888\",\"status\":\"idle\",\"provider\":\"openai/model-o\"},{\"id\":\"dddd3333-4444-8555-8666-777788889999\",\"status\":\"idle\",\"provider\":\"claude/model-a\"},{\"id\":\"eeee4444-5555-8666-9777-888899990000\",\"status\":\"idle\",\"provider\":\"claude/model-a\"},{\"id\":\"bad id\",\"status\":\"idle\",\"provider\":\"claude/model-a\"},{\"id\":\"ffff5555-6666-8777-8888-999900001111\",\"status\":\"idle\",\"provider\":\"claude-alt/model-a\"},{\"id\":\"abcd6666-7777-8888-9999-000011112222\",\"status\":\"idle\",\"provider\":\"claudex/model-a\"}]\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "logs",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              "--tail",
+              "1",
+              "--filter",
+              "text"
+            ],
+            "stdout": "You've hit your session limit · resets 7pm (UTC)\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "logs",
+              "aaaaaaaab-bbbbbbbbccccddddeeeeffff",
+              "--tail",
+              "1",
+              "--filter",
+              "text"
+            ],
+            "stdout": "You've hit your weekly limit · resets Oct 28, 9pm (UTC)\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "logs",
+              "ffff5555-6666-8777-8888-999900001111",
+              "--tail",
+              "1",
+              "--filter",
+              "text"
+            ],
+            "stdout": "You've hit your session limit · resets 7pm (UTC)\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "logs",
+              "dddd3333-4444-8555-8666-777788889999",
+              "--tail",
+              "1",
+              "--filter",
+              "text"
+            ],
+            "stdout": "Summary of the run.\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "logs",
+              "eeee4444-5555-8666-9777-888899990000",
+              "--tail",
+              "1",
+              "--filter",
+              "text"
+            ],
+            "stdout": "You've hit your session limit · resets 7pm (UTC)\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "inspect",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              "--json"
+            ],
+            "stdout": "{\"Status\":\"idle\",\"Archived\":false,\"UpdatedAt\":\"2026-10-29T18:50:00.000Z\",\"Provider\":\"claude/model-a\",\"Model\":\"model-a\"}\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "inspect",
+              "aaaaaaaab-bbbbbbbbccccddddeeeeffff",
+              "--json"
+            ],
+            "stdout": "{\"Status\":\"idle\",\"Archived\":false,\"UpdatedAt\":\"2026-10-28T20:30:00.000Z\",\"Provider\":\"claude/model-a\",\"Model\":\"model-a\"}\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "inspect",
+              "eeee4444-5555-8666-9777-888899990000",
+              "--json"
+            ],
+            "stdout": "{\"Status\":\"idle\",\"Archived\":true,\"UpdatedAt\":\"2026-10-29T18:50:00.000Z\",\"Provider\":\"claude/model-a\",\"Model\":\"model-a\"}\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "inspect",
+              "ffff5555-6666-8777-8888-999900001111",
+              "--json"
+            ],
+            "stdout": "{\"Status\":\"idle\",\"Archived\":false,\"UpdatedAt\":\"2026-10-29T18:50:00.000Z\",\"Provider\":\"claude/model-a\",\"Model\":\"model-a\"}\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_list_reports_only_idle_claude_limit_stalls"
+    },
+    {
+      "id": "stalls/unknown-zone-leaves-the-stall-out",
+      "argv": [
+        "stalls",
+        "list"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": [
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "ls",
+              "-g",
+              "--json"
+            ],
+            "stdout": "[{\"id\":\"4cec0a47-1d21-4115-945b-9e7dfb668ef4\",\"status\":\"idle\",\"provider\":\"claude/model-a\"}]\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "logs",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              "--tail",
+              "1",
+              "--filter",
+              "text"
+            ],
+            "stdout": "You've hit your session limit · resets 7pm (Nowhere/Made_Up)\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "inspect",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              "--json"
+            ],
+            "stdout": "{\"Status\":\"idle\",\"Archived\":false,\"UpdatedAt\":\"2026-10-29T18:50:00.000Z\",\"Provider\":\"claude/model-a\",\"Model\":\"model-a\"}\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_missing_zoneinfo_leaves_stalls_out"
+    },
+    {
+      "id": "stalls/archive-rechecks",
+      "argv": [
+        "stalls",
+        "archive",
+        "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": [
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "logs",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              "--tail",
+              "1",
+              "--filter",
+              "text"
+            ],
+            "stdout": "You've hit your session limit · resets 7pm (UTC)\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "inspect",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              "--json"
+            ],
+            "stdout": "{\"Status\":\"idle\",\"Archived\":false,\"UpdatedAt\":\"2026-10-29T18:50:00.000Z\",\"Provider\":\"claude/model-a\",\"Model\":\"model-a\"}\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "archive",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_archive_rechecks"
+    },
+    {
+      "id": "stalls/archive-keeps-a-woken-session",
+      "argv": [
+        "stalls",
+        "archive",
+        "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": [
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "logs",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              "--tail",
+              "1",
+              "--filter",
+              "text"
+            ],
+            "stdout": "You've hit your session limit · resets 7pm (UTC)\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "inspect",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              "--json"
+            ],
+            "stdout": "{\"Status\":\"running\",\"Archived\":false,\"UpdatedAt\":\"2026-10-29T18:50:00.000Z\",\"Provider\":\"claude/model-a\",\"Model\":\"model-a\"}\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "archive",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "exit": 3,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_archive_rechecks"
+    },
+    {
+      "id": "stalls/archive-force-skips-the-stall-check",
+      "argv": [
+        "stalls",
+        "archive",
+        "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+        "--force"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": [
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "inspect",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              "--json"
+            ],
+            "stdout": "{\"Status\":\"running\",\"Archived\":false,\"UpdatedAt\":\"2026-10-29T18:50:00.000Z\",\"Provider\":\"claude/model-a\",\"Model\":\"model-a\"}\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "archive",
+              "--force",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_archive_force_skips_the_stall_check"
+    },
+    {
+      "id": "stalls/archive-force-no-op-when-archived",
+      "argv": [
+        "stalls",
+        "archive",
+        "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+        "--force"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": [
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "inspect",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              "--json"
+            ],
+            "stdout": "{\"Status\":\"idle\",\"Archived\":true,\"UpdatedAt\":\"2026-10-29T18:50:00.000Z\",\"Provider\":\"claude/model-a\",\"Model\":\"model-a\"}\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "exit": 0,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_archive_force_is_a_no_op_on_an_archived_session"
+    },
+    {
+      "id": "stalls/archive-force-failure",
+      "argv": [
+        "stalls",
+        "archive",
+        "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+        "--force"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": [
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "inspect",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+              "--json"
+            ],
+            "stdout": "{\"Status\":\"idle\",\"Archived\":false,\"UpdatedAt\":\"2026-10-29T18:50:00.000Z\",\"Provider\":\"claude/model-a\",\"Model\":\"model-a\"}\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "archive",
+              "--force",
+              "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_archive_force_failure_exits_1"
+    },
+    {
+      "id": "stalls/ls-fails",
+      "argv": [
+        "stalls",
+        "list"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": [
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "ls",
+              "-g",
+              "--json"
+            ],
+            "stdout": "[]\n",
+            "stderr": "",
+            "code": 3
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_paseo_missing_or_failing"
+    },
+    {
+      "id": "stalls/ls-not-json",
+      "argv": [
+        "stalls",
+        "list"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": [
+          {
+            "argv": [
+              "--home",
+              "/nonexistent/paseo-home",
+              "ls",
+              "-g",
+              "--json"
+            ],
+            "stdout": "{oops\n",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "exit": 1,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_paseo_missing_or_failing"
+    },
+    {
+      "id": "stalls/usage-1",
+      "argv": [
+        "stalls",
+        "list",
+        "extra"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": []
+      },
+      "exit": 2,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_usage"
+    },
+    {
+      "id": "stalls/usage-2",
+      "argv": [
+        "stalls",
+        "bogus"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": []
+      },
+      "exit": 2,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_usage"
+    },
+    {
+      "id": "stalls/usage-3",
+      "argv": [
+        "stalls",
+        "archive",
+        "x"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": []
+      },
+      "exit": 2,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_usage"
+    },
+    {
+      "id": "stalls/usage-4",
+      "argv": [
+        "stalls",
+        "archive",
+        "x",
+        "y"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": []
+      },
+      "exit": 2,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_usage"
+    },
+    {
+      "id": "stalls/usage-5",
+      "argv": [
+        "stalls",
+        "archive",
+        "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
+        "--bogus"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": []
+      },
+      "exit": 2,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_usage"
+    },
+    {
+      "id": "stalls/usage-6",
+      "argv": [
+        "stalls",
+        "archive",
+        "../escape"
+      ],
+      "home": null,
+      "env": {
+        "PASEO_HOME": "/nonexistent/paseo-home"
+      },
+      "stubs": {
+        "paseo": []
+      },
+      "exit": 2,
+      "from": "tests/tools/test_paseo_stalls.py::PaseoStallsTest.test_usage"
+    }
+  ]
+}
