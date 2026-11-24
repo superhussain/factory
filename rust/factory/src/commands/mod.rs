@@ -1,4 +1,5 @@
 pub mod audit;
+pub mod bootstrap;
 pub mod catch_up;
 pub mod checks;
 pub mod claims;
@@ -12,6 +13,7 @@ pub mod pickup;
 pub mod pipeline;
 pub mod prompt;
 pub mod retro;
+pub mod screenshots;
 pub mod setup;
 pub mod sync;
 pub mod tracer;

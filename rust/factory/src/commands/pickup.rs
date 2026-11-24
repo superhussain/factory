@@ -587,7 +587,7 @@ fn detach(cmd: &mut Command) {
 }
 
 #[cfg(unix)]
-fn getuid() -> u32 {
+pub(crate) fn getuid() -> u32 {
     extern "C" {
         fn getuid() -> u32;
     }
@@ -596,7 +596,7 @@ fn getuid() -> u32 {
 }
 
 #[cfg(not(unix))]
-fn getuid() -> u32 {
+pub(crate) fn getuid() -> u32 {
     0
 }
 
@@ -6241,6 +6241,198 @@ fn adapter_run(adapter: &[String], extra: &[&str]) -> io::Result<Out> {
     )
 }
 
+const STALLS_USAGE: &str = "usage: factory stalls list | archive <id> [--force]\n";
+const STALLS_PASEO_SECONDS: u64 = 20;
+static STALL_LIMIT: Pattern = Pattern::new(
+    r"You['’]ve hit your (session|weekly) limit · resets (?:(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2}), )?(\d{1,2})(?::(\d{2}))?(am|pm) \(([A-Za-z_]+(?:/[A-Za-z0-9_+-]+)*)\)",
+    Re::NONE,
+);
+
+/// `factory stalls`: the stall adapter pickup's stalls.json names. It reports and archives
+/// Paseo sessions stalled on a Claude usage limit. Exit 0 ok, 1 failure, 2 usage, 3 archive
+/// refused because the session is no longer stalled.
+pub fn stalls_cmd(call: &Call) -> Res<()> {
+    let args: Vec<&str> = call.args.iter().map(String::as_str).collect();
+    match args[..] {
+        ["list"] => stalls_list(),
+        ["archive", id] if ADAPTER_ID.is_full(id) => stalls_archive(id),
+        ["archive", id, "--force"] if ADAPTER_ID.is_full(id) => stalls_archive_force(id),
+        _ => Err(Exit::raw(2, STALLS_USAGE)),
+    }
+}
+
+fn stalls_fail(msg: &str) -> Exit {
+    Exit::raw(1, format!("factory stalls: {msg}\n"))
+}
+
+/// (exit code, stdout) from one paseo call, or 1 when paseo fails or is slow.
+fn stalls_paseo(args: &[&str]) -> Res<(i32, String)> {
+    let Some(program) = which("paseo") else {
+        return Err(stalls_fail("paseo is not on PATH"));
+    };
+    let program = program.to_string_lossy().into_owned();
+    let home = std::env::var("PASEO_HOME").unwrap_or_default();
+    let mut argv = vec![program.as_str()];
+    if !home.is_empty() {
+        argv.extend(["--home", home.as_str()]);
+    }
+    argv.extend(args);
+    Ok(
+        match capture(
+            &argv,
+            None,
+            &[],
+            Some(Duration::from_secs(STALLS_PASEO_SECONDS)),
+        ) {
+            Ok(out) => (out.code, out.stdout),
+            Err(_) => (1, String::new()),
+        },
+    )
+}
+
+/// (limit line groups, inspect info) while the agent sits idle and unarchived on a Claude limit
+/// line, else None.
+fn stall_of(agent: &str) -> Res<Option<(Vec<Option<String>>, Value)>> {
+    let (code, text) = stalls_paseo(&["logs", agent, "--tail", "1", "--filter", "text"])?;
+    if code != 0 {
+        return Ok(None);
+    }
+    let Some(caps) = STALL_LIMIT.fullmatch(strip(&text)) else {
+        return Ok(None);
+    };
+    let groups = (1..=7)
+        .map(|i| caps.get(i).map(|m| m.as_str().to_string()))
+        .collect();
+    let (code, raw) = stalls_paseo(&["inspect", agent, "--json"])?;
+    if code != 0 {
+        return Ok(None);
+    }
+    let Some(info) = loads(&raw).ok().filter(Value::is_object) else {
+        return Ok(None);
+    };
+    if info.get("Status") != Some(&json!("idle")) || info.get("Archived") != Some(&json!(false)) {
+        return Ok(None);
+    }
+    Ok(Some((groups, info)))
+}
+
+/// The reset instant in seconds from the limit line groups and the message time in
+/// microseconds, or None when the zone is unknown: that agent is left out.
+fn stall_reset(groups: &[Option<String>], message_us: i128) -> Option<i64> {
+    let zone = groups[6].as_deref()?;
+    let at = message_us.div_euclid(1_000_000) as i64;
+    let local = at + zone_offset(zone, at)?;
+    let (y, m, d) = civil(local.div_euclid(86_400));
+    let hour = groups[3].as_deref()?.parse::<i64>().ok()? % 12
+        + if groups[5].as_deref() == Some("pm") {
+            12
+        } else {
+            0
+        };
+    let minute: i64 = groups[4].as_deref().unwrap_or("0").parse().ok()?;
+    if hour > 23 || minute > 59 {
+        return None;
+    }
+    let wall = |y: i64, m: i64, d: i64| -> Option<i128> {
+        if d < 1 || d > crate::commands::retro::month_days(y, m) {
+            return None;
+        }
+        let utc = zone_wall_to_utc(
+            zone,
+            days_from_civil(y, m, d) * 86_400 + hour * 3600 + minute * 60,
+        )?;
+        Some(i128::from(utc) * 1_000_000)
+    };
+    let reset = match groups[1].as_deref() {
+        None => {
+            let reset = wall(y, m, d)?;
+            if reset > message_us {
+                reset
+            } else {
+                let (y, m, d) = civil(days_from_civil(y, m, d) + 1);
+                wall(y, m, d)?
+            }
+        }
+        Some(month) => {
+            let month = MONTHS.iter().position(|n| *n == month)? as i64 + 1;
+            let day: i64 = groups[2].as_deref()?.parse().ok()?;
+            let reset = wall(y, month, day)?;
+            if reset < message_us - 86_400 * 1_000_000 {
+                wall(y + 1, month, day)?
+            } else {
+                reset
+            }
+        }
+    };
+    Some(reset.div_euclid(1_000_000) as i64)
+}
+
+fn stalls_list() -> Res<()> {
+    let (code, raw) = stalls_paseo(&["ls", "-g", "--json"])?;
+    let agents = (code == 0).then(|| loads(&raw).ok()).flatten();
+    let Some(Value::Array(agents)) = agents else {
+        return Err(stalls_fail("paseo ls failed"));
+    };
+    let mut stalls = Vec::new();
+    for agent in &agents {
+        let Some(id) = get_str(agent, "id") else {
+            continue;
+        };
+        let head = get_str(agent, "provider").map_or("", |p| p.split('/').next().unwrap_or(""));
+        if agent.get("status") != Some(&json!("idle"))
+            || !(head == "claude" || head.starts_with("claude-"))
+            || !ADAPTER_ID.is_full(id)
+        {
+            continue;
+        }
+        let Some((groups, info)) = stall_of(id)? else {
+            continue;
+        };
+        let Some(message_us) = crate::commands::retro::when(info.get("UpdatedAt")) else {
+            continue;
+        };
+        let Some(reset) = stall_reset(&groups, message_us) else {
+            continue;
+        };
+        let model = info
+            .get("Model")
+            .filter(|m| truthy(Some(*m)))
+            .cloned()
+            .unwrap_or(json!(""));
+        stalls.push(json!({"session": id, "reset": format_stamp(reset),
+            "provider": info.get("Provider").cloned().unwrap_or(Value::Null), "model": model}));
+    }
+    let doc = json!({"version": 1, "stalls": stalls});
+    let _ = writeln!(io::stdout(), "{}", dumps(&doc, DEFAULT));
+    Ok(())
+}
+
+/// Archive only a session that is still stalled; a woken one exits 3 and is kept.
+fn stalls_archive(id: &str) -> Res<()> {
+    if stall_of(id)?.is_none() {
+        return Err(exit(3));
+    }
+    let (code, _) = stalls_paseo(&["archive", id])?;
+    if code != 0 {
+        return Err(stalls_fail(&format!("paseo archive exit {code}")));
+    }
+    Ok(())
+}
+
+/// Archive a session whatever it is doing, unless it is already archived.
+fn stalls_archive_force(id: &str) -> Res<()> {
+    let (code, raw) = stalls_paseo(&["inspect", id, "--json"])?;
+    let info = (code == 0).then(|| loads(&raw).ok()).flatten();
+    if info.is_some_and(|i| i.get("Archived") == Some(&json!(true))) {
+        return Ok(());
+    }
+    let (code, _) = stalls_paseo(&["archive", "--force", id])?;
+    if code != 0 {
+        return Err(stalls_fail(&format!("paseo archive exit {code}")));
+    }
+    Ok(())
+}
+
 /// The stalls from one adapter list call, or the reason it gave none.
 fn list_stalls(adapter: &[String]) -> Result<Vec<Value>, String> {
     let p = match adapter_run(adapter, &["list"]) {
@@ -11670,16 +11862,7 @@ exit "$archive_code"
 
         #[test]
         fn test_agent_guard_matches_the_adapter_id_rule() {
-            let source = fs::read_to_string(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../skills/factory/runtime/paseo_stalls.py"
-            ))
-            .unwrap();
-            let line = source.lines().find(|l| l.starts_with("ID_RE = ")).unwrap();
-            assert!(
-                line.contains(r#""[0-9a-fA-F][0-9a-fA-F-]{7,63}""#),
-                "{line}"
-            );
+            // `factory stalls` checks ids with the same ADAPTER_ID pickup's guard uses.
             assert!(ADAPTER_ID.is_full(AGENT) && !ADAPTER_ID.is_full("ab_cd"));
         }
 

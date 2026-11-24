@@ -13,7 +13,7 @@ Walk a person from nothing to a first job, one question at a time. The written v
 - One decision per question, 2 to 4 options, the recommended option first with ` (Recommended)` in its label. Free text (account ID, zone, emails, paths) is a plain message, one value at a time.
 - Validate each answer before moving on (account ID is 32 hex characters, hostname ends in `.<zone>`, path exists and is a git checkout).
 - Never ask for, accept, print or store a secret: the Cloudflare API token, `FACTORY_ACCESS_CLIENT_*`, pairing codes. Commands that take one run in the person's own terminal. If a secret lands in chat, do not repeat it; tell them to revoke it in the Cloudflare dashboard and create a new one.
-- Ask before installing any tool, editing any file outside this checkout and the factory home, or running `--replace`. Never run `bootstrap.py down`.
+- Ask before installing any tool, editing any file outside this checkout and the factory home, or running `--replace`. Never run `factory bootstrap down`.
 - Do not create timers, edit agent settings or save pipeline settings yourself. Give the exact block or the exact dashboard controls and wait for "done".
 - Run read-only checks yourself and show their result. Use synthetic examples in explanations.
 - End with the summary table in phase 11.
@@ -29,7 +29,7 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory` once p
 
 ## 2. Tools
 
-- Check: `mise --version`, `python3 --version` (for tools/*.py), `cargo --version`, `git --version`, `gh auth status`.
+- Check: `mise --version`, `cargo --version`, `git --version`, `gh auth status`.
 - Ask, Install: "`<tool>` is missing. Install it now?" Options: Show me the command (Recommended), I installed it, Skip.
 - Then, after a yes, run `mise install` and `mise exec -- pnpm install --frozen-lockfile`.
 
@@ -42,9 +42,9 @@ In the phases below, `$FACTORY` is `<skills dir>/factory/runtime/factory` once p
 - Ask, Hostname: "Use factory.<zone>?" Options: factory.<zone> (Recommended), Other.
 - Ask as a plain message: allowed emails.
 - Ask, Plan: "Create these resources?" Options: Yes (Recommended), Change an answer, Stop.
-- Then write `deploy/bootstrap.json` as `{"version":1,"account_id":...,"zone":...,"hostname":...,"emails":[...]}`, run `python3 tools/bootstrap.py plan --answers deploy/bootstrap.json` and show it.
+- Then write `deploy/bootstrap.json` as `{"version":1,"account_id":...,"zone":...,"hostname":...,"emails":[...]}`, run `sh tools/install.sh <skills root>` if `<skills root>/factory/runtime/factory` is missing, then `<skills root>/factory/runtime/factory bootstrap plan --answers deploy/bootstrap.json`, and show it.
 - Show the token permission list from [cloudflare.md](../../../docs/cloudflare.md#guided-setup).
-- Hand over `mise exec -- python3 tools/bootstrap.py up` for their own terminal. They press Enter four times and paste the token at the hidden prompt. Wait for "done".
+- Hand over `mise exec -- <skills root>/factory/runtime/factory bootstrap up`, run from this checkout's root, for their own terminal. They press Enter four times and paste the token at the hidden prompt. Wait for "done".
 - On the Zero Trust message, send them to open Zero Trust once in the dashboard, then rerun.
 
 ## 4. Skill and roles

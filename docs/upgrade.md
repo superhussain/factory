@@ -33,7 +33,7 @@ These are host-local files; the server does not hold device credentials.
 ```sh
 mise install
 mise exec -- pnpm install --frozen-lockfile
-mise exec -- python3 tools/verify.py all
+mise exec -- node tools/verify.mjs all
 ```
 
 The `hosted` group exercises assets, auth, protocol, local integration, browser
@@ -49,13 +49,17 @@ Then bring each host up to date with one command (`factory.exe` on Windows):
 It fetches the checkout's origin, builds the binary from origin's own `rust/`
 crate in a temporary detached worktree, and runs that binary's `install`. The new bundle then
 rewrites the pickup timer if the host has one, and catch-up checks the Worker's
-`deploy-main` run. A host with nothing new prints `catch-up: nothing new` and
+`deploy-main` run. Catch-up also rewrites every factory timer that still runs
+`runtime/factory.py` (the crontab, `~/Library/LaunchAgents/factory.*.plist`,
+`~/.config/systemd/user/factory-*.service` and `~/.config/factory-*.cmd`) and a
+`stalls.json` adapter that runs `runtime/paseo_stalls.py`, so they run the binary
+beside it, and reloads launchd and systemd. It prints one `timers:` line for each. A host with nothing new prints `catch-up: nothing new` and
 writes nothing.
 
 Before any local write it prints `backup: <home>/backups/catch-up-<stamp>`. That
 folder (mode 700) holds `skill/factory/`, `crontab.txt` on cron hosts,
 `LaunchAgents/factory.*.plist` on macOS, `config/factory-*.cmd` on Windows, and
-`home/` with `config.md`, `paths.md`, `routes.md`, `launchers.json` and `.env`.
+`home/` with `config.md`, `paths.md`, `routes.md`, `launchers.json`, `stalls.json` and `.env`.
 Catch-up never prunes these folders. To roll back:
 
 1. Copy `skill/factory` back over `factory` in the skills root.
@@ -80,10 +84,10 @@ To roll back dependencies, return to the previous reviewed checkout, remove
 ## 5. Dry-run, then operator-gated deploy
 
 ```sh
-python3 tools/deploy.py check --profile deploy/profile.json
-python3 tools/deploy.py render --profile deploy/profile.json
-python3 tools/deploy.py dry-run --profile deploy/profile.json
-python3 tools/deploy.py deploy --profile deploy/profile.json
+node tools/deploy.mjs check --profile deploy/profile.json
+node tools/deploy.mjs render --profile deploy/profile.json
+node tools/deploy.mjs dry-run --profile deploy/profile.json
+node tools/deploy.mjs deploy --profile deploy/profile.json
 ```
 
 `dry-run` never contacts production storage. The real `deploy` is the
@@ -93,57 +97,11 @@ origin's storage, so deploying to the same R2 bucket preserves them.
 
 ## Reassigning jobs between projects
 
-Jobs sometimes need to move between projects — for example, factory history
-consolidated under the `factory` project. `tools/reassign-jobs.py` does this in
-two steps, both operator-run against your own instance:
-
-```sh
-python3 tools/reassign-jobs.py --runtime <installed>/runtime/factory.py --from <old-slug> --to factory plan
-python3 tools/reassign-jobs.py --runtime <installed>/runtime/factory.py --from <old-slug> --to factory apply \
-  --ids <comma-separated ids> --backup manifest.json
-```
-
-`--runtime` points at the installed runtime copy, which supplies the API client
-and CAS board writes, so the tool authenticates as an ordinary device. `--from`
-is required, as in `--from <old-slug> --to factory`; passing both slugs reversed
-reverses the migration.
-
-1. **Plan (no writes).** `plan` lists every job in the `--from` project, labeled
-   `MIGRATE` (terminal stage, no live claim, no existing worktree),
-   `KEEP` (not a candidate — the job id does not name the target), or
-   `FLAG: <reason>` (`non-terminal`, `live claim`, `existing worktree`). Add
-   `--json` for machine-readable output. Nothing is written.
-2. **Review the ids.** The plan output is a starting point; the ids you pass to
-   `apply` are the final authority. Only explicit ids are touched.
-3. **Backup manifest.** Take your own verified R2 backup per
-   [recovery.md](recovery.md), then write a manifest
-   `{"version": 1, "files": {"<key>": "<sha256>"}}` covering `board.json` and
-   every `jobs/<from>/<id>/` key for the ids being applied. `apply` refuses to
-   run unless the manifest matches live GETs exactly.
-4. **Pause writers and schedules** (see step 2 above), so the live state still
-   matches the backup when `apply` runs.
-5. **Apply.** Per reviewed job, in order: artifacts are copied to the new
-   project prefix create-only (`If-None-Match: *` — a conflicting copy with
-   different bytes flags the job and skips it entirely, changing nothing); a CAS
-   board write changes only the job's `project` field (every other field,
-   including stale claims, is preserved verbatim; only the board's top-level
-   `updated` refreshes); the device-side job cache
-   `<home>/jobs/<from>/<id>/` is renamed to `jobs/<to>/<id>/` with its
-   `.sync.json`. Old R2 keys are never deleted: they remain frozen aliases, so
-   historical `jobs/<from>/<id>/...` URLs and Markdown/image links inside old
-   artifacts keep serving the same bytes. Add `--json` to `apply` for the
-   per-file result record (old/new ETags and sha256).
-6. **First pull after apply.** A device's first `pull <to>/<id>` reports
-   "pulled N files" as it re-adopts the new ETags — expected, self-healing, no
-   bytes change.
-7. **Reversal.** Re-run `apply` with both slugs reversed and the same ids (and a
-   fresh manifest for the reversed keys). Board project and cache move back;
-   artifact copies at both prefixes stay as identical aliases.
-
-Re-running `apply` for an already-migrated id verifies copies by sha256 and
-board state, then makes no writes. Jobs outside the named projects, non-factory
-`<old-slug>` jobs and worktrees are never touched: worktree and Git state is
-left entirely alone.
+`tools/reassign-jobs.py` moved factory history under the `factory` project once,
+and was deleted after that. It loaded the Python runtime as a module, which is
+gone. Run it from commit `3e510927` with that commit's `runtime/factory.py` if
+another move is ever needed; its section in that commit's `docs/upgrade.md`
+describes the plan, backup manifest and apply steps.
 
 ## Known gaps
 

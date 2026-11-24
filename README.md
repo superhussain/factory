@@ -8,7 +8,7 @@ A portable software factory: a shared board, safe multi-device state, and a priv
 - Node `>=22.18.0` (development and verification are pinned to `24.14.0`; see `.node-version`)
 - pnpm `11.9.0` (`package.json` `packageManager`)
 - Rust toolchain: install rustup from https://rustup.rs. `tools/install.sh` (`tools\install.ps1` on Windows) builds the factory binary with cargo from PATH or `~/.cargo/bin`
-- Python `3.8+` for the `tools/*.py` scripts (still needed until those scripts move off Python)
+- Python `3.8+` only for the `tests/worker/test_*.py` suites that `pnpm test` runs, until they move off Python
 - Git
 - A Cloudflare account with an active zone (for deployment)
 
@@ -17,10 +17,11 @@ A portable software factory: a shared board, safe multi-device state, and a priv
 ```sh
 mise install
 mise exec -- pnpm install --frozen-lockfile
-mise exec -- python3 tools/bootstrap.py up
+sh tools/install.sh "$HOME/.claude/skills"
+mise exec -- "$HOME/.claude/skills/factory/runtime/factory" bootstrap up
 ```
 
-`bootstrap.py up` asks for your Cloudflare account ID, zone, factory hostname and allowed emails, then creates or reuses the R2 bucket, Access application, policies and this device's service token, writes `deploy/profile.json` and the device `.env`, and deploys. It reads the API token from `CLOUDFLARE_API_TOKEN` or a hidden prompt. Rerunning it creates nothing new. See [docs/cloudflare.md](docs/cloudflare.md#guided-setup) for token permissions, a second device and `down`.
+`tools/install.sh` builds the factory binary and installs the skill (`tools\install.ps1` and `factory.exe` on Windows). `factory bootstrap up`, run from this checkout's root, asks for your Cloudflare account ID, zone, factory hostname and allowed emails, then creates or reuses the R2 bucket, Access application, policies and this device's service token, writes `deploy/profile.json` and the device `.env`, and deploys. It reads the API token from `CLOUDFLARE_API_TOKEN` or a hidden prompt. Rerunning it creates nothing new. See [docs/cloudflare.md](docs/cloudflare.md#guided-setup) for token permissions, a second device and `down`.
 
 Then follow [docs/getting-started.md](docs/getting-started.md) to install the skill, register a project and run a first job. To be walked through it, run `/factory-setup` in Claude Code from this checkout.
 
@@ -43,26 +44,26 @@ The dashboard loads at the origin root `/`. Historical `/dashboard.html` links r
 
 ## Affected checks
 
-The four concerns are declared as Nx projects, so a change can run only what it touches:
+The three concerns are declared as Nx projects, so a change can run only what it touches:
 
 ```sh
 mise exec -- pnpm exec nx affected -t auth protocol assets deploy local browser \
   --base="$(git merge-base origin/main HEAD)" --head=HEAD
-mise exec -- pnpm exec nx run-many -t cli install verify
+mise exec -- pnpm exec nx run-many -t verify
 ```
 
-`worker-hosted` owns `auth` and `protocol`, `web-dashboard` owns `assets`, `tooling` owns `deploy`, `local`, `browser` and `verify`, and `skills/factory` is declared as `device-bundle`, whose Python suites run as the cached `cli`/`install` targets (and `tooling:verify`) through `nx run-many`; `tools/verify.py` still runs them directly with no Node. `worker-hosted`'s suites depend on `web-dashboard:assets` because they import the `.build` artifacts it writes, so a clean checkout builds assets first. Only `local` binds the fixed ports 8220/8221; `browser` uses owned ephemeral ports, so the two run side by side.
+`worker-hosted` owns `auth` and `protocol`, `web-dashboard` owns `assets`, and `tooling` owns `deploy`, `local`, `browser` and `verify`. The `rust/` crate is not an Nx project: `node tools/verify.mjs device` runs its `cargo test`, and a host without Node runs `cargo test --locked --manifest-path rust/Cargo.toml` directly. `worker-hosted`'s suites depend on `web-dashboard:assets` because they import the `.build` artifacts it writes, so a clean checkout builds assets first. Only `local` binds the fixed ports 8220/8221; `browser` uses owned ephemeral ports, so the two run side by side.
 
-`nx` is a pinned devDependency; task results cache locally under the ignored `.nx/cache` (`pnpm exec nx reset` clears them), and `pnpm exec nx show projects` lists the four projects. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
+`nx` is a pinned devDependency; task results cache locally under the ignored `.nx/cache` (`pnpm exec nx reset` clears them), and `pnpm exec nx show projects` lists the three projects. Lint and format run as package scripts (`pnpm run lint`, `pnpm run format:check`), not Nx targets, so `nx.json` declares none.
 
 ## Private deployment profile
 
 All deployment input lives in the ignored `deploy/profile.json`. Copy the schema from `tests/fixtures/deployment-valid.json` (synthetic values that validate syntactically but belong to nobody) and fill in your own account, Worker name, R2 bucket, HTTPS origin, Access issuer and audience. Every schema key is required: `image_origins` (`[]`) and `agent_links` (`{}`) are the values that disable those integrations. Optional `jira_origin`, such as `https://your-site.atlassian.net`, turns Jira keys in job files into links to `<jira_origin>/browse/<KEY>`; leave it out to keep keys as text.
 
 ```sh
-python3 tools/deploy.py check --profile deploy/profile.json
-python3 tools/deploy.py render --profile deploy/profile.json
-python3 tools/deploy.py dry-run --profile deploy/profile.json
+node tools/deploy.mjs check --profile deploy/profile.json
+node tools/deploy.mjs render --profile deploy/profile.json
+node tools/deploy.mjs dry-run --profile deploy/profile.json
 ```
 
 `check` validates only; `render` writes the fixed Wrangler config and a nonsecret connection descriptor under `.build/`; `dry-run` never contacts production storage. `deploy/profile.json` is ignored and must never be committed.

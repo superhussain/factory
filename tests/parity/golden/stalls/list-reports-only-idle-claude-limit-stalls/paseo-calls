@@ -1,0 +1,10 @@
+{"argv": ["--home", "/nonexistent/paseo-home", "ls", "-g", "--json"]}
+{"argv": ["--home", "/nonexistent/paseo-home", "logs", "4cec0a47-1d21-4115-945b-9e7dfb668ef4", "--tail", "1", "--filter", "text"]}
+{"argv": ["--home", "/nonexistent/paseo-home", "inspect", "4cec0a47-1d21-4115-945b-9e7dfb668ef4", "--json"]}
+{"argv": ["--home", "/nonexistent/paseo-home", "logs", "aaaaaaaab-bbbbbbbbccccddddeeeeffff", "--tail", "1", "--filter", "text"]}
+{"argv": ["--home", "/nonexistent/paseo-home", "inspect", "aaaaaaaab-bbbbbbbbccccddddeeeeffff", "--json"]}
+{"argv": ["--home", "/nonexistent/paseo-home", "logs", "dddd3333-4444-8555-8666-777788889999", "--tail", "1", "--filter", "text"]}
+{"argv": ["--home", "/nonexistent/paseo-home", "logs", "eeee4444-5555-8666-9777-888899990000", "--tail", "1", "--filter", "text"]}
+{"argv": ["--home", "/nonexistent/paseo-home", "inspect", "eeee4444-5555-8666-9777-888899990000", "--json"]}
+{"argv": ["--home", "/nonexistent/paseo-home", "logs", "ffff5555-6666-8777-8888-999900001111", "--tail", "1", "--filter", "text"]}
+{"argv": ["--home", "/nonexistent/paseo-home", "inspect", "ffff5555-6666-8777-8888-999900001111", "--json"]}
