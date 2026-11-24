@@ -2058,6 +2058,57 @@ mod tests {
     }
 
     #[test]
+    fn bundle_behind_since_reads_origin_base() {
+        let dir = temp_dir("setup-behind");
+        let repo = dir.join("studio");
+        fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str], date: Option<&str>| {
+            let mut c = std::process::Command::new("git");
+            c.arg("-C")
+                .arg(&repo)
+                .args([
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.invalid",
+                ])
+                .args(args);
+            if let Some(date) = date {
+                c.env("GIT_COMMITTER_DATE", date);
+            }
+            let out = c.output().unwrap();
+            assert!(out.status.success(), "git {args:?}");
+            String::from_utf8(out.stdout).unwrap().trim().to_string()
+        };
+        git(&["init", "-q"], None);
+        let mut commits = Vec::new();
+        for date in [
+            "2025-12-29T16:00:00Z",
+            "2025-12-30T14:00:00Z",
+            "2026-01-01T06:00:00Z",
+        ] {
+            git(&["commit", "-q", "--allow-empty", "-m", date], Some(date));
+            commits.push(git(&["rev-parse", "HEAD"], None));
+        }
+        git(
+            &["update-ref", "refs/remotes/origin/main", &commits[2]],
+            None,
+        );
+        fs::write(
+            dir.join("paths.md"),
+            format!("---\nstudio: {}\n---\n", repo.display()),
+        )
+        .unwrap();
+        assert_eq!(
+            bundle_behind_since(&dir, &commits[0]).unwrap(),
+            Some("2025-12-30T14:00:00Z".to_string())
+        );
+        assert_eq!(bundle_behind_since(&dir, &commits[2]).unwrap(), None);
+        assert_eq!(bundle_behind_since(&dir, &"0".repeat(40)).unwrap(), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn bundle_stamp_shape() {
         let good = r#"{"commit": "abcdef0", "tree": "0123456789abcdef"}"#;
         assert_eq!(stamp_shape(good), Some(loads(good).unwrap()));

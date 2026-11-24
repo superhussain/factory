@@ -411,6 +411,25 @@
       "from": "tests/cli/test_hosts.py::PairTest.test_pair_sets_device_sends_one_post_and_one_status"
     },
     {
+      "id": "setup/host-pair-cached-status",
+      "argv": ["--home", "{home}", "host", "pair", "parity", "ABCDE-23456"],
+      "home": "setup-host-pair-cached",
+      "stubs": {},
+      "routes": {
+        "POST /api/hosts/parity/pair": [200, "paired"],
+        "GET /projects.json": [200, []],
+        "GET /api/board": [
+          200,
+          {
+            "jobs": []
+          }
+        ],
+        "PUT /api/hosts/parity/status": [200, ""]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_hosts.py::PairTest.test_pair_reuses_cached_scheduler_and_last_pickup"
+    },
+    {
       "id": "setup/host-wrong-code",
       "argv": ["--home", "{home}", "host", "pair", "parity", "ABCDE-23456"],
       "home": null,
