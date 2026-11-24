@@ -364,7 +364,8 @@ whose `opened` is not a board timestamp or whose `version` is not a whole number
 when it writes the board.
 - **Settle-shaped.** The Worker's `checkTrialSettle` refuses, with 400, a board `PUT` or
   `PATCH` that changes a stored `open` trial any way `trial settle` would not.
-  `checkTrialSettle` skips such a record (`trialMisshapen`). Every key
+  `checkTrialSettle` does not guard an open record that `trialMisshapen` flags, so
+  `trial settle` can drop it. Every key
   outside `status`, `settled`, `arms`, `reads` and `revert_version` stays equal, a settled
   record's `settled` is a board timestamp, and the written record must pass:
 
