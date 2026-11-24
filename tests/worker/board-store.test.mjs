@@ -289,3 +289,52 @@ test("a one-row PATCH costs the same work at 2,300 and 4,600 rows", async () => 
   assert.ok(doubled.rpcBytes < 20000, `RPC bytes ${doubled.rpcBytes}`);
   assert.ok(doubled.json.stringify < 60, `JSON.stringify calls ${doubled.json.stringify}`);
 });
+
+test("a copy that lands before the room records it is the room's own after a restart", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const s = setup();
+  const first = { ...BUILD, note: "first" };
+  const second = { ...BUILD, note: "second" };
+  await s.patch({ rows: [{ id: BUILD.id, expect: BUILD, row: first }] });
+  const put = s.bucket.put.bind(s.bucket);
+  s.bucket.put = async (key, value, options) => {
+    // The row changes again while the copy is under way, and the room stops after R2 takes the
+    // copy but before it records so.
+    s.bucket.put = put;
+    const again = await s.patch({ rows: [{ id: BUILD.id, expect: first, row: second }] });
+    assert.equal(again.status, 200);
+    await put(key, value, options);
+    throw new Error("the room stopped");
+  };
+  await assert.rejects(s.room.runAlarm(), /the room stopped/);
+  s.room.restart();
+  assert.deepEqual(JSON.parse(s.r2().bytes).jobs, [first, SPEC]);
+  assert.deepEqual((await (await s.send("/board.json")).json()).jobs, [second, SPEC]);
+  assert.equal(warn.mock.calls.length, 0, "the room's own copy is no outside write to merge");
+  assert.equal(s.room.object.board().hasDirty(), true);
+  await s.room.runAlarm();
+  assert.deepEqual(JSON.parse(s.r2().bytes).jobs, [second, SPEC]);
+  assert.equal(s.room.object.board().hasDirty(), false);
+});
+
+test("a full write loses to an outside write that lands in R2 before its copy", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const s = setup();
+  await s.send("/board.json");
+  const outside = { ...BOARD, jobs: [BUILD, SPEC, IDEA] };
+  const put = s.bucket.put.bind(s.bucket);
+  s.bucket.put = async (key, value, options) => {
+    // A Worker from before the room writes R2 between the room's check and its copy.
+    s.bucket.put = put;
+    await put("board.json", JSON.stringify(outside));
+    return put(key, value, options);
+  };
+  const response = await s.send("/api/board", {
+    method: "PUT",
+    headers: { "If-Match": SEED },
+    body: JSON.stringify({ ...BOARD, jobs: [BUILD] }),
+  });
+  assert.equal(response.status, 412);
+  assert.deepEqual(await (await s.send("/board.json")).json(), outside);
+  assert.deepEqual(JSON.parse(s.r2().bytes), outside);
+});

@@ -140,7 +140,7 @@ export function memoryRoom(
   };
   globalThis.WebSocketRequestResponsePair ??= class {};
   const ctx = { storage, setWebSocketAutoResponse() {}, getWebSockets: () => [] };
-  const object = new BoardEvents(ctx, env);
+  let object = new BoardEvents(ctx, env);
   const calls = [];
   const rpc =
     (name) =>
@@ -164,7 +164,13 @@ export function memoryRoom(
   };
   return {
     namespace: { idFromName: (name) => ({ name }), get: () => stub },
-    object,
+    get object() {
+      return object;
+    },
+    // A new room object over the same SQLite, as after an eviction or a deploy.
+    restart() {
+      object = new BoardEvents(ctx, env);
+    },
     calls,
     work,
     stub,

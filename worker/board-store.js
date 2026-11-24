@@ -1,9 +1,14 @@
-// Board storage. The board's rows live in the BoardEvents room's SQLite, one SQL row per board
-// row, so a row PATCH reads and writes only the rows it names. GET /board.json is built from the
-// rows and cached per version. R2's board.json is a copy the room writes behind each change: at
-// once for a full write, within FLUSH_MS of a row commit. The room adopts a board.json that
-// something else wrote to R2, such as a Worker version from before this store or an operator's
-// restore, and merges its own unflushed rows over it row by row.
+// Board storage. The board's rows live in the BoardEvents room's SQLite, packed in order into
+// pages of about PAGE_BYTES, with one index row per board row for the lookups a PATCH needs. A
+// row PATCH reads and rewrites only the pages its rows sit on, and a whole-board read costs one
+// SQL row per page. The Workers Free plan caps SQLite at 5M rows read and 100k rows written a
+// day, so every operation's row count is budgeted in build.md and pinned in a test.
+//
+// GET /board.json is built from the pages and cached per version. R2's board.json is a copy the
+// room writes: before a full write answers, and within FLUSH_MS of a row commit. Each copy is
+// tagged with the room's sequence number, so the room knows its own copy after a restart. The
+// room adopts a board.json that something else wrote to R2, such as a Worker version from
+// before this store or an operator's restore, and merges its own unflushed rows over it.
 //
 // boardStore(env) is the Worker's handle. Without a room binding (unit tests that give the Worker
 // a memory bucket alone, or a room stub with fetch alone) it reads and writes R2's board.json
@@ -11,14 +16,18 @@
 
 export const BOARD_KEY = "board.json";
 export const ROOM = "main";
-export const FLUSH_MS = 5000;
+export const FLUSH_MS = 30_000;
+export const PAGE_BYTES = 256 << 10;
 const MAX_ROW = 1 << 20;
+// The customMetadata store value on the room's own copies in R2.
+const ROOM_COPY = "room";
 
 const ID_PREFIX = /^(\d{3,})-/;
 const encoder = new TextEncoder();
 const byteLength = (text) => encoder.encode(text).length;
 const isDoc = (doc) => typeof doc === "object" && doc !== null && !Array.isArray(doc);
 const newEtag = () => `"b${crypto.randomUUID().replaceAll("-", "")}"`;
+const rowId = (row) => (typeof row?.id === "string" ? row.id : null);
 
 function parseDoc(text) {
   try {
@@ -27,6 +36,21 @@ function parseDoc(text) {
   } catch {
     return null;
   }
+}
+
+// A short fingerprint of a row's JSON, or null for no row: two FNV-1a hashes and the length.
+// A merge compares R2's row with the one the room last copied by this alone.
+function rowHash(json) {
+  if (json === null) return null;
+  let a = 0x811c9dc5,
+    b = 0x050c5d1f;
+  for (let i = 0; i < json.length; i++) {
+    const c = json.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193);
+    b = Math.imul(b ^ c, 0x5bd1e995);
+  }
+  const hex = (n) => (n >>> 0).toString(16).padStart(8, "0");
+  return hex(a) + hex(b) + json.length.toString(16);
 }
 
 // The idea upload names a row carries, the ones checkIdeaImages and checkIdeaFiles subtract.
@@ -50,25 +74,24 @@ export function storedNames(jobs) {
   return names;
 }
 
-// The indexed columns of one board row.
+// The index columns of one board row.
 function rowColumns(row) {
-  const json = JSON.stringify(row);
-  const id = typeof row?.id === "string" ? row.id : null;
+  const id = rowId(row);
   const m = id !== null && ID_PREFIX.exec(id);
   const names = rowNames(row);
   return {
     id,
-    json,
     stage: id !== null ? JSON.stringify(row.stage ?? null) : null,
     num: m ? Number(m[1]) : null,
     capture: typeof row?.capture_id === "string" ? row.capture_id : null,
     names: names.length ? JSON.stringify(names) : null,
-    bytes: byteLength(json),
   };
 }
 
+const sameColumns = (a, b) => a.num === b.num && a.capture === b.capture && a.names === b.names;
+
 // A document's top-level keys in order, each with its value's JSON. An array jobs value is
-// null here: the rows hold it.
+// null here: the pages hold it.
 function headPairs(doc) {
   return Object.keys(doc).map((k) => [
     k,
@@ -92,84 +115,124 @@ const pairValue = (pairs, key) => {
   return pair ? JSON.parse(pair[1]) : undefined;
 };
 
-// The board document's text: JSON.stringify of the document the head and rows make.
-function boardText(pairs, rowTexts) {
+// The board document's text: JSON.stringify of the document the head and rows make. rows is
+// the comma-joined JSON of every row.
+function boardText(pairs, rows) {
   const parts = pairs.map(
-    ([k, v]) => JSON.stringify(k) + ":" + (v === null ? "[" + rowTexts.join(",") + "]" : v),
+    ([k, v]) => JSON.stringify(k) + ":" + (v === null ? "[" + rows + "]" : v),
   );
   return "{" + parts.join(",") + "}";
 }
 
+// The comma-joined row JSON inside one page's JSON array text.
+const pageBody = (json) => json.slice(1, -1);
+
 const SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS board_rows (pos INTEGER PRIMARY KEY, id TEXT, json TEXT NOT NULL,
-    stage TEXT, num REAL, capture TEXT, names TEXT, bytes INTEGER NOT NULL)`,
-  "CREATE INDEX IF NOT EXISTS board_rows_id ON board_rows (id)",
-  "CREATE INDEX IF NOT EXISTS board_rows_num ON board_rows (num)",
-  "CREATE INDEX IF NOT EXISTS board_rows_capture ON board_rows (capture)",
+  "CREATE TABLE IF NOT EXISTS board_pages (page INTEGER PRIMARY KEY, json TEXT NOT NULL)",
+  // One row per board row: its page and the columns a PATCH looks up. Rows sit in page order,
+  // and in order within a page.
+  `CREATE TABLE IF NOT EXISTS board_index (id TEXT, page INTEGER NOT NULL, num REAL, capture TEXT,
+    names TEXT)`,
+  "CREATE INDEX IF NOT EXISTS board_index_id ON board_index (id, page)",
+  // Partial indexes, so the many rows without a capture_id or upload names cost no index writes.
+  "CREATE INDEX IF NOT EXISTS board_index_capture ON board_index (capture) WHERE capture IS NOT NULL",
+  "CREATE INDEX IF NOT EXISTS board_index_names ON board_index (names) WHERE names IS NOT NULL",
+  // k 'state' holds the store's state; k 'stages' every id's stage as [[id, stage JSON]] in board
+  // order, first row per id, so a PATCH's stage reads cost one SQL row however many there are.
   "CREATE TABLE IF NOT EXISTS board_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)",
-  // Ids a row commit changed since the last flush, each with its JSON in R2's copy (null when
-  // R2's copy has no such row), so a merge can tell whose change a row is.
-  "CREATE TABLE IF NOT EXISTS board_dirty (id TEXT PRIMARY KEY, before TEXT, seq INTEGER NOT NULL)",
 ];
 
 /** The room's side of the store. storage is the Durable Object's ctx.storage. */
 export class BoardRows {
   constructor(storage, env) {
     this.storage = storage;
-    this.sql = storage.sql;
+    // SQLite rows read and written, summed from each cursor, which the Free plan caps per day.
+    this.work = { rowsRead: 0, rowsWritten: 0 };
+    this.sql = {
+      exec: (query, ...bindings) => {
+        const cursor = storage.sql.exec(query, ...bindings);
+        const rows = cursor.toArray();
+        this.work.rowsRead += cursor.rowsRead ?? 0;
+        this.work.rowsWritten += cursor.rowsWritten ?? 0;
+        return { toArray: () => rows };
+      },
+    };
     this.env = env;
     this.memo = { etag: null, text: "" };
-    this.flushing = false;
+    // While an R2 copy is under way, its promise; while a full write is, its promise.
     this.inflight = undefined;
+    this.replacing = undefined;
     for (const statement of SCHEMA) this.sql.exec(statement);
   }
 
   // The store's state: null before the first seed. etag is the board version clients see,
-  // r2etag the version of R2's copy the rows match, head the document's top-level pairs.
-  // headBefore is headKey of R2's copy while a commit's head change is unflushed.
+  // r2etag the version of R2's copy the rows match, head the document's top-level pairs,
+  // dirty { id: [hash of R2's row, seq] } for each id a row commit changed since that copy,
+  // headBefore headKey of R2's copy while a top-level change is uncopied.
   state() {
     const [row] = this.sql.exec("SELECT v FROM board_meta WHERE k = 'state'").toArray();
     return row ? JSON.parse(row.v) : null;
   }
 
-  save(state) {
+  save(state, key = "state") {
     this.sql.exec(
-      "INSERT INTO board_meta (k, v) VALUES ('state', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v",
+      "INSERT INTO board_meta (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v",
+      key,
       JSON.stringify(state),
     );
   }
 
-  insert(pos, row) {
-    const c = rowColumns(row);
-    this.sql.exec(
-      "INSERT INTO board_rows (pos, id, json, stage, num, capture, names, bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      pos,
-      c.id,
-      c.json,
-      c.stage,
-      c.num,
-      c.capture,
-      c.names,
-      c.bytes,
-    );
-    return c.bytes;
+  stages() {
+    const [row] = this.sql.exec("SELECT v FROM board_meta WHERE k = 'stages'").toArray();
+    return new Map(row ? JSON.parse(row.v) : []);
   }
 
-  // The JSON of the first row with this id, or null.
-  firstJson(id) {
-    const [row] = this.sql
-      .exec("SELECT json FROM board_rows WHERE id = ? ORDER BY pos LIMIT 1", id)
-      .toArray();
-    return row ? row.json : null;
+  // Every page holding a row with one of ids, as Map page -> parsed rows, in page order. Each
+  // lookup starts from the given values (CROSS JOIN keeps that order), so it reads the matching
+  // index rows and pages only, never a whole table.
+  pagesOf(ids) {
+    const pages = new Map();
+    if (!ids.length) return pages;
+    const numbers = this.sql
+      .exec(
+        "SELECT DISTINCT b.page FROM json_each(?) j CROSS JOIN board_index b ON b.id = j.value",
+        JSON.stringify(ids),
+      )
+      .toArray()
+      .map((r) => r.page)
+      .sort((a, b) => a - b);
+    for (const page of numbers) pages.set(page, null);
+    for (const p of this.sql
+      .exec(
+        "SELECT p.page, p.json FROM json_each(?) j CROSS JOIN board_pages p ON p.page = j.value",
+        JSON.stringify(numbers),
+      )
+      .toArray())
+      pages.set(p.page, JSON.parse(p.json));
+    for (const [page, rows] of pages) if (rows === null) pages.delete(page);
+    return pages;
   }
 
-  // Replaces every row with the board in text. An unreadable board keeps no rows; reads then
-  // go to R2, which holds it.
+  // The first row with each id in pages, as Map id -> { pos, row }.
+  firstRows(pages, ids) {
+    const want = new Set(ids),
+      found = new Map();
+    for (const [page, rows] of pages)
+      for (const [slot, row] of rows.entries()) {
+        const id = rowId(row);
+        if (id !== null && want.has(id) && !found.has(id))
+          found.set(id, { pos: page * 1e6 + slot, row });
+      }
+    return found;
+  }
+
+  // Replaces every page and index row with the board in text. An unreadable board keeps no
+  // rows; reads then go to R2, which holds it.
   seed(text, r2etag, etag) {
     const doc = parseDoc(text);
     const old = this.state();
-    this.sql.exec("DELETE FROM board_rows");
-    this.sql.exec("DELETE FROM board_dirty");
+    this.sql.exec("DELETE FROM board_pages");
+    this.sql.exec("DELETE FROM board_index");
     const state = {
       etag,
       r2etag,
@@ -178,7 +241,10 @@ export class BoardRows {
       clean: true,
       bytes: 0,
       count: 0,
+      maxNum: null,
+      lastPage: 0,
       seq: old?.seq ?? 0,
+      dirty: {},
       headSeq: 0,
       headBefore: null,
     };
@@ -186,23 +252,186 @@ export class BoardRows {
       state.head = headPairs(doc);
       const jobs = Array.isArray(doc.jobs) ? doc.jobs : [];
       const ids = new Set();
-      for (const [pos, row] of jobs.entries()) {
-        state.bytes += this.insert(pos, row);
-        if (typeof row?.id !== "string" || ids.has(row.id)) state.clean = false;
-        ids.add(row?.id);
+      const stages = new Map();
+      let page = 0,
+        rows = [],
+        size = 0;
+      const writePage = () => {
+        this.sql.exec(
+          "INSERT INTO board_pages (page, json) VALUES (?, ?)",
+          page,
+          "[" + rows.join(",") + "]",
+        );
+      };
+      for (const row of jobs) {
+        const json = JSON.stringify(row);
+        const bytes = byteLength(json);
+        if (rows.length && size + bytes > PAGE_BYTES) {
+          writePage();
+          page++;
+          rows = [];
+          size = 0;
+        }
+        rows.push(json);
+        size += bytes + 1;
+        state.bytes += bytes;
+        this.insertIndex(row, page);
+        const c = rowColumns(row);
+        if (c.num !== null) state.maxNum = Math.max(state.maxNum ?? c.num, c.num);
+        if (c.id === null || ids.has(c.id)) state.clean = false;
+        if (c.id !== null && !stages.has(c.id)) stages.set(c.id, c.stage);
+        ids.add(c.id);
       }
+      if (rows.length) writePage();
+      this.save([...stages], "stages");
       state.count = jobs.length;
+      state.lastPage = page;
     }
     this.save(state);
     this.memo = { etag: null, text: "" };
     return state;
   }
 
+  insertIndex(row, page) {
+    const c = rowColumns(row);
+    this.sql.exec(
+      "INSERT INTO board_index (id, page, num, capture, names) VALUES (?, ?, ?, ?, ?)",
+      c.id,
+      page,
+      c.num,
+      c.capture,
+      c.names,
+    );
+  }
+
+  // Applies row changes [{ id, row, add }] to state and the pages: an update rewrites every row
+  // with the id, null deletes them, add appends to the last page or a new one. Only the pages
+  // and index rows a change touches are written. Returns false, writing nothing, when the board
+  // would pass max bytes.
+  applyChanges(
+    state,
+    changes,
+    max = Infinity,
+    pages = this.pagesOf(changes.filter((c) => !c.add).map((c) => c.id)),
+  ) {
+    const touched = new Set();
+    const index = [];
+    // Stage changes, [id, stage JSON or undefined to drop], for the stages row.
+    const staged = [];
+    let bytes = state.bytes,
+      count = state.count,
+      maxNum = state.maxNum,
+      recount = false;
+    for (const c of changes) {
+      const next = rowColumns(c.row);
+      if (c.add) {
+        let last = state.lastPage;
+        if (!pages.has(last)) {
+          const [p] = this.sql.exec("SELECT json FROM board_pages WHERE page = ?", last).toArray();
+          pages.set(last, p ? JSON.parse(p.json) : []);
+        }
+        const json = JSON.stringify(c.row);
+        const size = byteLength(json);
+        if (
+          pages.get(last).length &&
+          byteLength(JSON.stringify(pages.get(last))) + size > PAGE_BYTES
+        )
+          pages.set(++last, []);
+        state.lastPage = last;
+        pages.get(last).push(c.row);
+        touched.add(last);
+        index.push(["insert", c.row, last]);
+        if (next.id !== null) staged.push([next.id, next.stage]);
+        bytes += size;
+        count++;
+        if (next.num !== null) maxNum = Math.max(maxNum ?? next.num, next.num);
+        continue;
+      }
+      let old = null;
+      for (const [page, rows] of pages) {
+        for (let slot = rows.length - 1; slot >= 0; slot--) {
+          if (rowId(rows[slot]) !== c.id) continue;
+          old ??= rows[slot];
+          bytes -= byteLength(JSON.stringify(rows[slot]));
+          if (c.row === null) {
+            rows.splice(slot, 1);
+            count--;
+          } else {
+            rows[slot] = c.row;
+            bytes += byteLength(JSON.stringify(c.row));
+          }
+          touched.add(page);
+        }
+      }
+      if (old === null) continue;
+      const before = rowColumns(old);
+      if (c.row === null) {
+        index.push(["delete", c.id]);
+        staged.push([c.id, undefined]);
+        if (before.num !== null && before.num === maxNum) recount = true;
+      } else {
+        if (!sameColumns(before, next)) index.push(["update", c.row]);
+        if (before.stage !== next.stage) staged.push([c.id, next.stage]);
+      }
+    }
+    if (byteLength(boardText(state.head, "")) + bytes + Math.max(count - 1, 0) > max) return false;
+    for (const page of touched) {
+      const rows = pages.get(page);
+      if (rows.length)
+        this.sql.exec(
+          "INSERT INTO board_pages (page, json) VALUES (?, ?) ON CONFLICT (page) DO UPDATE SET json = excluded.json",
+          page,
+          JSON.stringify(rows),
+        );
+      else this.sql.exec("DELETE FROM board_pages WHERE page = ?", page);
+    }
+    for (const [op, row, page] of index) {
+      if (op === "insert") this.insertIndex(row, page);
+      else if (op === "delete") this.sql.exec("DELETE FROM board_index WHERE id = ?", row);
+      else {
+        const c = rowColumns(row);
+        this.sql.exec(
+          "UPDATE board_index SET num = ?, capture = ?, names = ? WHERE id = ?",
+          c.num,
+          c.capture,
+          c.names,
+          c.id,
+        );
+      }
+    }
+    if (staged.length) {
+      const stages = this.stages();
+      for (const [id, stage] of staged)
+        if (stage === undefined) stages.delete(id);
+        else stages.set(id, stage);
+      this.save([...stages], "stages");
+    }
+    // Only deleting the row with the highest id number scans the index.
+    if (recount)
+      maxNum = this.sql.exec("SELECT MAX(num) AS m FROM board_index").toArray()[0].m ?? null;
+    Object.assign(state, { bytes, count, maxNum });
+    this.memo = { etag: null, text: "" };
+    return true;
+  }
+
+  // Marks each id dirty, keeping the hash of the row R2's copy holds from its first change.
+  markDirty(state, ids, beforeOf) {
+    for (const id of ids) {
+      state.seq++;
+      const entry = state.dirty[id];
+      state.dirty[id] = [entry ? entry[0] : rowHash(beforeOf(id)), state.seq];
+    }
+  }
+
+  hasDirty(state = this.state()) {
+    return !!state && (Object.keys(state.dirty).length > 0 || state.headBefore != null);
+  }
+
   // Takes in a board.json that something else wrote to R2. Unflushed row commits are applied
   // over it where R2's row is still the one they replaced; a row both sides changed keeps R2's.
   adopt(text, r2etag) {
     const old = this.state();
-    const dirty = old ? this.sql.exec("SELECT id, before FROM board_dirty").toArray() : [];
+    const dirty = Object.entries(old?.dirty ?? {});
     if (!dirty.length && old?.headBefore == null) {
       this.seed(text, r2etag, r2etag);
       return;
@@ -213,35 +442,41 @@ export class BoardRows {
       this.save({ ...old, r2etag });
       return;
     }
-    const mine = new Map(dirty.map((d) => [d.id, this.firstJson(d.id)]));
+    const ids = dirty.map(([id]) => id);
+    const mine = this.firstRows(this.pagesOf(ids), ids);
     const state = this.seed(text, r2etag, newEtag());
-    const kept = [];
-    let seq = old.seq;
-    for (const d of dirty) {
-      const r2row = this.firstJson(d.id);
-      if (r2row !== d.before) {
-        kept.push(d.id);
+    state.seq = old.seq;
+    const r2rows = this.firstRows(this.pagesOf(ids), ids);
+    const kept = [],
+      changes = [];
+    for (const [id, [before]] of dirty) {
+      const r2json = r2rows.has(id) ? JSON.stringify(r2rows.get(id).row) : null;
+      if (rowHash(r2json) !== before) {
+        kept.push(id);
         continue;
       }
-      const json = mine.get(d.id);
-      const delta = this.applyRow(d.id, json === null ? null : JSON.parse(json), r2row === null);
-      state.bytes += delta.bytes;
-      state.count += delta.count;
-      this.markDirty(d.id, r2row, ++seq);
+      changes.push({ id, row: mine.get(id)?.row ?? null, add: r2json === null });
     }
+    const real = changes.filter((c) => c.row !== null || !c.add);
+    this.applyChanges(state, real);
+    this.markDirty(
+      state,
+      real.map((c) => c.id),
+      (id) => (r2rows.has(id) ? JSON.stringify(r2rows.get(id).row) : null),
+    );
     if (old.headBefore != null) {
       const updated = [pairValue(old.head, "updated"), pairValue(state.head, "updated")]
         .filter((v) => typeof v === "string")
         .sort()
         .pop();
-      if (headKey(state.head) === old.headBefore) state.head = old.head;
+      const r2head = state.head;
+      if (headKey(r2head) === old.headBefore) state.head = old.head;
       else kept.push("(top-level fields)");
       if (updated !== undefined)
         state.head = setPair(state.head, "updated", JSON.stringify(updated));
-      state.headSeq = ++seq;
-      state.headBefore = headKey(headPairs(theirs));
+      state.headSeq = ++state.seq;
+      state.headBefore = headKey(r2head);
     }
-    state.seq = seq;
     this.save(state);
     console.warn(
       `board store: merged unflushed rows over an outside write to R2's board.json${
@@ -250,64 +485,62 @@ export class BoardRows {
     );
   }
 
-  // Writes one board row by id: updates every row with the id, deletes them for null, or
-  // appends when add is set. The change in stored bytes and in row count.
-  applyRow(id, row, add) {
-    const old = add ? [] : this.sql.exec("SELECT bytes FROM board_rows WHERE id = ?", id).toArray();
-    const before = old.reduce((sum, r) => sum + r.bytes, 0);
-    if (row === null) {
-      this.sql.exec("DELETE FROM board_rows WHERE id = ?", id);
-      return { bytes: -before, count: -old.length };
-    }
-    if (add) {
-      const [{ next }] = this.sql
-        .exec("SELECT COALESCE(MAX(pos), -1) + 1 AS next FROM board_rows")
-        .toArray();
-      return { bytes: this.insert(next, row), count: 1 };
-    }
-    const c = rowColumns(row);
-    this.sql.exec(
-      "UPDATE board_rows SET json = ?, stage = ?, num = ?, capture = ?, names = ?, bytes = ? WHERE id = ?",
-      c.json,
-      c.stage,
-      c.num,
-      c.capture,
-      c.names,
-      c.bytes,
-      id,
-    );
-    return { bytes: c.bytes * old.length - before, count: 0 };
-  }
-
-  markDirty(id, before, seq) {
-    this.sql.exec(
-      "INSERT INTO board_dirty (id, before, seq) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET seq = excluded.seq",
-      id,
-      before,
-      seq,
-    );
-  }
-
-  // Seeds from R2 before the first read, and adopts a board.json written there since.
-  async sync() {
-    if (this.flushing) return;
+  // Seeds from R2 before the first read, takes in the room's own copy that landed without its
+  // bookkeeping, and adopts a board.json written there by anything else.
+  // A copy or full write under way skips it, since its own put moves R2's version; force is
+  // that copy or write itself.
+  async sync(force = false) {
+    const busy = () => !force && (this.inflight || this.replacing);
+    if (busy()) return;
     const head = await this.env.BUCKET.head(BOARD_KEY);
     const state = this.state();
-    if (this.flushing || !head || head.httpEtag === state?.r2etag) return;
+    if (busy() || !head || head.httpEtag === state?.r2etag) return;
+    const tag = head.customMetadata;
+    if (state && tag?.store === ROOM_COPY && Number(tag.seq) <= state.seq) {
+      await this.landed(head.httpEtag, Number(tag.seq));
+      return;
+    }
     const object = await this.env.BUCKET.get(BOARD_KEY);
     if (!object) return;
     const text = await object.text();
-    if (this.flushing || object.httpEtag === this.state()?.r2etag) return;
+    if (busy() || object.httpEtag === this.state()?.r2etag) return;
     this.storage.transactionSync(() => this.adopt(text, object.httpEtag));
     if (this.hasDirty()) await this.schedule();
   }
 
-  hasDirty() {
+  // The room's copy at seq landed in R2 as r2etag, but the room stopped before it recorded so.
+  // Rows changed again after seq take R2's row as the one they replaced.
+  async landed(r2etag, seq) {
+    let flushed = new Map(),
+      headAt = null;
     const state = this.state();
-    return (
-      state?.headBefore != null ||
-      this.sql.exec("SELECT 1 FROM board_dirty LIMIT 1").toArray().length > 0
-    );
+    const later = Object.entries(state.dirty).filter(([, [, s]]) => s > seq);
+    if (later.length || state.headSeq > seq) {
+      const object = await this.env.BUCKET.get(BOARD_KEY);
+      const doc = object && object.httpEtag === r2etag ? parseDoc(await object.text()) : null;
+      if (!doc) return;
+      const jobs = Array.isArray(doc.jobs) ? doc.jobs : [];
+      for (const [id] of later) {
+        const row = jobs.find((j) => rowId(j) === id);
+        flushed.set(id, row === undefined ? null : JSON.stringify(row));
+      }
+      headAt = headKey(headPairs(doc));
+    }
+    this.storage.transactionSync(() => this.recordCopy(r2etag, seq, flushed, headAt));
+  }
+
+  // Records that R2 holds the room's copy at seq as r2etag. flushed maps each id changed after
+  // seq to its JSON in that copy; headAt is the copy's headKey.
+  recordCopy(r2etag, seq, flushed, headAt) {
+    const now = this.state();
+    if (now.seq < seq) return;
+    now.r2etag = r2etag;
+    for (const [id, [before, s]] of Object.entries(now.dirty))
+      if (s <= seq) delete now.dirty[id];
+      else if (flushed.has(id)) now.dirty[id] = [rowHash(flushed.get(id)), s];
+      else now.dirty[id] = [before, s];
+    now.headBefore = now.headSeq <= seq ? null : headAt;
+    this.save(now);
   }
 
   async schedule() {
@@ -317,14 +550,12 @@ export class BoardRows {
 
   text(state) {
     if (this.memo.etag !== state.etag) {
-      const rows = this.sql.exec("SELECT json FROM board_rows ORDER BY pos").toArray();
-      this.memo = {
-        etag: state.etag,
-        text: boardText(
-          state.head,
-          rows.map((r) => r.json),
-        ),
-      };
+      const pages = this.sql.exec("SELECT json FROM board_pages ORDER BY page").toArray();
+      const rows = pages
+        .map((p) => pageBody(p.json))
+        .filter(Boolean)
+        .join(",");
+      this.memo = { etag: state.etag, text: boardText(state.head, rows) };
     }
     return this.memo.text;
   }
@@ -368,60 +599,57 @@ export class BoardRows {
     const want = new Set(q.ids ?? []);
     const stale = [];
     if (q.stages?.length) {
-      const found = new Map();
-      for (const r of this.sql
-        .exec(
-          "SELECT id, stage FROM board_rows WHERE id IN (SELECT value FROM json_each(?)) ORDER BY pos",
-          JSON.stringify(q.stages.map(([id]) => id)),
-        )
-        .toArray())
-        if (!found.has(r.id)) found.set(r.id, r.stage);
+      const found = this.stages();
       for (const [id, stage] of q.stages)
         if (found.get(id) !== JSON.stringify(stage)) {
           stale.push(id);
           if (found.has(id)) want.add(id);
         }
     }
-    const captures = [];
-    if (q.captures?.length) {
-      const seen = new Set();
+    const holders = new Map();
+    if (q.captures?.length)
       for (const r of this.sql
         .exec(
-          "SELECT capture, id FROM board_rows WHERE capture IN (SELECT value FROM json_each(?)) ORDER BY pos",
+          `SELECT b.capture, b.id, b.page FROM json_each(?) j
+            CROSS JOIN board_index b INDEXED BY board_index_capture ON b.capture = j.value`,
           JSON.stringify(q.captures),
         )
-        .toArray())
-        if (!seen.has(r.capture)) {
-          seen.add(r.capture);
-          captures.push([r.capture, r.id]);
-          if (r.id !== null) want.add(r.id);
-        }
+        .toArray()
+        .sort((a, b) => a.page - b.page))
+        if (!holders.has(r.capture)) holders.set(r.capture, r.id);
+    // A capture's first holder by board order: rows on one page are ordered by the page itself.
+    const pages = this.pagesOf([...new Set([...want, ...[...holders.values()].filter(Boolean)])]);
+    const captures = [];
+    if (holders.size) {
+      const order = [];
+      for (const [, rows] of pages) for (const row of rows) order.push(row);
+      for (const c of q.captures) {
+        const first = order.find(
+          (row) => typeof row?.capture_id === "string" && row.capture_id === c,
+        );
+        if (first === undefined) continue;
+        captures.push([c, first.id]);
+        if (rowId(first) !== null) want.add(first.id);
+      }
     }
     const names = q.names?.length
       ? this.sql
           .exec(
-            "SELECT DISTINCT j.value AS name FROM board_rows r, json_each(r.names) j WHERE r.names IS NOT NULL AND j.value IN (SELECT value FROM json_each(?))",
+            `SELECT DISTINCT j.value AS name FROM board_index r INDEXED BY board_index_names, json_each(r.names) j
+              WHERE r.names IS NOT NULL AND j.value IN (SELECT value FROM json_each(?))`,
             JSON.stringify(q.names),
           )
           .toArray()
           .map((r) => r.name)
       : [];
-    const rows = want.size
-      ? this.sql
-          .exec(
-            "SELECT pos, json FROM board_rows WHERE id IN (SELECT value FROM json_each(?)) ORDER BY pos",
-            JSON.stringify([...want]),
-          )
-          .toArray()
-      : [];
-    const [{ maxNum }] = this.sql.exec("SELECT MAX(num) AS maxNum FROM board_rows").toArray();
+    const found = this.firstRows(pages, [...want]);
     return {
       etag: state.etag,
       readable: true,
       head: headObject(state.head),
       clean: state.clean,
-      maxNum: maxNum ?? null,
-      rows: rows.map((r) => ({ pos: r.pos, json: r.json })),
+      maxNum: state.maxNum,
+      rows: [...found.values()].map(({ pos, row }) => ({ pos, json: JSON.stringify(row) })),
       stale,
       captures,
       names,
@@ -432,6 +660,7 @@ export class BoardRows {
   // { etag }, { moved: true } when base is not the current version, or { tooLarge: true }
   // when the board would pass max bytes.
   async commit({ base, changes, updated, max }) {
+    while (this.replacing) await this.replacing;
     const result = this.storage.transactionSync(() => {
       const old = this.state();
       if ((old?.etag ?? null) !== base || (old && !old.readable)) return { moved: true };
@@ -444,7 +673,10 @@ export class BoardRows {
         clean: true,
         bytes: 0,
         count: 0,
+        maxNum: null,
+        lastPage: 0,
         seq: 0,
+        dirty: {},
         headSeq: 0,
         headBefore: null,
       };
@@ -452,29 +684,20 @@ export class BoardRows {
       state.head = setPair(state.head, "jobs", null);
       if (updated !== undefined)
         state.head = setPair(state.head, "updated", JSON.stringify(updated));
-      let bytes = state.bytes,
-        count = state.count;
-      for (const c of changes) {
-        const old = c.add
-          ? []
-          : this.sql.exec("SELECT bytes FROM board_rows WHERE id = ?", c.id).toArray();
-        const size = c.row === null ? 0 : byteLength(JSON.stringify(c.row));
-        bytes += size * (c.add ? 1 : old.length) - old.reduce((sum, r) => sum + r.bytes, 0);
-        count += c.add ? 1 : c.row === null ? -old.length : 0;
-      }
-      if (byteLength(boardText(state.head, [])) + bytes + Math.max(count - 1, 0) > max)
-        return { tooLarge: true };
-      let seq = state.seq;
-      for (const c of changes) {
-        const before = c.add ? null : this.firstJson(c.id);
-        this.applyRow(c.id, c.row, c.add);
-        this.markDirty(c.id, before, ++seq);
-      }
+      const ids = changes.filter((c) => !c.add).map((c) => c.id);
+      const pages = this.pagesOf(ids);
+      const before = this.firstRows(pages, ids);
+      if (!this.applyChanges(state, changes, max, pages)) return { tooLarge: true };
+      this.markDirty(
+        state,
+        changes.map((c) => c.id),
+        (id) => (before.has(id) ? JSON.stringify(before.get(id).row) : null),
+      );
       if (JSON.stringify(state.head) !== JSON.stringify(head)) {
         state.headBefore ??= headKey(head);
-        state.headSeq = seq;
+        state.headSeq = state.seq;
       }
-      Object.assign(state, { etag: newEtag(), bytes, count, seq });
+      state.etag = newEtag();
       this.save(state);
       return { etag: state.etag };
     });
@@ -482,86 +705,116 @@ export class BoardRows {
     return result;
   }
 
-  // Replaces the whole board, under cond { ifMatch } or { ifNoneMatch: true }, and copies it to
-  // R2 before it answers. { etag }, null when cond fails, or { tooLarge: true } for a row over
-  // MAX_ROW bytes.
+  // Replaces the whole board under cond { ifMatch } or { ifNoneMatch: true }. It copies the board
+  // to R2 first, on the condition that R2 still holds the room's last copy, so a write an older
+  // Worker landed there wins and this one gets null, as a failed cond does. { etag }, null, or
+  // { tooLarge: true } for a row over MAX_ROW bytes.
   async replace(text, cond = {}) {
-    await this.sync();
+    while (this.replacing) await this.replacing;
+    const run = this.replaceOnce(text, cond);
+    this.replacing = run.then(
+      () => {},
+      () => {},
+    );
+    try {
+      return await run;
+    } finally {
+      this.replacing = undefined;
+    }
+  }
+
+  async replaceOnce(text, cond) {
     const doc = parseDoc(text);
     if (!doc) throw new Error("board store: a full write needs a board document");
-    // One SQLite row holds at most 2 MB. A PATCH body is capped at 1 MiB, so only a full
+    // One SQLite page holds at most 2 MB. A PATCH body is capped at 1 MiB, so only a full
     // write can bring a row this large.
-    if (
-      Array.isArray(doc.jobs) &&
-      doc.jobs.some((j) => byteLength(JSON.stringify(j) ?? "") > MAX_ROW)
-    )
-      return { tooLarge: true };
+    const jobs = Array.isArray(doc.jobs) ? doc.jobs : [];
+    if (jobs.some((j) => byteLength(JSON.stringify(j) ?? "") > MAX_ROW)) return { tooLarge: true };
+    while (this.inflight) await this.inflight;
+    await this.sync(true);
     const state = this.state();
     const current = state?.etag ?? null;
     if (cond.ifMatch !== undefined && current !== cond.ifMatch) return null;
     if (cond.ifNoneMatch && current !== null) return null;
+    const seq = (state?.seq ?? 0) + 1;
+    const r2etag = state?.r2etag ?? null;
+    const put = await this.env.BUCKET.put(BOARD_KEY, JSON.stringify(doc), {
+      onlyIf: new Headers(r2etag ? { "If-Match": r2etag } : { "If-None-Match": "*" }),
+      httpMetadata: { contentType: "application/json" },
+      customMetadata: { store: ROOM_COPY, seq: String(seq) },
+    });
+    if (!put) {
+      await this.sync(true);
+      return null;
+    }
     const etag = newEtag();
     this.storage.transactionSync(() => {
-      const next = this.seed(text, state?.r2etag ?? null, etag);
-      // Unflushed until the copy below lands, so a flush already under way cannot clear it.
-      next.seq++;
-      Object.assign(next, { headSeq: next.seq, headBefore: "" });
+      const next = this.applyReplace(state, doc, put.httpEtag, etag);
+      Object.assign(next, { seq, dirty: {}, headSeq: 0, headBefore: null });
       this.save(next);
     });
-    while (this.inflight) await this.inflight;
-    await this.flush(true);
     return { etag };
   }
 
-  // Copies the board to R2. A forced flush writes over whatever R2 holds; otherwise R2 must
-  // still hold the copy the rows came from, else its board is adopted and flushed later.
-  flush(force = false) {
-    this.inflight ??= this.flushOnce(force).finally(() => {
+  // The board doc in place of state's: as row changes when it keeps the stored order, dropping
+  // rows and appending new ones, else by reseeding every page.
+  applyReplace(state, doc, r2etag, etag) {
+    const jobs = Array.isArray(doc.jobs) ? doc.jobs : [];
+    if (state?.readable && state.clean) {
+      const stored = [];
+      for (const p of this.sql.exec("SELECT json FROM board_pages ORDER BY page").toArray())
+        stored.push(...JSON.parse(p.json));
+      const next = new Map();
+      for (const row of jobs) if (rowId(row) !== null) next.set(row.id, row);
+      const kept = stored.filter((row) => next.has(row.id));
+      const ordered =
+        next.size === jobs.length && kept.every((row, i) => rowId(jobs[i]) === row.id);
+      if (ordered) {
+        const storedIds = new Set(stored.map((row) => row.id));
+        const changes = [];
+        for (const row of stored)
+          if (!next.has(row.id)) changes.push({ id: row.id, row: null, add: false });
+          else if (JSON.stringify(next.get(row.id)) !== JSON.stringify(row))
+            changes.push({ id: row.id, row: next.get(row.id), add: false });
+        for (const row of jobs.slice(kept.length))
+          if (!storedIds.has(row.id)) changes.push({ id: row.id, row, add: true });
+        const out = { ...state, head: headPairs(doc), etag, r2etag };
+        this.applyChanges(out, changes);
+        return out;
+      }
+    }
+    return this.seed(JSON.stringify(doc), r2etag, etag);
+  }
+
+  // Copies the board to R2 after row commits, tagged with the room's seq, on the condition that
+  // R2 still holds the room's last copy; otherwise R2's board is adopted and copied later.
+  flush() {
+    if (this.replacing) return Promise.resolve();
+    this.inflight ??= this.flushOnce().finally(() => {
       this.inflight = undefined;
     });
     return this.inflight;
   }
 
-  async flushOnce(force) {
+  async flushOnce() {
     const state = this.state();
-    if (!state?.readable || (!force && !this.hasDirty())) return;
+    if (!state?.readable || !this.hasDirty(state)) return;
     // Each dirty row as this copy holds it, the row a later merge compares R2's against.
+    const ids = Object.keys(state.dirty);
+    const rows = this.firstRows(this.pagesOf(ids), ids);
     const flushed = new Map(
-      this.sql
-        .exec("SELECT id FROM board_dirty")
-        .toArray()
-        .map((d) => [d.id, this.firstJson(d.id)]),
+      ids.map((id) => [id, rows.has(id) ? JSON.stringify(rows.get(id).row) : null]),
     );
-    this.flushing = true;
-    let put;
-    try {
-      const onlyIf = force
-        ? undefined
-        : new Headers(state.r2etag ? { "If-Match": state.r2etag } : { "If-None-Match": "*" });
-      put = await this.env.BUCKET.put(BOARD_KEY, this.text(state), {
-        ...(onlyIf && { onlyIf }),
-        httpMetadata: { contentType: "application/json" },
-      });
-    } finally {
-      this.flushing = false;
-    }
+    const put = await this.env.BUCKET.put(BOARD_KEY, this.text(state), {
+      onlyIf: new Headers(state.r2etag ? { "If-Match": state.r2etag } : { "If-None-Match": "*" }),
+      httpMetadata: { contentType: "application/json" },
+      customMetadata: { store: ROOM_COPY, seq: String(state.seq) },
+    });
     if (put)
-      this.storage.transactionSync(() => {
-        const now = this.state();
-        now.r2etag = put.httpEtag;
-        for (const d of this.sql.exec("SELECT id, seq FROM board_dirty").toArray())
-          if (d.seq <= state.seq) this.sql.exec("DELETE FROM board_dirty WHERE id = ?", d.id);
-          else if (flushed.has(d.id))
-            this.sql.exec(
-              "UPDATE board_dirty SET before = ? WHERE id = ?",
-              flushed.get(d.id),
-              d.id,
-            );
-        if (now.headSeq <= state.seq) now.headBefore = null;
-        else now.headBefore = headKey(state.head);
-        this.save(now);
-      });
-    else await this.sync();
+      this.storage.transactionSync(() =>
+        this.recordCopy(put.httpEtag, state.seq, flushed, headKey(state.head)),
+      );
+    else await this.sync(true);
     if (this.hasDirty()) await this.schedule();
   }
 }
