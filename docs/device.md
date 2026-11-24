@@ -607,8 +607,11 @@ For each case, one at a time, it:
    exits 4 before any case runs. `--setting-sources ""` loads no settings files,
    so their hooks and allow rules cannot widen the grant, and `--agents` passes
    the agent file inline. `--permission-mode dontAsk` and `--allowedTools` allow
-   only Read, Grep, Glob, Write and `git diff`, `git log`, `git show` and
-   `git blame` in Bash. `--disallowedTools "Bash(git *--out*)"` stops
+   only Read, Grep, Glob, `git diff`, `git log`, `git show` and `git blame` in
+   Bash, and `Edit(//<scratch job>/round-1/<reviewer>.md)`, which lets Write
+   create that one file. A bare `Write` let the reviewer write outside the
+   worktree, so every other write is denied. On Windows the rule takes the
+   `//c/...` form. `--disallowedTools "Bash(git *--out*)"` stops
    `--output`. `--add-dir` names the scratch job folder, and `--model` is passed
    when given. Its output goes to `<arm>/<case-id>/replay.log`, and it stops
    after an hour.
