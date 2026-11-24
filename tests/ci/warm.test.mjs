@@ -62,7 +62,8 @@ test("each warm job installs the same toolchain and compiles what its ci.yml job
     run(ci.jobs.targets, "Build the factory binary"),
   );
   assert.equal(run(warm.jobs["rust-test"], "Build the tests"), "cargo test --locked --no-run");
-  assert.equal(run(ci.jobs["rust-test"], "Test linux-x64"), "cargo test --locked");
+  // nextest builds the test profile with cargo test --no-run, so it reuses what warm compiled.
+  assert.match(run(ci.jobs["rust-test"], "Test linux-x64"), /^cargo nextest run --locked /);
   for (const name of ["Check darwin-arm64", "Check windows-x64"]) {
     assert.equal(run(warm.jobs["rust-check"], name), run(ci.jobs["rust-check"], name));
   }

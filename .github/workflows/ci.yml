@@ -225,6 +225,12 @@ jobs:
     if: needs.plan.outputs.all != 'true' && needs.plan.outputs.rust != 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 6
+    # nextest runs each test in its own process, so tests that hold TEST_ENV_LOCK no longer wait on each other,
+    # and count partitions split the tests evenly over the shards.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: rust
@@ -238,8 +244,15 @@ jobs:
         with:
           prefix-key: v1-rust
           workspaces: rust
+      - name: Install cargo-nextest
+        run: |
+          curl -sSfLo "$RUNNER_TEMP/nextest.tar.gz" https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.152/cargo-nextest-0.9.152-x86_64-unknown-linux-gnu.tar.gz
+          echo "d039b43c3e0958441b6ad0a39c8884d018b3d2e8fb9928f209074b1100b5e17a  $RUNNER_TEMP/nextest.tar.gz" | sha256sum -c
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/bin" cargo-nextest
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: Test linux-x64
-        run: cargo test --locked
+        run: cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.shard }}/4
   # Type-checks the darwin-arm64 and windows-x64 targets.
   rust-check:
     needs: plan

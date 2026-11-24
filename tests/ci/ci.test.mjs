@@ -264,7 +264,17 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
       'grep -q \'"entry": \\["runtime/factory"\\]\' "$root/skills/factory/bundle.json"',
     ].join("\n"),
   ]);
-  assert.deepEqual(runs(unit), ["rustup toolchain install", "cargo test --locked"]);
+  const unitRuns = runs(unit);
+  assert.equal(unitRuns[0], "rustup toolchain install");
+  assert.match(unitRuns[1], /cargo-nextest-0\.9\.152-x86_64-unknown-linux-gnu\.tar\.gz/);
+  assert.match(unitRuns[1], /sha256sum -c/);
+  // Every shard runs its count partition of every test, and the shards together cover all of them.
+  assert.equal(
+    unitRuns[2],
+    "cargo nextest run --locked --no-fail-fast --partition count:${{ matrix.shard }}/4",
+  );
+  assert.deepEqual(unit.strategy.matrix.shard, [1, 2, 3, 4]);
+  assert.equal(unit.strategy["fail-fast"], false);
   assert.deepEqual(runs(check), [
     "rustup toolchain install\nrustup target add aarch64-apple-darwin x86_64-pc-windows-gnu",
     "cargo fmt --check",
