@@ -293,8 +293,10 @@ Use `factory.exe` and PowerShell paths on Windows.
      `catch-up: done` or `catch-up: nothing new`. On a Mac older than `e137ba69`,
      use the `TMPDIR` form.
    - Fresh install path: the backup copy and the four commands under
-     [Fresh install](#fresh-install-or-a-python-only-bundle). Expect exit 0 and
-     the skill path as the last line. Then `$RT catch-up`, exit 0.
+     [Fresh install](#fresh-install-or-a-python-only-bundle). A fresh host has no
+     skill to copy, so it skips the backup copy. Expect exit 0 and the skill path
+     as the last line. On a fresh host, set `$SKILL` to that path. Then
+     `$RT catch-up`, exit 0.
 5. **Check the bundle.** `cat $SKILL/bundle.json`. Expect `"entry": ["runtime/factory"]`
    and a `binary_sha256`.
 6. **Check catch-up is idle.** `$RT catch-up`. Expect exit 0 and
