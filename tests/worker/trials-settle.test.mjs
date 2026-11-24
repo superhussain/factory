@@ -118,7 +118,15 @@ test("a board write cannot drop an open trial or change its other keys", async (
     [changed.status, changed.text],
     [
       400,
-      `a board write cannot change challenger on the open trial ${LABEL}: trial settle sets only status, settled, arms, reads and revert_version. Nothing was written.`,
+      `a board write cannot change "challenger" on the open trial ${LABEL}: trial settle sets only status, settled, arms, reads and revert_version. Nothing was written.`,
+    ],
+  );
+  const long = await settle({ ["k".repeat(60)]: 1 });
+  assert.deepEqual(
+    [long.status, long.text],
+    [
+      400,
+      `a board write cannot change "${"k".repeat(31)}..." on the open trial ${LABEL}: trial settle sets only status, settled, arms, reads and revert_version. Nothing was written.`,
     ],
   );
   const unknown = await settle({ status: "done", ...SETTLED });
@@ -210,7 +218,7 @@ test("reverted needs a revert_version, and an open trial takes new arms and read
     [settled.status, settled.text],
     [
       400,
-      `a board write cannot change settled on the open trial ${LABEL}: trial settle sets only status, settled, arms, reads and revert_version. Nothing was written.`,
+      `a board write cannot change "settled" on the open trial ${LABEL}: trial settle sets only status, settled, arms, reads and revert_version. Nothing was written.`,
     ],
   );
   const reverted = await settle({ status: "reverted", ...SETTLED, revert_version: 11 });

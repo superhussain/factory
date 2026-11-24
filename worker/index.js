@@ -3259,7 +3259,7 @@ async function checkTrialSettle(env, stored, data) {
       .sort()
       .find((k) => !free.includes(k) && canonicalJson(s[k]) !== canonicalJson(w[k]));
     if (changed !== undefined)
-      return `a board write cannot change ${changed} on the open trial ${label}: trial settle sets only status, settled, arms, reads and revert_version. Nothing was written.`;
+      return `a board write cannot change ${quoteIdCut(changed, QUOTED_ID_MAX)} on the open trial ${label}: trial settle sets only status, settled, arms, reads and revert_version. Nothing was written.`;
     if (w.status === "open") continue;
     if (!TRIAL_SETTLED.includes(w.status))
       return `a board write cannot set the open trial ${label} to an unknown status: trial settle uses kept, reverted, superseded, inconclusive or revert-failed. Nothing was written.`;
