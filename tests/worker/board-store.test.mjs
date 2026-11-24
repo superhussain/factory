@@ -563,9 +563,9 @@ test("the room's slim body is byte for byte the Worker's slimBoard, across rando
 });
 
 // Ids 12 and "12", or null and "null", are different ids to slimBoard's per-stage count, and
-// two rows without an id are the same one.
+// two rows without an id are the same one. Two {} ids are two ids, as two objects are.
 const LOOKALIKE_IDS = JSON.stringify({
-  jobs: [12, "12", null, "null", undefined, undefined, "undefined"].map((id) => ({
+  jobs: [12, "12", null, "null", undefined, undefined, "undefined", {}, {}].map((id) => ({
     id,
     stage: "merged",
     project: "sample",
