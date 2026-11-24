@@ -1779,6 +1779,252 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A home with the config.md the Python LocationTest.state helper wrote.
+    #[cfg(unix)]
+    fn location_home(dir: &Path, name: &str) -> PathBuf {
+        let home = dir.join(name);
+        fs::create_dir(&home).unwrap();
+        fs::write(
+            home.join("config.md"),
+            b"---\napi_url:\nunknown: retained\n---\nBody\n",
+        )
+        .unwrap();
+        resolve(&home).unwrap()
+    }
+
+    /// Every path under `root` with its bytes and mode, to compare a tree before and after.
+    #[cfg(unix)]
+    fn tree_snapshot(root: &Path) -> Vec<(String, Vec<u8>, u32)> {
+        use std::os::unix::fs::PermissionsExt;
+        fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>, u32)>) {
+            let mut names: Vec<_> = fs::read_dir(dir)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect();
+            names.sort();
+            for path in names {
+                let meta = fs::symlink_metadata(&path).unwrap();
+                let rel = path.strip_prefix(root).unwrap().display().to_string();
+                let bytes = if meta.is_file() {
+                    fs::read(&path).unwrap()
+                } else {
+                    Vec::new()
+                };
+                out.push((rel, bytes, meta.permissions().mode()));
+                if meta.is_dir() {
+                    walk(root, &path, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(root, root, &mut out);
+        out
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_pointer_and_trusted_default_alias() {
+        use crate::shared::home::resolve_home;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("setup-alias");
+        let home = location_home(&dir, "existing");
+        let pointer = dir.join("config/factory-location.json");
+        adopt_home(&home, &pointer).unwrap();
+        std::os::unix::fs::symlink(&home, dir.join("config/factory")).unwrap();
+        adopt_home(&home, &pointer).unwrap();
+        fs::set_permissions(&pointer, fs::Permissions::from_mode(0)).unwrap();
+        let e = resolve_home(None, Some(dir.join("config").as_os_str()), None).unwrap_err();
+        fs::set_permissions(&pointer, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(e.code, 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn metadata_validation_keeps_dirty_remote_and_empty_manifests() {
+        let dir = temp_dir("setup-metadata");
+        let home = location_home(&dir, "existing");
+        let pointer = dir.join("config/factory-location.json");
+        fs::write(
+            home.join("paths.md"),
+            format!("---\nsample: {}\n---\n", dir.join("not-present").display()),
+        )
+        .unwrap();
+        fs::create_dir(home.join("projects")).unwrap();
+        let projects = home.join("projects");
+        fs::write(
+            projects.join("sample.md"),
+            "---\npath: legacy\nunknown: retained\n---\nDirty",
+        )
+        .unwrap();
+        fs::write(projects.join("sample.md.remote"), "remote").unwrap();
+        let state = |version: &str, etag: &str| {
+            format!(
+                "{{\"version\": {version}, \"etag\": {etag}, \"sha256\": \"{}\"}}",
+                "0".repeat(64)
+            )
+        };
+        let metadata = projects.join("sample.sync.json");
+        fs::write(&metadata, state("1", "\"\\\"base\\\"\"")).unwrap();
+        let job = home.join("jobs/sample/001-test");
+        fs::create_dir_all(&job).unwrap();
+        fs::write(job.join(".sync.json"), "{}").unwrap();
+        fs::write(job.join("build.md.remote"), "other device").unwrap();
+        let before = tree_snapshot(&home);
+        adopt_home(&home, &pointer).unwrap();
+        assert_eq!(tree_snapshot(&home), before);
+        for bad in [
+            "{}".to_string(),
+            state("true", "\"\\\"base\\\"\""),
+            state("1", "\"W/\\\"base\\\"\""),
+        ] {
+            fs::write(&metadata, bad).unwrap();
+            assert_eq!(validate_home(&home, true).unwrap_err().code, 2);
+        }
+        fs::write(&metadata, state("1", "\"\\\"base\\\"\"")).unwrap();
+        let sha = "0".repeat(64);
+        let upper = "A".repeat(64);
+        for bad in [
+            "[]".to_string(),
+            format!("{{\"../escape.md\": {{\"etag\": \"x\", \"sha256\": \"{sha}\"}}}}"),
+            format!("{{\"build.md\": {{\"etag\": \"\", \"sha256\": \"{sha}\"}}}}"),
+            format!("{{\"build.md\": {{\"etag\": \"x\", \"sha256\": \"{upper}\"}}}}"),
+        ] {
+            fs::write(job.join(".sync.json"), bad).unwrap();
+            assert_eq!(validate_home(&home, true).unwrap_err().code, 2);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_metadata_and_unlistable_tree() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("setup-unreadable");
+        let home = location_home(&dir, "existing");
+        let pointer = dir.join("config/factory-location.json");
+        let config = home.join("config.md");
+        fs::set_permissions(&config, fs::Permissions::from_mode(0)).unwrap();
+        let first = adopt_home(&home, &pointer);
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(first.unwrap_err().code, 2);
+        let folder = home.join("jobs");
+        fs::create_dir(&folder).unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0)).unwrap();
+        let second = adopt_home(&home, &pointer);
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(second.unwrap_err().code, 2);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Python forced fsync, link and write failures; the Rust code has no hook for those, so a
+    /// pointer name past the filename limit makes the final hard link fail after the temporary exists.
+    #[cfg(unix)]
+    #[test]
+    fn interrupted_publication_cleans_only_own_temporary() {
+        let dir = temp_dir("setup-interrupted");
+        let home = location_home(&dir, "existing");
+        let folder = dir.join("config");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("unrelated"), "keep").unwrap();
+        let pointer = folder.join("p".repeat(300));
+        let e = adopt_home(&home, &pointer).unwrap_err();
+        assert_eq!(e.code, 2);
+        assert!(e
+            .stderr
+            .ends_with(": cannot publish factory location atomically\n"));
+        let left: Vec<_> = fs::read_dir(&folder)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, vec![std::ffi::OsString::from("unrelated")]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn simultaneous_different_adopters_and_identical_winner() {
+        for round in 0..20 {
+            let dir = temp_dir("setup-race");
+            let home = location_home(&dir, "existing");
+            let other = location_home(&dir, "other");
+            let pointer = dir.join("config/factory-location.json");
+            fs::create_dir(dir.join("config")).unwrap();
+            let different = round % 2 == 0;
+            let picks = [
+                home.clone(),
+                if different {
+                    other.clone()
+                } else {
+                    home.clone()
+                },
+            ];
+            let results: Vec<i32> = std::thread::scope(|s| {
+                let handles: Vec<_> = picks
+                    .iter()
+                    .map(|pick| {
+                        let pointer = &pointer;
+                        s.spawn(move || adopt_home(pick, pointer).map_or_else(|e| e.code, |()| 0))
+                    })
+                    .collect();
+                handles.into_iter().map(|h| h.join().unwrap()).collect()
+            });
+            let mut sorted = results.clone();
+            sorted.sort();
+            assert_eq!(sorted, if different { vec![0, 2] } else { vec![0, 0] });
+            let chosen = read_location(&pointer).unwrap();
+            assert!(chosen == home || chosen == other);
+            assert_eq!(fs::read_dir(dir.join("config")).unwrap().count(), 1);
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_git_worktree_and_state_unchanged() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("setup-gitwt");
+        let home = location_home(&dir, "existing");
+        let repo = dir.join("repo");
+        fs::create_dir(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}");
+            out.stdout
+        };
+        git(&["init"]);
+        git(&["commit", "--allow-empty", "-m", "initial"]);
+        let worktree = home.join("worktrees/sample/001-test");
+        git(&[
+            "worktree",
+            "add",
+            "-b",
+            "factory/001-test",
+            worktree.to_str().unwrap(),
+        ]);
+        let env = home.join(".env");
+        fs::write(
+            &env,
+            "FACTORY_ACCESS_CLIENT_SECRET=synthetic-private\nunknown=retained\n",
+        )
+        .unwrap();
+        fs::set_permissions(&env, fs::Permissions::from_mode(0o640)).unwrap();
+        let before = tree_snapshot(&home);
+        let admin = tree_snapshot(&repo.join(".git"));
+        let listed = git(&["worktree", "list", "--porcelain"]);
+        adopt_home(&home, &dir.join("config/factory-location.json")).unwrap();
+        assert_eq!(tree_snapshot(&home), before);
+        assert_eq!(tree_snapshot(&repo.join(".git")), admin);
+        assert_eq!(git(&["worktree", "list", "--porcelain"]), listed);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn cached_status_rules() {
         let dir = temp_dir("setup-cached");
