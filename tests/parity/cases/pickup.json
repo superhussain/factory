@@ -591,6 +591,32 @@
       "from": "tests/cli/test_pickup.py::PickupTest.test_pickup_runs_the_backlog_triage_pass"
     },
     {
+      "id": "pickup/autonomy-hold-pass",
+      "argv": ["--home", "{home}", "pickup"],
+      "home": "pickup-bare",
+      "stubs": {
+        "paseo": [
+          {
+            "argv": ["workspace", "ls", "--json"],
+            "stdout": "[]",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-10T10:00:00Z\",\"jobs\":[{\"id\":\"1019-add-z\",\"project\":\"alpha\",\"stage\":\"merged\",\"done\":\"2999-01-01T00:00:00Z\",\"updated\":\"2026-01-05T10:00:00Z\",\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"PASS\",\"code\":\"PASS\"}],\"outcome\":{\"result\":\"reverted\",\"at\":\"2026-01-09T12:00:00Z\",\"evidence\":[]}},{\"id\":\"1031-add-w\",\"project\":\"alpha\",\"stage\":\"pr-open\",\"automerge\":true,\"pr\":\"https://github.com/example/alpha/pull/631\",\"rounds\":[{\"security\":\"PASS\",\"ux\":\"PASS\",\"ui\":\"PASS\",\"code\":\"PASS\"}],\"updated\":\"2026-01-10T10:00:00Z\"}]}"
+        ],
+        "PUT /api/board": [200, ""],
+        "GET /projects.json": [200, "[]"],
+        "PUT /api/hosts/parity/status": [200, "{}"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_autonomy_hold.py::AutonomyHoldTest.test_pass_holds"
+    },
+    {
       "id": "pickup/dry-pr-sync",
       "argv": ["--home", "{home}", "pickup", "--dry-run"],
       "home": "pickup-pr",
