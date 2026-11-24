@@ -2827,7 +2827,7 @@ pub(crate) fn spawn_daemon() -> Result<(), String> {
         .iter()
         .filter(|l| unit_line(l, &DAEMON))
         .find_map(|l| l.strip_prefix("*/5 * * * * "))
-        .ok_or("no */5 daemon line in the crontab")?;
+        .ok_or("no */5 daemon line in the crontab; run factory daemon setup --install")?;
     // Only what cron gives a job, so no token or session variable of the caller reaches the
     // daemon or its pickup children.
     let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"));
@@ -2853,9 +2853,10 @@ pub(crate) fn spawn_daemon() -> Result<(), String> {
 /// 35 s, since a stopping daemon gives a running pickup child 30 s.
 const STOP_POLLS: u32 = 140;
 
-/// Waits for the daemon that held the lock to let go of it after its kill. locked is
+/// Waits for the daemon that held the lock, pid, to let go of it after its kill. locked is
 /// daemon::locked_pid for this home.
 pub(crate) fn daemon_stopped(
+    pid: u32,
     locked: &mut dyn FnMut() -> Result<Option<u32>, String>,
 ) -> Result<(), String> {
     for i in 0..STOP_POLLS {
@@ -2866,7 +2867,10 @@ pub(crate) fn daemon_stopped(
             return Ok(());
         }
     }
-    Err("the old daemon still holds its lock 35 s after the kill".into())
+    let stop = kill_argv(pid).map_or_else(|| format!("pid {pid}"), |a| a.join(" "));
+    Err(format!(
+        "the old daemon (pid {pid}) still holds its lock 35 s after the kill; stop it with {stop}, then run catch-up again"
+    ))
 }
 
 /// The pid of the daemon that holds the lock once one does, polled for about 5 s. locked is
@@ -19951,7 +19955,10 @@ exit "$archive_code"
             let ds = Ds::new("cron");
             assert_eq!(
                 spawn_daemon(),
-                Err("no */5 daemon line in the crontab".to_string())
+                Err(
+                    "no */5 daemon line in the crontab; run factory daemon setup --install"
+                        .to_string()
+                )
             );
             let bin = ds.fx.root.join("factory");
             let marker = ds.fx.root.join("started");

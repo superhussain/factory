@@ -192,7 +192,8 @@ fn run_restart(argvs: &[Vec<String>], home: &Path) -> Result<(), String> {
             ));
         }
         if kill {
-            pickup::daemon_stopped(&mut || locked_pid(home))?;
+            let pid = argv.iter().find_map(|w| w.parse().ok()).unwrap_or_default();
+            pickup::daemon_stopped(pid, &mut || locked_pid(home))?;
         }
     }
     Ok(())
@@ -2409,10 +2410,10 @@ mod tests {
         let (code, lines) = t.lines();
         assert_eq!(code, 1, "{lines:?}");
         assert!(
-            lines.contains(
-                &"daemon: restart failed: the old daemon still holds its lock 35 s after the kill"
-                    .to_string()
-            ),
+            lines.contains(&format!(
+                "daemon: restart failed: the old daemon (pid {0}) still holds its lock 35 s after the kill; stop it with kill {0}, then run catch-up again",
+                std::process::id()
+            )),
             "{lines:?}"
         );
     }

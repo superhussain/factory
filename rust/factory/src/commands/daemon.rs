@@ -407,7 +407,10 @@ fn connect(
             return Err(match response.status().as_u16() {
                 301 | 302 | 303 | 307 | 308 | 401 => access_message(env_file),
                 // Access passed the token; the Worker found no paired or active host bound to it.
-                403 => HOST_403.to_string(),
+                403 => format!(
+                    "{HOST_403}; if its service token was revoked or rotated in Access, check FACTORY_ACCESS_CLIENT_ID/SECRET in {}",
+                    env_file.display()
+                ),
                 404 => format!(
                     "HTTP 404: this Worker has no {HOST_EVENTS_PATH} route; deploy the Worker first"
                 ),
@@ -1470,7 +1473,10 @@ mod tests {
         assert_eq!(run(&home, &origin, 2), ["fallback", "connect"]);
         let log = log_text(&home);
         assert!(
-            log.contains(&format!("connect failed: {HOST_403}; retry in ")),
+            log.contains(&format!(
+                "connect failed: {HOST_403}; if its service token was revoked or rotated in Access, check FACTORY_ACCESS_CLIENT_ID/SECRET in {}; retry in ",
+                home.join(".env").display()
+            )),
             "{log}"
         );
         assert!(!log.contains("Access rejected"), "{log}");
