@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use super::conf::frontmatter;
-use super::consts::{JOB_ID, SLUG};
+use super::consts::{JOB_ID, PROJECT_SLUG, SLUG};
 use super::exit::{fail, Res};
 use super::fs::{is_link, listable, read_text, readable, write_atomic};
 use super::home::factory_home;
@@ -17,7 +17,6 @@ use super::py::{os_error, repr};
 use super::pyjson::{dumps, loads, DEFAULT};
 use super::pyre::{Flags, Pattern};
 
-static PROJECT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Flags::NONE);
 static PROJECT_ETAG: Pattern = Pattern::new(r#""[\x21\x23-\x7e\x80-\xff]+""#, Flags::NONE);
 static SHA256: Pattern = Pattern::new("[0-9a-f]{64}", Flags::NONE);
 

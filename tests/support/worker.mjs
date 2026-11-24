@@ -165,9 +165,9 @@ export function memoryRoom(
       return structuredClone(out);
     };
   const stub = {
-    // The room serves GET /board itself; the rest are notify calls for the test.
+    // The room serves GET /board and /board/slim itself; the rest are notify calls for the test.
     fetch: (input, init) =>
-      new URL(input).pathname === "/board"
+      ["/board", "/board/slim"].includes(new URL(input).pathname)
         ? object.fetch(new Request(input, init))
         : fetch(input, init),
     boardHead: rpc("boardHead"),

@@ -32,9 +32,15 @@ export function splitRecords(text) {
 }
 
 export function summarize(events) {
+  // Workers Logs strips query strings, so a GET /board.json is a slim read when the room's own
+  // GET /board/slim, which only a slim read makes, starts within its wall time.
+  const room = events.filter((e) => new URL(e.event.request.url).pathname === "/board/slim");
   const reads = events.filter((e) => {
     const url = new URL(e.event.request.url);
-    return url.pathname === "/board.json" && url.searchParams.get("view") === "slim";
+    if (url.pathname !== "/board.json") return false;
+    if (url.searchParams.get("view") === "slim") return true;
+    const end = e.eventTimestamp + (e.wallTime ?? 0);
+    return room.some((r) => r.eventTimestamp >= e.eventTimestamp && r.eventTimestamp <= end);
   });
   const misses = reads.filter((e) => e.cpuTime >= MISS_MS);
   const missMs = misses.map((e) => e.cpuTime).sort((a, b) => a - b);
@@ -82,6 +88,7 @@ if (isMain) {
     event: { request: { url: e.event?.request?.url ?? "http://none/" } },
     outcome: e.outcome,
     cpuTime: e.cpuTime,
+    wallTime: e.wallTime,
   }));
   text = "";
   if (events.length === 0) {

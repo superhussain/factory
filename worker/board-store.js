@@ -12,9 +12,15 @@
 // Worker version from before this store or an operator's restore, and merges its own unflushed
 // rows over it.
 //
+// GET /board.json?view=slim is joined from the same pages: each page keeps a meta column with
+// every row's byte length, and for a finished row its stage, project, rank time and id, so the
+// slim body takes its rows' bytes without decoding one. It is cached per version in memory too.
+//
 // boardStore(env) is the Worker's handle. Without a room binding (unit tests that give the Worker
 // a memory bucket alone, or a room stub with fetch alone) it reads and writes R2's board.json
 // directly, the whole object each time, as the Worker did before this store.
+
+import { SLIM_RECENT, terminal } from "./archive.js";
 
 export const BOARD_KEY = "board.json";
 export const ROOM = "main";
@@ -94,6 +100,23 @@ function rowColumns(row) {
 
 const sameColumns = (a, b) => a.num === b.num && a.capture === b.capture && a.names === b.names;
 
+// A row's entry in its page's meta, from its JSON: the byte length for an unfinished row, else
+// [length, stage, project, rank time, id], the fields slimBoard reads. A missing id is left off,
+// and an object id is [], which, parsed anew each time, equals no other id, as an object does.
+function rowMeta(row, json) {
+  const length = byteLength(json);
+  if (!terminal(row)) return length;
+  const id = row.id;
+  const meta = [
+    length,
+    row.stage,
+    typeof row.project === "string" ? row.project : "",
+    Date.parse(row.done || row.updated) || 0,
+  ];
+  if (id !== undefined) meta.push(id !== null && typeof id === "object" ? [] : id);
+  return meta;
+}
+
 // A document's top-level keys in order, each with its value's JSON. An array jobs value is
 // null here: the pages hold it.
 function headPairs(doc) {
@@ -129,7 +152,8 @@ function boardText(pairs, rows) {
 }
 
 const SCHEMA = [
-  "CREATE TABLE IF NOT EXISTS board_pages (page INTEGER PRIMARY KEY, json TEXT NOT NULL)",
+  // meta is each row's rowMeta in page order, as JSON, or null on a page from before it.
+  "CREATE TABLE IF NOT EXISTS board_pages (page INTEGER PRIMARY KEY, json TEXT NOT NULL, meta TEXT)",
   // One row per board row: its page and the columns a PATCH looks up. Rows sit in page order,
   // and in order within a page.
   `CREATE TABLE IF NOT EXISTS board_index (id TEXT, page INTEGER NOT NULL, num REAL, capture TEXT,
@@ -164,11 +188,21 @@ export class BoardRows {
     };
     this.env = env;
     this.memo = { etag: null, blob: null };
+    this.slimMemo = { etag: null, blob: null };
     this.decoded = { etag: null, text: "" };
     // While an R2 copy is under way, its promise; while a full write is, its promise.
     this.inflight = undefined;
     this.replacing = undefined;
     for (const statement of SCHEMA) this.sql.exec(statement);
+    // A room from before the meta column gains it; its pages fill in their meta on the first
+    // slim read.
+    if (
+      !this.sql
+        .exec("PRAGMA table_info(board_pages)")
+        .toArray()
+        .some((column) => column.name === "meta")
+    )
+      this.sql.exec("ALTER TABLE board_pages ADD COLUMN meta TEXT");
   }
 
   // The store's state: null before the first seed. etag is the board version clients see,
@@ -216,11 +250,13 @@ export class BoardRows {
     return new Map(this.load("stages") ?? []);
   }
 
-  // Every page holding a row with one of ids, as Map page -> parsed rows, in page order. Each
-  // lookup starts from the given values (CROSS JOIN keeps that order), so it reads the matching
-  // index rows and pages only, never a whole table.
+  // Every page holding a row with one of ids, as Map page -> parsed rows, in page order, with
+  // each page's meta, or null, in pages.meta. Each lookup starts from the given values (CROSS
+  // JOIN keeps that order), so it reads the matching index rows and pages only, never a whole
+  // table.
   pagesOf(ids) {
     const pages = new Map();
+    pages.meta = new Map();
     if (!ids.length) return pages;
     const numbers = this.sql
       .exec(
@@ -233,11 +269,13 @@ export class BoardRows {
     for (const page of numbers) pages.set(page, null);
     for (const p of this.sql
       .exec(
-        "SELECT p.page, p.json FROM json_each(?) j CROSS JOIN board_pages p ON p.page = j.value",
+        "SELECT p.page, p.json, p.meta FROM json_each(?) j CROSS JOIN board_pages p ON p.page = j.value",
         JSON.stringify(numbers),
       )
-      .toArray())
+      .toArray()) {
       pages.set(p.page, JSON.parse(p.json));
+      pages.meta.set(p.page, p.meta === null ? null : JSON.parse(p.meta));
+    }
     for (const [page, rows] of pages) if (rows === null) pages.delete(page);
     return pages;
   }
@@ -286,12 +324,14 @@ export class BoardRows {
       const stages = new Map();
       let page = 0,
         rows = [],
+        meta = [],
         size = 0;
       const writePage = () => {
         this.sql.exec(
-          "INSERT INTO board_pages (page, json) VALUES (?, ?)",
+          "INSERT INTO board_pages (page, json, meta) VALUES (?, ?, ?)",
           page,
           "[" + rows.join(",") + "]",
+          JSON.stringify(meta),
         );
       };
       for (const row of jobs) {
@@ -301,9 +341,11 @@ export class BoardRows {
           writePage();
           page++;
           rows = [];
+          meta = [];
           size = 0;
         }
         rows.push(json);
+        meta.push(rowMeta(row, json));
         size += bytes + 1;
         state.bytes += bytes;
         this.insertIndex(row, page);
@@ -320,6 +362,7 @@ export class BoardRows {
     }
     this.save(state);
     this.memo = { etag: null, blob: null };
+    this.slimMemo = { etag: null, blob: null };
     return state;
   }
 
@@ -358,18 +401,24 @@ export class BoardRows {
       if (c.add) {
         let last = state.lastPage;
         if (!pages.has(last)) {
-          const [p] = this.sql.exec("SELECT json FROM board_pages WHERE page = ?", last).toArray();
+          const [p] = this.sql
+            .exec("SELECT json, meta FROM board_pages WHERE page = ?", last)
+            .toArray();
           pages.set(last, p ? JSON.parse(p.json) : []);
+          pages.meta.set(last, !p ? [] : p.meta === null ? null : JSON.parse(p.meta));
         }
         const json = JSON.stringify(c.row);
         const size = byteLength(json);
         if (
           pages.get(last).length &&
           byteLength(JSON.stringify(pages.get(last))) + size > PAGE_BYTES
-        )
+        ) {
           pages.set(++last, []);
+          pages.meta.set(last, []);
+        }
         state.lastPage = last;
         pages.get(last).push(c.row);
+        pages.meta.get(last)?.push(rowMeta(c.row, json));
         touched.add(last);
         index.push(["insert", c.row, last]);
         if (next.id !== null) staged.push([next.id, next.stage]);
@@ -379,17 +428,22 @@ export class BoardRows {
         continue;
       }
       let old = null;
+      const json = c.row === null ? null : JSON.stringify(c.row);
+      const meta = c.row === null ? null : rowMeta(c.row, json);
       for (const [page, rows] of pages) {
+        const metas = pages.meta.get(page);
         for (let slot = rows.length - 1; slot >= 0; slot--) {
           if (rowId(rows[slot]) !== c.id) continue;
           old ??= rows[slot];
           bytes -= byteLength(JSON.stringify(rows[slot]));
           if (c.row === null) {
             rows.splice(slot, 1);
+            metas?.splice(slot, 1);
             count--;
           } else {
             rows[slot] = c.row;
-            bytes += byteLength(JSON.stringify(c.row));
+            if (metas) metas[slot] = meta;
+            bytes += byteLength(json);
           }
           touched.add(page);
         }
@@ -408,11 +462,14 @@ export class BoardRows {
     if (byteLength(boardText(state.head, "")) + bytes + Math.max(count - 1, 0) > max) return false;
     for (const page of touched) {
       const rows = pages.get(page);
+      const meta = pages.meta.get(page);
       if (rows.length)
         this.sql.exec(
-          "INSERT INTO board_pages (page, json) VALUES (?, ?) ON CONFLICT (page) DO UPDATE SET json = excluded.json",
+          `INSERT INTO board_pages (page, json, meta) VALUES (?, ?, ?)
+            ON CONFLICT (page) DO UPDATE SET json = excluded.json, meta = excluded.meta`,
           page,
           JSON.stringify(rows),
+          meta == null ? null : JSON.stringify(meta),
         );
       else this.sql.exec("DELETE FROM board_pages WHERE page = ?", page);
     }
@@ -442,6 +499,7 @@ export class BoardRows {
       maxNum = this.sql.exec("SELECT MAX(num) AS m FROM board_index").toArray()[0].m ?? null;
     Object.assign(state, { bytes, count, maxNum });
     this.memo = { etag: null, blob: null };
+    this.slimMemo = { etag: null, blob: null };
     return true;
   }
 
@@ -653,7 +711,7 @@ export class BoardRows {
   }
 
   // The board as { etag, text }. The text is kept per version, so the boardRead RPC behind
-  // readSlim and readBoardJson decodes each version once while the room stays in memory.
+  // readBoardJson decodes each version once while the room stays in memory.
   async read() {
     await this.sync();
     const state = this.state();
@@ -663,6 +721,91 @@ export class BoardRows {
       this.decoded = { etag: board.etag, text: await new Response(board.body).text() };
     }
     return { ...this.decoded };
+  }
+
+  // The dashboard's slim board as { etag, body }, the bytes JSON.stringify(slimBoard(board))
+  // gives, or null when there is none. Kept per version in memory. A board slimBoard cannot
+  // read, unreadable or with no jobs array, goes out as stored, as the Worker sent it before.
+  async slim() {
+    await this.sync();
+    const state = this.state();
+    if (!state?.readable || !state.head.some(([k, v]) => k === "jobs" && v === null))
+      return this.bodyOf(state);
+    if (this.slimMemo.etag !== state.etag)
+      this.slimMemo = { etag: state.etag, blob: this.buildSlim(state) };
+    return { etag: state.etag, body: this.slimMemo.blob };
+  }
+
+  // slimBoard over the pages: the pages' meta picks the rows and counts as slimBoard does, in
+  // board order, and each kept row's bytes are cut from its page without decoding it, in one
+  // read of every page: a second query for only the pages holding kept rows would cost more SQL
+  // rows than the Free plan's daily read budget allows. A page from before the meta column is
+  // decoded once to fill its meta in.
+  buildSlim(state) {
+    const counts = Object.create(null);
+    const counted = { merged: new Set(), closed: new Set() };
+    // The rows that go out, as [board position, page bytes, start, end]: every unfinished row,
+    // and the SLIM_RECENT rows of each finished stage with the highest rank, an earlier row
+    // first on a tie, as slimBoard's stable sort picks them. Only these get an array, since one
+    // per row costs more than the rest of the loop.
+    const kept = [];
+    const top = { merged: [], closed: [] };
+    let i = 0;
+    for (const p of this.sql
+      .exec("SELECT page, meta, CAST(json AS BLOB) AS json FROM board_pages ORDER BY page")
+      .toArray()) {
+      // workerd gives an ArrayBuffer, which this views; Node's SQLite a Uint8Array.
+      const bytes = new Uint8Array(p.json);
+      let metas = p.meta === null ? null : JSON.parse(p.meta);
+      if (metas === null) {
+        metas = JSON.parse(new TextDecoder().decode(bytes)).map((row) =>
+          rowMeta(row, JSON.stringify(row)),
+        );
+        this.sql.exec(
+          "UPDATE board_pages SET meta = ? WHERE page = ?",
+          JSON.stringify(metas),
+          p.page,
+        );
+      }
+      let at = 1;
+      for (const meta of metas) {
+        const start = at;
+        if (typeof meta === "number") {
+          at += meta + 1;
+          kept.push([i++, bytes, start, start + meta]);
+          continue;
+        }
+        const length = meta[0],
+          stage = meta[1],
+          project = meta[2],
+          rank = meta[3];
+        at += length + 1;
+        const t = top[stage];
+        if (t.length < SLIM_RECENT || rank > t[t.length - 1][0]) {
+          let j = t.length;
+          while (j > 0 && t[j - 1][0] < rank) j--;
+          t.splice(j, 0, [rank, [i, bytes, start, start + length]]);
+          if (t.length > SLIM_RECENT) t.pop();
+        }
+        i++;
+        // slimBoard counts each id once per stage; a row with no id has meta[4] undefined.
+        if (counted[stage].has(meta[4])) continue;
+        counted[stage].add(meta[4]);
+        counts[project] ??= { merged: 0, closed: 0 };
+        counts[project][stage] += 1;
+      }
+    }
+    for (const t of Object.values(top)) for (const [, span] of t) kept.push(span);
+    kept.sort((a, b) => a[0] - b[0]);
+    const head = setPair(state.head, "slim", JSON.stringify({ recent: SLIM_RECENT, counts }));
+    const [open, close] = boardText(head, "\0").split("\0");
+    const parts = [open];
+    for (const [, bytes, start, end] of kept) {
+      if (parts.length > 1) parts.push(",");
+      parts.push(bytes.subarray(start, end));
+    }
+    parts.push(close);
+    return new Blob(parts);
   }
 
   // What a row PATCH decides from, at the current version, or null when at names another.
@@ -919,15 +1062,19 @@ export class BoardRows {
 export function boardStore(env) {
   const stub = env.BoardEvents?.get(env.BoardEvents.idFromName(ROOM));
   if (typeof stub?.boardRows !== "function") return r2Store(env);
+  // The room's bytes at path as { etag, body }, passed through undecoded, or null.
+  const served = async (path) => {
+    const response = await stub.fetch("https://board-events.invalid" + path);
+    return response.status === 404
+      ? null
+      : { etag: response.headers.get("ETag"), body: response.body };
+  };
   return {
     head: () => stub.boardHead(),
     read: () => stub.boardRead(),
-    body: async () => {
-      const response = await stub.fetch("https://board-events.invalid/board");
-      return response.status === 404
-        ? null
-        : { etag: response.headers.get("ETag"), body: response.body };
-    },
+    body: () => served("/board"),
+    // The slim board, which only the room builds; r2Store has none.
+    slim: () => served("/board/slim"),
     rows: async (q, at) => {
       const snap = await stub.boardRows(q, at);
       if (snap?.rows)
