@@ -1,0 +1,7 @@
+{
+  "id": "001-test",
+  "stage": "closed",
+  "project": "sample",
+  "updated": "{now}",
+  "done": "{now}"
+}

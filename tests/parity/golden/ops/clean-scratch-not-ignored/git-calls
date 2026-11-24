@@ -1,0 +1,1 @@
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "check-ignore", "-q", ".context/capture-1"]}

@@ -1,9 +1,10 @@
-"""Differential runner: run each parity case on Python and on a factory binary, then compare.
+"""Parity runner: run each parity case on a factory binary and compare it with the case's golden files.
 
-python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N]
+python3 tests/parity/run.py [--bin PATH] [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N] [--record]
 
-Each case side runs in its own temp root with its own home, stub folder and HTTP port, so cases run in a process
-pool. Results print in case order. --shard K/N keeps every Nth case starting at the Kth, for a CI matrix.
+Each case runs in its own temp root with its own home, stub folder and HTTP port, so cases run in a process pool.
+Results print in case order. --shard K/N keeps every Nth case starting at the Kth, for a CI matrix. --record writes
+each selected case's normalized output to tests/parity/golden/<case-id>/ instead of comparing it.
 """
 import argparse
 import calendar
@@ -11,27 +12,97 @@ import concurrent.futures
 import contextlib
 import difflib
 import fnmatch
+import gzip
+import hashlib
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parents[1] / "tests" / "cli"))
-from support import FACTORY_BIN, ROOT, SKILL, http_fixture, isolated_env, snapshot
+sys.path.insert(0, str(HERE))
 import stub
 
+ROOT = HERE.parents[1]
+SKILL = ROOT / "skills" / "factory"
+FACTORY_BIN = os.environ.get("FACTORY_BIN", "")
 PYTHON = [sys.executable, "-B", str(SKILL / "runtime/factory.py")]
 TOOLS = ("gh", "paseo", "git", "crontab")
 CASES = HERE / "cases"
+GOLDEN = HERE / "golden"
 REQUEST_HEADERS = ("content-type", "if-match", "if-none-match", "cf-access-client-id", "cf-access-client-secret",
                    "user-agent", "authorization")
+FIELDS = ("exit code", "stdout", "stderr", "home tree") + tuple(f"{tool} calls" for tool in TOOLS) + ("requests",)
 STAMP = re.compile(rb"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
+
+
+def isolated_env(home):
+    env = dict(os.environ)
+    for key in list(env):
+        if (key in ("FACTORY_HOME", "FACTORY_SESSION", "PASEO_HOME", "PASEO_AGENT_ID", "CLAUDE_CONFIG_DIR",
+                    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE")
+                or key.startswith("GIT_CONFIG_") or key.lower().endswith("_proxy")):
+            env.pop(key, None)
+    env.update(HOME=str(home), USERPROFILE=str(home), XDG_CONFIG_HOME=str(home / "config"),
+               NO_PROXY="localhost,127.0.0.1",
+               GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=str(home / "gitconfig"),
+               GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.invalid",
+               GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.invalid")
+    return env
+
+
+def snapshot(root):
+    return {str(path.relative_to(root)): (stat.S_IMODE(path.stat().st_mode),
+            path.read_bytes() if path.is_file() else None)
+            for path in [root] + sorted(root.rglob("*"))}
+
+
+@contextlib.contextmanager
+def http_fixture(routes):
+    requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            requests.append((self.command, self.path, dict(self.headers), data))
+            route = routes.get(f"{self.command} {self.path}", routes.get(self.path, (404, b"")))
+            # A list serves its replies in order, and the last one repeats.
+            if isinstance(route, list):
+                route = route.pop(0) if len(route) > 1 else route[0]
+            status, body, *extra = route
+            if not isinstance(body, bytes):
+                body = json.dumps(body).encode("utf-8")
+            self.send_response(status)
+            if status == 302:
+                self.send_header("Location", "https://example.invalid/login")
+            self.send_header("ETag", '"' + hashlib.sha256(body).hexdigest() + '"')
+            for name, value in (extra[0] if extra else {}).items():
+                self.send_header(name, value)
+            self.end_headers()
+            self.wfile.write(body)
+        do_POST = do_PUT = do_PATCH = do_GET
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.requests = requests
+    server.origin = "http://127.0.0.1:" + str(server.server_port)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+    thread.start()
+    try:
+        yield server
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 def load_cases(folder=CASES):
@@ -184,7 +255,8 @@ def run_side(case, command):
             data = data.replace(runtime.encode(), b"{runtime}").replace(os.path.abspath(command[-1]).encode(), b"{runtime}")
             data = data.replace(os.path.dirname(os.path.dirname(runtime)).encode(), b"{skill}")
             data = data.replace(str(home).encode(), b"{home}").replace(str(root).encode(), b"{tmp}")
-            return now_stamps(data, start, end)
+            data = data.replace(str(ROOT).encode(), b"{root}")
+            return now_stamps(data, start, end).replace(values["today"].encode(), b"{today}")
 
         tree = [f"{path} {mode:o} {normalize(data)!r}" if data is not None else f"{path} {mode:o}"
                 for path, (mode, data) in snapshot(home).items()]
@@ -200,13 +272,52 @@ def run_side(case, command):
         shutil.rmtree(root)
 
 
-def run_case(case, bin_command):
-    python = run_side(case, PYTHON)
-    if ("routes" in case or "exit" in case) and python[0][1] != str(case.get("exit")):
-        return [f"FAIL {case['id']}: python exit {python[0][1]}, case expects {case.get('exit')}"]
-    for (field, python), (_, binary) in zip(python, run_side(case, bin_command)):
-        if python != binary:
-            diff = difflib.unified_diff(python.splitlines(), binary.splitlines(), "python", "bin", lineterm="")
+def golden_file(folder, field):
+    """A field's golden file. The home tree repeats each home's fixtures, so it is gzipped."""
+    name = field.replace(" ", "-")
+    return folder / (name + ".gz" if field == "home tree" else name)
+
+
+def read_golden(case):
+    """The case's golden fields, or None when it has no golden folder. A missing file is an empty field."""
+    folder = GOLDEN / case["id"]
+    if not folder.is_dir():
+        return None
+    fields = []
+    for field in FIELDS:
+        path = golden_file(folder, field)
+        data = path.read_bytes() if path.is_file() else b""
+        if data and path.suffix == ".gz":
+            data = gzip.decompress(data)
+        fields.append((field, data.decode("utf-8", "surrogateescape")))
+    return fields
+
+
+def write_golden(case, fields):
+    folder = GOLDEN / case["id"]
+    if folder.is_dir():
+        shutil.rmtree(folder)
+    folder.mkdir(parents=True)
+    for field, value in fields:
+        if value or field == "exit code":
+            path = golden_file(folder, field)
+            data = value.encode("utf-8", "surrogateescape")
+            path.write_bytes(gzip.compress(data, 9, mtime=0) if path.suffix == ".gz" else data)
+
+
+def run_case(case, command, record):
+    fields = run_side(case, command)
+    if record:
+        if ("routes" in case or "exit" in case) and fields[0][1] != str(case.get("exit")):
+            return [f"FAIL {case['id']}: exit {fields[0][1]}, case expects {case.get('exit')}"]
+        write_golden(case, fields)
+        return []
+    golden = read_golden(case)
+    if golden is None:
+        return [f"FAIL {case['id']}: no golden folder {GOLDEN / case['id']}; run with --record"]
+    for (field, want), (_, got) in zip(golden, fields):
+        if want != got:
+            diff = difflib.unified_diff(want.splitlines(), got.splitlines(), "golden", "bin", lineterm="")
             return [f"FAIL {case['id']}: {field} differs"] + list(diff)[:40]
     return []
 
@@ -218,6 +329,7 @@ def main(argv):
     parser.add_argument("--case", action="append", default=[])
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--shard")
+    parser.add_argument("--record", action="store_true")
     args = parser.parse_args(argv)
     shard = re.fullmatch(r"([1-9]\d*)/([1-9]\d*)", args.shard or "1/1")
     if args.jobs < 1 or not shard or int(shard[1]) > int(shard[2]):
@@ -246,14 +358,18 @@ def main(argv):
     if patterns:
         cases = [case for case in cases if any(fnmatch.fnmatchcase(case["id"], p) for p in patterns)]
     cases = cases[int(shard[1]) - 1::int(shard[2])]
-    bin_command = [os.path.abspath(binary)] if binary else PYTHON
+    command = PYTHON if args.record else [os.path.abspath(binary)]
+    if not args.record and not binary:
+        print("parity: --bin or FACTORY_BIN required", file=sys.stderr)
+        return 2
     failed = 0
-    # Processes, not threads: each case's Python-side work holds the GIL, so threads barely overlap.
+    # Processes, not threads: each case's harness work holds the GIL, so threads barely overlap.
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs) as pool:
-        for case, lines in zip(cases, pool.map(run_case, cases, [bin_command] * len(cases), chunksize=4)):
+        runs = pool.map(run_case, cases, [command] * len(cases), [args.record] * len(cases), chunksize=4)
+        for case, lines in zip(cases, runs):
             print("\n".join(lines) if lines else f"PASS {case['id']}", flush=True)
             failed += bool(lines)
-    print(f"parity: {len(cases) - failed} passed, {failed} failed")
+    print(f"parity: {len(cases) - failed} {'recorded' if args.record else 'passed'}, {failed} failed")
     return 1 if failed else 0
 
 

@@ -1,0 +1,4 @@
+wrote {home}/retro/lesson-card-bad/findings.md
+rejected lesson_cards[0].job: must be a job in aggregate.json lessons
+no suggestions
+uploaded retro run lesson-card-bad

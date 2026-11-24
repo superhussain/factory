@@ -1,0 +1,4 @@
+held sample/051-partial as parity session s1
+elapsed 0s
+pulled 0 files
+{"event": "malformed", "round": 1, "verdicts": {"security": "pending", "ux": "pending", "ui": "pending", "code": "PASS"}, "files": {"round-1/review-security.md": null, "round-1/review-ux.md": "Working on it", "round-1/review-ui.md": null, "round-1/review-code.md": "VERDICT: PASS"}, "elapsed": 1}

@@ -1,0 +1,1 @@
+factory.py: bench: {home}/bench/not-cases-5.json is not a cases file: needs {"cases": [...]}

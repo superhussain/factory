@@ -1,0 +1,4 @@
+held sample/052-none as parity session s1
+elapsed 0s
+pulled 0 files
+{"event": "timeout", "round": 1, "verdicts": {"security": "pending", "ux": "pending", "ui": "pending", "code": "pending"}, "files": {"round-1/review-security.md": null, "round-1/review-ux.md": null, "round-1/review-ui.md": null, "round-1/review-code.md": null}, "elapsed": 1}

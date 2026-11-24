@@ -1,0 +1,4 @@
+held sample/050-round as parity session s1
+elapsed 0s
+pulled 0 files
+{"event": "round", "round": 1, "verdicts": {"security": "PASS", "ux": "CHANGES", "ui": "SKIPPED", "code": "PASS"}, "files": {"round-1/review-security.md": "VERDICT: PASS", "round-1/review-ux.md": "VERDICT: CHANGES", "round-1/review-ui.md": "VERDICT: SKIPPED", "round-1/review-code.md": "VERDICT: PASS"}, "elapsed": 0}

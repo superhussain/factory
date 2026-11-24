@@ -1,0 +1,1 @@
+factory.py: {home}/retro/bad-category/reply.json: findings[0].category: must be one of navigation, automated-checks, reviewer-rules, steering, tool-economy, information-access, permissions; nothing written

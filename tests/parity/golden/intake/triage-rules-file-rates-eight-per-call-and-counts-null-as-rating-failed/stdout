@@ -1,0 +1,23 @@
+{
+  "project": "sample",
+  "rules_file": "{home}/triage-rules.txt",
+  "labels": 9,
+  "scored": 8,
+  "unscored": {
+    "rule": 0,
+    "no_verdict": 0,
+    "rating_failed": 1
+  },
+  "model_queued": 0,
+  "thresholds": [
+    {
+      "threshold": 90,
+      "current": true,
+      "queue_approved": 8,
+      "queue_denied": 0,
+      "hold_approved": 0,
+      "hold_denied": 0,
+      "agreement": 100
+    }
+  ]
+}

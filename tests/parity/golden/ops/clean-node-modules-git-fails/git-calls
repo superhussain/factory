@@ -1,0 +1,1 @@
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"]}

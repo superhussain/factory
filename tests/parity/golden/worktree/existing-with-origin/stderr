@@ -1,0 +1,1 @@
+factory.py: git rev-list --left-right --count HEAD...origin/factory/001-test: stub: no recorded response for git -C {home}/worktrees/sample/001-test rev-list --left-right --count HEAD...origin/factory/001-test

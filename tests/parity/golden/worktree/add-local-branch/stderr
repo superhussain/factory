@@ -1,0 +1,1 @@
+factory.py: git worktree add {home}/worktrees/sample/001-test factory/001-test: stub: no recorded response for git -C checkout worktree add {home}/worktrees/sample/001-test factory/001-test

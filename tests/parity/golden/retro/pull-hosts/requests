@@ -1,0 +1,3 @@
+{"body": "", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "user-agent": "factory"}, "method": "GET", "path": "/api/retro/2026-11-11"}
+{"body": "", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "user-agent": "factory"}, "method": "GET", "path": "/api/retro/pc/2026-11-11.jsonl"}
+{"body": "", "headers": {"cf-access-client-id": "parity-client-id", "cf-access-client-secret": "parity-client-secret", "user-agent": "factory"}, "method": "GET", "path": "/api/retro/mac/2026-11-11.jsonl"}

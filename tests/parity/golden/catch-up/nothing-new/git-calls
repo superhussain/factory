@@ -1,0 +1,7 @@
+{"argv": ["-C", "{home}/checkout", "fetch", "-q", "origin", "+refs/heads/main:refs/remotes/origin/main"]}
+{"argv": ["-C", "{home}/checkout", "rev-parse", "refs/remotes/origin/main"]}
+{"argv": ["-C", "{home}/checkout", "rev-parse", "--abbrev-ref", "HEAD"]}
+{"argv": ["-C", "{home}/checkout", "status", "--porcelain"]}
+{"argv": ["-C", "{home}/checkout", "rev-parse", "HEAD"]}
+{"argv": ["-C", "{home}/checkout", "config", "--get", "remote.origin.url"]}
+{"argv": ["-C", "{home}/checkout", "cat-file", "-e", "0123456789abcdef0123456789abcdef01234567:.github/workflows/deploy-main.yml"]}

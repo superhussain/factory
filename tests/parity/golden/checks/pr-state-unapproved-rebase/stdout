@@ -1,0 +1,1 @@
+{"pr": 44, "state": "open", "review": "none", "bots": 0, "checks": "pass", "queued": false, "conflict": true, "stacked": false, "base": "main", "next": "rebase", "ci_log": null, "threads": 0, "merge_queue": false, "items": [{"sig": "conflict:0d6e4079e36703eb", "label": "a merge conflict with main", "count": 0}], "capped": [], "rearm": [], "behind": null}

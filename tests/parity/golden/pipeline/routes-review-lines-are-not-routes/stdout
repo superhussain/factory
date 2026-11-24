@@ -1,0 +1,6 @@
+{
+  "route": "alpha",
+  "provider": "provider-a",
+  "runtime": "provider-a",
+  "model": "model-a"
+}

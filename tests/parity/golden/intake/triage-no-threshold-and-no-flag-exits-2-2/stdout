@@ -1,0 +1,21 @@
+{
+  "project": "sample",
+  "labels": 4,
+  "scored": 3,
+  "unscored": {
+    "rule": 1,
+    "no_verdict": 0
+  },
+  "model_queued": 0,
+  "thresholds": [
+    {
+      "threshold": 80,
+      "current": false,
+      "queue_approved": 2,
+      "queue_denied": 0,
+      "hold_approved": 0,
+      "hold_denied": 1,
+      "agreement": 100
+    }
+  ]
+}

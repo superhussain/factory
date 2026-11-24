@@ -1,0 +1,11 @@
+{
+  "paused": false,
+  "projects": [
+    "sample"
+  ],
+  "self": [
+    "sample"
+  ],
+  "changed": "{now}",
+  "by": "parity"
+}

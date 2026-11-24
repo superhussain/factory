@@ -1,0 +1,5 @@
+round-1/review-ux.md: VERDICT: CHANGES
+spec.md: # Spec: sample
+round-1/review-code.md: VERDICT: PASS
+build.md: Routing: synthetic
+decision.md: CLOSED: superseded by a later job

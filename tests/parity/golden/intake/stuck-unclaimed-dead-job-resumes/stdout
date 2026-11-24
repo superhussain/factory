@@ -1,0 +1,9 @@
+[
+  {
+    "id": "001-test",
+    "project": "sample",
+    "repo_path": "/tmp",
+    "session": "sender",
+    "stage": "build"
+  }
+]

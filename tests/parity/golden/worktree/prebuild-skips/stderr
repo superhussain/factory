@@ -1,0 +1,4 @@
+prebuild skips ../x: not inside the worktree
+prebuild skips /abs: not inside the worktree
+prebuild skips sample: its dependency files differ from origin/main
+prebuild skips missing: no pnpm-lock.yaml

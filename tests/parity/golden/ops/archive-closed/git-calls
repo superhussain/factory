@@ -1,0 +1,4 @@
+{"argv": ["-C", "/work/factory-045-closed-2", "status", "--porcelain"]}
+{"argv": ["-C", "/work/factory-045-closed-2", "branch", "--show-current"]}
+{"argv": ["-C", "/work/factory-045-closed-2", "reflog", "show", "--format=%H %gs", "refs/heads/factory/045-closed"]}
+{"argv": ["-C", "/work/factory-045-closed-2", "log", "--format=%h %s", "HEAD", "--not", "--remotes", "--exclude=factory/045-closed", "--branches", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]}

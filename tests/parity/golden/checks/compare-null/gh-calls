@@ -1,0 +1,3 @@
+{"argv": ["pr", "view", "https://github.com/example/sample/pull/42", "--json", "state", "--jq", ".state"]}
+{"argv": ["pr", "view", "https://github.com/example/sample/pull/42", "--json", "headRefOid,baseRefName"]}
+{"argv": ["api", "repos/example/sample/compare/main...a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1", "--jq", ".behind_by"]}

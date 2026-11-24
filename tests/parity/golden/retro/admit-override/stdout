@@ -1,0 +1,4 @@
+wrote {home}/retro/override/findings.md
+rejected findings[0].fix: reads like an instruction to override factory rules (override)
+rejected findings[2]: needs keys ['category', 'cost', 'count', 'fix', 'project', 'root_cause', 'sessions', 'title'], may have ['fixed_by']
+no suggestions

@@ -1,0 +1,50 @@
+{
+  "orphans": [
+    {
+      "kind": "branch",
+      "project": "factory",
+      "job": "2031-stale-banner",
+      "name": "factory/2031-stale-banner",
+      "reason": "job merged"
+    },
+    {
+      "kind": "pr",
+      "project": "factory",
+      "job": "1999-gone",
+      "name": "https://github.com/example/factory/pull/7",
+      "reason": "no job on the board"
+    },
+    {
+      "kind": "worktree",
+      "project": "factory",
+      "job": "2031-stale-banner",
+      "name": "{home}/worktrees/factory/2031-stale-banner",
+      "reason": "job merged"
+    },
+    {
+      "kind": "workspace",
+      "project": null,
+      "job": "1997-gone",
+      "name": "/srv/example/paseo/factory-1997-gone",
+      "reason": "no job on the board"
+    },
+    {
+      "kind": "workspace",
+      "project": "factory",
+      "job": "1998-lost",
+      "name": "/srv/example/paseo/factory-1998-lost",
+      "reason": "no job on the board"
+    },
+    {
+      "kind": "workspace",
+      "project": "factory",
+      "job": "2044-old-idea",
+      "name": "/srv/example/worktrees/factory-2044-old-idea-2",
+      "reason": "job closed"
+    }
+  ],
+  "skipped": [
+    "branches bare: git ls-remote failed (exit 127)",
+    "prs bare: the project file names no repo"
+  ]
+}

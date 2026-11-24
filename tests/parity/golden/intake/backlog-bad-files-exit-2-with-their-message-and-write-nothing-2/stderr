@@ -1,0 +1,11 @@
+factory.py: context file {home}/backlog-bad1.md: longer than 6000 characters
+a context file looks like this:
+Recommend: approve
+
+Why this line is worth building, in one or more lines.
+
+## Question: Which option?
+What the person decides.
+Pick: one
+- Option A (recommended): what it does
+- Option B: what it does

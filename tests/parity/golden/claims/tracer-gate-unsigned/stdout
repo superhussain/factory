@@ -1,0 +1,13 @@
+{
+  "id": "001-test",
+  "project": "sample",
+  "stage": "needs-human",
+  "round": 0,
+  "updated": "{now}",
+  "started": "2026-11-01T00:00:00Z",
+  "tracer": {
+    "scope": "approved"
+  },
+  "note": "gate: spec-approval",
+  "needs": "Tracer approved scope for factory-1 without a signed receipt: run /factory approve-spec 001-test or press Approve spec to build"
+}

@@ -1,0 +1,1 @@
+factory.py: GET {api}/api/pipeline/global returned 500: boom
