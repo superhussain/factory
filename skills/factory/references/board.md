@@ -16,6 +16,7 @@
   "pr": "https://github.com/<owner>/<repo>/pull/44",
   "escalated": true,
   "automerge": true,
+  "checked_head": "40-hex head SHA; set by factory checks",
   "resumes": { "count": 1, "key": "000000000000" },
   "jira": "optional Jira key, read by the Tracer mirror",
   "tracer": { "follow": true, "gather": true, "feature": "factory-42", "url": "set only by factory after a Tracer mirror", "scope": "gathering, approved or declined; set only by factory", "building": "true only while a Tracer build agent holds the feature; set by pickup", "stopped": "true once factory asked Tracer to stop the build scope approval queued; set only by factory", "tasks": "up to 30 {id, title, status} from the Tracer feature; set by pickup once Tracer builds the job" },
@@ -69,6 +70,7 @@ unless the local decision.md opens with APPROVE, and refuses stage `approve` unl
 the last `rounds` entry is all PASS or SKIPPED; factory says it cannot move to
 approve. `resumes` counts consecutive
 scheduled resumes without progress, and only `factory stuck` writes it.
+`checked_head` is the PR head that `factory checks` last saw pass, or saw with no checks. `factory checks` writes it. `factory pr-merge` merges only that head and exits 3 `unchecked` for any other.
 `refs` links a job to the jobs it came from, and the dashboard shows them on the
 card and as links in the job panel. The drawer's Add follow-up idea item saves a
 new idea with a `follow-up-of` ref to the open job. `build` is set only on merged jobs that need a
