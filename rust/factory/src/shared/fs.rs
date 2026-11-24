@@ -67,13 +67,18 @@ pub fn seed(p: &Path, data: &[u8], mode: u32) -> io::Result<bool> {
     }
 }
 
-/// `p.mkdir(mode=0o700, exist_ok=True)`.
-pub fn mkdir_private(p: &Path) -> io::Result<()> {
+/// `p.mkdir(mode=0o700)`: fails when p already exists.
+pub fn create_dir_private(p: &Path) -> io::Result<()> {
     #[cfg_attr(not(unix), allow(unused_mut))]
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-    match builder.create(p) {
+    builder.create(p)
+}
+
+/// `p.mkdir(mode=0o700, exist_ok=True)`.
+pub fn mkdir_private(p: &Path) -> io::Result<()> {
+    match create_dir_private(p) {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists && p.is_dir() => Ok(()),
         other => other,
     }
@@ -347,15 +352,26 @@ pub(crate) fn uid() -> u32 {
     unsafe { getuid() }
 }
 
+/// open(2)'s O_NOFOLLOW for this target: the open fails on a symlink.
 #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
-const O_DIRECTORY_NOFOLLOW: i32 = 0o40000 | 0o100000;
+pub const O_NOFOLLOW: i32 = 0o100000;
 #[cfg(all(
     target_os = "linux",
     not(any(target_arch = "aarch64", target_arch = "arm"))
 ))]
-const O_DIRECTORY_NOFOLLOW: i32 = 0o200000 | 0o400000;
+pub const O_NOFOLLOW: i32 = 0o400000;
 #[cfg(target_os = "macos")]
-const O_DIRECTORY_NOFOLLOW: i32 = 0x100000 | 0x100;
+pub const O_NOFOLLOW: i32 = 0x100;
+
+#[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
+const O_DIRECTORY_NOFOLLOW: i32 = 0o40000 | O_NOFOLLOW;
+#[cfg(all(
+    target_os = "linux",
+    not(any(target_arch = "aarch64", target_arch = "arm"))
+))]
+const O_DIRECTORY_NOFOLLOW: i32 = 0o200000 | O_NOFOLLOW;
+#[cfg(target_os = "macos")]
+const O_DIRECTORY_NOFOLLOW: i32 = 0x100000 | O_NOFOLLOW;
 
 /// Create the job's temp folder private to this account, refusing a name someone else holds.
 pub fn make_job_temp(slug: &str, job_id: &str) -> Res<PathBuf> {

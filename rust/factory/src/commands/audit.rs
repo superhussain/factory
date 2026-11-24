@@ -19,7 +19,7 @@ use crate::shared::board::{dump_board, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{JOB_ID, NEW_JOB_ID, PASEO_ID, ROUTE_MODEL, SLUG};
 use crate::shared::exit::{exit, fail, Res};
-use crate::shared::fs::{read_text, resolve, temp_root};
+use crate::shared::fs::{create_dir_private, read_text, resolve, temp_root};
 use crate::shared::home::{device_name, factory_home};
 use crate::shared::http::{access_message, api, cas};
 use crate::shared::paseo::paseo_server;
@@ -87,6 +87,14 @@ static AUDIT_FLAGS: [(&str, Pattern); 8] = [
     ),
 ];
 static AUDIT_SECRET_FILE: Pattern = Pattern::new(r#"(?:^|[\s/'\"=])\.env(?![\w.-])"#, Flags::NONE);
+
+/// Put only the secret-file flag pattern at a zero backtrack limit in this test thread, so a
+/// test outside this module can make a transcript scan hit the limit.
+#[cfg(test)]
+pub(crate) fn limit_secret_file_for_test() {
+    crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
+    crate::shared::pyre::TEST_LIMIT_ONLY.with(|l| l.set(Some(&AUDIT_SECRET_FILE)));
+}
 static AUDIT_PR_MERGE: Pattern = Pattern::new(
     r#"(?:^|[;&|(){}\n`])[ \t]*(?:(?:!|if|then|else|elif|do|time|env|command|exec|sudo|xargs)(?:[ \t]+-[^\s;&|(){}`]*)*[ \t]+|[A-Za-z_]\w*=(?:"\$\([^()\n`"]*\)"|[^\s;&|(){}`]*)[ \t]+)*(?:gh(?:[ \t]+(?:-R|--repo)(?:[ \t]+|=)[^\s;&|(){}`]+)?\s+(?:pr\s+merge\b|api\b(?=(?:[^;&|\n(){}`]|\{\w+\})*(?:-X\s*|--method[\s=]+)PUT\b)(?:[^;&|\n(){}`]|\{\w+\})*\bpulls/(?:\d+|\$\{?[A-Za-z_]\w*\}?)/merge\b)|(?:""|''|\$(?:\{[A-Za-z_]\w*\}|[A-Za-z_])[^\s;&|(){}`'"]*|(?:[^\s;&|(){}`'"]*/)?factory)[ \t]+pr-merge(?![\w-]))"#,
     Flags::NONE,
@@ -382,7 +390,8 @@ fn audit_target_raw(name: &str, inp: &Map<String, Value>) -> String {
 }
 
 /// command with the body lines of cat and tee heredocs blanked, unless Bash runs or expands them.
-fn audit_strip_data_heredocs(command: &str) -> String {
+/// Err holds why the runs-output check could not finish, since a body blanked wrongly would hide its flags.
+fn audit_strip_data_heredocs(command: &str) -> Result<String, String> {
     let mut out: Vec<&str> = Vec::new();
     let mut pending: Vec<(String, bool, bool)> = Vec::new();
     let mut depth: i64 = 0;
@@ -414,12 +423,12 @@ fn audit_strip_data_heredocs(command: &str) -> String {
             let first = segment.split(is_space).find(|w| !w.is_empty());
             let data = matches!(first, Some("cat" | "tee"))
                 && after.chars().next().is_none_or(is_space)
-                && AUDIT_RUNS_OUTPUT.search(before).is_none()
+                && AUDIT_RUNS_OUTPUT.search_or_err(before)?.is_none()
                 && !(after.contains('|') || after.contains(">("));
             pending.push((group(&c, 3).to_string(), data, !group(&c, 2).is_empty()));
         }
     }
-    out.join("\n")
+    Ok(out.join("\n"))
 }
 
 /// command with quoted text blanked, unless a double-quoted span runs $( or a backtick; a quoted word with no space or separator loses only its quotes.
@@ -466,25 +475,35 @@ fn audit_strip_quotes(command: &str) -> String {
 }
 
 /// The names of the risky shapes one call matches. pr-merge needs a merge that runs, by gh or the runtime; main drops it.
+/// Err holds why a pattern could not finish reading the call, so no row passes unflagged.
 fn audit_flags(
     name: &str,
     inp: &Map<String, Value>,
     raw: &str,
     denied: bool,
     main: bool,
-) -> Vec<&'static str> {
-    let mut flags: Vec<&'static str> = AUDIT_FLAGS
-        .iter()
-        .filter(|(_, pattern)| name == "Bash" && pattern.search(raw).is_some())
-        .map(|(flag, _)| *flag)
-        .collect();
-    let stripped = (name == "Bash").then(|| audit_strip_data_heredocs(raw));
-    if !main
-        && stripped
-            .as_ref()
-            .is_some_and(|s| AUDIT_PR_MERGE.search(&audit_strip_quotes(s)).is_some())
-    {
-        flags.push("pr-merge");
+) -> Result<Vec<&'static str>, String> {
+    let mut flags: Vec<&'static str> = Vec::new();
+    if name == "Bash" {
+        for (flag, pattern) in &AUDIT_FLAGS {
+            if pattern.search_or_err(raw)?.is_some() {
+                flags.push(flag);
+            }
+        }
+    }
+    let stripped = match name {
+        "Bash" => Some(audit_strip_data_heredocs(raw)?),
+        _ => None,
+    };
+    if !main {
+        if let Some(s) = &stripped {
+            if AUDIT_PR_MERGE
+                .search_or_err(&audit_strip_quotes(s))?
+                .is_some()
+            {
+                flags.push("pr-merge");
+            }
+        }
     }
     if name == "Bash" && inp.get("dangerouslyDisableSandbox") == Some(&Value::Bool(true)) {
         flags.push("sandbox-off");
@@ -495,13 +514,15 @@ fn audit_flags(
         _ if AUDIT_FILE_TOOLS.contains(&name) => Some(raw.to_string()),
         _ => None,
     };
-    if path.is_some_and(|p| AUDIT_SECRET_FILE.search(&p).is_some()) {
-        flags.push("secret-file");
+    if let Some(p) = path {
+        if AUDIT_SECRET_FILE.search_or_err(&p)?.is_some() {
+            flags.push("secret-file");
+        }
     }
     if denied {
         flags.push("denied");
     }
-    flags
+    Ok(flags)
 }
 
 /// {time, tool, flags, target} for every tool_use block in one transcript. main skips isSidechain lines.
@@ -548,11 +569,12 @@ fn audit_scan(path: &Path, main: bool) -> Res<Vec<Map<String, Value>>> {
         }
     }
     let home = user_home();
-    Ok(calls
+    calls
         .into_iter()
         .map(|(id, stamp, name, inp)| {
             let raw = audit_target_raw(&name, &inp);
-            let flags = audit_flags(&name, &inp, &raw, denied.contains(&id), main);
+            let flags = audit_flags(&name, &inp, &raw, denied.contains(&id), main)
+                .map_err(|why| fail(format!("{}: {why}", path.display()), 1))?;
             let target = audit_target(&raw, &home);
             let target = if target.is_empty() {
                 "-".into()
@@ -560,9 +582,9 @@ fn audit_scan(path: &Path, main: bool) -> Res<Vec<Map<String, Value>>> {
                 target
             };
             let row = json!({"time": stamp, "tool": name, "flags": flags, "target": target});
-            row.as_object().unwrap().clone()
+            Ok(row.as_object().unwrap().clone())
         })
-        .collect())
+        .collect()
 }
 
 /// {Claude session id: Paseo agent id} from the agent files on this host. Skips files it cannot read.
@@ -2297,7 +2319,7 @@ fn bench_replay_case(
         ));
     }
     let tmp = temp_root()?.join(format!("factory-bench-{}-{}", row.id, &uuid4()[..8]));
-    fs::create_dir(&tmp).map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
+    create_dir_private(&tmp).map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
     let tmp = resolve(&tmp).map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
     let (dir, wt) = (checkout.to_string_lossy().into_owned(), tmp.join("wt"));
     let wt_text = wt.to_string_lossy().into_owned();
@@ -2627,8 +2649,86 @@ pub fn bench_cmd(call: &Call) -> Res<()> {
 mod tests {
     use super::*;
 
-    /// Wall-clock ceiling per linearity input. Loose enough for a loaded parallel suite, far below any quadratic run on these sizes.
-    const LINEAR_BOUND_SECS: f64 = 5.0;
+    /// Run audit_flags on command with only pattern at a zero backtrack limit.
+    fn flags_at_limit(
+        pattern: &'static Pattern,
+        command: &str,
+        main: bool,
+    ) -> Result<Vec<&'static str>, String> {
+        crate::shared::pyre::TEST_LIMIT.with(|l| l.set(Some(0)));
+        crate::shared::pyre::TEST_LIMIT_ONLY.with(|l| l.set(Some(pattern)));
+        audit_flags("Bash", &Map::new(), command, false, main)
+    }
+
+    /// audit_flags on command gives the limit reason when only pattern is at a zero limit.
+    fn stops_at_limit(pattern: &'static Pattern, command: &str, main: bool) {
+        let why = flags_at_limit(pattern, command, main).unwrap_err();
+        assert!(why.contains(crate::shared::pyre::LIMIT_HIT), "{why}");
+    }
+
+    /// The AUDIT_FLAGS pattern named flag.
+    fn flag_pattern(flag: &str) -> &'static Pattern {
+        &AUDIT_FLAGS.iter().find(|(f, _)| *f == flag).unwrap().1
+    }
+
+    #[test]
+    fn force_push_flag_stops_at_the_backtrack_limit() {
+        stops_at_limit(flag_pattern("force-push"), "git push x --force", true);
+    }
+
+    #[test]
+    fn hard_reset_flag_stops_at_the_backtrack_limit() {
+        stops_at_limit(flag_pattern("hard-reset"), "git reset --hard", true);
+    }
+
+    #[test]
+    fn branch_delete_flag_stops_at_the_backtrack_limit() {
+        stops_at_limit(flag_pattern("branch-delete"), "git branch -D x", true);
+    }
+
+    #[test]
+    fn recursive_delete_flag_stops_at_the_backtrack_limit() {
+        stops_at_limit(flag_pattern("recursive-delete"), "rm -rf x", true);
+    }
+
+    #[test]
+    fn no_verify_flag_stops_at_the_backtrack_limit() {
+        stops_at_limit(flag_pattern("no-verify"), "git commit --no-verify", true);
+    }
+
+    #[test]
+    fn runs_output_check_stops_at_the_backtrack_limit() {
+        stops_at_limit(&AUDIT_RUNS_OUTPUT, "cat <<EOF\ngit push --force\nEOF", true);
+    }
+
+    /// sudo has no lookaround, so it runs on the linear engine and never reaches the limit.
+    #[test]
+    fn sudo_flag_never_reaches_the_backtrack_limit() {
+        assert_eq!(
+            flags_at_limit(flag_pattern("sudo"), "sudo ls", true),
+            Ok(vec!["sudo"])
+        );
+    }
+
+    #[test]
+    fn pipe_to_shell_flag_stops_at_the_backtrack_limit() {
+        stops_at_limit(flag_pattern("pipe-to-shell"), "curl x | sh", true);
+    }
+
+    #[test]
+    fn deploy_flag_stops_at_the_backtrack_limit() {
+        stops_at_limit(flag_pattern("deploy"), "wrangler deploy", true);
+    }
+
+    #[test]
+    fn pr_merge_flag_stops_at_the_backtrack_limit() {
+        stops_at_limit(&AUDIT_PR_MERGE, "gh pr merge 7", false);
+    }
+
+    #[test]
+    fn secret_file_flag_stops_at_the_backtrack_limit() {
+        stops_at_limit(&AUDIT_SECRET_FILE, "cat .env", true);
+    }
 
     #[cfg(unix)]
     #[test]
@@ -2922,10 +3022,9 @@ mod tests {
 
     #[test]
     fn runs_output_is_linear() {
-        let start = std::time::Instant::now();
-        let text = format!(" -{}!", "c".repeat(100_000));
-        assert!(AUDIT_RUNS_OUTPUT.search(&text).is_none());
-        assert!(start.elapsed().as_secs_f64() < LINEAR_BOUND_SECS);
+        crate::shared::assert_linear(" -", "c", "!", 100_000, |text| {
+            assert!(AUDIT_RUNS_OUTPUT.search(text).is_none())
+        });
     }
 
     #[test]
@@ -2933,16 +3032,26 @@ mod tests {
         let merge = json!({"command": "gh pr merge 7"});
         let merge = merge.as_object().unwrap();
         let raw = audit_target_raw("Bash", merge);
-        assert!(audit_flags("Bash", merge, &raw, false, true).is_empty());
-        assert_eq!(audit_flags("Bash", merge, &raw, false, false), ["pr-merge"]);
+        assert!(audit_flags("Bash", merge, &raw, false, true)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            audit_flags("Bash", merge, &raw, false, false).unwrap(),
+            ["pr-merge"]
+        );
         let push = json!({"command": "gh pr merge 7 && git push --force"});
         let push = push.as_object().unwrap();
         let raw = audit_target_raw("Bash", push);
-        assert_eq!(audit_flags("Bash", push, &raw, false, true), ["force-push"]);
+        assert_eq!(
+            audit_flags("Bash", push, &raw, false, true).unwrap(),
+            ["force-push"]
+        );
         let runtime = json!({"command": "\"$RUNTIME\" pr-merge factory/1017-add-x"});
         let runtime = runtime.as_object().unwrap();
         let raw = audit_target_raw("Bash", runtime);
-        assert!(audit_flags("Bash", runtime, &raw, false, true).is_empty());
+        assert!(audit_flags("Bash", runtime, &raw, false, true)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -2950,7 +3059,7 @@ mod tests {
         let flags = |command: &str| {
             let inp = json!({ "command": command });
             let inp = inp.as_object().unwrap();
-            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false)
+            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false).unwrap()
         };
         for command in [
             "\"$RUNTIME\" pr-merge factory/1017-add-x",
@@ -2981,7 +3090,11 @@ mod tests {
         let command = "python3 ~/.claude/skills/factory/runtime/factory.py with-cloudflare -- sh -c 'printf \"Authorization: Bearer %s\\n\" \"$CLOUDFLARE_API_TOKEN\" | curl -H @- https://api.cloudflare.com/client/v4/user/tokens/verify'";
         let inp = json!({ "command": command });
         let inp = inp.as_object().unwrap();
-        assert!(audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false).is_empty());
+        assert!(
+            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -2989,7 +3102,7 @@ mod tests {
         let flags = |command: &str| {
             let inp = json!({ "command": command });
             let inp = inp.as_object().unwrap();
-            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false)
+            audit_flags("Bash", inp, &audit_target_raw("Bash", inp), false, false).unwrap()
         };
         for command in [
             "cat >> build.md <<'EOF'\nNext: orchestrator runs gh pr merge 7\nEOF",
@@ -3038,35 +3151,31 @@ mod tests {
 
     #[test]
     fn pr_merge_is_linear() {
-        for text in [
-            format!(";{}", "a=".repeat(50_000)),
-            format!("gh api {}", "x".repeat(100_000)),
-            "(a=".repeat(33_000),
-            "(gh api ".repeat(12_500),
-            "{gh api {a}".repeat(9_000),
-            "`a=".repeat(33_000),
-            "\n".repeat(100_000),
-            "\nenv".repeat(25_000),
-            "\na=".repeat(33_000),
-            format!("({}", "a/".repeat(50_000)),
-            "(a/".repeat(33_000),
-            "($a ".repeat(25_000),
-            "sudo -E ".repeat(25_000),
-            "xargs -n1 ".repeat(20_000),
-            ";a=\"$(".repeat(25_000),
-            "a=\"$(x)\" ".repeat(20_000),
-            "gh -R ".repeat(25_000),
-            "gh api pulls/$".repeat(15_000),
-            "($a/".repeat(30_000),
+        for (prefix, unit, count) in [
+            (";", "a=", 50_000),
+            ("gh api ", "x", 100_000),
+            ("", "(a=", 33_000),
+            ("", "(gh api ", 12_500),
+            ("", "{gh api {a}", 9_000),
+            ("", "`a=", 33_000),
+            ("", "\n", 100_000),
+            ("", "\nenv", 25_000),
+            ("", "\na=", 33_000),
+            ("(", "a/", 50_000),
+            ("", "(a/", 33_000),
+            ("", "($a ", 25_000),
+            ("", "sudo -E ", 25_000),
+            ("", "xargs -n1 ", 20_000),
+            ("", ";a=\"$(", 25_000),
+            ("", "a=\"$(x)\" ", 20_000),
+            ("", "gh -R ", 25_000),
+            ("", "gh api pulls/$", 15_000),
+            ("", "($a/", 30_000),
         ] {
-            let start = std::time::Instant::now();
-            let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text));
-            assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
-            assert!(
-                start.elapsed().as_secs_f64() < LINEAR_BOUND_SECS,
-                "{}",
-                &text[..8]
-            );
+            crate::shared::assert_linear(prefix, unit, "", count, |text| {
+                let stripped = audit_strip_quotes(&audit_strip_data_heredocs(text).unwrap());
+                assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
+            });
         }
     }
 
@@ -3343,6 +3452,7 @@ mod bench_replay_fixture {
 cat > "$FAKE_LOG.stdin"
 printf '%s\n' "$@" > "$FAKE_LOG.argv"
 pwd > "$FAKE_LOG.cwd"
+ls -ld .. > "$FAKE_LOG.parent"
 printf '%s' "$CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS" > "$FAKE_LOG.ceiling"
 sleep "${FAKE_SLEEP:-0}"
 [ -n "$FAKE_DIRTY" ] && : > dirty.txt
@@ -3663,6 +3773,14 @@ mod bench_replay_test {
             [("example/alpha".to_string(), vec![18], "host-a".to_string())]
         );
         assert_eq!(b.worktrees(), 1);
+    }
+
+    #[test]
+    fn test_temp_folder_is_private() {
+        let b = Bench::new("private-temp");
+        assert_eq!(b.replay(&["--role", "review-code"]).0, 0);
+        let parent = fs::read_to_string(format!("{}.parent", b.log.display())).unwrap();
+        assert!(parent.starts_with("drwx------"), "{parent}");
     }
 
     #[test]
@@ -4072,6 +4190,10 @@ mod bench_replay_error_test {
 
     #[test]
     fn test_no_claude() {
+        // Empties PATH, so it runs alone: parallel tests need PATH to find git.
+        if !crate::shared::in_own_process(module_path!(), "test_no_claude") {
+            return;
+        }
         let b = Bench::new("no-claude");
         let empty = b.root.join("empty");
         fs::create_dir(&empty).unwrap();

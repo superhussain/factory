@@ -190,9 +190,10 @@ because WSL starts no cron on its own:
 - A Windows Task Scheduler task that starts WSL at logon, so the `[boot]` command
   runs.
 
-A cron-only host restarts the daemon from the `*/5` line. After catch-up stops
-the old daemon, or after a crash, there can be a gap of up to 5 minutes before
-the new one runs.
+A cron-only host restarts the daemon from the `*/5` line, so after a crash there
+can be a gap of up to 5 minutes before the new one runs. Catch-up does not wait
+for the line: it stops the old daemon, starts the new binary itself, and prints
+`daemon: restarted (pid N)` once the new daemon holds its lock.
 
 If macOS reports a disabled label, enable it and install again:
 

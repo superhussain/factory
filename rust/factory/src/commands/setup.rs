@@ -43,7 +43,7 @@ static WORKER_MODEL: Pattern = Pattern::new(r"[A-Za-z0-9._:@/\[\]-]{1,128}", Fla
 static PAIRING_CODE: Pattern = Pattern::new(r"[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}", Flags::ASCII);
 
 const PAIRING_FAILED: &str = "pairing code is wrong, used or expired";
-const SCHEDULERS: &[&str] = &["launchd", "cron", "schtasks", "none"];
+const SCHEDULERS: &[&str] = &["launchd", "systemd", "cron", "schtasks", "none"];
 const MAX_EXPLORER_PROJECTS: usize = 1;
 
 const ROLE_NAMES: [&str; 9] = [
@@ -151,25 +151,9 @@ fn frontmatter_text(text: &str) -> (Vec<(String, String)>, String) {
     (Vec::new(), text.to_string())
 }
 
-/// `os.path.abspath`: p joined to the cwd, with `.`, `..` and repeated `/` folded lexically.
+/// `os.path.abspath` against the cwd, on this platform's separators and drives.
 fn abspath(p: &str) -> PathBuf {
-    let joined = if p.starts_with('/') {
-        p.to_string()
-    } else {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        format!("{}/{p}", cwd.display())
-    };
-    let mut parts: Vec<&str> = Vec::new();
-    for part in joined.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            _ => parts.push(part),
-        }
-    }
-    PathBuf::from(format!("/{}", parts.join("/")))
+    crate::shared::fs::abspath(p, &std::env::current_dir().unwrap_or_default())
 }
 
 fn load_connection(path: &Path) -> Res<String> {
@@ -1692,10 +1676,19 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn abspath_folds() {
         assert_eq!(abspath("/a/./b/../c//d"), PathBuf::from("/a/c/d"));
         assert_eq!(abspath("/.."), PathBuf::from("/"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn abspath_keeps_a_windows_drive() {
+        assert_eq!(abspath(r"C:\repo"), PathBuf::from(r"C:\repo"));
+        assert_eq!(abspath(r"C:\a\.\b\..\c"), PathBuf::from(r"C:\a\c"));
+        assert_eq!(abspath("C:/a/b"), PathBuf::from(r"C:\a\b"));
     }
 
     #[test]
@@ -2133,8 +2126,10 @@ mod tests {
         );
         write(r#"{"scheduler": "cron", "last_pickup": null, "triage_failed_since": "soon"}"#);
         assert_eq!(cached_status(&dir), ("cron".to_string(), None, None));
+        write(r#"{"scheduler": "systemd", "last_pickup": null}"#);
+        assert_eq!(cached_status(&dir), ("systemd".to_string(), None, None));
         for bad in [
-            r#"{"scheduler": "systemd", "last_pickup": null}"#,
+            r#"{"scheduler": "anacron", "last_pickup": null}"#,
             r#"{"scheduler": "cron", "last_pickup": "2026-1-1T00:00:00Z"}"#,
             r#"{"scheduler": "cron"}"#,
             r#"["cron"]"#,

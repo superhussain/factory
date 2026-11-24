@@ -219,6 +219,12 @@ Treat every secret value as opaque: the older 64-hex form and the modern
 the dashboard: expiry and renewal, rotation with its grace period, disabling and
 revocation. Rotation is the right response to any suspected exposure.
 
+To cut a device off, revoke its service token in Access and retire its host
+under Settings, Hosts. Access checks the token only when a connection opens,
+and the revoked token stays bound to its host, so a daemon socket that is
+already open on `/events/host` keeps its seat and its board rows. Retiring the
+host unbinds the token and closes that seat at once.
+
 Access strict mode means a request without a client cookie is rejected 401/403
 even for a user inside the Allow policy; devices are unaffected because they use
 header-only Service Auth. Never suggest disabling strict mode as a fix.

@@ -17,7 +17,7 @@ use crate::shared::fs::{contained, is_link, resolve};
 use crate::shared::home::device_name;
 use crate::shared::proc::{capture, git, git_ok, origin_git, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
-use crate::shared::py::{is_space, os_error, strip};
+use crate::shared::py::{is_space, os_error, repr, strip};
 use crate::shared::pyjson::{dumps, loads, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
 
@@ -722,7 +722,32 @@ fn proc_alive(pid: u32) -> bool {
 
 /// `stop_pids` with the proc folder and lsof given.
 fn stop_pids_with(wt: &Path, proc_root: &Path, lsof: Option<PathBuf>) -> Option<Vec<u32>> {
-    let real = resolve(wt).unwrap_or_else(|_| wt.to_path_buf());
+    // A link at wt or its parent would point the signals at another folder, and an empty or
+    // unresolved wt would match every process.
+    let linked = [Some(wt), wt.parent()]
+        .into_iter()
+        .flatten()
+        .any(|p| !p.as_os_str().is_empty() && is_link(p).unwrap_or(true));
+    let resolved = resolve(wt);
+    let cause = if wt.as_os_str().is_empty() {
+        "the path is empty"
+    } else if linked {
+        "it is a link or sits under one"
+    } else if resolved.is_err() {
+        "it cannot be resolved"
+    } else {
+        ""
+    };
+    let real = match resolved {
+        Ok(real) if cause.is_empty() => real,
+        _ => {
+            eprintln!(
+                "factory.py: refusing to stop processes in {}: {cause}; no process was signalled",
+                repr(&wt.to_string_lossy())
+            );
+            return None;
+        }
+    };
     if !cfg!(windows) && !proc_root.is_dir() && lsof.is_none() {
         eprintln!(
             "factory.py: lsof not found, so processes in {} were not checked",
@@ -1464,7 +1489,6 @@ mod tests {
     /// `fetch_body` and passes every other call to the real git, so the parent's own git calls stay untouched.
     #[cfg(unix)]
     fn in_fake_git_child(name: &str, verb: &str, fetch_body: &str) {
-        use std::os::unix::fs::PermissionsExt;
         let path = std::env::var("PATH").unwrap();
         let real = path
             .split(':')
@@ -1475,16 +1499,13 @@ mod tests {
             "fake-git-{verb}-{}",
             name.rsplit("::").next().unwrap()
         ));
-        let script = dir.join("git");
-        fs::write(
-            &script,
-            format!(
-                "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = {verb} ]; then\n{fetch_body}\n  fi\ndone\nexec {} \"$@\"\n",
+        crate::shared::build::tests::script(
+            &dir.join("git"),
+            &format!(
+                "for a in \"$@\"; do\n  if [ \"$a\" = {verb} ]; then\n{fetch_body}\n  fi\ndone\nexec {} \"$@\"\n",
                 real.display()
             ),
-        )
-        .unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let out = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", name, "--nocapture"])
             .env(FAKE_GIT_CHILD, dir.display().to_string())
@@ -1823,8 +1844,7 @@ mod tests {
         let t = Prebuild::new("wt-prebuild-fails");
         t.config(r#"["sample"]"#);
         let failing = t.root.join("failing-pnpm");
-        fs::write(&failing, "#!/bin/sh\nexit 1\n").unwrap();
-        chmod(&failing, 0o755);
+        crate::shared::build::tests::script(&failing, "exit 1\n");
         assert_eq!(t.run(None, Some(&failing)), [t.failed("exit 1")]);
         chmod(&t.pnpm, 0o644);
         let out = t.run(None, Some(&t.pnpm));
@@ -2067,8 +2087,7 @@ mod tests {
         assert_eq!(GIT_TIMEOUT, Duration::from_secs(20));
         let dir = temp_dir("wt-slow-git");
         let slow = dir.join("git");
-        fs::write(&slow, "#!/bin/sh\nsleep 5\n").unwrap();
-        chmod(&slow, 0o755);
+        crate::shared::build::tests::script(&slow, "sleep 5\n");
         let out = run_git_with(
             &text(&slow),
             ".",
@@ -2227,14 +2246,39 @@ mod tests {
         let dir = temp_dir("wt-bad-lsof");
         let lsof = dir.join("lsof");
         let wt = dir.display();
-        fs::write(
+        crate::shared::build::tests::script(
             &lsof,
-            format!("#!/bin/sh\nprintf 'p4294967295\\nn{wt}\\np0\\nn{wt}\\n'\n"),
-        )
-        .unwrap();
-        chmod(&lsof, 0o755);
+            &format!("printf 'p4294967295\\nn{wt}\\np0\\nn{wt}\\n'\n"),
+        );
         let alive = stop_pids_with(&dir, &dir.join("no-proc"), Some(lsof));
         assert_eq!(alive, Some(vec![0, 4294967295]));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_pids_refuses_a_linked_or_empty_worktree() {
+        let dir = temp_dir("wt-linked-stop");
+        let real = dir.join("real/001-test");
+        fs::create_dir_all(&real).unwrap();
+        let lsof = dir.join("lsof");
+        let cwd = std::env::current_dir().unwrap();
+        // Unsignallable pids, so a call that was not refused lists them as alive.
+        crate::shared::build::tests::script(
+            &lsof,
+            &format!(
+                "printf 'p4294967295\\nn{}\\np4294967294\\nn{}\\n'\n",
+                real.display(),
+                cwd.display()
+            ),
+        );
+        let stop = |wt: &Path| stop_pids_with(wt, &dir.join("no-proc"), Some(lsof.clone()));
+        assert_eq!(stop(&real), Some(vec![4294967295]));
+        std::os::unix::fs::symlink(&real, dir.join("link")).unwrap();
+        std::os::unix::fs::symlink(dir.join("real"), dir.join("slug")).unwrap();
+        assert_eq!(stop(&dir.join("link")), None);
+        assert_eq!(stop(&dir.join("slug/001-test")), None);
+        assert_eq!(stop(Path::new("")), None);
         fs::remove_dir_all(dir).unwrap();
     }
 
