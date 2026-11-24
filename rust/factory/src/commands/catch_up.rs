@@ -594,8 +594,6 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
     }
 
     let stamp = bundle_stamp(skill);
-    // An install with no entry predates the Rust binary, so its first Rust install points at the guide.
-    let had_entry = crate::shared::home::bundle_entry(skill).is_some();
     let installed = stamp.as_ref().map(|s| py_str(s.get("commit")));
     let current = installed.as_deref() == Some(head.as_str());
     let scheduler = scheduler();
@@ -699,13 +697,6 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             ok = r.code == 0;
             if ok {
                 outln!(out, "skill: installed {h7} into {}", skill.display());
-                if !had_entry {
-                    outln!(
-                        out,
-                        "skill: the old install had no Rust entry; finish the move with {}",
-                        repo.join("docs").join("migrating-to-rust.md").display()
-                    );
-                }
             } else {
                 failed += 1;
                 let text = if r.stderr.is_empty() {
@@ -1480,39 +1471,6 @@ mod tests {
         );
         assert_eq!(t.installed(), c);
         assert_eq!(t.worktrees(), 1);
-    }
-
-    #[test]
-    fn install_without_entry_points_at_the_guide() {
-        let t = T::new("guide-pointer");
-        let bundle = t.skill.join("bundle.json");
-        let mut stamp: Value = serde_json::from_str(&fs::read_to_string(&bundle).unwrap()).unwrap();
-        let map = stamp.as_object_mut().unwrap();
-        map.remove("entry");
-        map.remove("binary_sha256");
-        fs::write(&bundle, stamp.to_string()).unwrap();
-        let (code, lines) = t.lines();
-        assert_eq!(code, 0, "{lines:?}");
-        let at = lines
-            .iter()
-            .position(|l| l.starts_with("skill: installed "))
-            .unwrap();
-        assert_eq!(
-            lines[at + 1],
-            format!(
-                "skill: the old install had no Rust entry; finish the move with {}",
-                t.checkout.join("docs/migrating-to-rust.md").display()
-            )
-        );
-        // The new install has an entry, so the next catch-up does not repeat the line.
-        fs::write(t.src.join("notes.txt"), "Commit C.\n").unwrap();
-        t.commit("C");
-        let (code, lines) = t.lines();
-        assert_eq!(code, 0, "{lines:?}");
-        assert!(
-            !lines.iter().any(|l| l.contains("migrating-to-rust")),
-            "{lines:?}"
-        );
     }
 
     #[test]
