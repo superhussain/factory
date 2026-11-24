@@ -10,8 +10,9 @@ panic = "abort"
 strip = true
 
 # The installer's and CI's build: no LTO and parallel incremental codegen rebuild a one-file change in seconds.
+# `lto = "off"`, not `false`: `false` still runs thin LTO across the crate's own codegen units, about 6 s of every rebuild.
 [profile.host]
 inherits = "release"
-lto = false
+lto = "off"
 codegen-units = 256
 incremental = true

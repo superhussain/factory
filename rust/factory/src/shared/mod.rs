@@ -20,8 +20,8 @@ pub mod time;
 pub mod unicode;
 mod unicode_printable;
 
-/// Held by every test that sets PASEO_HOME, PASEO_AGENT_ID, FACTORY_HOME or FACTORY_SESSION, since tests share
-/// one process environment.
+/// Held by every test that sets PATH, PASEO_HOME, PASEO_AGENT_ID, FACTORY_HOME or FACTORY_SESSION, and by
+/// fixtures that spawn git, since tests share one process environment.
 #[cfg(test)]
 static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

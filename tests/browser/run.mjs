@@ -338,6 +338,7 @@ const CAPTURE_JOBS = [
           "review-code.md web/dashboard.html:9 off-diff",
         ],
       },
+      { security: "PASS", ux: "SKIPPED", ui: "SKIPPED", code: "PASS" },
     ],
   },
   {
@@ -393,6 +394,9 @@ const CAPTURE_GROUNDING_FILES = {
     "Unverified means the cited path or line did not check out. The finding may still be right. No verdict changed.",
     "",
   ].join("\n"),
+  "round-2/review-code.md": "VERDICT: PASS\n\nThe synthetic round 2 code review.\n",
+  "pre-review.md": "PRE-REVIEW: FAIL\n\nThe synthetic pre-review.\n",
+  "decision.md": "APPROVE\n\nThe synthetic decision.\n",
 };
 const CAPTURE_BACKLOG_CONTEXT = [
   "Recommend: approve",
@@ -2266,12 +2270,10 @@ async function capture(outdir, referencePath) {
       return clipOf(page, wrap);
     };
     await view("held-card-390", 390, 844, "dark", openHeldCard, true);
-    // The reference page has no grounding tab, so its side shows the drawer on its spec tab.
-    const openGroundingTab = async (page, side) => {
-      await page.evaluate(() => {
-        location.hash = "#130-ground-export/round-1/grounding";
-      });
-      const text = side === "before" ? "Synthetic grounded export" : "GROUNDING: UNVERIFIED 2";
+    const openJobTab = (hash, text) => async (page) => {
+      await page.evaluate((h) => {
+        location.hash = h;
+      }, hash);
       await page.waitForFunction(
         (t) =>
           document.getElementById("d-meta").textContent.includes("130-ground-export") &&
@@ -2280,8 +2282,18 @@ async function capture(outdir, referencePath) {
         text,
       );
     };
+    const openGroundingTab = openJobTab(
+      "#130-ground-export/round-1/grounding",
+      "GROUNDING: UNVERIFIED 2",
+    );
     await view("grounding-tab-1280", 1280, 900, "light", openGroundingTab);
     await view("grounding-tab-390", 390, 844, "dark", openGroundingTab, true);
+    const openRoundTabs = openJobTab(
+      "#130-ground-export/round-2/review-code",
+      "The synthetic round 2 code review.",
+    );
+    await view("round-tabs-1280", 1280, 900, "light", openRoundTabs);
+    await view("round-tabs-390", 390, 844, "dark", openRoundTabs);
     // keepViewport, since a full-page capture would lay the board out again and shift the clip.
     await view(
       "grounding-chips-1280",
