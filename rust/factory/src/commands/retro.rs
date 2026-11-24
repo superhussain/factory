@@ -5913,52 +5913,84 @@ mod tests {
         text
     }
 
+    /// check on every parity and crafted corpus text, split over the available cores: each pattern runs a
+    /// backtracking search over megabytes of text, which takes tens of seconds on one core.
+    fn each_corpus_text(check: impl Fn(&str) + Sync) {
+        let texts: Vec<String> = parity_corpus()
+            .into_iter()
+            .chain(crafted_corpus())
+            .collect();
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+        std::thread::scope(|s| {
+            // Every threads-th text, so the long texts, which sort together, spread over the threads.
+            for first in 0..threads {
+                let (check, texts) = (&check, &texts);
+                s.spawn(move || {
+                    texts
+                        .iter()
+                        .skip(first)
+                        .step_by(threads)
+                        .for_each(|text| check(text))
+                });
+            }
+        });
+    }
+
     #[test]
     fn redact_supersets_cover_every_match() {
-        let mut matched = [0; REDACT_ORDER.len()];
-        let mut check = |piece: &str, range: std::ops::Range<usize>| {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let matched: [AtomicUsize; REDACT_ORDER.len()] =
+            std::array::from_fn(|_| AtomicUsize::new(0));
+        let check = |piece: &str, range: std::ops::Range<usize>| {
             let hits = redact_set().matches(piece);
             for i in range {
                 if REDACT_ORDER[i].search(piece).is_some() {
-                    matched[i] += 1;
+                    matched[i].fetch_add(1, Ordering::Relaxed);
                     assert!(hits.matched(i), "pattern {i} on {piece:?}");
                 }
             }
         };
-        for text in parity_corpus().iter().chain(&crafted_corpus()) {
+        each_corpus_text(|text| {
             check(text, 0..REDACT_ORDER.len());
             // tool_pass reads its gates one line at a time.
             if text.contains('\n') {
                 text.split('\n').for_each(|line| check(line, TOOL_GATES));
             }
-        }
-        assert!(matched.iter().all(|&n| n > 0), "{matched:?}");
+        });
+        assert!(
+            matched.iter().all(|n| n.load(Ordering::Relaxed) > 0),
+            "{matched:?}"
+        );
     }
 
     #[test]
     fn scan_supersets_cover_every_match() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
         let scan: Vec<&Pattern> = RETRO_POLLS
             .iter()
             .map(|(_, p)| p)
             .chain([&ROUND_DIR])
             .collect();
-        let mut matched = vec![0; scan.len()];
-        for text in parity_corpus().iter().chain(&crafted_corpus()) {
+        let matched: Vec<AtomicUsize> = scan.iter().map(|_| AtomicUsize::new(0)).collect();
+        each_corpus_text(|text| {
             let hits = scan_set().matches(text);
             for (i, p) in scan.iter().enumerate() {
                 if p.search(text).is_some() {
-                    matched[i] += 1;
+                    matched[i].fetch_add(1, Ordering::Relaxed);
                     assert!(hits.matched(i), "pattern {i} on {text:?}");
                 }
             }
-        }
-        assert!(matched.iter().all(|&n| n > 0), "{matched:?}");
+        });
+        assert!(
+            matched.iter().all(|n| n.load(Ordering::Relaxed) > 0),
+            "{matched:?}"
+        );
     }
 
     #[test]
     fn redact_matches_every_pass_run_unfiltered() {
-        for text in parity_corpus().iter().chain(&crafted_corpus()) {
+        each_corpus_text(|text| {
             assert_eq!(retro_redact(text), unfiltered_redact(text), "{text:?}");
-        }
+        });
     }
 }
