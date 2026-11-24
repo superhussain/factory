@@ -3,10 +3,7 @@
   "cases": [
     {
       "id": "stalls/list-reports-only-idle-claude-limit-stalls",
-      "argv": [
-        "stalls",
-        "list"
-      ],
+      "argv": ["stalls", "list"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -14,13 +11,7 @@
       "stubs": {
         "paseo": [
           {
-            "argv": [
-              "--home",
-              "/nonexistent/paseo-home",
-              "ls",
-              "-g",
-              "--json"
-            ],
+            "argv": ["--home", "/nonexistent/paseo-home", "ls", "-g", "--json"],
             "stdout": "[{\"id\":\"4cec0a47-1d21-4115-945b-9e7dfb668ef4\",\"status\":\"idle\",\"provider\":\"claude/model-a\"},{\"id\":\"aaaaaaaab-bbbbbbbbccccddddeeeeffff\",\"status\":\"idle\",\"provider\":\"claude/model-a\"},{\"id\":\"bbbb1111-2222-4333-8444-555566667777\",\"status\":\"running\",\"provider\":\"claude/model-a\"},{\"id\":\"cccc2222-3333-8444-9555-666677778888\",\"status\":\"idle\",\"provider\":\"openai/model-o\"},{\"id\":\"dddd3333-4444-8555-8666-777788889999\",\"status\":\"idle\",\"provider\":\"claude/model-a\"},{\"id\":\"eeee4444-5555-8666-9777-888899990000\",\"status\":\"idle\",\"provider\":\"claude/model-a\"},{\"id\":\"bad id\",\"status\":\"idle\",\"provider\":\"claude/model-a\"},{\"id\":\"ffff5555-6666-8777-8888-999900001111\",\"status\":\"idle\",\"provider\":\"claude-alt/model-a\"},{\"id\":\"abcd6666-7777-8888-9999-000011112222\",\"status\":\"idle\",\"provider\":\"claudex/model-a\"}]\n",
             "stderr": "",
             "code": 0
@@ -155,10 +146,7 @@
     },
     {
       "id": "stalls/unknown-zone-leaves-the-stall-out",
-      "argv": [
-        "stalls",
-        "list"
-      ],
+      "argv": ["stalls", "list"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -166,13 +154,7 @@
       "stubs": {
         "paseo": [
           {
-            "argv": [
-              "--home",
-              "/nonexistent/paseo-home",
-              "ls",
-              "-g",
-              "--json"
-            ],
+            "argv": ["--home", "/nonexistent/paseo-home", "ls", "-g", "--json"],
             "stdout": "[{\"id\":\"4cec0a47-1d21-4115-945b-9e7dfb668ef4\",\"status\":\"idle\",\"provider\":\"claude/model-a\"}]\n",
             "stderr": "",
             "code": 0
@@ -211,11 +193,7 @@
     },
     {
       "id": "stalls/archive-rechecks",
-      "argv": [
-        "stalls",
-        "archive",
-        "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
-      ],
+      "argv": ["stalls", "archive", "4cec0a47-1d21-4115-945b-9e7dfb668ef4"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -267,11 +245,7 @@
     },
     {
       "id": "stalls/archive-keeps-a-woken-session",
-      "argv": [
-        "stalls",
-        "archive",
-        "4cec0a47-1d21-4115-945b-9e7dfb668ef4"
-      ],
+      "argv": ["stalls", "archive", "4cec0a47-1d21-4115-945b-9e7dfb668ef4"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -323,12 +297,7 @@
     },
     {
       "id": "stalls/archive-force-skips-the-stall-check",
-      "argv": [
-        "stalls",
-        "archive",
-        "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
-        "--force"
-      ],
+      "argv": ["stalls", "archive", "4cec0a47-1d21-4115-945b-9e7dfb668ef4", "--force"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -366,12 +335,7 @@
     },
     {
       "id": "stalls/archive-force-no-op-when-archived",
-      "argv": [
-        "stalls",
-        "archive",
-        "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
-        "--force"
-      ],
+      "argv": ["stalls", "archive", "4cec0a47-1d21-4115-945b-9e7dfb668ef4", "--force"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -397,12 +361,7 @@
     },
     {
       "id": "stalls/archive-force-failure",
-      "argv": [
-        "stalls",
-        "archive",
-        "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
-        "--force"
-      ],
+      "argv": ["stalls", "archive", "4cec0a47-1d21-4115-945b-9e7dfb668ef4", "--force"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -440,10 +399,7 @@
     },
     {
       "id": "stalls/ls-fails",
-      "argv": [
-        "stalls",
-        "list"
-      ],
+      "argv": ["stalls", "list"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -451,13 +407,7 @@
       "stubs": {
         "paseo": [
           {
-            "argv": [
-              "--home",
-              "/nonexistent/paseo-home",
-              "ls",
-              "-g",
-              "--json"
-            ],
+            "argv": ["--home", "/nonexistent/paseo-home", "ls", "-g", "--json"],
             "stdout": "[]\n",
             "stderr": "",
             "code": 3
@@ -469,10 +419,7 @@
     },
     {
       "id": "stalls/ls-not-json",
-      "argv": [
-        "stalls",
-        "list"
-      ],
+      "argv": ["stalls", "list"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -480,13 +427,7 @@
       "stubs": {
         "paseo": [
           {
-            "argv": [
-              "--home",
-              "/nonexistent/paseo-home",
-              "ls",
-              "-g",
-              "--json"
-            ],
+            "argv": ["--home", "/nonexistent/paseo-home", "ls", "-g", "--json"],
             "stdout": "{oops\n",
             "stderr": "",
             "code": 0
@@ -498,11 +439,7 @@
     },
     {
       "id": "stalls/usage-1",
-      "argv": [
-        "stalls",
-        "list",
-        "extra"
-      ],
+      "argv": ["stalls", "list", "extra"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -515,10 +452,7 @@
     },
     {
       "id": "stalls/usage-2",
-      "argv": [
-        "stalls",
-        "bogus"
-      ],
+      "argv": ["stalls", "bogus"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -531,11 +465,7 @@
     },
     {
       "id": "stalls/usage-3",
-      "argv": [
-        "stalls",
-        "archive",
-        "x"
-      ],
+      "argv": ["stalls", "archive", "x"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -548,12 +478,7 @@
     },
     {
       "id": "stalls/usage-4",
-      "argv": [
-        "stalls",
-        "archive",
-        "x",
-        "y"
-      ],
+      "argv": ["stalls", "archive", "x", "y"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -566,12 +491,7 @@
     },
     {
       "id": "stalls/usage-5",
-      "argv": [
-        "stalls",
-        "archive",
-        "4cec0a47-1d21-4115-945b-9e7dfb668ef4",
-        "--bogus"
-      ],
+      "argv": ["stalls", "archive", "4cec0a47-1d21-4115-945b-9e7dfb668ef4", "--bogus"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
@@ -584,11 +504,7 @@
     },
     {
       "id": "stalls/usage-6",
-      "argv": [
-        "stalls",
-        "archive",
-        "../escape"
-      ],
+      "argv": ["stalls", "archive", "../escape"],
       "home": null,
       "env": {
         "PASEO_HOME": "/nonexistent/paseo-home"
