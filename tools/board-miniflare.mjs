@@ -5,7 +5,10 @@
 //     as a mean over --runs. They are wall times, so the R2 steps include Miniflare's simulator.
 //   - "workerd CPU" rows are the workerd process's CPU time per request, read with ps around
 //     --runs requests sent over HTTP. That counts the Worker, the Durable Object and Miniflare's
-//     R2 simulator, which production does not charge to the Worker, so it is an upper bound.
+//     R2 simulator together. Production bills the Worker and each Durable Object invocation
+//     separately, and charges neither for R2's side, so each row is an upper bound on the CPU
+//     of any one invocation. The R2 copy runs later in its own alarm invocation and has its
+//     own row.
 // Usage: node tools/board-miniflare.mjs [--rows 2300,4600] [--runs 30] [--worker DIR]
 import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
@@ -129,30 +132,42 @@ export async function benchMiniflare(rows, runs, script) {
     // PATCHes of n active rows, each run moving their updated stamp on, with the rows it expects.
     const active = board.jobs.filter((j) => j.stage !== "merged" && j.stage !== "closed");
     let tick = 0;
-    for (const n of [1, 5]) {
-      const r = await perRequest(runs, async () => {
-        const updated = new Date(Date.UTC(2026, 10, 23, 12, 0, ++tick)).toISOString();
-        const body = JSON.stringify({
-          rows: active.slice(0, n).map((row) => {
-            const expect = { ...row };
-            row.updated = updated.replace(/\.\d+Z$/, "Z");
-            return { id: row.id, expect, row };
-          }),
-        });
-        const res = await mf.dispatchFetch(`${origin}/api/board`, { method: "PATCH", body });
-        if (res.status !== 200) throw new Error(`PATCH ${res.status}: ${await res.text()}`);
-        await res.arrayBuffer();
+    const patchRows = (n) => async () => {
+      const updated = new Date(Date.UTC(2026, 10, 23, 12, 0, ++tick)).toISOString();
+      const body = JSON.stringify({
+        rows: active.slice(0, n).map((row) => {
+          const expect = { ...row };
+          row.updated = updated.replace(/\.\d+Z$/, "Z");
+          return { id: row.id, expect, row };
+        }),
       });
+      const res = await mf.dispatchFetch(`${origin}/api/board`, { method: "PATCH", body });
+      if (res.status !== 200) throw new Error(`PATCH ${res.status}: ${await res.text()}`);
+      await res.arrayBuffer();
+    };
+    for (const n of [1, 5]) {
+      const r = await perRequest(runs, patchRows(n));
       out[`workerd CPU: PATCH ${n} row${n > 1 ? "s" : ""}`] = r.cpu;
       out[`wall: PATCH ${n} row${n > 1 ? "s" : ""}`] = r.wall;
     }
-    const get = await perRequest(runs, async () => {
+    // The room copies the board to R2 from an alarm FLUSH_MS after a row commit, in its own
+    // invocation. An idle 7 s after the PATCHes catches that copy.
+    const idle = workerdCpu();
+    await new Promise((resolve) => setTimeout(resolve, 7000));
+    out["workerd CPU: one R2 copy (alarm, idle 7 s)"] = (workerdCpu() - idle) * 1000;
+    const get = async () => {
       const res = await mf.dispatchFetch(`${origin}/board.json`);
       if (res.status !== 200) throw new Error(`GET ${res.status}`);
       await res.arrayBuffer();
+    };
+    const cached = await perRequest(runs, get);
+    out["workerd CPU: GET /board.json, same version"] = cached.cpu;
+    // A GET after each PATCH reads a new version, which the room builds once.
+    const both = await perRequest(runs, async () => {
+      await patchRows(1)();
+      await get();
     });
-    out["workerd CPU: GET /board.json"] = get.cpu;
-    out["wall: GET /board.json"] = get.wall;
+    out["workerd CPU: GET /board.json after a PATCH"] = both.cpu - out["workerd CPU: PATCH 1 row"];
     return out;
   } finally {
     await mf.dispose();
