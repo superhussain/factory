@@ -187,6 +187,7 @@ fn run(home: &Path) -> Res<()> {
         },
         &running_agents,
         &mut |_| {
+            cap_log(&home.join("logs").join("daemon.log"));
             let _ = std::fs::write(lock_dir(&home).join(LAST_PASS_FILE), now() + "\n");
             let (code, stopped, launched) = run_pickup(&exe, &home, signal_stop);
             log_line(&home, &format!("pickup exited {code}"));
@@ -202,6 +203,37 @@ fn run(home: &Path) -> Res<()> {
     );
     mirror::unlisten(&home);
     Ok(())
+}
+
+/// The size past which a pass trims daemon.log, and the tail it keeps.
+const LOG_CAP: u64 = 5 << 20;
+const LOG_KEEP: u64 = 1 << 20;
+
+/// Trims the service log at path to its last LOG_KEEP bytes, from a line start, once it passes
+/// LOG_CAP. launchd, systemd and cron open it for append, so the daemon's writes go on at the new
+/// end. Windows' `>>` keeps its own offset, so the log there stays as it is.
+fn cap_log(path: &Path) {
+    if cfg!(windows) {
+        return;
+    }
+    let Ok(mut file) = OpenOptions::new().read(true).write(true).open(path) else {
+        return;
+    };
+    let len = file.metadata().map_or(0, |m| m.len());
+    if len <= LOG_CAP {
+        return;
+    }
+    let mut tail = Vec::new();
+    let read = io::Seek::seek(&mut file, io::SeekFrom::Start(len - LOG_KEEP))
+        .and_then(|_| io::Read::read_to_end(&mut io::Read::take(&mut file, LOG_KEEP), &mut tail));
+    if read.is_err() {
+        return;
+    }
+    let start = tail.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let _ = file
+        .set_len(0)
+        .and_then(|_| io::Seek::seek(&mut file, io::SeekFrom::Start(0)))
+        .and_then(|_| io::Write::write_all(&mut file, &tail[start..]));
 }
 
 /// The file beside the lock that holds when the daemon's last pass began.
@@ -1426,6 +1458,26 @@ mod tests {
             "{log}"
         );
         assert!(!log.contains("Access rejected"), "{log}");
+    }
+
+    /// Past LOG_CAP the log keeps its last LOG_KEEP bytes from a line start, and a writer that
+    /// opened it for append, as the service did, goes on at the new end.
+    #[cfg(unix)]
+    #[test]
+    fn service_log_is_capped() {
+        let path = temp_dir("daemon-log-cap").join("daemon.log");
+        let line = format!("{}\n", "x".repeat(99));
+        std::fs::write(&path, line.repeat(60_000)).unwrap();
+        let mut service = OpenOptions::new().append(true).open(&path).unwrap();
+        cap_log(&path);
+        io::Write::write_all(&mut service, b"after\n").unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.len() as u64 <= LOG_KEEP + 6, "{}", text.len());
+        assert!(text.starts_with(&line) && text.ends_with(&format!("{line}after\n")));
+        // Under the cap, nothing changes.
+        std::fs::write(&path, &line).unwrap();
+        cap_log(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), line);
     }
 
     #[test]
