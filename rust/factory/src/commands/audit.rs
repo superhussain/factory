@@ -2730,9 +2730,6 @@ mod tests {
         stops_at_limit(&AUDIT_SECRET_FILE, "cat .env", true);
     }
 
-    /// Wall-clock ceiling per linearity input. Loose enough for a loaded parallel suite, far below any quadratic run on these sizes.
-    const LINEAR_BOUND_SECS: f64 = 5.0;
-
     #[cfg(unix)]
     #[test]
     fn outcome_of_reads_reverts_fixes_and_holds() {
@@ -3025,10 +3022,9 @@ mod tests {
 
     #[test]
     fn runs_output_is_linear() {
-        let start = std::time::Instant::now();
-        let text = format!(" -{}!", "c".repeat(100_000));
-        assert!(AUDIT_RUNS_OUTPUT.search(&text).is_none());
-        assert!(start.elapsed().as_secs_f64() < LINEAR_BOUND_SECS);
+        crate::shared::assert_linear(" -", "c", "!", 100_000, |text| {
+            assert!(AUDIT_RUNS_OUTPUT.search(text).is_none())
+        });
     }
 
     #[test]
@@ -3155,35 +3151,31 @@ mod tests {
 
     #[test]
     fn pr_merge_is_linear() {
-        for text in [
-            format!(";{}", "a=".repeat(50_000)),
-            format!("gh api {}", "x".repeat(100_000)),
-            "(a=".repeat(33_000),
-            "(gh api ".repeat(12_500),
-            "{gh api {a}".repeat(9_000),
-            "`a=".repeat(33_000),
-            "\n".repeat(100_000),
-            "\nenv".repeat(25_000),
-            "\na=".repeat(33_000),
-            format!("({}", "a/".repeat(50_000)),
-            "(a/".repeat(33_000),
-            "($a ".repeat(25_000),
-            "sudo -E ".repeat(25_000),
-            "xargs -n1 ".repeat(20_000),
-            ";a=\"$(".repeat(25_000),
-            "a=\"$(x)\" ".repeat(20_000),
-            "gh -R ".repeat(25_000),
-            "gh api pulls/$".repeat(15_000),
-            "($a/".repeat(30_000),
+        for (prefix, unit, count) in [
+            (";", "a=", 50_000),
+            ("gh api ", "x", 100_000),
+            ("", "(a=", 33_000),
+            ("", "(gh api ", 12_500),
+            ("", "{gh api {a}", 9_000),
+            ("", "`a=", 33_000),
+            ("", "\n", 100_000),
+            ("", "\nenv", 25_000),
+            ("", "\na=", 33_000),
+            ("(", "a/", 50_000),
+            ("", "(a/", 33_000),
+            ("", "($a ", 25_000),
+            ("", "sudo -E ", 25_000),
+            ("", "xargs -n1 ", 20_000),
+            ("", ";a=\"$(", 25_000),
+            ("", "a=\"$(x)\" ", 20_000),
+            ("", "gh -R ", 25_000),
+            ("", "gh api pulls/$", 15_000),
+            ("", "($a/", 30_000),
         ] {
-            let start = std::time::Instant::now();
-            let stripped = audit_strip_quotes(&audit_strip_data_heredocs(&text).unwrap());
-            assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
-            assert!(
-                start.elapsed().as_secs_f64() < LINEAR_BOUND_SECS,
-                "{}",
-                &text[..8]
-            );
+            crate::shared::assert_linear(prefix, unit, "", count, |text| {
+                let stripped = audit_strip_quotes(&audit_strip_data_heredocs(text).unwrap());
+                assert!(AUDIT_PR_MERGE.search(&stripped).is_none());
+            });
         }
     }
 
@@ -4198,6 +4190,10 @@ mod bench_replay_error_test {
 
     #[test]
     fn test_no_claude() {
+        // Empties PATH, so it runs alone: parallel tests need PATH to find git.
+        if !crate::shared::in_own_process(module_path!(), "test_no_claude") {
+            return;
+        }
         let b = Bench::new("no-claude");
         let empty = b.root.join("empty");
         fs::create_dir(&empty).unwrap();

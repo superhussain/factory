@@ -341,15 +341,20 @@ async function assets() {
   return import("./assets.mjs");
 }
 
-// deps lets tests stand in for Wrangler, the asset steps and the Node version.
+// deps lets tests stand in for Wrangler, the asset steps and the Node version, and write to their
+// own build folder.
 export async function main(argv, deps = {}) {
-  const { run = wrangler, tools = assets, version = process.version } = deps;
+  const {
+    run = wrangler,
+    tools = assets,
+    version = process.version,
+    build = join(ROOT, ".build"),
+  } = deps;
   if (argv.length !== 3 || !COMMANDS.includes(argv[0]) || argv[1] !== "--profile") {
     console.error("usage: node tools/deploy.mjs <check|render|dry-run|deploy> --profile <file>");
     return 2;
   }
   const [command, , profilePath] = argv;
-  const build = join(ROOT, ".build");
   try {
     const profile = loadProfile(profilePath);
     if (command === "check") {

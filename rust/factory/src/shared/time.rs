@@ -4,7 +4,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::pyre::{Flags, Pattern};
 
+#[cfg(test)]
+thread_local! {
+    /// A test's pinned clock: while set, `unix_now` on that test's thread returns it.
+    pub static PINNED_NOW: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
 pub fn unix_now() -> i64 {
+    #[cfg(test)]
+    if let Some(secs) = PINNED_NOW.with(|p| p.get()) {
+        return secs;
+    }
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
