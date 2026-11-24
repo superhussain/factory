@@ -1359,7 +1359,9 @@ fn trial_whole(v: Option<&Value>) -> Option<i64> {
     let n = if v.is_i64() || v.is_u64() {
         v.as_i64()?
     } else {
-        let f = v.as_f64().filter(|f| f.fract() == 0.0 && f.abs() <= MAX as f64)?;
+        let f = v
+            .as_f64()
+            .filter(|f| f.fract() == 0.0 && f.abs() <= MAX as f64)?;
         f as i64
     };
     (n.abs() <= MAX).then_some(n)
@@ -5835,7 +5837,9 @@ mod tests {
 
         #[test]
         fn trial_valid_follows_the_shared_rule() {
-            assert!(trial_valid(&trial(json!({"version": 10.0, "id": "factory-spec-v10"}))));
+            assert!(trial_valid(&trial(
+                json!({"version": 10.0, "id": "factory-spec-v10"})
+            )));
             for opened in [
                 "2026-02-30T00:00:00Z",
                 "2026-11-12T24:00:00Z",
@@ -5846,7 +5850,9 @@ mod tests {
                 assert!(!trial_valid(&t), "{opened}");
                 assert!(trial_droppable(&t), "{opened}");
             }
-            assert!(!trial_valid(&trial(json!({"version": 9007199254740992u64}))));
+            assert!(!trial_valid(&trial(
+                json!({"version": 9007199254740992u64})
+            )));
             assert!(!trial_valid(&trial(json!({"champion_version": 1.5}))));
         }
 
