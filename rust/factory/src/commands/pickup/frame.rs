@@ -88,26 +88,47 @@ pub(super) fn dispatch(
 pub(super) fn run(io: &mut Io, home: &Path, flags: &Flags) -> Res<()> {
     let (device, _, minutes) = holder(home)?;
     let started = now();
-    let mut failing = cached_status(home).2;
+    let cached = cached_status(home).2;
+    let mut failing = cached.clone();
     let result = run_passes(io, home, flags, &device, minutes, &started, &mut failing);
     if !flags.dry {
         // Where a daemon holds the lock it is this host's scheduler, and on Linux that may be a
-        // systemd service rather than cron.
-        let scheduler = if daemon::running(home) == Some(true) {
-            daemon_scheduler()
-        } else {
-            pickup_scheduler()
-        };
-        report_status(
-            home,
-            scheduler,
-            Some(&started),
-            failing.as_deref(),
-            None,
-            true,
-        );
+        // systemd service rather than cron. It sends the heartbeat on its own timer, so a pass
+        // beside it sends one only when the triage failure changed, which only the pass knows.
+        if daemon::running(home) != Some(true) {
+            report_status(
+                home,
+                pickup_scheduler(),
+                Some(&started),
+                failing.as_deref(),
+                None,
+                true,
+            );
+        } else if failing != cached {
+            report_status(
+                home,
+                daemon_scheduler(),
+                Some(&started),
+                failing.as_deref(),
+                None,
+                true,
+            );
+        }
     }
     result
+}
+
+/// The daemon's heartbeat: this host's status with the daemon's scheduler, its last pass and the
+/// triage failure the last pass cached. Silent in every outcome.
+pub(crate) fn daemon_heartbeat(home: &Path) -> bool {
+    report_status(
+        home,
+        daemon_scheduler(),
+        daemon::last_pass(home).as_deref(),
+        cached_status(home).2.as_deref(),
+        None,
+        true,
+    )
 }
 
 /// A Worker failure (exit 5) inside a pass costs its message and one line; any other exit stops pickup.

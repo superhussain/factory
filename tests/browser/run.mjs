@@ -378,7 +378,8 @@ const CAPTURE_MERGED = Array.from({ length: 30 }, (_, n) => {
 const CAPTURE_BOARD = [...CAPTURE_JOBS, ...CAPTURE_MERGED];
 const CAPTURE_GROUNDING_FILES = {
   "spec.md": "# Synthetic grounded export\n\nCapture fixture content, not real job data.\n",
-  "round-1/review-code.md": "CHANGES\n\nThe synthetic code review.\n",
+  "round-1/review-code.md":
+    "CHANGES\n\nThe synthetic code review.\n\n## Findings\n\nSynthetic finding.\n",
   "round-1/grounding.md": [
     "GROUNDING: UNVERIFIED 2",
     "",
@@ -394,7 +395,8 @@ const CAPTURE_GROUNDING_FILES = {
     "Unverified means the cited path or line did not check out. The finding may still be right. No verdict changed.",
     "",
   ].join("\n"),
-  "round-2/review-code.md": "VERDICT: PASS\n\nThe synthetic round 2 code review.\n",
+  "round-2/review-code.md":
+    "VERDICT: PASS\n\nThe synthetic round 2 code review.\n\n## Findings\n\nSynthetic finding.\n",
   "pre-review.md": "PRE-REVIEW: FAIL\n\nThe synthetic pre-review.\n",
   "decision.md": "APPROVE\n\nThe synthetic decision.\n",
 };

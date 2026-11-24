@@ -4,6 +4,7 @@ pub mod catch_up;
 pub mod checks;
 pub mod claims;
 pub mod daemon;
+pub mod heartbeat;
 pub mod install;
 pub mod intake;
 pub mod job_sync;

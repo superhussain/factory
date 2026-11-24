@@ -14,7 +14,7 @@ const documents = {
     "round-1/review-code.md": `VERDICT: CHANGES\n\nThe synthetic round 1 code review.\n\n${FILLER}\n`,
     "round-1/grounding.md": "GROUNDING: UNVERIFIED 2\n\nThe synthetic grounding report.\n",
     "round-2/review-code.md":
-      "VERDICT: PASS\n\nThe synthetic round 2 code review.\n\n![shot](shot.png)\n",
+      "VERDICT: PASS\n\nThe synthetic round 2 code review.\n\n![shot](shot.png)\n\n## Findings\n\nSynthetic finding.\n",
     "decision.md": "APPROVE\n\nThe synthetic decision.\n",
   },
   "141-round-escalate": {
@@ -119,6 +119,24 @@ test(
             ["H2", "2", "Round 2"],
           ],
         );
+        assert.deepEqual(
+          await page.$$eval("#d-doc .round-head", (heads) =>
+            heads.map((h) => {
+              const style = getComputedStyle(h);
+              return [style.fontSize, style.borderTopWidth, style.borderTopStyle];
+            }),
+          ),
+          [
+            ["20px", "0px", "none"],
+            ["20px", "2px", "solid"],
+          ],
+        );
+        assert.deepEqual(
+          await page.$$eval("#d-doc h2:not(.round-head)", (heads) =>
+            heads.map((h) => getComputedStyle(h).fontSize),
+          ),
+          ["17px"],
+        );
         const text = await page.$eval("#d-doc", (doc) => doc.textContent);
         assert.ok(
           text.indexOf("The synthetic round 1 code review.") <
@@ -170,6 +188,34 @@ test(
           );
           assert.deepEqual(await tabs(page), [["spec.md", "spec", null], chip]);
         }
+
+        // On a phone moveMedia prepends the gallery and file list into the page. Round 1 still gets no rule.
+        await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 1 });
+        await page.goto(origin + "/#130-ground-export/review-code", {
+          waitUntil: "domcontentloaded",
+        });
+        await page.waitForFunction(() =>
+          document
+            .getElementById("d-doc")
+            .textContent.includes("The synthetic round 2 code review."),
+        );
+        assert.deepEqual(
+          await page.evaluate(() => {
+            const doc = document.getElementById("d-doc");
+            const gallery = document.getElementById("d-gallery");
+            gallery.hidden = false;
+            doc.prepend(gallery, document.getElementById("d-files"));
+            const heads = [...doc.querySelectorAll(".round-head")];
+            return [
+              doc.firstElementChild.id,
+              ...heads.map((h) => {
+                const s = getComputedStyle(h);
+                return [s.borderTopWidth, s.borderTopStyle, s.paddingTop, s.marginTop];
+              }),
+            ];
+          }),
+          ["d-gallery", ["0px", "none", "0px", "0px"], ["2px", "solid", "16px", "32px"]],
+        );
         assert.deepEqual(external, [], "no external requests");
         assert.deepEqual(errors, [], "no page errors");
       } finally {

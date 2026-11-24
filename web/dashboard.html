@@ -689,6 +689,8 @@ try { const t = localStorage.getItem('factory-theme'); if (t === 'light' || t ==
   .doc h1, .doc h2, .doc h3, .doc h4 { line-height: 1.25; margin: 1.2em 0 .5em; }
   .doc h1 { font-size: 20px; } .doc h2 { font-size: 17px; } .doc h3 { font-size: 15px; } .doc h4 { font-size: 14px; }
   .doc > :first-child { margin-top: 0; }
+  .doc .round-head { font-size: 20px; border-top: 2px solid var(--line); padding-top: 16px; margin-top: 32px; }
+  .doc > .round-head:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
   .doc code { font: 12.5px var(--font-mono); background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
   .doc pre { background: var(--code-bg); padding: 10px 12px; border-radius: 6px; overflow-x: auto; }
   .doc pre code { padding: 0; background: none; }
