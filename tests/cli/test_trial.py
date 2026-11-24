@@ -21,6 +21,8 @@ RESUME_ROUTE = "POST /api/trials/resume/factory"
 REASON = "Owner asked in chat to resume factory trials"
 PAUSE_LINE = ("stage-note trials paused for factory after 2 reverts; "
               "a person runs trial resume factory")
+DROPPED_LINE = ("dropped malformed open trial records: {} "
+                "(opened is not a board timestamp or version is not a whole number)")
 
 
 def edit(**over):
@@ -396,10 +398,16 @@ class TrialSettleTest(TrialWorkerCase):
                         arm_jobs(b={"rounds": 3}))
         code, out, err, _, written = self.settle(board)
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, f"trial {TRIAL} reverted to version 9: rounds b higher, tokens no difference\n")
+        self.assertEqual(out, f"trial {TRIAL} reverted to version 9: rounds b higher, tokens no difference\n"
+                              f"{DROPPED_LINE.format(2)}\n")
         self.assertNotIn("junk", written[0]["trials"])
-        self.assertEqual({t["id"]: t["status"] for t in written[0]["trials"]},
-                         {"factory-spec-v9": "open", "factory-spec-v10": "open", TRIAL: "reverted"})
+        self.assertEqual({t["id"]: t["status"] for t in written[0]["trials"]}, {TRIAL: "reverted"})
+
+    def test_misshapen_open_records_are_dropped(self):
+        code, out, err, requests, written = self.settle(running([trial(version=11, opened="garbage")]))
+        self.assertEqual((code, out, err), (0, f"{DROPPED_LINE.format(1)}\n", ""))
+        self.assertEqual([f"{m} {p}" for m, p, *_ in requests], ["GET /api/board", "GET /api/board", "PUT /api/board"])
+        self.assertEqual(written[0]["trials"], [])
 
     def test_no_open_trials(self):
         code, out, _, requests, _ = self.settle(running([trial(status="kept")]))
