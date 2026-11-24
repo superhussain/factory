@@ -1807,10 +1807,10 @@ mod tests {
         assert_eq!(PREBUILD_TIMEOUT, Duration::from_secs(600));
         let dir = temp_dir("wt-run-logged");
         let log = dir.join("logs/run.log");
-        let argv = ["sh", "-c", "echo started; sleep 5"].map(String::from);
+        let argv = ["sh", "-c", "echo started; sleep 30"].map(String::from);
         assert_eq!(
-            run_logged(&argv, &dir, &log, Duration::from_secs(1)),
-            Err("timed out after 1 s".to_string())
+            run_logged(&argv, &dir, &log, Duration::from_secs(5)),
+            Err("timed out after 5 s".to_string())
         );
         assert_eq!(fs::read_to_string(&log).unwrap(), "started\n");
         let argv = ["sh", "-c", "echo out; echo err >&2; exit 3"].map(String::from);

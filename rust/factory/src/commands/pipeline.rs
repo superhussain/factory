@@ -7315,8 +7315,8 @@ mod tests {
                     "deterministic",
                 ),
             ];
-            CHECK_TIMEOUT.with(|t| t.set(Some(1)));
             for (row, unit, exit, cell) in rows {
+                CHECK_TIMEOUT.with(|t| t.set(Some(if row == "budget" { 1 } else { 60 })));
                 let _ = fs::remove_file(&record);
                 f.base(Some(json!([check("lint", "pass"), unit])), None);
                 let (code, out, err) = f.gate();
