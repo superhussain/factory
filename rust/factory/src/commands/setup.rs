@@ -1667,6 +1667,29 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Only the `---` delimiters are checked: invalid YAML inside them is kept byte for byte and the body is refreshed.
+    #[test]
+    fn install_roles_keeps_invalid_yaml_inside_valid_delimiters() {
+        let invalid =
+            "---\ndescription: \"Local tuning\"\nmodel: \"provider/model\nmode: all\n---\n";
+        assert_eq!(native_header(&format!("{invalid}body\n")), Some(invalid));
+        let dir = temp_dir("setup-roles-invalid-yaml");
+        let agents = dir.join("agents");
+        let dirs = vec![("opencode".to_string(), agents.clone())];
+        assert_eq!(install_roles(&dirs).unwrap(), 9);
+        let builder = agents.join("factory-builder.md");
+        fs::write(&builder, format!("{invalid}Stale body.\n")).unwrap();
+        assert_eq!(install_roles(&dirs).unwrap(), 9);
+        let data = fs::read_to_string(&builder).unwrap();
+        assert!(data.starts_with(invalid), "{data}");
+        assert!(
+            data[invalid.len()..].starts_with("You build one software factory job"),
+            "{data}"
+        );
+        assert!(!data.contains("---You"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn adopt_home_once() {

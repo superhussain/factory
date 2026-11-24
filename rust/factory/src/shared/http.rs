@@ -301,6 +301,37 @@ pub fn urlopen_error(e: &ureq::Error) -> String {
     printable_line(&urlopen_detail(e), 200)
 }
 
+/// True when SSL_CERT_FILE or SSL_CERT_DIR names the user's own trust roots.
+fn ssl_env(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
+    ["SSL_CERT_FILE", "SSL_CERT_DIR"]
+        .iter()
+        .any(|name| var(name).is_some_and(|v| !v.is_empty()))
+}
+
+/// A certificate error retries once with the system bundle, unless that file is missing or the
+/// user set their own roots. `retry` is None when the bundle cannot be loaded.
+fn retry_with_fallback(
+    first: Result<Response, ureq::Error>,
+    bundle: &Path,
+    ssl_env: bool,
+    retry: impl FnOnce() -> Option<Result<Response, ureq::Error>>,
+) -> Result<Response, ureq::Error> {
+    if !first.as_ref().is_err_and(cert_error) || ssl_env || !bundle.is_file() {
+        return first;
+    }
+    retry().unwrap_or(first)
+}
+
+/// The exit for a request that never got a response; a certificate error says how to point at a bundle.
+fn network_failure(url: &str, e: &ureq::Error) -> Exit {
+    let hint = if cert_error(e) {
+        ". Set SSL_CERT_FILE to your system CA bundle and retry."
+    } else {
+        ""
+    };
+    fail(format!("can't reach {url}: {}{hint}", urlopen_error(e)), 5)
+}
+
 fn send(
     agent: &Agent,
     method: &str,
@@ -398,7 +429,7 @@ pub fn api(
             }
         }
     }
-    let mut result = send(
+    let result = send(
         platform_agent(&key.0),
         method,
         &url,
@@ -406,28 +437,12 @@ pub fn api(
         body,
         MAX_BODY_BYTES,
     );
-    if result.as_ref().is_err_and(cert_error) {
-        let ssl_env = std::env::var_os("SSL_CERT_FILE").is_some_and(|v| !v.is_empty())
-            || std::env::var_os("SSL_CERT_DIR").is_some_and(|v| !v.is_empty());
-        let fallback = if Path::new(FALLBACK_CA_FILE).is_file() && !ssl_env {
-            fallback_agent(&key.0)
-        } else {
-            None
-        };
-        if let Some(agent) = fallback {
-            result = send(&agent, method, &url, &sent, body, MAX_BODY_BYTES);
-        }
-    }
+    let own_roots = ssl_env(|name| std::env::var_os(name));
+    let result = retry_with_fallback(result, Path::new(FALLBACK_CA_FILE), own_roots, || {
+        fallback_agent(&key.0).map(|agent| send(&agent, method, &url, &sent, body, MAX_BODY_BYTES))
+    });
     if let Err(e) = &result {
-        let hint = if cert_error(e) {
-            ". Set SSL_CERT_FILE to your system CA bundle and retry."
-        } else {
-            ""
-        };
-        return Err(fail(
-            format!("can't reach {url}: {}{hint}", urlopen_error(e)),
-            5,
-        ));
+        return Err(network_failure(&url, e));
     }
     let response = result.unwrap();
     let status = response.status;
@@ -538,12 +553,23 @@ pub(crate) mod tests {
     pub(crate) fn serve(
         replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>,
     ) -> (String, Arc<Mutex<Vec<Seen>>>) {
+        serve_hooked(replies, Vec::new())
+    }
+
+    /// A hook that runs once, after the server reads request `n` and before it replies.
+    pub(crate) type Hook = Box<dyn FnOnce() + Send>;
+
+    /// `serve`, where `hooks[n]` runs mid-request: a local edit that lands between a request and its reply.
+    pub(crate) fn serve_hooked(
+        replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>,
+        mut hooks: Vec<Option<Hook>>,
+    ) -> (String, Arc<Mutex<Vec<Seen>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = seen.clone();
         std::thread::spawn(move || {
-            for (status, body, extra) in replies {
+            for (n, (status, body, extra)) in replies.into_iter().enumerate() {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
                 let mut line = String::new();
@@ -576,6 +602,9 @@ pub(crate) mod tests {
                     headers,
                     body: data,
                 });
+                if let Some(hook) = hooks.get_mut(n).and_then(Option::take) {
+                    hook();
+                }
                 let mut head = format!("HTTP/1.0 {status} X\r\n");
                 for (k, v) in extra {
                     head.push_str(&format!("{k}: {v}\r\n"));
@@ -586,6 +615,18 @@ pub(crate) mod tests {
             }
         });
         (origin, seen)
+    }
+
+    /// A hook that writes `data` to `rel` under the home in `slot`, set once the server's origin is known.
+    pub(crate) fn edit_during(
+        slot: &Arc<Mutex<std::path::PathBuf>>,
+        rel: &'static str,
+        data: String,
+    ) -> Option<Hook> {
+        let slot = slot.clone();
+        Some(Box::new(move || {
+            std::fs::write(slot.lock().unwrap().join(rel), data).unwrap()
+        }))
     }
 
     pub(crate) fn home_for(name: &str, origin: &str) -> std::path::PathBuf {
@@ -718,6 +759,85 @@ pub(crate) mod tests {
             format!("factory.py: can't reach {origin}/projects.json: <urlopen error [Errno 111] Connection refused>\n")
         );
         assert!(!e.stderr.contains("test-secret"));
+    }
+
+    fn cert_failure() -> ureq::Error {
+        ureq::Error::Io(std::io::Error::other(
+            "certificate verify failed: unable to get local issuer certificate",
+        ))
+    }
+
+    fn ok_response() -> Response {
+        Response {
+            status: 200,
+            headers: vec![("ETag".into(), "\"v1\"".into())],
+            body: b"{\"jobs\": []}".to_vec(),
+        }
+    }
+
+    #[test]
+    fn cert_error_retries_with_the_system_bundle() {
+        assert_eq!(FALLBACK_CA_FILE, "/etc/ssl/cert.pem");
+        let home = temp_dir("http-bundle");
+        let bundle = home.join("cert.pem");
+        std::fs::write(&bundle, "").unwrap();
+        let mut retries = 0;
+        let got = retry_with_fallback(Err(cert_failure()), &bundle, ssl_env(|_| None), || {
+            retries += 1;
+            Some(Ok(ok_response()))
+        })
+        .unwrap();
+        assert_eq!(
+            (got.status, got.text().unwrap()),
+            (200, "{\"jobs\": []}".into())
+        );
+        assert_eq!(retries, 1);
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn cert_error_is_not_retried_when_ssl_cert_file_or_dir_is_set() {
+        let home = temp_dir("http-own-roots");
+        let bundle = home.join("cert.pem");
+        std::fs::write(&bundle, "").unwrap();
+        for (name, value) in [
+            ("SSL_CERT_FILE", "/synthetic/ca.pem"),
+            ("SSL_CERT_DIR", "/synthetic/certs"),
+        ] {
+            let own = ssl_env(|var| (var == name).then(|| value.into()));
+            assert!(own, "{name}");
+            let err = retry_with_fallback(Err(cert_failure()), &bundle, own, || {
+                panic!("{name} is set, so there is no second attempt")
+            })
+            .unwrap_err();
+            assert_eq!(
+                network_failure("https://factory.example.test/api/board", &err).code,
+                5
+            );
+        }
+        assert!(!ssl_env(|_| Some("".into())));
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn cert_error_without_the_bundle_explains_how_to_set_one() {
+        let home = temp_dir("http-no-bundle");
+        let err = retry_with_fallback(
+            Err(cert_failure()),
+            &home.join("missing.pem"),
+            false,
+            || panic!("no bundle file, so there is no second attempt"),
+        )
+        .unwrap_err();
+        let exit = network_failure("https://factory.example.test/api/board", &err);
+        assert_eq!(exit.code, 5);
+        assert!(
+            exit.stderr
+                .ends_with(". Set SSL_CERT_FILE to your system CA bundle and retry.\n"),
+            "{}",
+            exit.stderr
+        );
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

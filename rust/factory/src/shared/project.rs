@@ -343,7 +343,8 @@ pub fn safe_job_folder(home: &Path, slug: &str, job_id: &str) -> Res<PathBuf> {
 mod tests {
     use super::*;
     use crate::shared::fs::temp_dir;
-    use crate::shared::http::tests::{home_for, serve};
+    use crate::shared::http::tests::{edit_during, home_for, serve, serve_hooked};
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn trailing_dot_refused_on_windows() {
@@ -391,6 +392,50 @@ mod tests {
         fs::remove_dir_all(home).unwrap();
     }
 
+    /// A local edit that lands while the GET is in flight is kept: pull exits 6 and rewrites nothing.
+    #[test]
+    fn pull_keeps_an_edit_made_during_the_get() {
+        let draft = "---\nrepo: octo/sample\n---\nBodyTyping\n";
+        let slot = Arc::new(Mutex::new(PathBuf::new()));
+        let (origin, _) = serve_hooked(
+            vec![
+                (
+                    200,
+                    "---\nrepo: octo/sample\n---\nBody\n",
+                    vec![("ETag", "\"e1\"")],
+                ),
+                (
+                    200,
+                    "---\nrepo: octo/sample\n---\nBodyRemote\n",
+                    vec![("ETag", "\"e2\"")],
+                ),
+            ],
+            vec![
+                None,
+                edit_during(&slot, "projects/sample.md", draft.to_string()),
+            ],
+        );
+        let home = home_for("project-pull-edit", &origin);
+        *slot.lock().unwrap() = home.clone();
+        assert!(!pull_project(&home, "sample").unwrap());
+        let state = home.join("projects/sample.sync.json");
+        let before = fs::read(&state).unwrap();
+        let e = pull_project(&home, "sample").unwrap_err();
+        assert_eq!(e.code, 6);
+        assert!(
+            e.stderr
+                .contains("Project changed locally during pull. Local edits were kept."),
+            "{}",
+            e.stderr
+        );
+        assert_eq!(
+            fs::read_to_string(home.join("projects/sample.md")).unwrap(),
+            draft
+        );
+        assert_eq!(fs::read(&state).unwrap(), before);
+        fs::remove_dir_all(home).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn job_folder_refuses_links() {
@@ -410,6 +455,72 @@ mod tests {
             project_files(&home, "bad slug").unwrap_err().stderr,
             "factory.py: invalid project slug\n"
         );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    /// project_files refuses a linked document, a directory as document, a linked state file, an
+    /// unreadable document and a linked projects folder, each with exit 6.
+    #[cfg(unix)]
+    #[test]
+    fn project_files_refuses_links_nonregular_and_unreadable_paths() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let home = temp_dir("project-files-refusals");
+        let folder = home.join("projects");
+        let (document, state, _) = project_files(&home, "sample").unwrap();
+        let refused = |want: &str| {
+            let e = project_files(&home, "sample").unwrap_err();
+            assert_eq!(e.code, 6, "{}", e.stderr);
+            assert!(e.stderr.contains(want), "{}", e.stderr);
+        };
+        let links = "project paths must not be symlinks or junctions";
+        let regular = "project paths must be readable regular files in a real directory";
+
+        symlink(home.join("outside"), &document).unwrap();
+        refused(links);
+        fs::remove_file(&document).unwrap();
+
+        fs::create_dir(&document).unwrap();
+        refused(regular);
+        fs::remove_dir(&document).unwrap();
+
+        symlink(home.join("outside"), &state).unwrap();
+        refused(links);
+        fs::remove_file(&state).unwrap();
+
+        fs::write(&document, "draft").unwrap();
+        fs::set_permissions(&document, fs::Permissions::from_mode(0o000)).unwrap();
+        let readable = fs::File::open(&document).is_ok();
+        let result = project_files(&home, "sample");
+        fs::set_permissions(&document, fs::Permissions::from_mode(0o644)).unwrap();
+        if !readable {
+            let e = result.unwrap_err();
+            assert_eq!(e.code, 6);
+            assert!(e.stderr.contains(regular), "{}", e.stderr);
+        }
+        fs::remove_file(&document).unwrap();
+
+        fs::remove_dir(&folder).unwrap();
+        symlink(&home, &folder).unwrap();
+        refused(links);
+        fs::remove_file(&folder).unwrap();
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    /// A factory home reached through a symlink alias is trusted: only jobs, jobs/<slug> and the job
+    /// folder are checked for links, so a link above the home does not refuse the job.
+    #[cfg(unix)]
+    #[test]
+    fn job_folder_trusts_a_symlinked_factory_home() {
+        let home = temp_dir("project-jobs-alias");
+        fs::create_dir_all(home.join("jobs/s/1-a/round-1")).unwrap();
+        let alias = temp_dir("project-jobs-alias-link").join("alias");
+        std::os::unix::fs::symlink(&home, &alias).unwrap();
+        assert_eq!(
+            safe_job_folder(&alias, "s", "1-a").unwrap(),
+            alias.join("jobs/s/1-a")
+        );
+        fs::remove_file(&alias).unwrap();
+        fs::remove_dir_all(alias.parent().unwrap()).unwrap();
         fs::remove_dir_all(home).unwrap();
     }
 
@@ -473,6 +584,22 @@ mod tests {
             fs::read_to_string(round.join("review-code.md")).unwrap(),
             "VERDICT: PASS\n"
         );
+
+        // A write-and-execute-only job folder lists as empty, so a link hidden in it must fail the
+        // guard rather than let a pull write through it.
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o333)).unwrap();
+        let listable = fs::read_dir(&folder).is_ok();
+        let result = safe_job_folder(&home, "s", "1-a");
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        if !listable {
+            let e = result.unwrap_err();
+            assert_eq!(e.code, 6);
+            assert!(
+                e.stderr.contains("cannot inspect job paths"),
+                "{}",
+                e.stderr
+            );
+        }
         fs::remove_dir_all(home).unwrap();
     }
 }

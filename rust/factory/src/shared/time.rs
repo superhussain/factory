@@ -110,6 +110,12 @@ mod tests {
     }
 
     #[test]
+    fn elapsed_counts_seconds_since_a_past_stamp() {
+        let elapsed = elapsed_seconds(&format_stamp(unix_now() - 340)).unwrap();
+        assert!((340..=400).contains(&elapsed), "{elapsed}");
+    }
+
+    #[test]
     fn parse_accepts_what_strptime_accepts() {
         assert_eq!(
             parse_stamp("2026-1-5T1:2:3Z"),

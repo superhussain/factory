@@ -17185,6 +17185,45 @@
       "exit": 5
     },
     {
+      "id": "intake/idea-images-import-retries-after-a-partial-push",
+      "argv": ["--home", "{home}", "idea-images", "sample/001-idea"],
+      "home": "intake-images-retry",
+      "stubs": {},
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\": \"2026-01-01T00:00:00Z\", \"jobs\": [{\"id\": \"001-idea\", \"project\": \"sample\", \"stage\": \"idea\", \"idea\": \"with images\", \"idea_images\": [\"9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png\"], \"capture_id\": \"11111111-1111-4111-8111-111111111111\"}]}\n"
+        ],
+        "GET /api/idea-images/9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          "fake png one\n"
+        ],
+        "GET /api/jobs/sample/001-idea/?etags=1": [
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              },
+              {
+                "name": "idea-images.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "PUT /api/jobs/sample/001-idea/idea-images.md": [200, ""],
+        "PUT /api/jobs/sample/001-idea/idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          ""
+        ]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_factory.py::IdeaImagesTest.test_import_retries_after_a_partial_push"
+    },
+    {
       "id": "intake/idea-images-unsynced-import-exits-6",
       "argv": ["--home", "{home}", "idea-images", "sample/001-idea"],
       "home": "intake-next",

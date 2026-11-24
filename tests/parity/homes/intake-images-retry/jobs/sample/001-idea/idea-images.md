@@ -1,0 +1,3 @@
+Pasted image context for this idea:
+
+![pasted image 1](idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png)

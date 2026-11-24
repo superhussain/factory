@@ -65,6 +65,40 @@
       "from": "tests/cli/test_factory.py::AgentInstallTest.test_repeated_init_preserves_native_header_and_refreshes_body"
     },
     {
+      "id": "setup/init-agents-refuses-a-header-without-delimiters",
+      "argv": ["--home", "{home}", "init", "--agents", "both"],
+      "home": "setup-agents-bad-no-header",
+      "stubs": {},
+      "from": "tests/cli/test_factory.py::AgentInstallTest.test_init_refuses_missing_or_unsupported_header_delimiters",
+      "exit": 2
+    },
+    {
+      "id": "setup/init-agents-refuses-an-unclosed-header",
+      "argv": ["--home", "{home}", "init", "--agents", "both"],
+      "home": "setup-agents-bad-unclosed",
+      "stubs": {},
+      "from": "tests/cli/test_factory.py::AgentInstallTest.test_init_refuses_missing_or_unsupported_header_delimiters",
+      "exit": 2
+    },
+    {
+      "id": "setup/init-agents-refuses-a-header-closed-by-the-unsupported-document-end",
+      "argv": ["--home", "{home}", "init", "--agents", "both"],
+      "home": "setup-agents-bad-dots",
+      "stubs": {},
+      "from": "tests/cli/test_factory.py::AgentInstallTest.test_init_refuses_missing_or_unsupported_header_delimiters",
+      "exit": 2
+    },
+    {
+      "id": "setup/init-agents-empty-xdg-config-home-falls-back",
+      "argv": ["--home", "{home}", "init", "--agents", "both"],
+      "home": null,
+      "stubs": {},
+      "from": "tests/cli/test_factory.py::AgentInstallTest.test_empty_xdg_config_home_falls_back_to_default",
+      "env": {
+        "XDG_CONFIG_HOME": ""
+      }
+    },
+    {
       "id": "setup/init-register",
       "argv": ["--home", "{home}", "init", "/srv/sample"],
       "home": null,

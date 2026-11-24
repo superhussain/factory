@@ -725,7 +725,8 @@ pub fn sync(call: &Call) -> Res<()> {
 mod tests {
     use super::*;
     use crate::shared::fs::temp_dir;
-    use crate::shared::http::tests::home_for;
+    use crate::shared::http::tests::{edit_during, home_for, serve_hooked};
+    use std::sync::{Arc, Mutex};
 
     fn job_home(name: &str, origin: &str, files: &[(&str, &[u8])]) -> PathBuf {
         let home = home_for(name, origin);
@@ -918,6 +919,39 @@ mod tests {
             e.stderr,
             "factory.py: cannot push local project: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte\n"
         );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    /// A local edit that lands while the PUT is in flight is kept, and the state records the uploaded sha.
+    #[test]
+    fn push_project_keeps_an_edit_made_during_the_put() {
+        let base = "---\nrepo: octo/sample\n---\nBody\n";
+        let draft = "---\nrepo: octo/sample\n---\nBodyTyping\n";
+        let slot = Arc::new(Mutex::new(PathBuf::new()));
+        let (origin, seen) = serve_hooked(
+            vec![(200, "ok", vec![("ETag", "\"e2\"")])],
+            vec![edit_during(
+                &slot,
+                "projects/sample.md",
+                format!("{draft}More"),
+            )],
+        );
+        let home = home_for("sync-project-put-edit", &origin);
+        *slot.lock().unwrap() = home.clone();
+        let (document, state_path, _) = project_files(&home, "sample").unwrap();
+        save_project_state(&state_path, Some("\"e1\""), base.as_bytes()).unwrap();
+        fs::write(&document, draft).unwrap();
+        push_project(&home, "sample").unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].body, draft.as_bytes());
+        assert_eq!(seen[0].header("If-Match"), Some("\"e1\""));
+        assert_eq!(
+            fs::read_to_string(&document).unwrap(),
+            format!("{draft}More")
+        );
+        let state = read_project_state(&state_path).unwrap().unwrap();
+        assert_eq!(state["sha256"], sha(draft.as_bytes()));
+        assert_eq!(state["etag"], "\"e2\"");
         fs::remove_dir_all(home).unwrap();
     }
 
