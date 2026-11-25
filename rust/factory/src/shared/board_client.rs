@@ -119,7 +119,7 @@ fn connect(home: &Path) -> Option<BufReader<Box<dyn Stream>>> {
 
 /// Why a request got no usable reply.
 #[derive(Debug, PartialEq)]
-enum Unanswered {
+pub(crate) enum Unanswered {
     /// No daemon took the request: nothing connected or proved itself, or it refused the request.
     Unreached,
     /// The request went out and no reply came, so the daemon may have acted on it.
@@ -127,7 +127,7 @@ enum Unanswered {
 }
 
 /// Sends one request and returns the reply's first line and the reader for any more.
-fn ask(
+pub(crate) fn ask(
     home: &Path,
     mut request: Map<String, Value>,
     limit: Duration,

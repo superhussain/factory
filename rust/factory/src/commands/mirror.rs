@@ -330,6 +330,7 @@ impl Mirror {
                     }
                     json!({"v": PROTOCOL, "ok": true})
                 }
+                Some("gh" | "gh-wait") => crate::commands::ghpoll::answer(&request),
                 _ => refused("unknown op"),
             }
         };
