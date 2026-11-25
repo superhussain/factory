@@ -212,10 +212,11 @@ timeout. See [pickup](references/pickup.md#prebuilt-dependencies).
 ## Claims
 
 Every job carries a `claim` naming the session running it, so two sessions, on one
-device or two, never run the same job. The first `claim` or `hold` without a session
-prints `new session <tag>` on stderr, so read stderr. `next`
-does the same. Pass `--session <tag>` to every later `claim`, `next`, `hold`, and
-`board` call in this conversation.
+device or two, never run the same job. The first `claim`, `hold` or `next` without a
+session prints `new session <tag>` on stderr, so read stderr. With that tag or a
+launch prompt's `--session <tag>`, start every shell call that runs the runtime
+with `export FACTORY_SESSION=<tag>`, since shells start fresh. Without it, a write
+exits 6.
 
 - Run `hold` before spawning each agent and after each one finishes, so a long
   build keeps the claim fresh. A claim goes stale after `claim_stale_minutes` in
@@ -259,8 +260,9 @@ comes from the argument. Update the board at every stage change and as each
 verdict lands.
 
 ```bash
+export FACTORY_SESSION=<tag>
 echo '{"stage":"review","round":1,"rounds":[{"security":"pending","ux":"pending","ui":"pending","code":"pending"}]}' \
-  | "$RUNTIME" board "$FACTORY" 003-rate-limiting --session <tag>
+  | "$RUNTIME" board "$FACTORY" 003-rate-limiting
 ```
 
 `null` clears a key (`{"port": null}`), and `rounds` is always sent whole. To record one
@@ -274,7 +276,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
 
 ## Rules
 
-- Before each role dispatch, run `"$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`. `<via>` is `native` for a direct Claude Code subagent, else `paseo`, `launcher`, `general` or `direct`. For via paseo, record after the worker exists, with `--paseo-agent <agent-id>`.
+- Before each role dispatch, run `"$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>]`. `<via>` is `native` for a direct Claude Code subagent, else `paseo`, `launcher`, `general` or `direct`. For via paseo, record after the worker exists, with `--paseo-agent <agent-id>`.
   After hold, record the orchestrator once when no orchestrator row carries this session.
 - Agents get context from files, not the conversation. Build every agent prompt with
   `"$RUNTIME" prompt "$SLUG/<id>" <role> [--round N] [--port P] --out "$FACTORY/prompts/$SLUG/<id>/<role>.txt"`
