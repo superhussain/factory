@@ -187,6 +187,19 @@ fn run(home: &Path) -> Res<()> {
     catch_stop_signals();
     let exe = std::env::current_exe().map_err(|e| fail(os_error(&e, None), 1))?;
     let url = host_url(&origin);
+    let terminal = io::stderr().is_terminal();
+    let service_log = home.join("logs").join("daemon.log");
+    // launchd, systemd and cron open the service log for append; on Windows the daemon does.
+    #[cfg(windows)]
+    let capped = !terminal && own_log(&service_log);
+    #[cfg(not(windows))]
+    let capped = true;
+    if let Ok(pinned) = std::env::var("FACTORY_PARITY_NOW") {
+        log_line(
+            &home,
+            &format!("clock pinned: FACTORY_PARITY_NOW={pinned} is set, so this daemon reads that time, not the real one"),
+        );
+    }
     let board = Mirror::new(&home);
     // Without the endpoint, commands read the Worker as before.
     if let Err(e) = mirror::listen(board.clone()) {
@@ -214,7 +227,6 @@ fn run(home: &Path) -> Res<()> {
             Arc::new(move |msg: &str| log_line(&sync_home, msg)),
         )
     });
-    let terminal = io::stderr().is_terminal();
     let poller_home = home.clone();
     let gh_poller = crate::commands::ghpoll::start(
         signal_stop,
@@ -240,7 +252,9 @@ fn run(home: &Path) -> Res<()> {
         },
         &running_agents,
         &mut |_| {
-            cap_log(&home.join("logs").join("daemon.log"));
+            if capped {
+                cap_log(&service_log);
+            }
             let _ = std::fs::write(lock_dir(&home).join(LAST_PASS_FILE), now() + "\n");
             heart.before_pass(&home, &|msg| log_line(&home, msg));
             let (code, stopped, launched) = run_pickup(&exe, &home, signal_stop);
@@ -333,11 +347,10 @@ const LOG_CAP: u64 = 5 << 20;
 const LOG_KEEP: u64 = 1 << 20;
 
 /// Trims the service log at path to its last LOG_KEEP bytes, from a line start, once it passes
-/// LOG_CAP. launchd, systemd and cron open it for append, so the daemon's writes go on at the new
-/// end. Windows' `>>` keeps its own offset, so the log there stays as it is. A link there is left
-/// alone, so the trim never truncates another file.
+/// LOG_CAP. Every writer has it open for append, so the daemon's writes go on at the new end. A
+/// link there is left alone, so the trim never truncates another file.
 fn cap_log(path: &Path) {
-    if cfg!(windows) || is_link(path).unwrap_or(true) {
+    if is_link(path).unwrap_or(true) {
         return;
     }
     let mut options = OpenOptions::new();
@@ -362,6 +375,27 @@ fn cap_log(path: &Path) {
         .set_len(0)
         .and_then(|_| io::Seek::seek(&mut file, io::SeekFrom::Start(0)))
         .and_then(|_| io::Write::write_all(&mut file, &tail[start..]));
+}
+
+/// Points this process's stdout and stderr at its own append-mode handle on the service log. The
+/// `.cmd` loop starts the daemon with both on the log through `>>`, whose handle keeps its own
+/// offset, so a trim would leave it writing past the new end. False when the log can't be opened.
+#[cfg(windows)]
+fn own_log(path: &Path) -> bool {
+    use std::os::windows::io::IntoRawHandle;
+    extern "system" {
+        fn SetStdHandle(which: u32, handle: *mut std::ffi::c_void) -> i32;
+    }
+    const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
+    const STD_ERROR_HANDLE: u32 = -12i32 as u32;
+    let Ok(file) = OpenOptions::new().create(true).append(true).open(path) else {
+        return false;
+    };
+    let handle = file.into_raw_handle();
+    // SAFETY: the handle stays open for the life of the process, as the standard handles need.
+    unsafe {
+        SetStdHandle(STD_OUTPUT_HANDLE, handle) != 0 && SetStdHandle(STD_ERROR_HANDLE, handle) != 0
+    }
 }
 
 /// The file beside the lock that holds when the daemon's last pass began.
@@ -1725,7 +1759,6 @@ mod tests {
 
     /// Past LOG_CAP the log keeps its last LOG_KEEP bytes from a line start, and a writer that
     /// opened it for append, as the service did, goes on at the new end.
-    #[cfg(unix)]
     #[test]
     fn service_log_is_capped() {
         let path = temp_dir("daemon-log-cap").join("daemon.log");
