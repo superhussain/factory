@@ -37,6 +37,13 @@ const MIN_BACKOFF: Duration = Duration::from_secs(60);
 const MAX_BACKOFF: Duration = Duration::from_secs(15 * 60);
 /// The most keys the daemon keeps; past it a new key is refused and the command runs gh itself.
 const MAX_KEYS: usize = 200;
+/// The longest single argument and the longest argv, in bytes, the daemon runs gh with. A longer
+/// request is refused and the command runs gh itself.
+const MAX_ARG: usize = 4096;
+const MAX_ARGV: usize = 8192;
+/// The most gh processes the daemon runs at once; a read that would start another is refused and
+/// the command runs gh itself.
+const MAX_GH: usize = 4;
 /// The longest single gh-wait; a longer sleep waits again.
 const MAX_WAIT: f64 = 50.0;
 /// How young a cached answer must be for a command's first read of a key.
@@ -189,12 +196,17 @@ struct Cache {
     versions: u64,
     backoff: Duration,
     backoff_until: Option<Instant>,
+    /// GitHub's last rate-limit answer, which a read of a key with no cached answer gets during
+    /// the backoff.
+    limit: Option<GhOut>,
 }
 
 pub struct Poller {
     state: Mutex<Cache>,
     moved: Condvar,
     gh: RunGh,
+    /// Whether the daemon's environment sets a variable.
+    env: fn(&str) -> bool,
 }
 
 static POLLER: OnceLock<Arc<Poller>> = OnceLock::new();
@@ -209,6 +221,7 @@ impl Poller {
             state: Mutex::new(Cache::default()),
             moved: Condvar::new(),
             gh,
+            env: |k| std::env::var_os(k).is_some(),
         })
     }
 
@@ -235,6 +248,7 @@ impl Poller {
         if rate_limited(&out) {
             s.backoff = (s.backoff * 2).clamp(MIN_BACKOFF, MAX_BACKOFF);
             s.backoff_until = Some(now + s.backoff);
+            s.limit = Some(out.clone());
         } else if !throttled(&out) {
             s.backoff = Duration::ZERO;
             s.backoff_until = None;
@@ -275,16 +289,27 @@ impl Poller {
         Some((out, version))
     }
 
-    /// The cached answer to key when it is at most max_age old, else a fresh one.
-    fn read(&self, key: &Key, max_age: Duration, every: Duration) -> Option<(GhOut, u64)> {
+    /// The cached answer to key when it is at most max_age old, else a fresh one. While a rate
+    /// limit holds, no read calls GitHub: a cached answer serves whatever its age, and a key with
+    /// none gets the rate-limit answer, kept as version 0. Err is why the daemon can't answer.
+    fn read(
+        &self,
+        key: &Key,
+        max_age: Duration,
+        every: Duration,
+    ) -> Result<(GhOut, u64), &'static str> {
         let mut s = self.state.lock().unwrap();
         loop {
+            let limited = s.backoff_until.is_some_and(|t| Instant::now() < t);
             if let Some(e) = s.entries.get_mut(key) {
                 e.read = Instant::now();
                 e.every = e.every.min(every);
-                if e.fetched.elapsed() <= max_age {
-                    return Some((e.answer.clone(), e.version));
+                if limited || e.fetched.elapsed() <= max_age {
+                    return Ok((e.answer.clone(), e.version));
                 }
+            }
+            if let (true, Some(out)) = (limited, &s.limit) {
+                return Ok((out.clone(), 0));
             }
             if !s.inflight.contains(key) {
                 break;
@@ -292,9 +317,12 @@ impl Poller {
             // Another caller's gh call for this key is running; share its answer.
             s = self.moved.wait(s).unwrap();
         }
+        if s.inflight.len() >= MAX_GH {
+            return Err("the daemon already runs as many gh calls as it allows");
+        }
         s.inflight.insert(key.clone());
         drop(s);
-        self.fetch(key, every)
+        self.fetch(key, every).ok_or("gh is not installed")
     }
 
     /// Blocks until one of keys holds a version other than the one given, or wait passes.
@@ -350,7 +378,7 @@ impl Poller {
                     .filter(|e| e.fetched.elapsed() >= Self::interval(e))
                     .map(|e| e.every);
                 match due {
-                    Some(every) if !s.inflight.contains(&key) => {
+                    Some(every) if !s.inflight.contains(&key) && s.inflight.len() < MAX_GH => {
                         s.inflight.insert(key.clone());
                         every
                     }
@@ -378,12 +406,17 @@ impl Poller {
                 let Some(key) = key_of(&request["args"]) else {
                     return refused("gh needs args");
                 };
+                if key.iter().any(|a| a.len() > MAX_ARG)
+                    || key.iter().map(String::len).sum::<usize>() > MAX_ARGV
+                {
+                    return refused("gh args too long");
+                }
                 let args: Vec<&str> = key.iter().map(String::as_str).collect();
                 if !cacheable(&args) {
                     return refused("not a cached gh read");
                 }
                 // A daemon with its own gh identity would answer as another account.
-                if own_gh_env(&|k| std::env::var_os(k).is_some()) {
+                if own_gh_env(&self.env) {
                     if !WARNED.swap(true, Ordering::Relaxed) {
                         if let Some(log) = LOG.get() {
                             log("gh poller: not proxying, the daemon's environment sets a gh credential or setting; commands run gh themselves");
@@ -396,8 +429,8 @@ impl Poller {
                 }
                 let every = secs(&request["every"], 3600.0).max(FASTEST);
                 match self.read(&key, secs(&request["max_age"], TRUSTED), every) {
-                    None => refused("gh is not installed"),
-                    Some((out, version)) => {
+                    Err(why) => refused(why),
+                    Ok((out, version)) => {
                         let code = match out.code {
                             GhCode::Exit(c) => json!(c),
                             GhCode::Timeout => json!("timeout"),
@@ -744,6 +777,8 @@ mod tests {
 
     #[test]
     fn answers_pass_through_with_their_exit_code_and_streams() {
+        // Other tests swap HOME, which gh_env compares on both sides.
+        let _env = crate::shared::test_env_lock();
         let (p, _) = poller(vec![GhOut {
             code: GhCode::Timeout,
             stdout: String::new(),
@@ -942,6 +977,122 @@ mod tests {
         assert!(!own_gh_env(&|v| v == "PATH"));
     }
 
+    /// A daemon whose own environment sets a gh credential or setting refuses every read without
+    /// running gh, so the command runs gh under its own identity.
+    #[test]
+    fn a_daemon_with_its_own_gh_identity_refuses() {
+        let (mut p, calls) = poller(vec![out(0, "OPEN\n", "")]);
+        Arc::get_mut(&mut p).unwrap().env = |k| k == "GH_TOKEN";
+        let reply = p.answer(&json!({"op": "gh", "args": view(), "env": gh_env()}));
+        assert_eq!(
+            (reply["ok"].clone(), reply["error"].clone()),
+            (
+                json!(false),
+                json!("the daemon has its own gh credentials or config")
+            )
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// A request whose argv is over the size caps is refused before gh runs.
+    #[test]
+    fn an_oversized_argv_is_refused() {
+        let (p, calls) = poller(vec![out(0, "OPEN\n", "")]);
+        let long_url = format!("https://github.com/{}", "a".repeat(MAX_ARG));
+        let near = |n: usize| format!("https://github.com/{}", "a".repeat(n));
+        for args in [
+            json!(["pr", "view", long_url, "--json", "state"]),
+            json!([
+                "pr",
+                "view",
+                near(4070),
+                "--json",
+                "s".repeat(4090),
+                "--jq",
+                ".state"
+            ]),
+        ] {
+            let reply = p.answer(&json!({"op": "gh", "args": args, "env": gh_env()}));
+            assert_eq!(reply["error"], "gh args too long");
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// At most MAX_GH gh calls run at once: a read that would start another is refused until one
+    /// ends.
+    #[test]
+    fn gh_calls_past_the_cap_are_refused() {
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (held, seen) = (gate.clone(), calls.clone());
+        let gh: RunGh = Box::new(move |_| {
+            seen.fetch_add(1, Ordering::SeqCst);
+            let (open, moved) = &*held;
+            let open = open.lock().unwrap();
+            let _ = moved.wait_timeout_while(open, Duration::from_secs(10), |o| !*o);
+            Some(out(0, "OPEN\n", ""))
+        });
+        let p = Poller::new(gh);
+        let pr = |n: usize| {
+            key(&[
+                "pr",
+                "view",
+                &format!("https://github.com/example/sample/pull/{n}"),
+                "--json",
+                "state",
+            ])
+        };
+        let readers: Vec<_> = (0..MAX_GH)
+            .map(|n| {
+                let (p, k) = (p.clone(), pr(n));
+                std::thread::spawn(move || p.read(&k, Duration::ZERO, FASTEST))
+            })
+            .collect();
+        let start = Instant::now();
+        while calls.load(Ordering::SeqCst) < MAX_GH {
+            assert!(
+                start.elapsed() < Duration::from_secs(30),
+                "the first calls never started"
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            p.read(&pr(MAX_GH), Duration::ZERO, FASTEST).err(),
+            Some("the daemon already runs as many gh calls as it allows")
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), MAX_GH);
+        *gate.0.lock().unwrap() = true;
+        gate.1.notify_all();
+        for r in readers {
+            assert_eq!(r.join().unwrap().unwrap().0.stdout, "OPEN\n");
+        }
+        p.read(&pr(MAX_GH), Duration::ZERO, FASTEST).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), MAX_GH + 1);
+    }
+
+    /// During a rate-limit backoff no read calls GitHub: a held key gets its cached answer even
+    /// when it asks for none older than 0 s, and a new key gets the rate-limit answer, unkept.
+    #[test]
+    fn reads_during_a_backoff_never_call_github() {
+        let limit = out(1, "", "gh: API rate limit exceeded for user\n");
+        let (p, calls) = poller(vec![out(0, "OPEN\n", ""), limit.clone()]);
+        let k = view();
+        p.read(&k, Duration::ZERO, FASTEST).unwrap();
+        age(&p, &k, 60);
+        p.tick(&|| false);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let (o, v) = p.read(&k, Duration::ZERO, FASTEST).unwrap();
+        assert_eq!((o.stdout.as_str(), v), ("OPEN\n", 1));
+        let other = key(&["pr", "view", PR, "--json", "headRefOid"]);
+        let (o, v) = p.read(&other, Duration::ZERO, FASTEST).unwrap();
+        assert_eq!((o.stderr, v), (limit.stderr, 0));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        // Once the backoff ends, reads call GitHub again.
+        p.state.lock().unwrap().backoff_until = Some(Instant::now());
+        p.read(&other, Duration::ZERO, FASTEST).unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
     #[test]
     fn another_home_runs_gh_itself() {
         let (p, calls) = poller(vec![out(0, "OPEN\n", "")]);
@@ -1004,6 +1155,9 @@ mod tests {
         if which("gh").is_none() {
             return;
         }
+        // Other tests swap HOME, which gh_env compares on both sides of the socket: a swap
+        // between them is a refusal, and the command then runs gh itself.
+        let _env = crate::shared::test_env_lock();
         let home = crate::shared::fs::temp_dir("ghpoll-socket");
         let (p, calls) = poller(vec![
             out(0, "{\"s\":\"PENDING\"}", ""),
