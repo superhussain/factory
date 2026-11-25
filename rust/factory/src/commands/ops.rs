@@ -430,7 +430,8 @@ fn scan(
         );
         match listed {
             Err(e) if e.kind() == io::ErrorKind::TimedOut => skipped.push(format!(
-                "branches {slug}: git ls-remote timed out after 20 s"
+                "branches {slug}: git ls-remote timed out after {} s",
+                git_timeout().as_secs()
             )),
             Err(_) => skipped.push(format!("branches {slug}: could not run git")),
             Ok(o) if o.code != 0 => skipped.push(format!(
@@ -642,7 +643,8 @@ fn workspace_leftovers(cwd: &str) -> Vec<String> {
             .collect();
         match capture(&argv, None, &[], Some(git_timeout())) {
             Err(e) if e.kind() == io::ErrorKind::TimedOut => {
-                Err(format!("git {verb} failed: timed out after 20 s"))
+                let secs = git_timeout().as_secs();
+                Err(format!("git {verb} failed: timed out after {secs} s"))
             }
             Err(_) => Err(format!("git {verb} failed: could not run git")),
             Ok(o) if o.code != 0 => Err(format!("git {verb} failed: exit {}", o.code)),
@@ -1106,8 +1108,8 @@ mod tests {
         assert_eq!(
             found,
             [
-                "git status failed: timed out after 20 s",
-                "git branch failed: timed out after 20 s"
+                "git status failed: timed out after 1 s",
+                "git branch failed: timed out after 1 s"
             ]
         );
     }
