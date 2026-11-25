@@ -382,8 +382,8 @@ Core needs neither. Any program that accepts these values works.
 
 - Pass a settings file with `--settings`: `syncClaudeAiSkills: false`,
   `disableClaudeAiConnectors: true`, and `skillOverrides` mapping every skill
-  except `factory` to `"user-invocable-only"`. Skills your stage notes tell agents
-  to load stay `"name-only"`.
+  except `factory`, and the skills your stage notes tell agents to load, to
+  `"user-invocable-only"`. Map those stage-note skills to `"name-only"`.
 - Paseo: add a provider
   `{"extends": "claude", "options": {"extraArgs": {"settings": "<settings file>", "strict-mcp-config": null}}}`
   to the Paseo config and name it in `routes.md`.
