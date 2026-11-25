@@ -10409,9 +10409,10 @@ mod daemon_setup_test {
     }
 
     /// The daemon pushes the retro digest, so install removes the documented retro-push line and
-    /// keeps every other line; uninstall puts a daily 08:30 line back beside the pickup timer.
+    /// keeps every other line. Uninstall puts the pickup timer back but no retro-push line, since
+    /// the host may never have had one, or had its own times.
     #[test]
-    fn cron_install_removes_the_retro_push_line_and_uninstall_restores_it() {
+    fn cron_install_removes_the_retro_push_line_and_uninstall_leaves_it_off() {
         let ds = Ds::new("cron");
         let retro =
             "30 8 * * * /opt/skill/runtime/factory retro push >> /h/logs/retro-push.log 2>&1";
@@ -10436,10 +10437,15 @@ mod daemon_setup_test {
 
         let (code, out, err) = ds.run(Uninstall);
         assert_eq!(code, 0, "{out}{err}");
+        assert!(out.contains("\nretro-push timer: left off\n"), "{out}");
+        let crontab = ds.sched.borrow().crontab.clone();
         assert!(
-            out.contains("\nretro-push timer: installed cron timer: crontab\n"),
-            "{out}"
+            !crontab.contains("retro push") && crontab.contains(other),
+            "{crontab}"
         );
+        assert!(!timer_installed("cron", &RETRO_PUSH).0 && timer_installed("cron", &PICKUP).0);
+        assert!(!timer_installed("cron", &DAEMON).0);
+        // The line the schedules reference sets up, should the person add it back:
         let line = timer_text("cron", &timer_values(&ds.fx.home, &RETRO_PUSH));
         let home = ds.fx.home.display().to_string();
         assert!(line.starts_with("30 8 * * * PATH="), "{line}");
@@ -10454,13 +10460,6 @@ mod daemon_setup_test {
             line.ends_with(&format!(" >> {}/logs/retro-push.log 2>&1", home)),
             "{line}"
         );
-        let crontab = ds.sched.borrow().crontab.clone();
-        assert!(
-            crontab.contains(&line) && crontab.contains(other),
-            "{crontab}"
-        );
-        assert!(timer_installed("cron", &RETRO_PUSH).0 && timer_installed("cron", &PICKUP).0);
-        assert!(!timer_installed("cron", &DAEMON).0);
     }
 
     /// The task's `/ST` is the one time retro_push_times gives Task Scheduler, which the daemon
@@ -10689,12 +10688,14 @@ mod daemon_setup_test {
         let (code, out, _) = ds.run(Uninstall);
         assert_eq!(code, 0, "{out}");
         assert!(out.starts_with(&format!(
-            "installed launchd timer: {}\nretro-push timer: installed launchd timer: {}\nremoved launchd service: {}\n",
+            "installed launchd timer: {}\nretro-push timer: left off\nremoved launchd service: {}\n",
             timer.display(),
-            retro.display(),
             plist.display()
         )));
-        let doc = plist_loads(&fs::read(&retro).unwrap()).unwrap();
+        // Uninstall leaves the retro-push timer off; its plist, as install_timer writes it:
+        assert!(!retro.exists() && !ds.sched.borrow().retro);
+        let text = timer_text("launchd", &timer_values(&ds.fx.home, &RETRO_PUSH));
+        let doc = plist_loads(text.as_bytes()).unwrap();
         assert_eq!(doc["Label"], "factory.retro-push");
         assert_eq!(
             doc["StartCalendarInterval"],
@@ -10709,7 +10710,6 @@ mod daemon_setup_test {
             doc["StandardOutPath"],
             ds.fx.home.join("logs/retro-push.log").display().to_string()
         );
-        assert!(ds.sched.borrow().retro);
         let domain = format!("gui/{}", getuid());
         let timer_target = format!("gui/{}/factory.pickup", getuid());
         assert!(
@@ -10878,7 +10878,7 @@ mod daemon_setup_test {
         assert_eq!(code, 0, "{out}");
         assert!(
             out.contains(&format!(
-                "\ninstalled cron timer: crontab\nretro-push timer: installed cron timer: crontab\nremoved cron service: crontab\nstopped the running daemon (pid {})\n",
+                "\ninstalled cron timer: crontab\nretro-push timer: left off\nremoved cron service: crontab\nstopped the running daemon (pid {})\n",
                 std::process::id()
             )),
             "{out}"
@@ -10886,10 +10886,9 @@ mod daemon_setup_test {
         assert!(ds.ran(&["kill", &std::process::id().to_string()]));
         let crontab = ds.sched.borrow().crontab.clone();
         let lines: Vec<&str> = crontab.lines().collect();
-        assert_eq!(lines.len(), 3, "{crontab}");
+        assert_eq!(lines.len(), 2, "{crontab}");
         assert_eq!(lines[0], "0 1 * * * true");
         assert!(unit_line(lines[1], &PICKUP) && !unit_line(lines[1], &DAEMON));
-        assert!(unit_line(lines[2], &RETRO_PUSH) && lines[2].starts_with("30 8 * * * "));
     }
 
     #[test]
