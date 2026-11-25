@@ -15,6 +15,13 @@ pub fn unix_now() -> i64 {
     if let Some(secs) = PINNED_NOW.with(|p| p.get()) {
         return secs;
     }
+    // The parity harness pins the clock, in seconds since the epoch, so a golden never depends on the date.
+    if let Some(secs) = std::env::var("FACTORY_NOW")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        return secs;
+    }
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
