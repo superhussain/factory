@@ -10437,7 +10437,7 @@ mod daemon_setup_test {
 
         let (code, out, err) = ds.run(Uninstall);
         assert_eq!(code, 0, "{out}{err}");
-        assert!(!out.contains("retro-push timer"), "{out}");
+        assert!(out.contains("\nretro-push timer: left off\n"), "{out}");
         let crontab = ds.sched.borrow().crontab.clone();
         assert!(
             !crontab.contains("retro push") && crontab.contains(other),
@@ -10688,7 +10688,7 @@ mod daemon_setup_test {
         let (code, out, _) = ds.run(Uninstall);
         assert_eq!(code, 0, "{out}");
         assert!(out.starts_with(&format!(
-            "installed launchd timer: {}\nremoved launchd service: {}\n",
+            "installed launchd timer: {}\nretro-push timer: left off\nremoved launchd service: {}\n",
             timer.display(),
             plist.display()
         )));
@@ -10878,7 +10878,7 @@ mod daemon_setup_test {
         assert_eq!(code, 0, "{out}");
         assert!(
             out.contains(&format!(
-                "\ninstalled cron timer: crontab\nremoved cron service: crontab\nstopped the running daemon (pid {})\n",
+                "\ninstalled cron timer: crontab\nretro-push timer: left off\nremoved cron service: crontab\nstopped the running daemon (pid {})\n",
                 std::process::id()
             )),
             "{out}"

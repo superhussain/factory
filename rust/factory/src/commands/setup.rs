@@ -782,7 +782,9 @@ pub fn doctor_cmd(_call: &Call) -> Res<()> {
     clock_line(
         &mut stderr.lock(),
         stderr.is_terminal(),
-        std::env::var("FACTORY_PARITY_NOW").ok(),
+        std::env::var("FACTORY_PARITY_NOW")
+            .ok()
+            .filter(|v| v.parse::<i64>().is_ok()),
     );
     if failed(&checks[..3]) {
         return Err(exit(2));

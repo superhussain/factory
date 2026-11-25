@@ -13,9 +13,9 @@
 //! The agent must have claimed the job on this host, as the `paseo-claims/<job>/<agent>` marker
 //! that `claim`, `board` and `hold` write shows, so a board row pointed at some other local agent
 //! never keeps a claim alive. The agent must also carry the title pickup launches the job's
-//! sessions with, `factory <id>` or `babysit <id>`. A long-lived agent that changed its session tag, left a job without releasing
-//! it, or kept a stale link from idea pickup is titled for another job or for none, so its claims
-//! age out.
+//! sessions with, `factory <id>` or `babysit <id>`. A long-lived agent that changed its session
+//! tag, left a job without releasing it, or kept a stale link from idea pickup is titled for
+//! another job or for none, so its claims age out.
 //!
 //! A claim that stays due, such as a dead session's, does not make every pass run `paseo ls`: the
 //! heartbeat skips the read while the due claims match its last read, for up to 10 minutes.

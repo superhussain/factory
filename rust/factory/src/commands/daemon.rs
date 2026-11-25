@@ -194,7 +194,11 @@ fn run(home: &Path) -> Res<()> {
     let capped = !terminal && own_log(&service_log);
     #[cfg(not(windows))]
     let capped = true;
-    if let Ok(pinned) = std::env::var("FACTORY_PARITY_NOW") {
+    // Only a value unix_now reads pins the clock, and only that one is logged.
+    if let Some(pinned) = std::env::var("FACTORY_PARITY_NOW")
+        .ok()
+        .filter(|v| v.parse::<i64>().is_ok())
+    {
         log_line(
             &home,
             &format!("clock pinned: FACTORY_PARITY_NOW={pinned} is set, so this daemon reads that time, not the real one"),

@@ -1525,6 +1525,7 @@ pub(super) fn daemon_setup(
         // times, which the install's backup keeps.
         ServiceAction::Uninstall => {
             outln!(io, "{}", install_timer(home, pickup_scheduler(), &PICKUP)?);
+            outln!(io, "retro-push timer: left off");
             outln!(io, "{}", uninstall_timer(home, scheduler, &DAEMON)?);
             if scheduler == "cron" || scheduler == "schtasks" {
                 if let Some(line) = stop_daemon(home) {
