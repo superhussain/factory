@@ -155,16 +155,14 @@ on its own where it is installed:
   `closed`. Pull a finished job by id.
 - Where the daemon runs, it pushes a changed job folder about 3 s after its
   last write, with the same rules. It pulls a job when its board row changes,
-  unless a live session here holds it. An edit made from a copy older than
-  the daemon's pull is kept as a conflict, so `pull` first. Still run `push`
-  after writing.
+  unless a live session here holds it. An edit from a copy older than the
+  daemon's pull conflicts, so `pull` first. Still run `push` after writing.
 - When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
   the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
-  each file. `push` refuses a file while its `.remote` waits. Diff the `.remote`
-  against your file. If every difference is text you wrote, delete it and
-  push. If you never edited the file, move the `.remote` over it. Otherwise set
-  `needs-human`. For an image, delete the `.remote` to keep yours, or move it
-  over the file to keep R2's.
+  each file; `push` refuses it while the `.remote` waits. Diff the two. If every
+  difference is text you wrote, delete the `.remote` and push. If you never
+  edited the file, move the `.remote` over it. Else set `needs-human`. For an
+  image, delete the `.remote` to keep yours, or move it over to keep R2's.
 
 - In a UI job, the builder saves screenshots in `$JOBS/<id>/` and embeds them in
   build.md as a `| Before | After |` table. The builder never uploads to the public image host.
@@ -243,7 +241,7 @@ says to.
 | --- | --- | --- |
 | `hold`, `board` | `<id> is held by <device> session <tag>` | Tell the user who holds the job and when it was last seen, then stop. Take over only when the user says so, with `hold <project>/<id> take`. |
 | `hold`, `board` | `<id> was moved to <host>` | Stop. Do not retry or take it. |
-| `hold`, `pull`, `push` | `conflict in <files>` | Settle each `.remote` by its diff, as in Where things live. If one is left, set `needs-human` with the message as note and stop; `hold` claimed the job. |
+| `hold`, `pull`, `push` | `conflict in <files>` | Settle each `.remote` by its diff (Where things live). For any left, set `needs-human` with the message as note; `hold` holds it. Stop. |
 | `sync` | `conflict in <project>/<id>/<file>, ...` | Tell the user which jobs conflict. They don't block a new job. |
 | `push`, `pull`, `sync`, `hold`, `handoff` | `<path> is a symlink or junction...` or `cannot inspect job paths under <folder>...` | Report the stop and do nothing to the paths: never remove links, change permissions, or `take` the job automatically. Mark the job `needs-human` with the message as the note only if this session owns the claim (`hold` may have already claimed it). Links, their targets, and local edits are left untouched. |
 | `worktree` | `<wt> is N ahead and M behind` | Set the job to `needs-human` with the message as the note, and stop. |
