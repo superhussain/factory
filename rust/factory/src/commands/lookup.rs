@@ -167,7 +167,8 @@ pub fn where_cmd(call: &Call) -> Res<()> {
     Ok(())
 }
 
-/// An older row's decision, read from this host's decision.md and marked inferred, or None.
+/// An older row's decision, read from this host's decision.md and marked inferred, or None. A
+/// CLOSED decision counts only while the row is closed, since a reopened job keeps the old file.
 fn inferred_decision(home: &Path, j: &Value) -> Option<Value> {
     if j.get("decision").is_some() {
         return None;
@@ -182,6 +183,9 @@ fn inferred_decision(home: &Path, j: &Value) -> Option<Value> {
         return None;
     }
     let mut verdict = decision_verdict(&read_text(&path).ok()?)?;
+    if verdict["verdict"] == "CLOSED" && j.get("stage").and_then(Value::as_str) != Some("closed") {
+        return None;
+    }
     verdict["inferred"] = Value::Bool(true);
     Some(verdict)
 }
@@ -326,6 +330,26 @@ mod tests {
         assert_eq!(inferred_decision(&home, &old), None);
         std::fs::write(folder.join("decision.md"), b"\xff").unwrap();
         assert_eq!(inferred_decision(&home, &old), None);
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_closed_decision_holds_only_while_the_row_is_closed() {
+        let home = temp_dir("lookup-reopened");
+        let folder = home.join("jobs/alpha/042-sample-export");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("decision.md"),
+            "CLOSED: PR closed on GitHub\n\n**Summary.** GitHub reported pull request #7 closed.\n",
+        )
+        .unwrap();
+        let row =
+            |stage: &str| json!({"id": "042-sample-export", "project": "alpha", "stage": stage});
+        assert_eq!(
+            inferred_decision(&home, &row("closed")),
+            Some(json!({"verdict": "CLOSED", "decider": "person", "inferred": true}))
+        );
+        assert_eq!(inferred_decision(&home, &row("pr-open")), None);
         std::fs::remove_dir_all(home).unwrap();
     }
 

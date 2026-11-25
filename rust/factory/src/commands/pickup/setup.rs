@@ -1506,7 +1506,7 @@ pub(super) fn daemon_setup(
         files.extend(timer_backup(pickup_scheduler(), &RETRO_PUSH));
     }
     backup_files(io, home, files)?;
-    // The daemon pushes the retro digest too, so the retro-push timer follows the pickup timer.
+    // The daemon pushes the retro digest too, so install removes the retro-push timer as well.
     match action {
         ServiceAction::Install => {
             outln!(io, "{}", install_timer(home, scheduler, &DAEMON)?);
@@ -1521,13 +1521,11 @@ pub(super) fn daemon_setup(
                 uninstall_timer(home, pickup_scheduler(), &RETRO_PUSH)?
             );
         }
+        // The retro-push timer is not put back: the host may never have had one, or had its own
+        // times, which the install's backup keeps.
         ServiceAction::Uninstall => {
             outln!(io, "{}", install_timer(home, pickup_scheduler(), &PICKUP)?);
-            outln!(
-                io,
-                "retro-push timer: {}",
-                install_timer(home, pickup_scheduler(), &RETRO_PUSH)?
-            );
+            outln!(io, "retro-push timer: left off");
             outln!(io, "{}", uninstall_timer(home, scheduler, &DAEMON)?);
             if scheduler == "cron" || scheduler == "schtasks" {
                 if let Some(line) = stop_daemon(home) {
