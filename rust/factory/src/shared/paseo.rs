@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -30,17 +31,74 @@ pub fn paseo_session() -> Option<Value> {
         .then(|| json!({"server": server, "agent": agent}))
 }
 
+/// False once this host's Paseo has rejected `--background`, as one older than the flag does.
+static BACKGROUND: AtomicBool = AtomicBool::new(true);
+
 /// This host's `paseo ls -g --background --json` list, with any further arguments, under
 /// PASEO_HOME when set; None when paseo is missing, fails, or prints no JSON. `--background` keeps
-/// agents in background workspaces, which the plain list leaves out.
+/// agents in background workspaces, which the plain list leaves out. A Paseo that rejects the
+/// flag is asked once more without it, and is never sent it again by this process.
 pub fn paseo_ls(extra: &[&str]) -> Option<Value> {
     let exe = which("paseo")?.to_string_lossy().into_owned();
+    paseo_ls_with(&exe, extra)
+}
+
+fn paseo_ls_with(exe: &str, extra: &[&str]) -> Option<Value> {
     let home = std::env::var("PASEO_HOME").unwrap_or_default();
-    let mut argv = vec![exe.as_str(), "ls", "-g", "--background", "--json"];
-    argv.extend(extra);
-    if !home.is_empty() {
-        argv.extend(["--home", home.as_str()]);
+    let run = |background: bool| {
+        let mut argv = vec![exe, "ls", "-g"];
+        if background {
+            argv.push("--background");
+        }
+        argv.push("--json");
+        argv.extend(extra);
+        if !home.is_empty() {
+            argv.extend(["--home", home.as_str()]);
+        }
+        capture(&argv, None, &[], Some(Duration::from_secs(20))).ok()
+    };
+    let mut r = run(BACKGROUND.load(Ordering::Relaxed))?;
+    if r.code != 0
+        && BACKGROUND.load(Ordering::Relaxed)
+        && r.stderr.contains("unknown option '--background'")
+    {
+        BACKGROUND.store(false, Ordering::Relaxed);
+        r = run(false)?;
     }
-    let r = capture(&argv, None, &[], Some(Duration::from_secs(20))).ok()?;
     serde_json::from_str(&r.stdout).ok().filter(|_| r.code == 0)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// A Paseo without `--background` rejects it as Paseo does an unknown option; the list is
+    /// read again without it, and later reads leave it off.
+    #[test]
+    fn a_paseo_without_background_is_asked_without_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::shared::fs::temp_dir("paseo-no-background");
+        let (fake, log) = (dir.join("paseo"), dir.join("calls"));
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$*\" in *--background*) echo \"error: unknown option '--background'\" >&2; exit 1;; esac\necho '[{{\"id\":\"a1\"}}]'\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let fake = fake.to_string_lossy().into_owned();
+        assert_eq!(paseo_ls_with(&fake, &[]), Some(json!([{"id": "a1"}])));
+        assert_eq!(paseo_ls_with(&fake, &[]), Some(json!([{"id": "a1"}])));
+        let calls = std::fs::read_to_string(&log).unwrap();
+        let calls: Vec<&str> = calls
+            .lines()
+            .map(|l| l.split(" --home").next().unwrap())
+            .collect();
+        assert_eq!(
+            calls,
+            ["ls -g --background --json", "ls -g --json", "ls -g --json"]
+        );
+    }
 }
