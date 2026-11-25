@@ -781,32 +781,41 @@ pub(crate) fn pull_job_files(
                 }
                 continue;
             }
-            let (body, mut fetched) = fetch(home, slug, job_id, rel)?;
-            if auto {
-                let base = match stored("base") {
-                    Some(base) => base.clone(),
-                    None if data.is_some() => stored("etag").cloned().unwrap_or(Value::Null),
-                    None => Value::Null,
-                };
-                fetched["base"] = base;
-            }
-            manifest.insert(rel.clone(), fetched);
+            let (body, fetched) = fetch(home, slug, job_id, rel)?;
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|e| os_fail(e, parent))?;
             }
-            // Written here while the fetch ran: keep it, and save R2's copy beside it.
+            // Written here while the fetch ran: keep it, and save R2's copy beside it, as
+            // reconcile does. The .remote holds push back until a person merges it.
             if local_bytes(&path) != data {
+                manifest.insert(rel.clone(), fetched);
                 let remote = dot_remote(&path);
                 write_atomic(&remote, &body).map_err(|e| os_fail(e, &remote))?;
                 conflicts.push(rel.clone());
                 continue;
             }
-            // The entry, with its base, is saved before the bytes it describes. A pull cut short
-            // after this leaves the old bytes under the base, which a push conditions on; the
-            // reverse order would leave R2's bytes under the old entry, and the next reconcile
-            // would adopt them with no base.
+            // The entry claims R2's ETag before the bytes are here, so it is saved with a base: the
+            // ETag the local bytes came from, or null when there were none. A write that fails or
+            // is cut short leaves the old bytes under that base, and a push conditions on it and
+            // meets a 412. Saving after the write instead would leave R2's bytes under the old
+            // entry, which the next reconcile adopts with no base.
+            let base = match stored("base") {
+                Some(base) => base.clone(),
+                None if data.is_some() => stored("etag").cloned().unwrap_or(Value::Null),
+                None => Value::Null,
+            };
+            let mut entry = fetched;
+            entry["base"] = base;
+            manifest.insert(rel.clone(), entry);
             save_manifest(&folder, &manifest)?;
             write_atomic(&path, &body).map_err(|e| os_fail(e, &path))?;
+            // A deliberate pull took R2's version, so once the bytes are here the base goes.
+            if !auto {
+                if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                    e.shift_remove("base");
+                }
+                save_manifest(&folder, &manifest)?;
+            }
             got.push(rel.clone());
         } else if entry.is_some() && stored("etag") == Some(&tag_value) {
             unpushed.push(rel.clone());

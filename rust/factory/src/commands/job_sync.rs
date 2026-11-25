@@ -313,6 +313,80 @@ mod tests {
 
     const JOB: &str = "042-sample-export";
 
+    type Reply = (u16, String, Vec<(&'static str, String)>);
+
+    /// A loopback server that answers each request by its method and path, and how many times
+    /// that method and path came before, so a test's replies never fall out of step when the code
+    /// under test makes more or fewer requests.
+    fn serve_routes(
+        route: impl Fn(&str, &str, usize) -> Reply + Send + 'static,
+    ) -> (String, Arc<Mutex<Vec<crate::shared::http::tests::Seen>>>) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let seen: Arc<Mutex<Vec<crate::shared::http::tests::Seen>>> = Arc::default();
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut parts = line.split_whitespace();
+                let (method, path) = (
+                    parts.next().unwrap().to_string(),
+                    parts.next().unwrap().to_string(),
+                );
+                let mut headers = Vec::new();
+                loop {
+                    let mut h = String::new();
+                    reader.read_line(&mut h).unwrap();
+                    let h = h.trim_end();
+                    if h.is_empty() {
+                        break;
+                    }
+                    let (k, v) = h.split_once(':').unwrap();
+                    headers.push((k.to_string(), v.trim().to_string()));
+                }
+                let length = headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                    .map_or(0, |(_, v)| v.parse().unwrap());
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let nth = counts.entry(format!("{method} {path}")).or_default();
+                let (status, reply, extra) = route(&method, &path, *nth);
+                *nth += 1;
+                log.lock().unwrap().push(crate::shared::http::tests::Seen {
+                    method,
+                    path,
+                    headers,
+                    body,
+                });
+                let mut head = format!("HTTP/1.0 {status} X\r\n");
+                for (k, v) in extra {
+                    head.push_str(&format!("{k}: {v}\r\n"));
+                }
+                let _ = stream.write_all(format!("{head}\r\n{reply}").as_bytes());
+            }
+        });
+        (origin, seen)
+    }
+
+    /// A routed reply: a body and its ETag.
+    fn file(body: &str, etag: &str) -> Reply {
+        (200, body.to_string(), vec![("ETag", format!("\"{etag}\""))])
+    }
+
+    fn listing(files: &[(&str, &str)]) -> Reply {
+        let rows: Vec<Value> = files
+            .iter()
+            .map(|(name, etag)| json!({"name": name, "etag": format!("\"{etag}\"")}))
+            .collect();
+        (200, Value::from(rows).to_string(), vec![])
+    }
+
     fn row(stage: &str, seen: &str) -> Value {
         json!({"id": JOB, "project": "alpha", "stage": stage,
                "claim": {"device": "mac", "seen": seen}})
@@ -733,21 +807,18 @@ mod tests {
 
     #[test]
     fn interrupted_auto_pull_still_conflicts_a_stale_write() {
-        let listing =
-            r#"[{"name":"build.md","etag":"\"b1\""},{"name":"notes.md","etag":"\"n1\""}]"#;
-        let (origin, seen) = serve(vec![
-            // The first auto-pull writes build.md, then the notes.md fetch fails.
-            (200, listing, vec![]),
-            (200, "B1\n", vec![("ETag", "\"b1\"")]),
-            (500, "", vec![]),
-            // The next auto-pull finishes.
-            (200, listing, vec![]),
-            (200, "Notes\n", vec![("ETag", "\"n1\"")]),
-            // The push of the stale copy.
-            (200, listing, vec![]),
-            (412, "", vec![]),
-            (200, "B1\n", vec![("ETag", "\"b1\"")]),
-        ]);
+        let job = format!("/api/jobs/alpha/{JOB}");
+        let (origin, seen) = serve_routes(move |method, path, nth| {
+            match (method, path.strip_prefix(&job).unwrap_or(path)) {
+                ("GET", "/?etags=1") => listing(&[("build.md", "b1"), ("notes.md", "n1")]),
+                ("GET", "/build.md") => file("B1\n", "b1"),
+                // The first pull's notes.md fetch fails after build.md is written.
+                ("GET", "/notes.md") if nth == 0 => (500, String::new(), vec![]),
+                ("GET", "/notes.md") => file("Notes\n", "n1"),
+                ("PUT", "/build.md") => (412, String::new(), vec![]),
+                _ => (404, String::new(), vec![]),
+            }
+        });
         let home = synced_b0("job-sync-interrupted", &origin);
         let f = folder(&home);
         assert!(crate::commands::sync::pull_job_files(&home, "alpha", JOB, true).is_err());
@@ -755,17 +826,73 @@ mod tests {
         crate::commands::sync::pull_job_files(&home, "alpha", JOB, true).unwrap();
         fs::write(f.join("build.md"), "B0 plus a stale edit\n").unwrap();
         let e = push_job(&home, "alpha", JOB, &mut Vec::new()).unwrap_err();
-        assert_eq!(e.code, 6);
         let seen = seen.lock().unwrap();
-        assert_eq!(
-            (seen[6].method.as_str(), seen[6].header("If-Match")),
-            ("PUT", Some("\"b0\""))
-        );
+        let put = seen.iter().find(|r| r.method == "PUT").unwrap();
+        assert_eq!(put.header("If-Match"), Some("\"b0\""));
+        assert_eq!(e.code, 6);
         assert_eq!(
             fs::read(f.join("build.md")).unwrap(),
             b"B0 plus a stale edit\n"
         );
         assert_eq!(fs::read(f.join("build.md.remote")).unwrap(), b"B1\n");
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_manual_pull_write_never_lets_old_bytes_push() {
+        use std::os::unix::fs::PermissionsExt;
+        let job = format!("/api/jobs/alpha/{JOB}");
+        let (origin, seen) = serve_routes(move |method, path, _| {
+            match (method, path.strip_prefix(&job).unwrap_or(path)) {
+                ("GET", "/?etags=1") => listing(&[("round-1/review.md", "r1")]),
+                ("GET", "/round-1/review.md") => file("R1\n", "r1"),
+                ("PUT", "/round-1/review.md") => (412, String::new(), vec![]),
+                _ => (404, String::new(), vec![]),
+            }
+        });
+        let home = with_job("job-sync-manual-write-fails", &origin);
+        let f = folder(&home);
+        let round = f.join("round-1");
+        fs::create_dir_all(&round).unwrap();
+        fs::write(round.join("review.md"), "R0\n").unwrap();
+        let state = json!({"round-1/review.md": {"etag": "\"r0\"", "sha256": sha(b"R0\n")}});
+        fs::write(f.join(".sync.json"), state.to_string()).unwrap();
+        // A deliberate pull whose write fails: round-1/ is read-only.
+        fs::set_permissions(&round, fs::Permissions::from_mode(0o555)).unwrap();
+        let pulled = crate::commands::sync::pull_job(&home, "alpha", JOB);
+        fs::set_permissions(&round, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(pulled.is_err());
+        assert_eq!(fs::read(round.join("review.md")).unwrap(), b"R0\n");
+        // Nobody edits. The push still conditions on r0, the bytes' own version, and conflicts.
+        let e = push_job(&home, "alpha", JOB, &mut Vec::new()).unwrap_err();
+        let seen = seen.lock().unwrap();
+        let put = seen.iter().find(|r| r.method == "PUT").unwrap();
+        assert_eq!(put.header("If-Match"), Some("\"r0\""));
+        assert_eq!(e.code, 6);
+        assert_eq!(fs::read(round.join("review.md")).unwrap(), b"R0\n");
+        assert_eq!(fs::read(round.join("review.md.remote")).unwrap(), b"R1\n");
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn manual_pull_clears_the_base_once_written() {
+        let job = format!("/api/jobs/alpha/{JOB}");
+        let (origin, _seen) = serve_routes(move |method, path, _| {
+            match (method, path.strip_prefix(&job).unwrap_or(path)) {
+                ("GET", "/?etags=1") => listing(&[("build.md", "b1")]),
+                ("GET", "/build.md") => file("B1\n", "b1"),
+                _ => (404, String::new(), vec![]),
+            }
+        });
+        let home = synced_b0("job-sync-manual-clears", &origin);
+        let f = folder(&home);
+        crate::commands::sync::pull_job(&home, "alpha", JOB).unwrap();
+        let manifest =
+            crate::shared::pyjson::loads(&fs::read_to_string(f.join(".sync.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["build.md"]["etag"], "\"b1\"");
+        assert!(manifest["build.md"].get("base").is_none());
         fs::remove_dir_all(home).unwrap();
     }
 
