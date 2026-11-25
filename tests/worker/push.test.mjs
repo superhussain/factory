@@ -587,6 +587,40 @@ test("the hourly cron pushes 042-sample-retry once when its claim goes stale", a
   assert.equal(sent.length, 1);
 });
 
+// The archive pass, the idea upload sweep, the spend nudge and the stuck push all read the board
+// and the archive; the run reads each once and shares it.
+test("the hourly cron reads the board and the archive once for all its passes", async (t) => {
+  const sent = stubFetch(t);
+  const { env, call } = setup();
+  const phone = await browser("https://fcm.googleapis.com/fcm/send/sample-cron");
+  await call("/api/push/subscriptions", { method: "PUT", body: phone.body });
+  const claim = { device: "device-a", seen: SEEN };
+  await env.BUCKET.put("board.json", JSON.stringify({ jobs: [{ ...RETRY, claim }] }));
+  await env.BUCKET.put("board-archive.json", JSON.stringify({ jobs: [] }));
+  await env.BUCKET.put(
+    "pipeline/global.json",
+    JSON.stringify({ schema: 1, archive: { mode: "age", n: 30 } }),
+  );
+  const { scheduled } = (await loadProduction()).default;
+  const cronEnv = { ...serverEnv, BUCKET: env.BUCKET, FACTORY_VAPID_KEY: env.FACTORY_VAPID_KEY };
+  const pending = [];
+  const calls = env.BUCKET.calls.length;
+  scheduled({ scheduledTime: at("10:17").getTime() }, cronEnv, {
+    waitUntil: (p) => pending.push(p),
+  });
+  const results = await Promise.allSettled(pending);
+  assert.deepEqual(
+    results.map((r) => r.status),
+    ["fulfilled", "fulfilled", "fulfilled", "fulfilled", "fulfilled"],
+  );
+  const gets = env.BUCKET.calls
+    .slice(calls)
+    .filter(([op, key]) => op === "get" && ["board.json", "board-archive.json"].includes(key))
+    .map(([, key]) => key);
+  assert.deepEqual(gets, ["board.json", "board-archive.json"]);
+  assert.equal(sent.length, 1);
+});
+
 test("the hourly cron still pushes 042-sample-retry when the spend pass throws", async (t) => {
   const sent = stubFetch(t);
   const { env, call } = setup();

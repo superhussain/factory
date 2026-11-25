@@ -122,15 +122,31 @@ const conflict = (reason) => {
   return { status: "conflict", moved: [] };
 };
 
-/** One archive pass. Off unless a valid global pipeline document sets `archive`. */
-export async function runArchive(env, now) {
+/** The board, then the archive, read once for the hourly passes to share. board is as
+ * readBoardJson gives it; archive is null when missing, else { data, etag }, data undefined when
+ * it is not JSON. The board comes first, since the archive pass writes the archive first. */
+export async function readHourly(env) {
+  const board = await readBoardJson(env);
+  const object = await env.BUCKET.get(ARCHIVE_KEY);
+  if (!object) return { board, archive: null };
+  let data;
+  try {
+    data = JSON.parse(await object.text());
+  } catch {}
+  return { board, archive: { data, etag: object.httpEtag } };
+}
+
+/** One archive pass over the promise of readHourly's read. Off unless a valid global pipeline
+ * document sets `archive`. */
+export async function runArchive(env, now, hourly) {
   const pipeline = await readJson(env, "pipeline/global.json");
   if (!pipeline || validatePipeline(pipeline.data) || !pipeline.data.archive)
     return { status: "off", moved: [] };
-  const board = await readBoardJson(env);
+  const { board, archive: stored } = await hourly;
   const jobs = jobsOf(board);
   if (!jobs) return { status: "none", moved: [] };
-  const archive = await readJson(env, ARCHIVE_KEY);
+  // An archive that is not JSON is written only where none exists, so its write fails.
+  const archive = stored?.data === undefined ? null : stored;
   const archiveJobs = jobsOf(archive) ?? [];
   const ids = planArchive(jobs, pipeline.data.archive, now, pipeline.data.tracer?.enabled !== true);
   const boardIds = new Set(jobs.map((j) => j?.id));
