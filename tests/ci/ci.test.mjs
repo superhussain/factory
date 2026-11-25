@@ -272,7 +272,7 @@ test("rust-build caches the binary under the rust key, and targets restores it o
       "CARGO_INCREMENTAL=1 cargo build --profile host --locked",
     ],
   );
-  // The rust jobs save the shared rust/target cache and rust-build's incremental artifacts; targets only reads them.
+  // warm.yml saves the shared rust/target cache and the incremental artifacts; targets only reads them.
   assert.equal(onMiss[1].with["save-if"], false);
   const incremental = build.steps.find((step) => step.name === "Restore incremental artifacts");
   assert.deepEqual(onMiss[2].with, incremental.with);
@@ -282,28 +282,29 @@ test("rust-build caches the binary under the rust key, and targets restores it o
   assert.ok(onMiss.every((step) => targets.steps.indexOf(step) < nx));
 });
 
-test("rust-build restores and saves this PR's incremental artifacts around an incremental build", () => {
+test("rust-build restores main's incremental artifacts before an incremental build and never saves them", () => {
   const steps = workflow.jobs["rust-build"].steps;
   const at = (name) => steps.findIndex((step) => step.name === name);
   const cache = steps.findIndex((step) => action(step) === "Swatinem/rust-cache");
   const restore = steps[at("Restore incremental artifacts")];
-  const save = steps[at("Save incremental artifacts")];
   assert.equal(action(restore), "actions/cache/restore");
-  assert.equal(action(save), "actions/cache/save");
-  // After rust-cache, whose restore would otherwise land on top; saved before its post step cleans target.
+  // After rust-cache, whose restore would otherwise land on top.
   assert.ok(cache < at("Restore incremental artifacts"));
   assert.ok(at("Restore incremental artifacts") < at("Build linux-x64"));
-  assert.ok(at("Build linux-x64") < at("Save incremental artifacts"));
   assert.equal(
     steps[at("Build linux-x64")].run,
     "CARGO_INCREMENTAL=1 cargo build --profile host --locked",
   );
+  // A PR run's save would add about 50 MB per run to the repo's cache budget; the binary is the only save.
+  assert.deepEqual(
+    steps.filter((step) => action(step) === "actions/cache/save").map((step) => step.with.path),
+    ["rust/target/host/factory"],
+  );
   const path = "rust/target/host/incremental";
   const prefix = "v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-";
   const key = `${prefix}\${{ github.run_id }}-\${{ github.run_attempt }}`;
-  // A fresh key per run, since a saved key never changes; restore takes the newest with the toolchain's prefix.
+  // restore takes the newest with the toolchain's prefix.
   assert.deepEqual(restore.with, { path, key, "restore-keys": prefix });
-  assert.deepEqual(save.with, { path, key });
 });
 
 test("the nextest config neither retries nor terminates tests", () => {
@@ -377,7 +378,9 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
       'cargo_home="${CARGO_HOME:-$HOME/.cargo}"',
       'rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"',
       'root="$(mktemp -d)"',
-      'CARGO_INCREMENTAL=1 HOME="$root/home" CARGO_HOME="$cargo_home" RUSTUP_HOME="$rustup_home" sh ../tools/install.sh "$root/skills"',
+      'out="$(CARGO_INCREMENTAL=1 HOME="$root/home" CARGO_HOME="$cargo_home" RUSTUP_HOME="$rustup_home" sh ../tools/install.sh "$root/skills" 2>&1)"',
+      "printf '%s\\n' \"$out\"",
+      'printf \'%s\\n\' "$out" | grep -qx "install: Rust binary from $PWD/target/host/factory"',
       'test -x "$root/skills/factory/runtime/factory"',
       'grep -q \'"entry": \\["runtime/factory"\\]\' "$root/skills/factory/bundle.json"',
     ].join("\n"),
@@ -387,13 +390,35 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
   assert.match(unitRuns[1], /cargo-nextest-0\.9\.152-x86_64-unknown-linux-gnu\.tar\.gz/);
   assert.match(unitRuns[1], /sha256sum -c/);
   assert.equal(unitRuns[2], "CARGO_INCREMENTAL=1 cargo test --locked --no-run");
-  // Every shard runs its hash partition of every test, and the shards together cover all of them.
+  // Every shard runs its hash partition of every test but the heavy ones, and its share of those beside it.
   assert.equal(
     unitRuns[3],
-    "CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2",
+    [
+      'CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast -E "$HEAVY" &',
+      "heavy=$!",
+      "status=0",
+      'CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2 -E "not ($ALL_HEAVY)" || status=1',
+      'wait "$heavy" || status=1',
+      'exit "$status"',
+    ].join("\n"),
   );
   assert.equal(unitRuns.length, 4);
-  assert.deepEqual(unit.strategy.matrix.shard, [1, 2]);
+  assert.equal(unit.name, "rust-test (${{ matrix.shard }})");
+  const shards = unit.strategy.matrix.include;
+  assert.deepEqual(
+    shards.map((entry) => entry.shard),
+    [1, 2],
+  );
+  // The shards' heavy tests together are exactly ALL_HEAVY, which is exactly nextest.toml's priority-100 list.
+  const tests = (expr) => expr.split("|").map((part) => part.trim());
+  const step = unit.steps.find((entry) => entry.name === "Test linux-x64");
+  assert.equal(step.env.HEAVY, "${{ matrix.heavy }}");
+  const all = tests(step.env.ALL_HEAVY);
+  assert.deepEqual(shards.flatMap((entry) => tests(entry.heavy)).sort(), [...all].sort());
+  assert.ok(shards.every((entry) => tests(entry.heavy).length > 0));
+  const config = readFileSync(new URL("../../rust/.config/nextest.toml", import.meta.url), "utf8");
+  const first = /filter = '''([^]*?)'''\npriority = 100/.exec(config)[1];
+  assert.deepEqual(tests(first).sort(), [...all].sort());
   assert.equal(unit.strategy["fail-fast"], false);
   assert.deepEqual(runs(check), [
     "rustup toolchain install\nrustup target add aarch64-apple-darwin x86_64-pc-windows-gnu",

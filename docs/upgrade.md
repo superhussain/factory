@@ -54,7 +54,9 @@ rewrites the pickup timer if the host has one, and catch-up checks the Worker's
 `~/.config/systemd/user/factory-*.service` and `~/.config/factory-*.cmd`) and a
 `stalls.json` adapter that runs `runtime/paseo_stalls.py`, so they run the binary
 beside it, and reloads launchd and systemd. It prints one `timers:` line for each. A host with nothing new prints `catch-up: nothing new` and
-writes nothing.
+writes nothing else. Every run, even one with nothing new, first deletes `catch-up-*` copies
+over a day old under `<home>/tmp` and prints `skill: removed <n> leftover binary copies over a
+day old from <home>/tmp` when it removed any.
 
 Before any local write it prints `backup: <home>/backups/catch-up-<stamp>`. That
 folder (mode 700) holds `skill/factory/`, `crontab.txt` on cron hosts,
