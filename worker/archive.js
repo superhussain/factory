@@ -183,6 +183,20 @@ export const reply = (body, status = 200, type = "text/plain") =>
     },
   });
 
+// The archive's rows as last parsed in this isolate, with the bucket and R2 version they came
+// from, so each archive version is parsed once while the isolate lives. The rows are only read.
+let archiveMemo = { bucket: null, etag: null, jobs: [] };
+
+async function archiveRows(env) {
+  const head = await env.BUCKET.head(ARCHIVE_KEY);
+  if (!head) return [];
+  if (archiveMemo.bucket !== env.BUCKET || archiveMemo.etag !== head.httpEtag) {
+    const doc = await readJson(env, ARCHIVE_KEY);
+    archiveMemo = { bucket: env.BUCKET, etag: doc?.etag ?? null, jobs: jobsOf(doc) ?? [] };
+  }
+  return archiveMemo.jobs;
+}
+
 /** GET /api/board/archive with exactly one of ?id=, ?page= or ?q=. */
 export async function archiveGet(request, env) {
   const params = new URL(request.url).searchParams;
@@ -193,8 +207,8 @@ export async function archiveGet(request, env) {
   const q = params.get("q");
   if (q !== null && ([...q].length < 1 || [...q].length > 200))
     return reply("q: must be 1 to 200 characters", 400);
-  const boardIds = new Set((jobsOf(await readBoardJson(env)) ?? []).map((j) => j?.id));
-  const jobs = (jobsOf(await readJson(env, ARCHIVE_KEY)) ?? []).filter((j) => !boardIds.has(j?.id));
+  const boardIds = new Set(await boardStore(env).ids());
+  const jobs = (await archiveRows(env)).filter((j) => !boardIds.has(j?.id));
   const json = (body) => reply(body, 200, "application/json");
   if (params.has("id")) {
     const row = jobs.find((j) => j?.id === params.get("id"));

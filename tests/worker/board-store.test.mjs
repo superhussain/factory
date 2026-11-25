@@ -702,3 +702,122 @@ test("a PATCH that grows a page past its limit splits it, and the board reads ba
   }
   assert.ok(sizes().length > 1, JSON.stringify(sizes()));
 });
+
+// GET /api/board/archive as it answered before the room kept the board's ids: the whole board
+// and the whole archive parsed on every request.
+function archiveBefore(boardText, archiveText, query) {
+  const parse = (text) => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  };
+  const jobsOf = (doc) => (Array.isArray(doc?.jobs) ? doc.jobs : null);
+  const boardIds = new Set((jobsOf(parse(boardText)) ?? []).map((j) => j?.id));
+  const jobs = (jobsOf(parse(archiveText)) ?? []).filter((j) => !boardIds.has(j?.id));
+  const params = new URLSearchParams(query);
+  if (params.has("id")) {
+    const row = jobs.find((j) => j?.id === params.get("id"));
+    return row ? [200, JSON.stringify({ jobs: [row] })] : [404, "not found"];
+  }
+  const q = params.get("q");
+  if (q !== null) {
+    const fields = ["id", "title", "project", "jira", "pr", "idea", "goal"];
+    const pr = /^(?:pr\s*)?#(\d+)$/i.exec(q)?.[1];
+    const matches = jobs.filter(
+      (j) =>
+        fields.some(
+          (k) => typeof j?.[k] === "string" && j[k].toLowerCase().includes(q.toLowerCase()),
+        ) ||
+        (pr !== undefined && typeof j?.pr === "string" && j.pr.endsWith(`/pull/${pr}`)),
+    );
+    return [200, JSON.stringify({ jobs: matches.slice(0, 50), total: matches.length })];
+  }
+  const n = Number(params.get("page") ?? "1");
+  return [
+    200,
+    JSON.stringify({
+      jobs: jobs.slice((n - 1) * 50, n * 50),
+      page: n,
+      pages: Math.ceil(jobs.length / 50),
+      total: jobs.length,
+    }),
+  ];
+}
+
+// Made-up boards and archives that share ids, with duplicate, missing, null, number and object
+// ids and rows that are not objects. The room's id list and the isolate's parsed archive must
+// answer every query the dashboard and the CLI send byte for byte as before, through room
+// commits and archive rewrites, and so must a Worker with R2 alone.
+test("the archive read answers byte for byte as before, across random boards and archives", async () => {
+  let seed = 2323;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const pick = (list) => list[Math.floor(rand() * list.length)];
+  const shared = Array.from({ length: 40 }, (_, i) => `${700 + i}-shared`);
+  const row = () => {
+    if (rand() < 0.03) return pick([null, "a string row", 7]);
+    const out = {
+      id: rand() < 0.08 ? pick([null, 12, { nested: 1 }, undefined]) : pick(shared),
+      stage: pick(["merged", "closed", "build"]),
+      project: pick(["sample", "demo", "Émoji 🎉"]),
+      title: pick(["Fix login", "ADD export", "é 中文", 'quote " and \\']),
+      done: "2026-10-01T12:00:00Z",
+    };
+    if (rand() < 0.5) out.pr = `https://github.example.test/sample/pull/${Math.floor(rand() * 30)}`;
+    return out;
+  };
+  const queries = (archive) => [
+    ...archive.jobs
+      .map((j) => j?.id)
+      .filter((id) => typeof id === "string")
+      .map((id) => `id=${encodeURIComponent(id)}`),
+    "id=999-none",
+    ...["1", "2", "3"].map((p) => `page=${p}`),
+    ...["sample", "SHARED", "#12", "PR #7", "é", "🎉", '"', "x"].map(
+      (q) => `q=${encodeURIComponent(q)}`,
+    ),
+  ];
+  for (let b = 0; b < 25; b++) {
+    const board = {
+      updated: "2026-11-24T00:00:00Z",
+      jobs: Array.from({ length: Math.floor(rand() * 30) }, row),
+    };
+    const archive = { jobs: Array.from({ length: Math.floor(rand() * 120) }, row) };
+    const s = setup(board);
+    s.bucket.objects.set("board-archive.json", {
+      key: "board-archive.json",
+      bytes: Buffer.from(JSON.stringify(archive)),
+      httpEtag: `"archive-${b}"`,
+    });
+    const check = async (what) => {
+      const boardText = await (await s.send("/board.json")).text();
+      const archiveText = s.bucket.objects.get("board-archive.json").bytes.toString();
+      for (const query of queries(JSON.parse(archiveText))) {
+        const want = archiveBefore(boardText, archiveText, query);
+        const request = () => new Request("http://local/api/board/archive?" + query);
+        for (const env of [s.env, { BUCKET: s.bucket }]) {
+          const got = await serveFactory(request(), env, person);
+          assert.deepEqual([got.status, await got.text()], want, `${what} ${query}`);
+        }
+      }
+    };
+    await check(`board ${b}`);
+    const store = s.room.object.board();
+    const ids = board.jobs.map((j) => j?.id).filter((id) => typeof id === "string");
+    const changes = [{ id: pick(shared), row: null, add: false }];
+    if (ids.length) changes.push({ id: pick(ids), row: null, add: false });
+    const added = row();
+    changes.push({ id: added?.id ?? "1-x", row: added, add: true });
+    const out = await store.commit({
+      base: store.state().etag,
+      changes,
+      updated: "2026-11-24T01:00:00Z",
+    });
+    assert.ok(out.etag, JSON.stringify(out));
+    await check(`board ${b} after a commit`);
+    archive.jobs.push(row());
+    await s.bucket.put("board-archive.json", JSON.stringify(archive));
+    await check(`board ${b} after an archive write`);
+  }
+});

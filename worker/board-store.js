@@ -757,6 +757,21 @@ export class BoardRows {
     return { ...this.decoded };
   }
 
+  // Every board row's id, as readBoardJson's rows give j?.id, without decoding a page: the
+  // stages row holds each string id. Only a board with a row whose id is not a string, which
+  // the index stores as NULL, decodes its pages for the others.
+  async ids() {
+    await this.sync();
+    const state = this.state();
+    if (!state?.readable) return [];
+    if (!this.sql.exec("SELECT 1 FROM board_index WHERE id IS NULL LIMIT 1").toArray().length)
+      return [...this.stages().keys()];
+    return this.sql
+      .exec("SELECT json FROM board_pages ORDER BY page")
+      .toArray()
+      .flatMap((p) => JSON.parse(p.json).map((j) => j?.id));
+  }
+
   // The dashboard's slim board as { etag, body }, the bytes JSON.stringify(slimBoard(board))
   // gives, or null when there is none. Kept per version in memory. A board slimBoard cannot
   // read, unreadable or with no jobs array, goes out as stored, as the Worker sent it before.
@@ -1127,6 +1142,7 @@ export function boardStore(env) {
   return {
     head: () => stub.boardHead(),
     read: () => stub.boardRead(),
+    ids: () => stub.boardIds(),
     body: () => served("/board"),
     // The slim board, which only the room builds; r2Store has none.
     slim: () => served("/board/slim"),
@@ -1180,6 +1196,11 @@ function r2Store(env) {
     async body() {
       const object = await env.BUCKET.get(BOARD_KEY);
       return object && { etag: object.httpEtag, body: object.body };
+    },
+    async ids() {
+      const object = await env.BUCKET.get(BOARD_KEY);
+      const jobs = object && parseDoc(await object.text())?.jobs;
+      return Array.isArray(jobs) ? jobs.map((j) => j?.id) : [];
     },
     async rows(q, at) {
       if (at === undefined || last?.etag !== at) last = await load();
