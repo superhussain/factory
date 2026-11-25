@@ -54,4 +54,3 @@ impl Exit {
         }
     }
 }
-// CI toolchain cache probe 2; the next commit reverts it.
