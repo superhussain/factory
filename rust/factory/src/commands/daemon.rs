@@ -1965,6 +1965,7 @@ mod tests {
             hb::get(&after),
         ]);
         let home = home("heartbeat", &api_origin);
+        hb::mark(&home, &hb::board_of(jobs(&old)));
         let origin = quiet();
         let fake = hb::Fake::new(
             serde_json::json!([
