@@ -822,9 +822,13 @@ async function boardPatch(request, env, principal, ctx) {
     const out = await store.commit({ base: snap.etag, changes, updated, max: MAX_BOARD });
     if (out.tooLarge) return reply("board over 16 MiB. Nothing was written.", 413);
     if (out.etag) {
-      await announce(env, "board.json", snap.clean ? rowsFrame(stored, data, out.etag) : "");
+      const frame = snap.clean ? rowsFrame(stored, data, out.etag) : "";
+      await announce(env, "board.json", frame);
       await boardCommitted(env, stored.jobs, data.jobs, ctx);
-      return reply("ok", 200, "text/plain", { ETag: out.etag });
+      // X-Board-Prev names the version a rows frame follows, so a host daemon that sent this
+      // write can apply it to its mirror without waiting for the frame.
+      const prev = frame ? { "X-Board-Prev": stored.etag } : {};
+      return reply("ok", 200, "text/plain", { ETag: out.etag, ...prev });
     }
     await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 80));
   }

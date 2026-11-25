@@ -25,8 +25,8 @@ const READ_LIMIT: Duration = Duration::from_secs(5);
 /// How long a write waits: the daemon's Worker request, plus the wait for its own frame.
 const WRITE_LIMIT: Duration = Duration::from_secs(45);
 /// The Worker's PATCH limits.
-const MAX_PATCH_ROWS: usize = 100;
-const MAX_PATCH_BYTES: usize = 1024 * 1024;
+pub const MAX_PATCH_ROWS: usize = 100;
+pub const MAX_PATCH_BYTES: usize = 1024 * 1024;
 /// How many times a board write retries a 503, and the first wait, which doubles each retry.
 const BUSY_RETRIES: u32 = 3;
 #[cfg(not(test))]
@@ -533,34 +533,41 @@ fn landed(old: Option<&str>, new: &str, now: Option<&str>) -> bool {
     changed
 }
 
-/// Sends a row PATCH, through the daemon when the read came from its mirror, else, or when no
-/// daemon takes it, straight to the Worker. True once the Worker committed it, false on a 409
-/// conflict, so the caller reads again. A request the daemon took but never answered fails,
-/// since the write may have landed and running the change again could repeat it.
-fn send_patch(home: &Path, body: &str, mirror: bool, api: Api) -> Res<bool> {
-    if mirror {
-        let mut request = Map::new();
-        request.insert("op".into(), "patch".into());
-        request.insert("body".into(), body.into());
-        match ask(home, request, WRITE_LIMIT) {
-            Err(Unanswered::Unreached) => {}
-            Err(Unanswered::Lost) => {
-                return Err(fail(
-                    "the daemon took a board write and sent no reply, so it may have landed. Nothing else was written; read the board before you retry.",
-                    5,
-                ))
-            }
-            Ok((head, _)) => return match head["status"].as_u64() {
-            Some(200) => Ok(true),
-            Some(409) => Ok(false),
-            _ => Err(Exit {
-                code: head["code"].as_i64().unwrap_or(5) as i32,
-                stderr: head["stderr"].as_str().unwrap_or_default().to_string(),
-                status: head["status"].as_array().and_then(|s| {
-                    Some((s.first()?.as_u64()? as u16, s.get(1)?.as_str()?.to_string()))
+/// What became of a board write.
+enum Wrote {
+    Committed,
+    Conflict,
+    /// The daemon took the write and sent no reply, so it may have landed.
+    Lost,
+}
+
+/// Sends a row PATCH through the daemon when `daemon` holds, which forwards it and puts a
+/// committed one in its mirror at once. Else, or with no daemon, or one that refuses the request,
+/// it goes straight to the Worker. Either way the Worker's answer comes back unchanged.
+fn send_patch(home: &Path, body: &str, daemon: bool, api: Api) -> Res<Wrote> {
+    let mut request = Map::new();
+    request.insert("op".into(), "patch".into());
+    request.insert("body".into(), body.into());
+    let asked = if daemon {
+        ask(home, request, WRITE_LIMIT)
+    } else {
+        Err(Unanswered::Unreached)
+    };
+    match asked {
+        Err(Unanswered::Unreached) => {}
+        Err(Unanswered::Lost) => return Ok(Wrote::Lost),
+        Ok((head, _)) => {
+            return match head["status"].as_u64() {
+                Some(200) => Ok(Wrote::Committed),
+                Some(409) => Ok(Wrote::Conflict),
+                _ => Err(Exit {
+                    code: head["code"].as_i64().unwrap_or(5) as i32,
+                    stderr: head["stderr"].as_str().unwrap_or_default().to_string(),
+                    status: head["status"].as_array().and_then(|s| {
+                        Some((s.first()?.as_u64()? as u16, s.get(1)?.as_str()?.to_string()))
+                    }),
                 }),
-            }),
-            },
+            }
         }
     }
     let r = api(
@@ -571,10 +578,13 @@ fn send_patch(home: &Path, body: &str, mirror: bool, api: Api) -> Res<bool> {
         &[200, 409],
         &[("Content-Type", "application/json")],
     )?;
-    if let Some(etag) = r.header("ETag").filter(|_| r.status == 200) {
+    if r.status != 200 {
+        return Ok(Wrote::Conflict);
+    }
+    if let Some(etag) = r.header("ETag") {
         await_etag(home, etag.strip_prefix("W/").unwrap_or(etag));
     }
-    Ok(r.status == 200)
+    Ok(Wrote::Committed)
 }
 
 /// After a write straight to the Worker, waits until a running daemon's mirror has the board at
@@ -606,7 +616,10 @@ pub fn cas_reading<T>(
 
 /// `cas_reading` through the Worker client `api`, so a caller's test seam reaches it too. A 503 on
 /// the write or its read retries up to `BUSY_RETRIES` times after a backoff, reading the Worker
-/// directly first, and a write the re-read shows `landed` returns without running its change again.
+/// directly first. A write the daemon took without replying reads the Worker directly too. A
+/// write that may have landed stays pending until the loop ends, so a re-read that shows it
+/// `landed` returns without running its change again, even after a later try of ours got 409
+/// because the first one reached the Worker late.
 pub fn cas_via<T>(
     home: &Path,
     reads: Reads,
@@ -623,7 +636,9 @@ pub fn cas_via<T>(
         std::thread::sleep(BUSY_BASE * (1 << (busy_tries - 1)) + jitter());
         true
     };
-    let mut sent: Option<(Option<String>, String, T)> = None;
+    let mut pending: Vec<(Option<String>, String, T)> = Vec::new();
+    // A daemon that took a write and never answered gets no more of this change's writes.
+    let mut lost = false;
     for _ in 0..20 {
         let read = match (direct, mirror_read(home, Map::new())) {
             (false, Some(read)) => read,
@@ -636,10 +651,11 @@ pub fn cas_via<T>(
                 Err(e) => return Err(e),
             },
         };
-        if let Some((old, new, result)) = sent.take() {
-            if landed(old.as_deref(), &new, read.text.as_deref()) {
-                return Ok(result);
-            }
+        if let Some(at) = pending
+            .iter()
+            .position(|(old, new, _)| landed(old.as_deref(), new, read.text.as_deref()))
+        {
+            return Ok(pending.swap_remove(at).2);
         }
         if read.text.is_some() && read.etag.is_none() {
             return Err(fail("/api/board: the Worker sent no ETag", 1));
@@ -651,7 +667,7 @@ pub fn cas_via<T>(
             _ => None,
         };
         let wrote = match body {
-            Some(body) => send_patch(home, &body, read.mirror, api),
+            Some(body) => send_patch(home, &body, !lost, api),
             None => {
                 let cond = match &read.etag {
                     Some(etag) => ("If-Match", etag.as_str()),
@@ -666,17 +682,24 @@ pub fn cas_via<T>(
                     &[cond],
                 )
                 .map(|r| {
-                    if let Some(etag) = r.header("ETag").filter(|_| r.status == 200) {
+                    if r.status != 200 {
+                        return Wrote::Conflict;
+                    }
+                    if let Some(etag) = r.header("ETag") {
                         await_etag(home, etag.strip_prefix("W/").unwrap_or(etag));
                     }
-                    r.status == 200
+                    Wrote::Committed
                 })
             }
         };
         match wrote {
-            Ok(true) => return Ok(result),
-            Ok(false) => std::thread::sleep(jitter()),
-            Err(e) if wait_busy(&e) => sent = Some((read.text, new, result)),
+            Ok(Wrote::Committed) => return Ok(result),
+            Ok(Wrote::Conflict) => std::thread::sleep(jitter()),
+            Ok(Wrote::Lost) => {
+                lost = true;
+                pending.push((read.text, new, result));
+            }
+            Err(e) if wait_busy(&e) => pending.push((read.text, new, result)),
             Err(e) => return Err(e),
         }
         direct = true;
@@ -1132,16 +1155,21 @@ mod tests {
         assert_eq!(methods, ["GET", "PATCH", "GET", "GET"]);
     }
 
-    /// A daemon that takes a board write and closes without a reply fails the write, and the
-    /// change never runs twice, since the write may have landed.
+    /// Runs `cas` adding row 2001-new through a fake daemon that serves the board read and then
+    /// takes every write without a reply, with the Worker sending `replies`. Returns how many
+    /// times the change ran, how many writes the daemon took, and the Worker's request methods.
     #[cfg(unix)]
-    #[test]
-    fn a_lost_daemon_reply_is_an_error_not_a_retry() {
+    fn lost_daemon(
+        name: &str,
+        replies: Vec<(u16, &'static str, Vec<(&'static str, &'static str)>)>,
+    ) -> (usize, usize, Vec<String>) {
         use std::os::unix::fs::DirBuilderExt;
         use std::os::unix::net::UnixListener;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
         use std::time::{SystemTime, UNIX_EPOCH};
-        let (origin, seen) = serve(vec![]);
-        let long = home_for("board-client-lost", &origin);
+        let (origin, seen) = serve(replies);
+        let long = home_for(name, &origin);
         let home = (0..100)
             .find_map(|_| {
                 let nanos = SystemTime::now()
@@ -1161,20 +1189,26 @@ mod tests {
         std::fs::copy(long.join(".env"), home.join(".env")).unwrap();
         let home = std::fs::canonicalize(&home).unwrap();
         let listener = UnixListener::bind(socket_path(&home)).unwrap();
+        let taken = Arc::new(AtomicUsize::new(0));
+        let count = taken.clone();
         std::thread::spawn(move || {
-            for (n, stream) in listener.incoming().enumerate() {
+            for stream in listener.incoming() {
                 let mut stream = stream.unwrap();
                 let mut line = String::new();
                 BufReader::new(&stream).read_line(&mut line).unwrap();
-                if n == 0 {
-                    stream
+                match serde_json::from_str::<Value>(&line).unwrap()["op"].as_str() {
+                    Some("board") => stream
                         .write_all(b"{\"v\":1,\"ok\":true,\"etag\":\"\\\"e1\\\"\",\"patch\":true}\n{\"updated\":\"\",\"jobs\":[{\"id\":\"1999-a\"}]}\n")
-                        .unwrap();
+                        .unwrap(),
+                    Some("patch") => {
+                        count.fetch_add(1, Ordering::SeqCst);
+                    }
+                    _ => {}
                 }
             }
         });
         let mut runs = 0;
-        let e = cas(&home, |text| {
+        cas(&home, |text| {
             runs += 1;
             let mut b = loads(text.unwrap()).unwrap();
             b["jobs"]
@@ -1183,10 +1217,61 @@ mod tests {
                 .push(json!({"id": "2001-new"}));
             Ok((Some(dumps(&b, COMPACT)), ()))
         })
-        .unwrap_err();
-        assert_eq!((e.code, runs), (5, 1));
-        assert!(e.stderr.contains("may have landed"), "{}", e.stderr);
-        assert!(seen.lock().unwrap().is_empty());
+        .unwrap();
         let _ = std::fs::remove_dir_all(&home);
+        let methods = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.method.clone())
+            .collect();
+        (runs, taken.load(Ordering::SeqCst), methods)
+    }
+
+    const ONE: &str = r#"{"updated":"","jobs":[{"id":"1999-a"}]}"#;
+    const TWO: &str = r#"{"updated":"","jobs":[{"id":"1999-a"},{"id":"2001-new"}]}"#;
+
+    /// A write the daemon took without a reply that the Worker's board shows returns without
+    /// running the change again.
+    #[cfg(unix)]
+    #[test]
+    fn a_lost_daemon_reply_that_landed_runs_once() {
+        let (runs, taken, methods) =
+            lost_daemon("board-client-lost-landed", vec![(200, TWO, patchable())]);
+        assert_eq!((runs, taken), (1, 1));
+        assert_eq!(methods, ["GET"]);
+    }
+
+    /// A lost write the Worker's board does not show runs again straight on the Worker, never
+    /// through the daemon that lost the first one.
+    #[cfg(unix)]
+    #[test]
+    fn a_lost_daemon_reply_that_did_not_land_falls_back_to_the_worker() {
+        let (runs, taken, methods) = lost_daemon(
+            "board-client-lost-retry",
+            vec![
+                (200, ONE, patchable()),
+                (200, "ok", vec![("ETag", "\"e2\"")]),
+            ],
+        );
+        assert_eq!((runs, taken), (2, 1));
+        assert_eq!(methods, ["GET", "PATCH"]);
+    }
+
+    /// A lost write that reaches the Worker after the fallback re-read makes the fallback's write
+    /// conflict, and the next read shows the first one, so the change ran twice but wrote once.
+    #[cfg(unix)]
+    #[test]
+    fn a_lost_write_that_lands_late_is_not_written_twice() {
+        let (runs, taken, methods) = lost_daemon(
+            "board-client-lost-late",
+            vec![
+                (200, ONE, patchable()),
+                (409, r#"{"error":"conflict"}"#, vec![]),
+                (200, TWO, patchable()),
+            ],
+        );
+        assert_eq!((runs, taken), (2, 1));
+        assert_eq!(methods, ["GET", "PATCH", "GET"]);
     }
 }
