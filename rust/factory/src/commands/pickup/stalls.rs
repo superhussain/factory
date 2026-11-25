@@ -584,10 +584,8 @@ pub(super) fn takeover(
     for stall in &stalls {
         let session = get_str(stall, "session").unwrap();
         // Python subtracts a now with microseconds and truncates, so a whole-second reset reads
-        // one second short.
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0.0, |d| d.as_secs_f64());
+        // one second short. The half second stands in for the microseconds unix_now drops.
+        let now = unix_now() as f64 + 0.5;
         let seconds = (stamp_of(stall.get("reset")).unwrap() as f64 - now).trunc() as i64;
         if seconds.div_euclid(60) <= threshold {
             let line = format!(
