@@ -5968,7 +5968,6 @@ mod tests {
     }
 
     /// A git command in dir with a clean config and a fixed author, as the Python tests run it.
-    #[cfg(unix)]
     pub(super) fn git_in(dir: &Path, args: &[&str]) -> String {
         let out = std::process::Command::new("git")
             .arg("-C")
