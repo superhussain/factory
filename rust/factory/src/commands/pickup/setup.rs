@@ -295,16 +295,21 @@ pub(super) fn timer_text(scheduler: &str, values: &TimerValues) -> String {
             log = log.replace('%', "%%"),
         );
     }
-    let run = format!("{} >> \"{log}\" 2>&1", list2cmdline(argv));
     if unit.keep_alive {
         // Task Scheduler starts it once at logon; the loop restarts it 10 seconds after it ends,
-        // until uninstall writes the stop marker.
+        // until uninstall writes the stop marker. cmd's `>>` holds its file without write sharing,
+        // so the loop sends output to a boot log, trimmed past 256 KiB, and the daemon opens and
+        // caps daemon.log itself.
         let stop = daemon::stop_marker(Path::new(&argv[2]));
         let stop = stop.display();
+        let boot = Path::new(log).with_file_name(format!("{}-boot.log", unit.command));
+        let boot = boot.display();
+        let run = format!("{} >> \"{boot}\" 2>&1", list2cmdline(argv));
         return format!(
-            "@echo off\r\nset \"PATH={path};%PATH%\"\r\n:run\r\nif exist \"{stop}\" exit /b 0\r\n{run}\r\nif exist \"{stop}\" exit /b 0\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n"
+            "@echo off\r\nset \"PATH={path};%PATH%\"\r\n:run\r\nif exist \"{stop}\" exit /b 0\r\nif exist \"{boot}\" for %%F in (\"{boot}\") do if %%~zF GTR 262144 type nul > \"{boot}\"\r\n{run}\r\nif exist \"{stop}\" exit /b 0\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n"
         );
     }
+    let run = format!("{} >> \"{log}\" 2>&1", list2cmdline(argv));
     format!("@echo off\r\nset \"PATH={path};%PATH%\"\r\n{run}\r\n")
 }
 

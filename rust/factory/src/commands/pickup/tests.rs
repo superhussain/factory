@@ -10950,13 +10950,31 @@ mod daemon_setup_test {
         let text = fs::read_to_string(&cmd).unwrap();
         let stop = daemon::stop_marker(&ds.fx.home);
         let check = format!("if exist \"{}\" exit /b 0", stop.display());
-        assert!(text.contains(&format!("\r\n:run\r\n{check}\r\n\"/opt/my skill/runtime/factory\" --home {} daemon >> \"{}\" 2>&1\r\n{check}\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n", ds.fx.home.display(), ds.log())), "{text:?}");
+        // The loop sends the daemon's output to a boot log it trims past 256 KiB, so the daemon
+        // can open daemon.log itself and cap it.
+        let boot = ds.fx.home.join("logs/daemon-boot.log");
+        let boot = boot.display();
+        let trim = format!("if exist \"{boot}\" for %%F in (\"{boot}\") do if %%~zF GTR 262144 type nul > \"{boot}\"");
+        assert!(text.contains(&format!("\r\n:run\r\n{check}\r\n{trim}\r\n\"/opt/my skill/runtime/factory\" --home {} daemon >> \"{boot}\" 2>&1\r\n{check}\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n", ds.fx.home.display())), "{text:?}");
 
         ds.sched.borrow_mut().runs.clear();
         let (code, out, _) = ds.run(Install);
         assert_eq!(code, 0);
         assert!(out.starts_with(&format!("service current: {}\n", cmd.display())));
         assert!(!ds.sched.borrow().runs.iter().any(|a| a[1] == "/Create"));
+
+        // A loop written before the boot log reads as drift, so catch-up reinstalls it.
+        fs::write(
+            &cmd,
+            text.replace(&format!("{trim}\r\n"), "")
+                .replace(&*boot.to_string(), &ds.log()),
+        )
+        .unwrap();
+        assert!(timer_drift("schtasks", &timer_values(&ds.fx.home, &DAEMON)).is_some());
+        let (code, out, _) = ds.run(Install);
+        assert_eq!(code, 0);
+        assert!(out.starts_with(&format!("installed schtasks service: {}\n", cmd.display())));
+        assert_eq!(fs::read_to_string(&cmd).unwrap(), text);
 
         // Uninstall writes the stop marker before /End, so a loop /End leaves behind exits, and
         // ends the loop's daemon by its pid.

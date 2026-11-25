@@ -382,8 +382,8 @@ fn cap_log(path: &Path) {
 }
 
 /// Points this process's stdout and stderr at its own append-mode handle on the service log. The
-/// `.cmd` loop starts the daemon with both on the log through `>>`, whose handle keeps its own
-/// offset, so a trim would leave it writing past the new end. False when the log can't be opened.
+/// `.cmd` loop starts the daemon with both on `daemon-boot.log` through `>>`, so output from
+/// before this call, such as a startup error, lands there. False when the log can't be opened.
 #[cfg(windows)]
 fn own_log(path: &Path) -> bool {
     use std::os::windows::io::IntoRawHandle;

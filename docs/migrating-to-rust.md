@@ -160,7 +160,10 @@ Measured on 2026-11-23, the mirror answered in under 10 ms on WSL and in 50 to
 
 It installs the daemon as a service and removes the pickup timer. It exits 0
 and prints `daemon setup (<os>, <scheduler>): running`. Run `daemon setup` with no flag to
-see its state, its last pass and its log, `<home>/logs/daemon.log`.
+see its state, its last pass and its log, `<home>/logs/daemon.log`. The daemon trims
+that log to its last 1 MiB once it passes 5 MiB. On Windows the restart loop sends the
+daemon's startup output, such as an error that stops it before it opens its log, to
+`<home>\logs\daemon-boot.log`, which the loop empties once it passes 256 KiB.
 
 | Host                         | Service                                                                                                                            |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
