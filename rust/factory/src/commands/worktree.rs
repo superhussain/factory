@@ -1645,6 +1645,7 @@ mod tests {
         assert_ne!(sh_git(&wt, &["rev-parse", "HEAD"]), before);
     }
 
+    #[cfg(unix)]
     const FAKE_PNPM: &str = "echo \"$* $(pwd)\" >> \"{record}\"\nmkdir -p node_modules && echo done > node_modules/.modules.yaml\n";
 
     /// A home whose factory project lists prebuild folders, and a clone of an origin holding sample/.
@@ -1749,11 +1750,9 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn chmod(p: &Path, mode: u32) {
-        #[cfg(unix)]
         fs::set_permissions(p, std::os::unix::fs::PermissionsExt::from_mode(mode)).unwrap();
-        #[cfg(not(unix))]
-        let _ = (p, mode);
     }
 
     const PREBUILT: &str = "prebuilt sample with pnpm install --frozen-lockfile";
