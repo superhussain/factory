@@ -266,12 +266,17 @@ jobs:
     timeout-minutes: 6
     # nextest runs each test in its own process, so tests that hold TEST_ENV_LOCK no longer wait on each other,
     # and hash partitions split the tests over the shards by name, so a test keeps its shard as others come and
-    # go. Each shard's test step takes about 16 s, and parity, not rust-test, ends last, so more shards would not
-    # shorten a run.
+    # go. The hash put all three heavy tests, the priority-100 ones in rust/.config/nextest.toml, in shard 2,
+    # whose test step took 29-34 s against shard 1's 13-19 s. So every shard leaves them out of its partition
+    # and runs its own share of them beside it.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        include:
+          - shard: 1
+            heavy: test(=commands::audit::tests::pr_merge_is_linear) | test(=commands::retro::tests::redact_supersets_cover_every_match)
+          - shard: 2
+            heavy: test(=commands::retro::tests::redact_matches_every_pass_run_unfiltered)
     defaults:
       run:
         working-directory: rust
@@ -305,7 +310,16 @@ jobs:
       - name: Build the tests
         run: CARGO_INCREMENTAL=1 cargo test --locked --no-run
       - name: Test linux-x64
-        run: CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2
+        env:
+          HEAVY: ${{ matrix.heavy }}
+          ALL_HEAVY: test(=commands::audit::tests::pr_merge_is_linear) | test(=commands::retro::tests::redact_supersets_cover_every_match) | test(=commands::retro::tests::redact_matches_every_pass_run_unfiltered)
+        run: |
+          CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast -E "$HEAVY" &
+          heavy=$!
+          status=0
+          CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2 -E "not ($ALL_HEAVY)" || status=1
+          wait "$heavy" || status=1
+          exit "$status"
   # Type-checks the darwin-arm64 and windows-x64 targets.
   rust-check:
     needs: plan

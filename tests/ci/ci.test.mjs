@@ -417,13 +417,34 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
   assert.match(unitRuns[1], /cargo-nextest-0\.9\.152-x86_64-unknown-linux-gnu\.tar\.gz/);
   assert.match(unitRuns[1], /sha256sum -c/);
   assert.equal(unitRuns[2], "CARGO_INCREMENTAL=1 cargo test --locked --no-run");
-  // Every shard runs its hash partition of every test, and the shards together cover all of them.
+  // Every shard runs its hash partition of every test but the heavy ones, and its share of those beside it.
   assert.equal(
     unitRuns[3],
-    "CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2",
+    [
+      'CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast -E "$HEAVY" &',
+      "heavy=$!",
+      "status=0",
+      'CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2 -E "not ($ALL_HEAVY)" || status=1',
+      'wait "$heavy" || status=1',
+      'exit "$status"',
+    ].join("\n"),
   );
   assert.equal(unitRuns.length, 4);
-  assert.deepEqual(unit.strategy.matrix.shard, [1, 2]);
+  const shards = unit.strategy.matrix.include;
+  assert.deepEqual(
+    shards.map((entry) => entry.shard),
+    [1, 2],
+  );
+  // The shards' heavy tests together are exactly ALL_HEAVY, which is exactly nextest.toml's priority-100 list.
+  const tests = (expr) => expr.split("|").map((part) => part.trim());
+  const step = unit.steps.find((entry) => entry.name === "Test linux-x64");
+  assert.equal(step.env.HEAVY, "${{ matrix.heavy }}");
+  const all = tests(step.env.ALL_HEAVY);
+  assert.deepEqual(shards.flatMap((entry) => tests(entry.heavy)).sort(), [...all].sort());
+  assert.ok(shards.every((entry) => tests(entry.heavy).length > 0));
+  const config = readFileSync(new URL("../../rust/.config/nextest.toml", import.meta.url), "utf8");
+  const first = /filter = '''([^]*?)'''\npriority = 100/.exec(config)[1];
+  assert.deepEqual(tests(first).sort(), [...all].sort());
   assert.equal(unit.strategy["fail-fast"], false);
   assert.deepEqual(runs(check), [
     "rustup toolchain install\nrustup target add aarch64-apple-darwin x86_64-pc-windows-gnu",
