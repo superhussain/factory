@@ -953,6 +953,76 @@
       "from": "tests/cli/test_outcomes.py::OutcomesUnknownTest.test_bad_oid"
     },
     {
+      "id": "outcomes/no-gh",
+      "argv": ["--home", "{home}", "outcomes", "alpha"],
+      "home": "audit-outcomes-checkout",
+      "no_gh": true,
+      "stubs": {
+        "git": [
+          {
+            "argv": ["-C", "{home}/alpha", "rev-parse", "--show-toplevel"],
+            "stdout": "{home}/alpha\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "{home}/alpha", "config", "--bool", "extensions.worktreeConfig"],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "config",
+              "--local",
+              "--includes",
+              "--get-regexp",
+              "^(url|http)\\."
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/alpha",
+              "fetch",
+              "-q",
+              "https://github.com/example/alpha.git",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          {
+            "updated": "2026-01-09T12:00:00Z",
+            "jobs": [
+              {
+                "id": "1019-add-z",
+                "project": "alpha",
+                "stage": "merged",
+                "done": "2999-01-01T00:00:00Z",
+                "updated": "2026-01-05T10:00:00Z",
+                "pr": "https://github.com/example/alpha/pull/9"
+              }
+            ]
+          }
+        ],
+        "PUT /api/board": [200, "ok"]
+      },
+      "exit": 0,
+      "from": "tests/cli/test_outcomes.py::OutcomesUnknownTest.test_gh_failure"
+    },
+    {
       "id": "outcomes/merge-commits-query-chunks-at-fifty",
       "argv": ["--home", "{home}", "outcomes", "alpha"],
       "home": "audit-outcomes-checkout",
