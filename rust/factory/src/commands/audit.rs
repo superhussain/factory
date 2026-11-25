@@ -722,7 +722,7 @@ fn audit_pushed_rows(home: &Path, job_id: &str, device: &str) -> Res<Vec<Map<Str
         })
         .filter(|row| {
             row.get("host").and_then(Value::as_str) == Some(device)
-                && row.get("target").and_then(Value::as_str) != Some(AUDIT_SKIPPED)
+                && row.get("skipped") != Some(&Value::Bool(true))
         })
         .collect())
 }
@@ -747,7 +747,7 @@ pub(crate) fn audit_push(job_id: &str) -> Res<()> {
         Err(e) if e.code == LIMIT => {
             let mut rows = audit_pushed_rows(&home, job_id, device)?;
             let time: String = now().replace('T', " ").chars().take(19).collect();
-            let marker = json!({"time": time, "session": "-", "agent": "-", "tool": "-", "flags": [], "target": AUDIT_SKIPPED});
+            let marker = json!({"time": time, "session": "-", "agent": "-", "tool": "-", "flags": [], "target": AUDIT_SKIPPED, "skipped": true});
             rows.push(marker.as_object().unwrap().clone());
             (rows, Some(e))
         }

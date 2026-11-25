@@ -4885,7 +4885,7 @@ mod audit_pickup_test {
         let log = push_fakes(&fx, None);
         fx.set_fakes(|f| f.audit_push = None);
         let old = r#"{"host": "host-a", "job": "1017-add-x", "time": "2026-01-01 00:00:00", "session": "3f2a9c1d", "agent": "main", "tool": "Bash", "flags": ["force-push"], "target": "git push --force"}"#;
-        let marker = r#"{"host": "host-a", "job": "1017-add-x", "time": "2026-01-01 00:00:01", "session": "-", "agent": "-", "tool": "-", "flags": [], "target": "audit push skipped: a flag pattern hit its backtrack limit, so newer calls are not shown"}"#;
+        let marker = r#"{"host": "host-a", "job": "1017-add-x", "time": "2026-01-01 00:00:01", "session": "-", "agent": "-", "tool": "-", "flags": [], "target": "audit push skipped: a flag pattern hit its backtrack limit, so newer calls are not shown", "skipped": true}"#;
         let other = r#"{"host": "host-b", "job": "1017-add-x", "time": "2026-01-01 00:00:02", "tool": "Read", "flags": [], "target": "-"}"#;
         let pushed: &'static str =
             Box::leak(format!("{old}\n{marker}\n{other}\n").into_boxed_str());

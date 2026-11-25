@@ -54,7 +54,7 @@ async function seed(origin) {
   }
 }
 
-async function openAudit(page, origin, width, height) {
+async function openAudit(page, origin, width, height, rows = ROWS) {
   await page.setViewport({ width, height, deviceScaleFactor: 1 });
   await page.setRequestInterception(true);
   page.on("request", (request) => {
@@ -63,7 +63,7 @@ async function openAudit(page, origin, width, height) {
       return request.respond({
         status: 200,
         contentType: "application/x-ndjson",
-        body: ROWS.map((r) => JSON.stringify(r) + "\n").join("") + "not json\n",
+        body: rows.map((r) => JSON.stringify(r) + "\n").join("") + "not json\n",
       });
     if (path === "/api/audit/1018-no-audit")
       return request.respond({ status: 200, contentType: "application/x-ndjson", body: "" });
@@ -188,6 +188,33 @@ test("the audit tab stacks each call as a card on a phone", { timeout: 120000 },
       assert.deepEqual(layout.flags, { text: "recursive-delete, denied", inside: true });
       assert.deepEqual(layout.target, { text: "rm -rf build", inside: true });
       assert.deepEqual(errors, [], "no page errors");
+    } finally {
+      await context.close();
+    }
+  });
+});
+
+test("the audit tab counts a skip marker row as no call", { timeout: 120000 }, async () => {
+  await prepareAssets();
+  await withBrowserFixture(async ({ browser, origin }) => {
+    await seed(origin);
+    const context = await browser.createBrowserContext();
+    try {
+      const page = await context.newPage();
+      const marker = {
+        ...call(7, "-", "-", [], "audit push skipped: a flag pattern hit its backtrack limit"),
+        session: "-",
+        skipped: true,
+      };
+      await openAudit(page, origin, 1440, 900, [ROWS[0], ROWS[1], marker]);
+      const doc = await page.$eval("#d-doc", (d) => ({
+        summary: d.querySelector("p").textContent,
+        rows: d.querySelectorAll("table.audit tbody tr").length,
+      }));
+      assert.deepEqual(doc, {
+        summary: "2 calls from 1 host, 1 flagged. Each host redacted its targets before upload.",
+        rows: 3,
+      });
     } finally {
       await context.close();
     }
