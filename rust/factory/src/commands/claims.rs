@@ -6,7 +6,6 @@ use std::fs;
 use std::hash::{BuildHasher, Hasher};
 use std::io::{ErrorKind, IsTerminal, Read};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Map, Value};
 
@@ -30,7 +29,7 @@ use crate::shared::py::{os_error, repr, splitlines, strip, universal_newlines};
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::pyval::{py_eq, py_int, py_repr, py_str, truthy};
-use crate::shared::time::{elapsed_seconds, now, parse_stamp};
+use crate::shared::time::{elapsed_seconds, now, parse_stamp, unix_now};
 
 static ID_DIGITS: Pattern = Pattern::new(r"(\d{3,})-", Flags::ASCII);
 
@@ -277,11 +276,7 @@ fn seen_age(c: &Value) -> Res<f64> {
             1,
         ));
     };
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0);
-    Ok(now - stamp as f64)
+    Ok((unix_now() - stamp) as f64)
 }
 
 /// The job's claim if another session holds it and checked in within the last minutes.

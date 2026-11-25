@@ -63,7 +63,7 @@ const FIELDS = [
 ];
 // A golden's dates relative to the run's UTC date. --record writes these placeholders, and a compare expands them.
 const DAYS = { "{today}": 0, "{today-6}": 6 };
-// Every case runs at this instant: the harness's dates use it, and the binary reads it from FACTORY_NOW, so no
+// Every case runs at this instant: the harness's dates use it, and the binary reads it from FACTORY_PARITY_NOW, so no
 // golden depends on the day it runs.
 const NOW = Date.parse("2026-11-24T12:00:00Z");
 // The host's OS label (host_os in the binary) in host-status.json and its PUT body, raw or JSON-escaped.
@@ -503,7 +503,7 @@ async function runSide(c, command) {
     delete env.FACTORY_ACCESS_CLIENT_SECRET;
     // The binary's local dates are UTC dates, so a golden holds the same dates in every zone.
     env.TZ = "UTC";
-    env.FACTORY_NOW = String(NOW / 1000);
+    env.FACTORY_PARITY_NOW = String(NOW / 1000);
     Object.assign(env, c.env ?? {}, {
       PATH: binDir + ":" + (process.env.PATH ?? ""),
       FACTORY_STUB_DIR: stubDir,

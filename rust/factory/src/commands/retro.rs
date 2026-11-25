@@ -8,7 +8,7 @@ use std::hash::{BuildHasher, Hasher};
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use regex::{RegexSet, SetMatches};
 use serde_json::{json, Map, Value};
@@ -899,10 +899,7 @@ fn rows(days: i64) -> Res<Vec<Value>> {
         ));
     }
     let host = host(&factory_home()?)?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs_f64();
+    let now = unix_now() as f64;
     let home = home_text(std::env::home_dir())?;
     Ok(rows_in(&root, &host, &home, now - days as f64 * 86400.0))
 }
@@ -1991,10 +1988,7 @@ fn check_doc_edit(e: &Value, agg: &Value) -> Violation {
 }
 
 fn now_micros() -> i128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_micros() as i128
+    i128::from(unix_now()) * 1_000_000
 }
 
 /// How many retro versions the history at route has from the last 24 hours. Only retro saves carry run.
@@ -3617,7 +3611,7 @@ mod tests {
     use super::*;
     use crate::shared::fs::temp_dir;
     use serde_json::json;
-    use std::time::{Duration, Instant};
+    use std::time::{Duration, Instant, SystemTime};
 
     /// Wall-clock ceiling per linear-time input. Loose enough for a loaded parallel suite.
     const LINEAR_BOUND: Duration = Duration::from_secs(5);
