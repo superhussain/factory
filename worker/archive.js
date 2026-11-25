@@ -1,3 +1,4 @@
+// CI timing probe; reverted in this PR.
 // The hourly archive pass and its read API. The pass moves old finished jobs from
 // board.json into board-archive.json, writing the archive first so a lost board race
 // leaves copies, never a loss. Reads hide any archive row whose id is still on the board.
