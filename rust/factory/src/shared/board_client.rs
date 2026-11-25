@@ -1261,6 +1261,22 @@ mod tests {
         assert_eq!(methods, ["GET", "PATCH"]);
     }
 
+    /// A lost write whose fallback goes as a PUT, since the Worker's read no longer advertises
+    /// row PATCHes, doesn't wait on the silent daemon's mirror either.
+    #[cfg(unix)]
+    #[test]
+    fn a_lost_daemon_reply_that_falls_back_to_a_put_skips_the_daemon() {
+        let (runs, taken, methods) = lost_daemon(
+            "board-client-lost-put",
+            vec![
+                (200, ONE, vec![("ETag", "\"e1\"")]),
+                (200, "ok", vec![("ETag", "\"e2\"")]),
+            ],
+        );
+        assert_eq!((runs, taken), (2, 1));
+        assert_eq!(methods, ["GET", "PUT"]);
+    }
+
     /// A lost write that reaches the Worker after the fallback re-read makes the fallback's write
     /// conflict, and the next read shows the first one, so the change ran twice but wrote once.
     #[cfg(unix)]
