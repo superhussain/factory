@@ -1349,22 +1349,22 @@ mod tests {
     /// starts, and a failed read do not.
     #[test]
     fn agent_finish_runs_a_pass() {
-        let origin = quiet();
+        let (origin, _, sockets) = held();
         let home = home("agent", &origin);
-        let reads = std::cell::Cell::new(0);
-        let agents = || {
-            reads.set(reads.get() + 1);
-            match reads.get() {
-                1 => Some(vec!["a1".to_string(), "a2".to_string()]),
-                2 => None,
-                3..=6 => Some(vec!["a1".into(), "a2".into(), "a3".into()]),
-                _ => Some(vec!["a2".into(), "a3".into()]),
-            }
+        let reads = AtomicUsize::new(0);
+        let agents = move || match reads.fetch_add(1, Ordering::SeqCst) + 1 {
+            1 => Some(vec!["a1".to_string(), "a2".to_string()]),
+            2 => None,
+            3..=6 => Some(vec!["a1".into(), "a2".into(), "a3".into()]),
+            _ => Some(vec!["a2".into(), "a3".into()]),
         };
-        let start = Instant::now();
-        let seen = run_with(&home, &origin, 2, &TEST, &agents, &[]);
-        assert_eq!(seen, ["connect", "agent finished a1"]);
-        assert!(start.elapsed() >= TEST.min_gap);
+        let (d, serving) = drive(&home, &origin, 2, DRIVEN, None, agents, &[]);
+        let start = *d.clock.lock().unwrap();
+        let _socket = sockets.recv().unwrap();
+        d.advance_until("pickup pass (connect)");
+        d.advance_until("pickup pass (agent finished a1)");
+        assert!(d.clock.lock().unwrap().duration_since(start) >= DRIVEN.min_gap);
+        assert_eq!(serving.join().unwrap(), ["connect", "agent finished a1"]);
         assert!(log_text(&home).contains(" agent finished a1\n"));
     }
 
@@ -1450,14 +1450,14 @@ mod tests {
         let home = home("down", &origin);
         let t = Timing {
             fallback: Duration::from_millis(300),
-            ..TEST
+            ..DRIVEN
         };
-        let start = Instant::now();
-        assert_eq!(
-            run_with(&home, &origin, 2, &t, &|| None, &[]),
-            ["fallback", "fallback"]
-        );
-        assert!(start.elapsed() >= t.fallback);
+        let (d, serving) = drive(&home, &origin, 2, t, None, || None, &[]);
+        let start = *d.clock.lock().unwrap();
+        d.advance_until("pickup pass (fallback)");
+        d.advance_until("pickup pass (fallback)");
+        assert!(d.clock.lock().unwrap().duration_since(start) >= t.fallback);
+        assert_eq!(serving.join().unwrap(), ["fallback", "fallback"]);
         assert!(log_text(&home).contains(" pickup pass (fallback)\n"));
     }
 
@@ -1497,18 +1497,25 @@ mod tests {
     /// that launched nothing queues none.
     #[test]
     fn launch_runs_a_room_left_pass() {
-        let origin = quiet();
+        let (origin, _, sockets) = held();
         let home = home("room", &origin);
         let t = Timing {
             fallback: Duration::from_millis(1500),
-            ..TEST
+            ..DRIVEN
         };
-        let start = Instant::now();
-        let seen = run_with(&home, &origin, 3, &t, &|| None, &[1]);
-        assert_eq!(seen, ["connect", "room left", "fallback"]);
+        let (d, serving) = drive(&home, &origin, 3, t, None, || None, &[1]);
+        let start = *d.clock.lock().unwrap();
+        let _socket = sockets.recv().unwrap();
+        d.advance_until("pickup pass (connect)");
+        d.advance_until("pickup pass (room left)");
+        d.advance_until("pickup pass (fallback)");
         assert!(
-            start.elapsed() >= t.fallback,
+            d.clock.lock().unwrap().duration_since(start) >= t.fallback,
             "the second pass queued no third"
+        );
+        assert_eq!(
+            serving.join().unwrap(),
+            ["connect", "room left", "fallback"]
         );
     }
 
@@ -1621,15 +1628,17 @@ mod tests {
     /// is logged by length only.
     #[test]
     fn rows_frame_runs_a_pass() {
-        let (origin, _) = fake(None, |mut socket| {
-            sleep(Duration::from_millis(100));
-            send(&mut socket, OTHER);
-            answer_pings(&mut socket, Duration::from_millis(400));
-            send(&mut socket, ROWS);
-            sleep(Duration::from_secs(1));
-        });
+        let (origin, _, sockets) = held();
         let home = home("rows", &origin);
-        assert_eq!(run(&home, &origin, 2), ["connect", "changed board.json"]);
+        let (d, serving) = drive(&home, &origin, 2, DRIVEN, None, || None, &[]);
+        let mut socket = sockets.recv().unwrap();
+        send(&mut socket, OTHER);
+        d.wait_for(&format!("frame ignored ({} bytes)", OTHER.len()));
+        d.advance_until("pickup pass (connect)");
+        send(&mut socket, ROWS);
+        d.wait_for("changed board.json");
+        d.advance_until("pickup pass (changed board.json)");
+        assert_eq!(serving.join().unwrap(), ["connect", "changed board.json"]);
         let log = log_text(&home);
         let ignored = format!(" frame ignored ({} bytes)\n", OTHER.len());
         assert!(log.contains(&ignored), "{log}");
@@ -1718,15 +1727,55 @@ mod tests {
         assert!(log_text(&home).contains("closed: no frame for 0.3s; retry in "));
     }
 
+    /// Pongs keep a socket open past many silence spells on the clock. The test answers each
+    /// ping before it moves the clock again, so the socket never goes a silence without a frame.
     #[test]
     fn pong_keeps_socket_open() {
-        let (origin, seen) = fake(None, |mut socket| {
-            answer_pings(&mut socket, Duration::from_secs(1));
-            send(&mut socket, BOARD);
-            sleep(Duration::from_secs(1));
-        });
+        let (origin, seen, sockets) = held();
         let home = home("pong", &origin);
-        assert_eq!(run(&home, &origin, 2), ["connect", "changed board.json"]);
+        let t = Timing {
+            silence: TEST.silence,
+            ..DRIVEN
+        };
+        let (d, serving) = drive(&home, &origin, 2, t, None, || None, &[]);
+        let mut socket = sockets.recv().unwrap();
+        socket
+            .get_ref()
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        // Moves the clock a ping_every at a time until the reader pings, then answers. The reader
+        // stamps a pong when it reads it, which may be after the clock moved, so a ping can take
+        // a second move. Only three moves with no ping could reach silence.
+        let step = |socket: &mut WebSocket<TcpStream>| {
+            sleep(Duration::from_millis(50));
+            loop {
+                d.advance(t.ping_every);
+                match socket.read() {
+                    Ok(Message::Text(text)) if text.as_str() == "ping" => {
+                        return send(socket, "pong")
+                    }
+                    Ok(_) => {}
+                    Err(tungstenite::Error::Io(e))
+                        if matches!(
+                            e.kind(),
+                            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                        ) => {}
+                    Err(e) => panic!("{e}"),
+                }
+            }
+        };
+        // The reader runs once it has logged a frame, so every ping below is one it sends.
+        send(&mut socket, OTHER);
+        d.wait_for("frame ignored");
+        for _ in 0..10 {
+            step(&mut socket);
+        }
+        d.wait_for("pickup pass (connect)");
+        send(&mut socket, BOARD);
+        d.wait_for("changed board.json");
+        step(&mut socket);
+        d.wait_for("pickup pass (changed board.json)");
+        assert_eq!(serving.join().unwrap(), ["connect", "changed board.json"]);
         assert_eq!(seen.lock().unwrap().len(), 1);
         assert!(!log_text(&home).contains("closed:"));
     }
