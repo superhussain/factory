@@ -1,3 +1,4 @@
+// CI probe: a Rust-only change on top of factory/2319-ci-test-floor.
 pub mod board;
 pub mod board_client;
 pub mod build;
