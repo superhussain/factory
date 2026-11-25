@@ -3,7 +3,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { parse } from "yaml";
 import { selectShard } from "../browser/shard.mjs";
 
@@ -89,7 +91,7 @@ const runAggregate = (job, name, env) => {
   const step = workflow.jobs[job].steps.find((entry) => entry.name === name);
   try {
     const stdout = execFileSync("sh", ["-c", step.run], {
-      env: { ...process.env, ALL_HIT: "", RUST_HIT: "", ...env },
+      env: { ...process.env, ALL_HIT: "", RUST_HIT: "", BROWSER_RUN: "", ...env },
       stdio: "pipe",
     });
     return { status: 0, stdout: String(stdout), stderr: "" };
@@ -117,6 +119,84 @@ test("the aggregate accepts a skip only where the plan found a passing run", () 
   assert.equal(run(`plan=success targets=skipped ${rust}`, { RUST_HIT: "true" }).status, 1);
   assert.equal(run("plan=skipped targets=success", { ALL_HIT: "true" }).status, 1);
   assert.equal(run("plan=success rust-test=failure", { RUST_HIT: "true" }).status, 1);
+});
+
+test("the aggregate accepts a skipped browser job only when no browser input changed", () => {
+  const run = (RESULTS, env) => runAggregate("ci", "All CI jobs passed", { RESULTS, ...env });
+  const skipped = run("plan=success targets=success browser=skipped", { BROWSER_RUN: "false" });
+  assert.equal(skipped.status, 0);
+  assert.ok(skipped.stdout.includes("browser: no browser input changed"));
+  assert.equal(run("plan=success browser=skipped", { BROWSER_RUN: "true" }).status, 1);
+  assert.equal(run("plan=success browser=skipped", { BROWSER_RUN: "" }).status, 1);
+  assert.equal(run("plan=success targets=skipped", { BROWSER_RUN: "false" }).status, 1);
+  assert.equal(run("plan=success browser=failure", { BROWSER_RUN: "false" }).status, 1);
+});
+
+test("the plan's browser inputs cover the Nx browser target's inputs", () => {
+  const nx = JSON.parse(readFileSync(new URL("../../nx.json", import.meta.url), "utf8"));
+  const tooling = JSON.parse(
+    readFileSync(new URL("../../tools/project.json", import.meta.url), "utf8"),
+  );
+  assert.ok(tooling.targets.browser);
+  const step = workflow.jobs.plan.steps.find((entry) => entry.name === "Browser inputs");
+  const paths = step.run.split(" HEAD -- ")[1].split(";")[0].split(" ");
+  // "default" is the tooling project's own folder; "shared" is nx.json's named input.
+  const wanted = [
+    "tools",
+    ...nx.namedInputs.shared.map((input) => input.replace("{workspaceRoot}/", "")),
+  ];
+  for (const input of nx.targetDefaults.browser.inputs) {
+    if (typeof input !== "string" || ["default", "shared"].includes(input)) continue;
+    const path = input.replace("{workspaceRoot}/", "").replace(/\/\*\*(\/\*)?$/, "");
+    wanted.push(path.startsWith("!") ? `':!${path.slice(1)}'` : path);
+  }
+  wanted.push("nx.json", "paseo-plugin", ".github/workflows/ci.yml", ".github/actions");
+  assert.deepEqual([...new Set(paths)].sort(), [...new Set(wanted)].sort());
+  assert.deepEqual(workflow.jobs.plan.outputs.browser, "${{ steps.browser.outputs.run }}");
+  assert.equal(
+    workflow.jobs.browser.if,
+    "needs.plan.outputs.all != 'true' && needs.plan.outputs.browser == 'true'",
+  );
+});
+
+test("the browser inputs step skips a Rust-only change and runs a web change", () => {
+  const step = workflow.jobs.plan.steps.find((entry) => entry.name === "Browser inputs");
+  const repo = mkdtempSync(join(tmpdir(), "ci-browser-inputs-"));
+  const git = (...args) => execFileSync("git", ["-C", repo, ...args], { stdio: "pipe" });
+  git("init", "-q");
+  git(
+    "-c",
+    "user.email=ci@example.test",
+    "-c",
+    "user.name=ci",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "base",
+  );
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  const touched = (path) => {
+    mkdirSync(dirname(join(repo, path)), { recursive: true });
+    writeFileSync(join(repo, path), `${path}\n`);
+    git("add", path);
+    git("-c", "user.email=ci@example.test", "-c", "user.name=ci", "commit", "-q", "-m", path);
+    const output = join(repo, ".output");
+    writeFileSync(output, "");
+    execFileSync("sh", ["-c", step.run], {
+      cwd: repo,
+      env: { ...process.env, GITHUB_BASE_REF: "main", GITHUB_OUTPUT: output },
+    });
+    return readFileSync(output, "utf8");
+  };
+  try {
+    assert.equal(touched("rust/factory/src/main.rs"), "run=false\n");
+    assert.equal(touched("tools/deploy.mjs"), "run=false\n");
+    assert.equal(touched("tests/fixtures/hosts-list.json"), "run=true\n");
+    assert.equal(touched("web/app.js"), "run=true\n");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 test("the plan keys the whole merge tree and the rust inputs, and lookups never download", () => {
@@ -154,7 +234,7 @@ test("the plan keys the whole merge tree and the rust inputs, and lookups never 
   for (const job of ["rust-build", "rust-test", "rust-check", "parity"]) {
     assert.ok(saves[0].if.includes(`needs.${job}.result == 'success'`), job);
   }
-  for (const job of ["targets", "browser", "paseo-plugin"]) {
+  for (const job of ["targets", "paseo-plugin"]) {
     assert.equal(workflow.jobs[job].if, "needs.plan.outputs.all != 'true'", job);
   }
 });

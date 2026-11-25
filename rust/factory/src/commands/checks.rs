@@ -3436,13 +3436,14 @@ mod tests {
                 .unwrap();
             std::thread::sleep(Duration::from_secs(60));
         });
+        crate::shared::http::TEST_HTTP_TIMEOUT.with(|t| t.set(Some(Duration::from_secs(1))));
         let started = Instant::now();
         let got = buildkite_get(&format!("{origin}/v2/x"), TOKEN, BUILDKITE_MAX_BYTES);
-        let waited = started.elapsed().as_secs();
+        let waited = started.elapsed().as_millis();
         let problem = got.unwrap_err();
         assert!(problem.starts_with("can't reach Buildkite: "), "{problem}");
         assert!(!problem.contains(TOKEN));
-        assert!((29..40).contains(&waited), "waited {waited} s");
+        assert!((1000..10_000).contains(&waited), "waited {waited} ms");
     }
 
     const SHA: &str = "0123456789abcdef0123456789abcdef01234567";

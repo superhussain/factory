@@ -37,6 +37,20 @@ static CREATED: Pattern = Pattern::new("[0-9a-f]{40,64} branch: Created from .*"
 const ORPHAN_KINDS: &[&str] = &["branch", "pr", "worktree", "workspace"];
 const GIT_TIMEOUT: Duration = Duration::from_secs(20);
 
+#[cfg(test)]
+thread_local! {
+    /// A shorter GIT_TIMEOUT for this test thread, so a timeout test need not wait 20 s.
+    static TEST_GIT_TIMEOUT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+fn git_timeout() -> Duration {
+    #[cfg(test)]
+    if let Some(limit) = TEST_GIT_TIMEOUT.with(std::cell::Cell::get) {
+        return limit;
+    }
+    GIT_TIMEOUT
+}
+
 pub fn stop(call: &Call) -> Res<()> {
     let alive = worktree::stop_pids(Path::new(&call.args[0])).unwrap_or_default();
     for pid in &alive {
@@ -206,7 +220,7 @@ fn clean_worktree(wt: &Path, what: &str, name: Option<&str>) -> Res<(Vec<String>
             ],
             None,
             &[],
-            Some(GIT_TIMEOUT),
+            Some(git_timeout()),
         );
         let out = match listed {
             Ok(o) if o.code == 0 => o.stdout,
@@ -240,7 +254,7 @@ fn clean_worktree(wt: &Path, what: &str, name: Option<&str>) -> Res<(Vec<String>
                 &["git", "-C", &wt_text, "check-ignore", "-q", &rel],
                 None,
                 &[],
-                Some(GIT_TIMEOUT),
+                Some(git_timeout()),
             )
             .is_ok_and(|o| o.code == 0);
             if ignored {
@@ -412,11 +426,12 @@ fn scan(
             ],
             None,
             &[("GIT_TERMINAL_PROMPT", "0")],
-            Some(GIT_TIMEOUT),
+            Some(git_timeout()),
         );
         match listed {
             Err(e) if e.kind() == io::ErrorKind::TimedOut => skipped.push(format!(
-                "branches {slug}: git ls-remote timed out after 20 s"
+                "branches {slug}: git ls-remote timed out after {} s",
+                git_timeout().as_secs()
             )),
             Err(_) => skipped.push(format!("branches {slug}: could not run git")),
             Ok(o) if o.code != 0 => skipped.push(format!(
@@ -626,9 +641,10 @@ fn workspace_leftovers(cwd: &str) -> Vec<String> {
             .into_iter()
             .chain(args.iter().copied())
             .collect();
-        match capture(&argv, None, &[], Some(GIT_TIMEOUT)) {
+        match capture(&argv, None, &[], Some(git_timeout())) {
             Err(e) if e.kind() == io::ErrorKind::TimedOut => {
-                Err(format!("git {verb} failed: timed out after 20 s"))
+                let secs = git_timeout().as_secs();
+                Err(format!("git {verb} failed: timed out after {secs} s"))
             }
             Err(_) => Err(format!("git {verb} failed: could not run git")),
             Ok(o) if o.code != 0 => Err(format!("git {verb} failed: exit {}", o.code)),
@@ -1049,11 +1065,18 @@ mod tests {
         assert_eq!(early_reason(true, paseo), None);
     }
 
+    #[test]
+    fn git_timeout_is_20s() {
+        assert_eq!(GIT_TIMEOUT, Duration::from_secs(20));
+        assert_eq!(git_timeout(), GIT_TIMEOUT);
+    }
+
     #[cfg(unix)]
     #[test]
     fn archive_git_times_out() {
         use std::os::unix::fs::PermissionsExt;
         let _lock = crate::shared::test_env_lock();
+        TEST_GIT_TIMEOUT.with(|t| t.set(Some(Duration::from_secs(1))));
         let home = temp_dir("archive-git-times-out");
         let hung = home.join("hung");
         fs::create_dir_all(&hung).unwrap();
@@ -1074,17 +1097,19 @@ mod tests {
         let mut dirs = vec![bin];
         dirs.extend(std::env::split_paths(path.as_deref().unwrap_or_default()));
         std::env::set_var("PATH", std::env::join_paths(dirs).unwrap());
+        let started = std::time::Instant::now();
         let found = workspace_leftovers(&hung.to_string_lossy());
+        let waited = started.elapsed();
         match path {
             Some(v) => std::env::set_var("PATH", v),
             None => std::env::remove_var("PATH"),
         }
-        assert_eq!(GIT_TIMEOUT, Duration::from_secs(20));
+        assert!(waited >= Duration::from_secs(2), "waited {waited:?}");
         assert_eq!(
             found,
             [
-                "git status failed: timed out after 20 s",
-                "git branch failed: timed out after 20 s"
+                "git status failed: timed out after 1 s",
+                "git branch failed: timed out after 1 s"
             ]
         );
     }
