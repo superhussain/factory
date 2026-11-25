@@ -390,8 +390,10 @@ Where `factory daemon setup --install` has installed the daemon service, the
 daemon is the host's only pickup scheduler and no pickup timer exists.
 
 - `daemon setup --install` installs the service, then removes the pickup timer
-  and the daily retro-push timer. `daemon setup --uninstall` puts both timers
-  back, then removes the service, so the host never goes without a scheduler.
+  and the daily retro-push timer. `daemon setup --uninstall` puts the pickup
+  timer back, then removes the service, so the host never goes without a
+  scheduler. It leaves the retro-push timer off; restore it from the backup or
+  set it up again as the schedules reference shows.
   When either rewrites the crontab, it first saves it to
   `<home>/backups/daemon-setup-<stamp>/crontab.txt`. Catch-up removes a
   retro-push timer left beside the daemon and prints

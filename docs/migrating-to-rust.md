@@ -217,8 +217,9 @@ back before it removes the service.
 The daemon pushes the retro digest at the timer's times, so the host has no
 `retro push` timer either. `daemon setup --install` removes it with the same
 backup, and catch-up removes a survivor and prints
-`retro-push timer: replaced by the daemon`. `daemon setup --uninstall` puts it
-back. A host without the daemon keeps the timer its
+`retro-push timer: replaced by the daemon`. `daemon setup --uninstall` leaves
+it off, since the host may never have had one or had its own times; restore it
+from the backup or set it up again. A host without the daemon keeps the timer its
 [schedules reference](../skills/factory/references/schedules.md#daily-retro-push)
 lines set up; point it at the binary as the next section shows.
 
