@@ -224,15 +224,11 @@ lines set up; point it at the binary as the next section shows.
 
 ## Update old automations
 
-Anything that still calls `python3 <installed-skill>/runtime/factory.py`, or
-`py -3 <installed-skill>\runtime\factory.py` on Windows, keeps working for one
-release. The installed `factory.py` is now a small stub. It prints one
-deprecation line on stderr, then runs `runtime/factory` (`runtime\factory.exe`
-on Windows) with the same arguments. The binary's exit code passes through. Move
-every caller to the binary before the stub goes.
-
-If the stub finds no binary beside it, it prints one line that names
-`sh tools/install.sh <skills folder>` (`tools\install.ps1` on Windows) and exits 127. Take the [Fresh install](#fresh-install-or-a-python-only-bundle) path.
+The installed skill no longer has `runtime/factory.py`. The one-release stub that
+ran the binary beside it is gone, so anything that still calls
+`python3 <installed-skill>/runtime/factory.py`, or
+`py -3 <installed-skill>\runtime\factory.py` on Windows, now fails. Move every
+caller to `runtime/factory` (`runtime\factory.exe` on Windows).
 
 Find them:
 

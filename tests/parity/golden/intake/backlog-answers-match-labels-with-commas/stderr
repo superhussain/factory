@@ -1,1 +1,1 @@
-factory.py: --answers {home}/backlog-decide-answers-19.txt: Yes is not an option of Revoke scope; pick from Yes, confirm cross-owner revokes, Log each revoke
+--answers {home}/backlog-decide-answers-19.txt: Yes is not an option of Revoke scope; pick from Yes, confirm cross-owner revokes, Log each revoke

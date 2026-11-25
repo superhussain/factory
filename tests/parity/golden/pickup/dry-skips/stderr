@@ -1,1 +1,1 @@
-factory.py: pickup skips the close of 006-closing: its reason must be 1 to 200 characters, with no line breaks or control characters
+pickup skips the close of 006-closing: its reason must be 1 to 200 characters, with no line breaks or control characters

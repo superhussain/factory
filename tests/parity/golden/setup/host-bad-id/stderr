@@ -1,1 +1,1 @@
-factory.py: usage: host pair <id> <code>: the id is 1 to 64 letters, digits, ., - and _
+usage: host pair <id> <code>: the id is 1 to 64 letters, digits, ., - and _

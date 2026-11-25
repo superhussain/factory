@@ -1,1 +1,1 @@
-factory.py: --fact-file must not hold a code fence or a link; nothing was written
+--fact-file must not hold a code fence or a link; nothing was written

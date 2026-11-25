@@ -1,1 +1,1 @@
-factory.py: GET {api}/api/jobs/sample/001-test/?etags=1 returned 500: boom
+GET {api}/api/jobs/sample/001-test/?etags=1 returned 500: boom

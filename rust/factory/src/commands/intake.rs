@@ -439,7 +439,7 @@ fn load_autonomy(data: &Value) -> Value {
         || !lists_ok
         || record["projects"].as_array().unwrap().len() > MAX_EXPLORER_PROJECTS
     {
-        eprintln!("factory.py: the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it");
+        eprintln!("the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it");
         return loads(AUTONOMY_DEFAULT).unwrap();
     }
     record
@@ -1230,7 +1230,7 @@ fn backlog_triage(home: &Path, item: &str, context: Option<&str>) -> Res<(Option
     let (status, text) = match r {
         Ok(r) => (Ok(r.status), r.text().unwrap_or_default()),
         Err(e) => {
-            let why = collapse(&e.stderr).replacen("factory.py: ", "", 1);
+            let why = collapse(&e.stderr);
             let why = if why.is_empty() {
                 "unknown error".to_string()
             } else {
@@ -1253,9 +1253,7 @@ fn backlog_triage(home: &Path, item: &str, context: Option<&str>) -> Res<(Option
             Ok(code) => code.to_string(),
             Err(why) => why.clone(),
         };
-        eprintln!(
-            "factory.py: backlog triage failed ({why}); the item waits in the backlog for review"
-        );
+        eprintln!("backlog triage failed ({why}); the item waits in the backlog for review");
         return Ok((None, status == Ok(400)));
     };
     if verdict["decision"] == "off" {
@@ -1326,7 +1324,7 @@ fn backlog_triage_batch(
     let (status, text) = match r {
         Ok(r) => (Ok(r.status), r.text().unwrap_or_default()),
         Err(e) => {
-            let why = collapse(&e.stderr).replacen("factory.py: ", "", 1);
+            let why = collapse(&e.stderr);
             let why = if why.is_empty() {
                 "unknown error".to_string()
             } else {
@@ -1359,7 +1357,7 @@ fn backlog_triage_batch(
             Err(why) => why.clone(),
         };
         eprintln!(
-            "factory.py: backlog triage failed ({why}); {} items wait in the backlog for review",
+            "backlog triage failed ({why}); {} items wait in the backlog for review",
             entries.len()
         );
         return Ok((Some(waiting), true));
@@ -1377,7 +1375,9 @@ fn backlog_triage_batch(
             None
         };
         let why = status.map_or("malformed reply".to_string(), |s| s.to_string());
-        eprintln!("factory.py: backlog triage failed for {item} ({why}); the item waits in the backlog for review");
+        eprintln!(
+            "backlog triage failed for {item} ({why}); the item waits in the backlog for review"
+        );
         results.push((None, status == Some(400)));
     }
     Ok((Some(results), false))
@@ -1636,7 +1636,9 @@ fn queue_backlog_item(
         Ok(id) => id,
         Err(e) => {
             shown(e);
-            eprintln!("factory.py: backlog triage could not queue {item}; the item waits in the backlog for review");
+            eprintln!(
+                "backlog triage could not queue {item}; the item waits in the backlog for review"
+            );
             return Ok(false);
         }
     };
@@ -1675,10 +1677,10 @@ fn queue_backlog_item(
                 false
             });
             if dropped {
-                eprintln!("factory.py: backlog triage could not check off {item}; it removed {job_id} and the item waits in the backlog for review");
+                eprintln!("backlog triage could not check off {item}; it removed {job_id} and the item waits in the backlog for review");
                 return Ok(false);
             }
-            eprintln!("factory.py: backlog triage queued {item} as {job_id} but could not check off its line; check off the line or remove {job_id} by hand");
+            eprintln!("backlog triage queued {item} as {job_id} but could not check off its line; check off the line or remove {job_id} by hand");
             return Ok(true);
         }
     };
@@ -1696,7 +1698,7 @@ fn queue_backlog_item(
     };
     println!("kept {item} in the backlog: its line changed before triage finished");
     if left {
-        eprintln!("factory.py: backlog triage kept {item} in the backlog but could not remove {job_id}; remove {job_id} by hand");
+        eprintln!("backlog triage kept {item} in the backlog but could not remove {job_id}; remove {job_id} by hand");
     }
     Ok(left)
 }
@@ -5813,7 +5815,7 @@ fn stuck_in(home: &Path, args: &[String]) -> Res<()> {
     let limit: usize = args.get(1).map_or(1, |n| n.parse().unwrap_or(usize::MAX));
     let (device, session, minutes) = holder(home)?;
     if let Some(halt) = read_halt(home)? {
-        eprintln!("factory.py: stuck resumes nothing; {}", halt_line(&halt));
+        eprintln!("stuck resumes nothing; {}", halt_line(&halt));
         return Err(exit(3));
     }
     let paths = read_paths(home)?;
@@ -6587,7 +6589,7 @@ mod tests {
             assert_eq!(e.code, 2);
             assert_eq!(
                 e.stderr,
-                format!("factory.py: autonomy {} refuses to run in an agent session (CLAUDECODE is set); a person types it in their own terminal. Nothing was changed.\n", list[0])
+                format!("autonomy {} refuses to run in an agent session (CLAUDECODE is set); a person types it in their own terminal. Nothing was changed.\n", list[0])
             );
             assert!(asked.is_empty() && puts.is_empty());
         }

@@ -1,1 +1,1 @@
-factory.py: bad artifact '--hold'. usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]
+bad artifact '--hold'. usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]

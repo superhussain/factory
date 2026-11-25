@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-fields-6.json: suggestions[0].size: must be S, M or L; nothing admitted
+{home}/suggest-fields-6.json: suggestions[0].size: must be S, M or L; nothing admitted

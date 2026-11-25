@@ -45,10 +45,7 @@ pub(super) fn priority_nudge_pass(
         return Ok(());
     }
     let Some(statuses) = paseo_statuses() else {
-        errln!(
-            io,
-            "factory.py: pickup skips priority nudges: paseo did not answer"
-        );
+        errln!(io, "pickup skips priority nudges: paseo did not answer");
         return Ok(());
     };
     for j in &jobs {
@@ -84,10 +81,7 @@ pub(super) fn priority_nudge_pass(
             continue;
         }
         if !paseo_send(&agent, &PRIORITY_NUDGE.replace("{id}", job_id)) {
-            errln!(
-                io,
-                "factory.py: pickup could not nudge {job_id}: paseo send failed"
-            );
+            errln!(io, "pickup could not nudge {job_id}: paseo send failed");
             continue;
         }
         let at = j["priority"]["at"].clone();
@@ -168,10 +162,7 @@ pub(super) fn idle_watch_pass(
         paseo_statuses()
     };
     let Some(statuses) = statuses else {
-        errln!(
-            io,
-            "factory.py: pickup skips idle checks: paseo did not answer"
-        );
+        errln!(io, "pickup skips idle checks: paseo did not answer");
         return Ok(());
     };
     let cutoff = format_stamp(unix_now() - IDLE_NUDGE_MINUTES * 60);
@@ -277,7 +268,7 @@ pub(super) fn idle_watch_pass(
             } else if !paseo_send(&agent, &IDLE_NUDGE.replace("{id}", job_id)) {
                 errln!(
                     io,
-                    "factory.py: pickup could not nudge idle {job_id}: paseo send failed"
+                    "pickup could not nudge idle {job_id}: paseo send failed"
                 );
             } else {
                 entry["nudged"] = now().into();
@@ -355,14 +346,14 @@ pub(super) fn usage_totals(
             .to_string_lossy()
             .into_owned();
         let Ok((models, bad)) = usage_scan(&path, main, None) else {
-            errln!(io, "factory.py: usage: cannot read {name}");
+            errln!(io, "usage: cannot read {name}");
             continue;
         };
         read += 1;
         if bad > 0 {
             errln!(
                 io,
-                "factory.py: usage: {bad} unreadable line{} in {name}",
+                "usage: {bad} unreadable line{} in {name}",
                 if bad == 1 { "" } else { "s" }
             );
         }
@@ -404,7 +395,7 @@ pub(super) fn token_cap_pass(
             Err(kind) => {
                 errln!(
                     io,
-                    "factory.py: pickup skips the token cap of {job_id}: scan failed ({kind})"
+                    "pickup skips the token cap of {job_id}: scan failed ({kind})"
                 );
                 continue;
             }
@@ -497,7 +488,10 @@ pub(super) fn token_cap_pass(
         {
             if let Some(agent) = paseo_agent(j) {
                 if paseo_run(&["stop", &agent]).0 != 0 {
-                    errln!(io, "factory.py: pickup could not stop agent {agent} of {job_id}: paseo stop failed");
+                    errln!(
+                        io,
+                        "pickup could not stop agent {agent} of {job_id}: paseo stop failed"
+                    );
                 }
             }
         }

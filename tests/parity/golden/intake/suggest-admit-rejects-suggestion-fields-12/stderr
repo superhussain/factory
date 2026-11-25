@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-fields-12.json: suggestions[0].paths: must be a list of 0-20 items; nothing admitted
+{home}/suggest-fields-12.json: suggestions[0].paths: must be a list of 0-20 items; nothing admitted

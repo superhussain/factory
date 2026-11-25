@@ -91,7 +91,7 @@ pub(super) fn pr_sync_pass(
         if jobs.len() > PR_SYNC_LIMIT {
             errln!(
                 io,
-                "factory.py: pickup syncs the first {PR_SYNC_LIMIT} of {} pull requests in {repo}",
+                "pickup syncs the first {PR_SYNC_LIMIT} of {} pull requests in {repo}",
                 jobs.len()
             );
             jobs.truncate(PR_SYNC_LIMIT);
@@ -100,7 +100,7 @@ pub(super) fn pr_sync_pass(
         let states = match pr_states(&repo, &numbers, device) {
             Ok(states) => states,
             Err(why) => {
-                errln!(io, "factory.py: pickup skips the PR sync for {repo}: {why}");
+                errln!(io, "pickup skips the PR sync for {repo}: {why}");
                 continue;
             }
         };
@@ -336,7 +336,7 @@ pub(super) fn auto_babysit_pass(
     for (repo, mut jobs) in groups {
         jobs.sort_by(|a, b| auto_babysit_at(&a.0).cmp(auto_babysit_at(&b.0)));
         if jobs.len() > limit {
-            errln!(io, "factory.py: pickup checks {limit} of {} auto-babysit candidates for {repo} this run, oldest automatic babysit first", jobs.len());
+            errln!(io, "pickup checks {limit} of {} auto-babysit candidates for {repo} this run, oldest automatic babysit first", jobs.len());
         }
         jobs.truncate(limit);
         let numbers: Vec<u64> = jobs.iter().map(|(_, n, _)| *n).collect();
@@ -347,10 +347,7 @@ pub(super) fn auto_babysit_pass(
         let signals = match pr_signals(&repo, &numbers, device, &handled) {
             Ok(signals) => signals,
             Err(why) => {
-                errln!(
-                    io,
-                    "factory.py: pickup skips auto-babysit for {repo}: {why}"
-                );
+                errln!(io, "pickup skips auto-babysit for {repo}: {why}");
                 continue;
             }
         };
@@ -512,7 +509,7 @@ pub(super) fn autonomy_hold(data: &Value, job: &Value) -> Option<String> {
     let (project, cls) = (get_str(job, "project")?, job_class(job)?);
     let holds = autonomy_holds(data);
     let (_, held) = holds.iter().find(|((p, c), _)| p == project && *c == cls)?;
-    Some(format!("earned autonomy holds {project} {cls} PRs after reverted {}; a person lifts it with factory.py autonomy restore {project} {cls}", held.join(", ")))
+    Some(format!("earned autonomy holds {project} {cls} PRs after reverted {}; a person lifts it with factory autonomy restore {project} {cls}", held.join(", ")))
 }
 
 /// Set automerge false and needs on a held pr-open job. The needs line, or None with no write.

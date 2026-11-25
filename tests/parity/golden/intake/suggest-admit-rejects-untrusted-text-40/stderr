@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-untrusted-40.json: suggestions[0].options[0].cons: looks like a secret; nothing admitted
+{home}/suggest-untrusted-40.json: suggestions[0].options[0].cons: looks like a secret; nothing admitted

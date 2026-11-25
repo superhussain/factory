@@ -69,10 +69,7 @@ pub(super) fn session_stop_pass(
         return Ok(());
     }
     let Some(statuses) = paseo_statuses() else {
-        errln!(
-            io,
-            "factory.py: pickup skips session stops: paseo did not answer"
-        );
+        errln!(io, "pickup skips session stops: paseo did not answer");
         return Ok(());
     };
     for i in due_ids {
@@ -97,7 +94,7 @@ pub(super) fn session_stop_pass(
         if paseo_run(&["stop", &agent]).0 != 0 {
             errln!(
                 io,
-                "factory.py: pickup could not stop agent {agent} of {job_id}: paseo stop failed"
+                "pickup could not stop agent {agent} of {job_id}: paseo stop failed"
             );
             continue;
         }
@@ -223,7 +220,7 @@ pub(super) fn close_decision(
     let holders = recorded_holders(j);
     let uncovered: Vec<&String> = holders.iter().filter(|h| !pickup.lists(h)).collect();
     let (project, id) = (text_of(j.get("project")), text_of(j.get("id")));
-    let task = format!("`factory.py cleanup {project}/{id}`");
+    let task = format!("`factory cleanup {project}/{id}`");
     let quoted = |hosts: &[&String]| {
         hosts
             .iter()
@@ -249,7 +246,7 @@ pub(super) fn close_decision(
     let github = get_str(&j["close"], "via") == Some("github");
     let (summary, requested, unreviewed) = if github {
         (
-            format!("GitHub reported pull request {pr} closed without merging, so factory.py pickup closed the job at {at} while at stage `{stage}`."),
+            format!("GitHub reported pull request {pr} closed without merging, so factory pickup closed the job at {at} while at stage `{stage}`."),
             format!("GitHub reported the pull request closed. Pickup queued the close at {at}."),
             "No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` ref if the work is still wanted.".to_string(),
         )
@@ -271,7 +268,7 @@ pub(super) fn close_decision(
         }
         None => "none".into(),
     };
-    let text = format!("CLOSED: {reason}\n\n**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- {requested}\n- Stage when closed: `{stage}`, round {round}.\n- Branch: `{branch}`.\n- Pull request: {shown_pr}.\n- Written by factory.py pickup on {device}.\n\n## Left out\n\n- {unreviewed}\n{open_pr}- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup {project}/{id}` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup {project}/{id}` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n{manual}");
+    let text = format!("CLOSED: {reason}\n\n**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- {requested}\n- Stage when closed: `{stage}`, round {round}.\n- Branch: `{branch}`.\n- Pull request: {shown_pr}.\n- Written by factory pickup on {device}.\n\n## Left out\n\n- {unreviewed}\n{open_pr}- The next pickup run on each host that holds the worktree or branch runs `factory cleanup {project}/{id}` there when the project's pickup is on and lists that host. On any other host, run `factory cleanup {project}/{id}` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n{manual}");
     match earlier {
         Some(e) if !e.is_empty() => format!("{text}\n## Earlier decision\n\n{e}"),
         _ => text,
@@ -301,7 +298,7 @@ pub(super) fn close_pass(
             continue;
         }
         let Some(reason) = close_reason(&j) else {
-            errln!(io, "factory.py: pickup skips the close of {job_id}: its reason must be 1 to 200 characters, with no line breaks or control characters");
+            errln!(io, "pickup skips the close of {job_id}: its reason must be 1 to 200 characters, with no line breaks or control characters");
             continue;
         };
         if let Some(c) = claims::blocking(Some(&j), device, "", minutes)? {
@@ -331,11 +328,9 @@ pub(super) fn close_pass(
         };
         match &outcome {
             Some(("closed", _)) => outln!(io, "closed pull request {} for {job_id}", pr.unwrap()),
-            Some(("open", why)) => errln!(
-                io,
-                "factory.py: pickup leaves pull request {} open: {why}",
-                pr.unwrap()
-            ),
+            Some(("open", why)) => {
+                errln!(io, "pickup leaves pull request {} open: {why}", pr.unwrap())
+            }
             _ => {}
         }
         if !configs.contains_key(project) {

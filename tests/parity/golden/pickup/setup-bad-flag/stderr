@@ -1,1 +1,1 @@
-factory.py: usage: pickup setup [--install]
+usage: pickup setup [--install]

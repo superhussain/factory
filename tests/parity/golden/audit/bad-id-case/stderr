@@ -1,1 +1,1 @@
-factory.py: usage: factory.py audit <job-id>, a full job id such as 1017-add-x
+usage: factory audit <job-id>, a full job id such as 1017-add-x

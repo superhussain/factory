@@ -1,1 +1,1 @@
-factory.py: usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]
+usage: wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]

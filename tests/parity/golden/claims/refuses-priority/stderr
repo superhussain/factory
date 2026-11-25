@@ -1,1 +1,1 @@
-factory.py: only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's chat, run factory.py control <job-id> prioritize --chat-file <file>
+only the dashboard, factory pickup and factory control set priority. To relay a person's chat, run factory control <job-id> prioritize --chat-file <file>

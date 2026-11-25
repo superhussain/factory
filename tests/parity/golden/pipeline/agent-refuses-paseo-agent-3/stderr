@@ -1,1 +1,1 @@
-factory.py: --paseo-agent "-x" must be 1 to 64 letters, digits, _ or -, not starting with -
+--paseo-agent "-x" must be 1 to 64 letters, digits, _ or -, not starting with -

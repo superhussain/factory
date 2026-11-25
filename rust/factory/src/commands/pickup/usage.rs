@@ -102,7 +102,7 @@ pub(super) fn retro_catchup_wait(
     if !dry && read_json(&path).as_ref() == Some(&record) {
         return Ok(());
     }
-    errln!(io, "factory.py: retro catch-up waits: {reason}");
+    errln!(io, "retro catch-up waits: {reason}");
     if !dry {
         write_file(&path, &(dumps(&record, DEFAULT) + "\n"))?;
     }
@@ -156,7 +156,7 @@ pub(super) fn retro_pickup_catchup(io: &mut Io, home: &Path, dry: bool) {
         } else {
             errln!(
                 io,
-                "factory.py: retro catch-up {job_id} failed to launch ({}); see {}; no retry today",
+                "retro catch-up {job_id} failed to launch ({}); see {}; no retry today",
                 detail.unwrap_or_default(),
                 log_path.display()
             );
@@ -167,7 +167,7 @@ pub(super) fn retro_pickup_catchup(io: &mut Io, home: &Path, dry: bool) {
         let _ = io.err.write_all(e.stderr.as_bytes());
         errln!(
             io,
-            "factory.py: retro catch-up stopped (exit {}); the next pickup run retries it",
+            "retro catch-up stopped (exit {}); the next pickup run retries it",
             e.code
         );
     }
@@ -457,7 +457,7 @@ pub(super) fn token_cap(io: &mut Io, home: &Path, key: &str) -> Res<Option<i64>>
         _ => {
             errln!(
                 io,
-                "factory.py: pickup ignores {key} in {}: must be a whole number of at least 1",
+                "pickup ignores {key} in {}: must be a whole number of at least 1",
                 config.display()
             );
             Ok(None)
@@ -522,7 +522,7 @@ pub(super) fn record_launch(io: &mut Io, home: &Path, job_id: &str, row: Value) 
         let _ = io.err.write_all(e.stderr.as_bytes());
         errln!(
             io,
-            "factory.py: {job_id} launched, but its agent row was not recorded; the pass goes on"
+            "{job_id} launched, but its agent row was not recorded; the pass goes on"
         );
     }
 }

@@ -1,1 +1,1 @@
-factory.py: bench: {home}/bench/arm-file is not a folder
+bench: {home}/bench/arm-file is not a folder

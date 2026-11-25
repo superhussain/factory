@@ -1722,10 +1722,7 @@ mod tests {
         let home = temp_dir("daemon-token");
         let e = access_headers(&home, "https://f.example.test").unwrap_err();
         assert_eq!(e.code, 2);
-        assert_eq!(
-            e.stderr,
-            format!("factory.py: {}\n", token_message(&home.join(".env")))
-        );
+        assert_eq!(e.stderr, format!("{}\n", token_message(&home.join(".env"))));
     }
 
     /// The server holds the connection open until connect returns, so only the watchdog can end the

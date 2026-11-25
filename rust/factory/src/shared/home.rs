@@ -415,7 +415,7 @@ mod tests {
     fn selected_home_must_be_absolute() {
         assert_eq!(
             err(resolve_home(Some(OsStr::new("relative")), None, None)),
-            "factory.py: factory home must be absolute. Nothing was written.\n"
+            "factory home must be absolute. Nothing was written.\n"
         );
         let dir = temp_dir("home-selected");
         assert_eq!(
@@ -438,7 +438,7 @@ mod tests {
         );
         assert_eq!(
             err(resolve_home(None, Some(OsStr::new("rel")), None)),
-            "factory.py: XDG_CONFIG_HOME must be absolute\n"
+            "XDG_CONFIG_HOME must be absolute\n"
         );
         fs::remove_dir_all(dir).unwrap();
     }
@@ -482,15 +482,12 @@ mod tests {
         fs::write(&pointer, "{\"version\": 1.0, \"home\": \"/x\"}").unwrap();
         assert_eq!(
             read_location(&pointer).unwrap_err().stderr,
-            format!(
-                "factory.py: Invalid location pointer: {}.\n",
-                pointer.display()
-            )
+            format!("Invalid location pointer: {}.\n", pointer.display())
         );
         fs::write(home.join("paths.md"), "---\nbad key: /x\n---\n").unwrap();
         assert_eq!(
             validate_home(&home, true).unwrap_err().stderr,
-            "factory.py: Invalid local metadata: paths.md.\n"
+            "Invalid local metadata: paths.md.\n"
         );
         fs::write(home.join("paths.md"), "---\nsample: /x\n---\n").unwrap();
         fs::create_dir_all(home.join("jobs/sample/001-x")).unwrap();
@@ -501,7 +498,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             validate_home(&home, true).unwrap_err().stderr,
-            "factory.py: Invalid local metadata: jobs/sample/001-x/.sync.json.\n"
+            "Invalid local metadata: jobs/sample/001-x/.sync.json.\n"
         );
         // The pointer check reads only the top level, so the bad manifest below it passes.
         assert!(validate_home(&home, false).is_ok());
@@ -519,7 +516,7 @@ mod tests {
         assert_eq!(
             holder(&dir).unwrap_err().stderr,
             format!(
-                "factory.py: claim_stale_minutes in {}/config.md must be a whole number of minutes, not 'soon'\n",
+                "claim_stale_minutes in {}/config.md must be a whole number of minutes, not 'soon'\n",
                 dir.display()
             )
         );
@@ -555,10 +552,7 @@ mod tests {
             (e.code, e.stderr),
             (
                 2,
-                format!(
-                    "factory.py: Invalid location pointer: {}.\n",
-                    pointer.display()
-                )
+                format!("Invalid location pointer: {}.\n", pointer.display())
             )
         );
         std::os::unix::fs::symlink(&dir, home.join("projects")).unwrap();
@@ -566,7 +560,7 @@ mod tests {
             let e = validate_home(&home, deep).unwrap_err();
             assert_eq!(
                 (e.code, e.stderr.as_str()),
-                (2, "factory.py: Invalid local metadata: projects.\n")
+                (2, "Invalid local metadata: projects.\n")
             );
         }
         fs::remove_file(home.join("projects")).unwrap();
@@ -580,10 +574,7 @@ mod tests {
         let e = validate_home(&home, true).unwrap_err();
         assert_eq!(
             (e.code, e.stderr.as_str()),
-            (
-                2,
-                "factory.py: Invalid local metadata: jobs/sample/001-test/pipe.\n"
-            )
+            (2, "Invalid local metadata: jobs/sample/001-test/pipe.\n")
         );
         fs::remove_dir_all(dir).unwrap();
     }

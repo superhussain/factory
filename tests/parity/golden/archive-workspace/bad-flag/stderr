@@ -1,1 +1,1 @@
-factory.py: usage: archive-workspace <project-slug>/<job-id> [--check]
+usage: archive-workspace <project-slug>/<job-id> [--check]

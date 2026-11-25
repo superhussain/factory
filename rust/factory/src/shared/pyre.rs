@@ -119,7 +119,7 @@ impl Pattern {
         result.unwrap_or_else(|_| {
             if !WARNED.swap(true, Ordering::Relaxed) {
                 eprintln!(
-                    "factory.py: pattern {} hit the regex backtrack limit; treating it as no match",
+                    "pattern {} hit the regex backtrack limit; treating it as no match",
                     repr(self.src)
                 );
             }
@@ -214,7 +214,7 @@ impl Pattern {
 
     /// Exit 1 so a redaction or refusal never passes text a pattern could not finish reading.
     fn stop(&self) -> ! {
-        let msg = format!("factory.py: {}", self.limit_reason());
+        let msg = self.limit_reason();
         #[cfg(test)]
         panic!("{msg}");
         #[cfg(not(test))]

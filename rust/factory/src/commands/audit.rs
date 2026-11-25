@@ -709,7 +709,7 @@ pub(crate) fn audit_push(job_id: &str) -> Res<()> {
     let meta = config_meta(&config)?;
     let device = fm_get(&meta, "device").unwrap_or("");
     let hint = format!(
-        "set device: in {}; pair this host with factory.py host pair <id> <code>",
+        "set device: in {}; pair this host with factory host pair <id> <code>",
         config.display()
     );
     if !HOST_NAME.is_full(device) {
@@ -789,7 +789,7 @@ pub fn audit_cmd(call: &Call) -> Res<()> {
     if args.len() == 2 {
         if args[0] != "push" || !NEW_JOB_ID.is_full(&args[1]) {
             return Err(fail(
-                "usage: factory.py audit push <job-id>, a full job id such as 1017-add-x",
+                "usage: factory audit push <job-id>, a full job id such as 1017-add-x",
                 2,
             ));
         }
@@ -798,7 +798,7 @@ pub fn audit_cmd(call: &Call) -> Res<()> {
     let job_id = &args[0];
     if !NEW_JOB_ID.is_full(job_id) {
         return Err(fail(
-            "usage: factory.py audit <job-id>, a full job id such as 1017-add-x",
+            "usage: factory audit <job-id>, a full job id such as 1017-add-x",
             2,
         ));
     }
@@ -1047,16 +1047,13 @@ pub(crate) fn usage_totals(home: &Path, slug: &str, job_id: &str) -> io::Result<
     let mut read = 0;
     for (path, main) in usage_transcripts(home, slug, job_id)? {
         let Ok((models, bad)) = usage_scan(&path, main, None) else {
-            eprintln!("factory.py: usage: cannot read {}", file_name(&path));
+            eprintln!("usage: cannot read {}", file_name(&path));
             continue;
         };
         read += 1;
         if bad > 0 {
             let s = if bad == 1 { "" } else { "s" };
-            eprintln!(
-                "factory.py: usage: {bad} unreadable line{s} in {}",
-                file_name(&path)
-            );
+            eprintln!("usage: {bad} unreadable line{s} in {}", file_name(&path));
         }
         for (model, counts) in &models {
             add_counts(&mut totals, model, counts);
@@ -1142,7 +1139,7 @@ pub fn usage_cmd(call: &Call) -> Res<()> {
     let record = args.len() == 2;
     if record && args[0] != "record" {
         return Err(fail(
-            "usage: factory.py usage [record] <project-slug>/<job-id>",
+            "usage: factory usage [record] <project-slug>/<job-id>",
             2,
         ));
     }
@@ -1156,7 +1153,7 @@ pub fn usage_cmd(call: &Call) -> Res<()> {
         if !HOST_NAME.is_full(&host) {
             return Err(fail(
                 format!(
-                    "set device: in {}; pair this host with factory.py host pair <id> <code>",
+                    "set device: in {}; pair this host with factory host pair <id> <code>",
                     config.display()
                 ),
                 2,
@@ -1167,7 +1164,7 @@ pub fn usage_cmd(call: &Call) -> Res<()> {
         Ok(totals) => totals,
         Err(e) => {
             eprintln!(
-                "factory.py: usage: scan failed ({}: {}); nothing recorded",
+                "usage: scan failed ({}: {}); nothing recorded",
                 exc_name(&e),
                 os_error(&e, Some(&retro_transcripts()))
             );
@@ -1637,10 +1634,7 @@ pub fn outcomes_cmd(call: &Call) -> Res<()> {
     let record = args.first().is_some_and(|a| a == "record");
     let rest = if record { &args[1..] } else { &args[..] };
     if rest.len() > 1 || rest.first().is_some_and(|s| !SLUG.is_full(s)) {
-        return Err(fail(
-            "usage: factory.py outcomes [record] [<project-slug>]",
-            2,
-        ));
+        return Err(fail("usage: factory outcomes [record] [<project-slug>]", 2));
     }
     let mut out = String::new();
     let result = outcomes(record, rest.first().map(String::as_str), &mut out);
@@ -1655,8 +1649,8 @@ static CITATION: Pattern = Pattern::new(
 );
 static ARM_NAME: Pattern = Pattern::new(r"[\w.-]+", Flags::ASCII);
 const BENCH_WEIGHTS: [(&str, i64); 3] = [("high", 3), ("medium", 2), ("low", 1)];
-const BENCH_USAGE: &str = "usage: factory.py bench score <cases-file> <arm-folder>... | bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] | bench cases <project-slug>";
-const BENCH_DRAFT_USAGE: &str = "usage: factory.py bench cases <project-slug>";
+const BENCH_USAGE: &str = "usage: factory bench score <cases-file> <arm-folder>... | bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] | bench cases <project-slug>";
+const BENCH_DRAFT_USAGE: &str = "usage: factory bench cases <project-slug>";
 const ROLE_ALIASES: [(&str, &str); 10] = [
     ("builder", "build"),
     ("factory-builder", "build"),
@@ -1897,7 +1891,7 @@ fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<Vec<ReplayRow>> {
         if jobs.is_empty() {
             return Err(fail(
                 format!(
-                    "bench: {id}: no job folder with spec.md under {}; pull it with factory.py pull <project>/{id}",
+                    "bench: {id}: no job folder with spec.md under {}; pull it with factory pull <project>/{id}",
                     home.join("jobs").display()
                 ),
                 4,
@@ -1922,7 +1916,7 @@ fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<Vec<ReplayRow>> {
         if repo.is_empty() {
             return Err(fail(
                 format!(
-                    "bench: {id}: project {slug} has no repo; pull it with factory.py pull {slug}"
+                    "bench: {id}: project {slug} has no repo; pull it with factory pull {slug}"
                 ),
                 4,
             ));
@@ -2437,7 +2431,7 @@ fn bench_replay_case(
     .map_or(1, |r| r.code);
     if removed != 0 {
         bench_warn(&format!(
-            "factory.py: bench: left {}; remove it with git -C {dir} worktree remove {wt_text}",
+            "bench: left {}; remove it with git -C {dir} worktree remove {wt_text}",
             tmp.display()
         ));
     } else {
@@ -2565,7 +2559,7 @@ fn bench_draft(args: &[String]) -> Res<()> {
                 } else {
                     repo
                 };
-                eprintln!("factory.py: bench cases skips {id}: PR is not in {repo}");
+                eprintln!("bench cases skips {id}: PR is not in {repo}");
             }
         }
     }
@@ -2590,7 +2584,7 @@ fn bench_draft(args: &[String]) -> Res<()> {
         {
             Some(head) => cases.push(json!({"id": j["id"], "pr": j["pr"], "head": head,
                                             "source": j["outcome"]["result"], "defects": []})),
-            None => eprintln!("factory.py: bench cases skips {id}: no head commit from GitHub"),
+            None => eprintln!("bench cases skips {id}: no head commit from GitHub"),
         }
     }
     if cases.is_empty() {
@@ -4077,7 +4071,7 @@ mod bench_replay_test {
         assert_eq!(
             err,
             format!(
-                "factory.py: bench: left {}; remove it with git -C {} worktree remove {}\n",
+                "bench: left {}; remove it with git -C {} worktree remove {}\n",
                 tmp.display(),
                 b.repo.display(),
                 wt.display()
@@ -4098,7 +4092,7 @@ mod bench_replay_error_test {
     fn assert_fails(b: &Bench, arm: Option<&Path>, flags: &[&str], code: i32, message: &str) {
         assert_eq!(
             b.replay_to(arm.unwrap_or(&b.arm), flags),
-            (code, String::new(), format!("factory.py: {message}\n")),
+            (code, String::new(), format!("{message}\n")),
             "{flags:?}"
         );
         assert!(b.call().is_none());
@@ -4132,7 +4126,7 @@ mod bench_replay_error_test {
         }
         assert_eq!(
             b.run(&[b.cases.display().to_string()]),
-            (2, String::new(), format!("factory.py: {BENCH_USAGE}\n"))
+            (2, String::new(), format!("{BENCH_USAGE}\n"))
         );
     }
 
@@ -4222,7 +4216,7 @@ mod bench_replay_error_test {
             None,
             &["--role", "review-code"],
             4,
-            &format!("bench: 1018-add-y: no job folder with spec.md under {}; pull it with factory.py pull <project>/1018-add-y", b.home.join("jobs").display()),
+            &format!("bench: 1018-add-y: no job folder with spec.md under {}; pull it with factory pull <project>/1018-add-y", b.home.join("jobs").display()),
         );
     }
 
@@ -4267,7 +4261,7 @@ mod bench_replay_error_test {
                 None,
                 &["--role", "review-code"],
                 4,
-                "bench: 1018-add-y: project alpha has no repo; pull it with factory.py pull alpha",
+                "bench: 1018-add-y: project alpha has no repo; pull it with factory pull alpha",
             );
         }
     }

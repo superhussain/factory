@@ -225,7 +225,7 @@ const MAX_PER_RUN: usize = 5;
 const ENV_SECRET_MIN: usize = 12;
 static DIGITS: Pattern = Pattern::new(r"\d+", Flags::NONE);
 static ROUND_DIR: Pattern = Pattern::new(r"\bround-(\d+)/", Flags::NONE);
-const USAGE: &str = "usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>, N from 1 to 90 for digest and 1 to 30 for aggregate";
+const USAGE: &str = "usage: factory retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>, N from 1 to 90 for digest and 1 to 30 for aggregate";
 
 pub fn retro_cmd(call: &Call) -> Res<()> {
     let (action, args) = (call.args[0].as_str(), &call.args[1..]);
@@ -938,7 +938,7 @@ pub(crate) fn retro_push() -> Res<()> {
     let config = home.join("config.md");
     let device = config_device(&home)?;
     let hint = format!(
-        "set device: in {}; pair this host with factory.py host pair <id> <code>",
+        "set device: in {}; pair this host with factory host pair <id> <code>",
         config.display()
     );
     if !HOST_NAME.is_full(&device) {
@@ -1480,7 +1480,7 @@ fn load_autonomy(data: &Value) -> Value {
         || record["projects"].as_array().unwrap().len() > MAX_EXPLORER_PROJECTS
     {
         eprintln!(
-            "factory.py: the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it"
+            "the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it"
         );
         return default;
     }
@@ -5502,7 +5502,7 @@ mod tests {
             let e = admit(&home, RUN_A).unwrap_err();
             assert_eq!(e.code, 2);
             let prefix = format!(
-                "factory.py: {} is not UTF-8 JSON: ",
+                "{} is not UTF-8 JSON: ",
                 folder.join("reply.json").display()
             );
             assert!(
@@ -5612,10 +5612,7 @@ mod tests {
         admit(&home, RUN_A).unwrap();
         std::os::unix::fs::symlink(&folder, home.join("retro/linked")).unwrap();
         let e = admit(&home, "linked").unwrap_err();
-        assert_eq!(
-            (e.code, e.stderr),
-            (4, "factory.py: no retro run linked\n".to_string())
-        );
+        assert_eq!((e.code, e.stderr), (4, "no retro run linked\n".to_string()));
     }
 
     #[cfg(unix)]
@@ -5643,10 +5640,7 @@ mod tests {
             assert_eq!(e.code, 2, "{name}");
             assert_eq!(
                 e.stderr,
-                format!(
-                    "factory.py: {} is a link; nothing written\n",
-                    path.display()
-                )
+                format!("{} is a link; nothing written\n", path.display())
             );
             assert_eq!(fs::read(&target).unwrap(), body);
             let mut want = vec![
@@ -5681,7 +5675,7 @@ mod tests {
         );
     }
 
-    const PAIR_HINT: &str = "pair this host with factory.py host pair <id> <code>";
+    const PAIR_HINT: &str = "pair this host with factory host pair <id> <code>";
 
     #[test]
     fn push_outcome_write_only_names_the_pairing() {
@@ -5693,10 +5687,7 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(e.code, 2);
-        assert_eq!(
-            e.stderr,
-            format!("factory.py: {RETRO_WRITE_ONLY}. {PAIR_HINT}\n")
-        );
+        assert_eq!(e.stderr, format!("{RETRO_WRITE_ONLY}. {PAIR_HINT}\n"));
     }
 
     #[test]

@@ -1,1 +1,1 @@
-factory.py: {home}/bad.json: invalid connection descriptor
+{home}/bad.json: invalid connection descriptor

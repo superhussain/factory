@@ -1,1 +1,1 @@
-factory.py: bench: {home}/bench/reasons/17.json: case 1: defect 2: lines must be [start, end] with 1 <= start <= end
+bench: {home}/bench/reasons/17.json: case 1: defect 2: lines must be [start, end] with 1 <= start <= end

@@ -1,1 +1,1 @@
-factory.py: bad round '0'. usage: grounding <project-slug>/<job-id> <round>
+bad round '0'. usage: grounding <project-slug>/<job-id> <round>

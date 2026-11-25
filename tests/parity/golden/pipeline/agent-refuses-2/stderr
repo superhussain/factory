@@ -1,1 +1,1 @@
-factory.py: usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]: harness "open code" must be 1 to 64 letters, digits, _ or -
+usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]: harness "open code" must be 1 to 64 letters, digits, _ or -

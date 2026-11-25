@@ -471,7 +471,7 @@ pub fn api(
         let short: String = detail.chars().take(200).collect();
         return Err(Exit {
             code: 5,
-            stderr: format!("factory.py: {method} {url} returned {status}: {short}\n"),
+            stderr: format!("{method} {url} returned {status}: {short}\n"),
             status: Some((status, detail)),
         });
     }
@@ -679,7 +679,7 @@ pub(crate) mod tests {
         assert_eq!(e.code, 5);
         assert_eq!(
             e.stderr,
-            format!("factory.py: {}\n", access_message(&home.join(".env")))
+            format!("{}\n", access_message(&home.join(".env")))
         );
         assert!(!e.stderr.contains("test-secret"));
     }
@@ -691,7 +691,7 @@ pub(crate) mod tests {
         let e = api(&home, "GET", "/api/board", None, &[200], &[]).unwrap_err();
         assert_eq!(
             e.stderr,
-            format!("factory.py: GET {origin}/api/board returned 500: boom bang\n")
+            format!("GET {origin}/api/board returned 500: boom bang\n")
         );
         assert_eq!(e.status, Some((500, "boom bang".to_string())));
         let seen = seen.lock().unwrap();
@@ -831,7 +831,7 @@ pub(crate) mod tests {
         #[cfg(target_os = "linux")]
         assert_eq!(
             e.stderr,
-            format!("factory.py: can't reach {origin}/projects.json: <urlopen error [Errno 111] Connection refused>\n")
+            format!("can't reach {origin}/projects.json: <urlopen error [Errno 111] Connection refused>\n")
         );
         assert!(!e.stderr.contains("test-secret"));
     }

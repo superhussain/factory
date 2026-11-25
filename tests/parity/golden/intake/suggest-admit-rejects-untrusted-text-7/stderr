@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-untrusted-7.json: suggestions[0].options[0].label: contains control, invisible or bidirectional characters; nothing admitted
+{home}/suggest-untrusted-7.json: suggestions[0].options[0].label: contains control, invisible or bidirectional characters; nothing admitted

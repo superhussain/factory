@@ -1,2 +1,2 @@
-factory.py: PUT {api}/api/board returned 500: board down
-factory.py: backlog triage could not queue sample: Add CSV export to reports; the item waits in the backlog for review
+PUT {api}/api/board returned 500: board down
+backlog triage could not queue sample: Add CSV export to reports; the item waits in the backlog for review

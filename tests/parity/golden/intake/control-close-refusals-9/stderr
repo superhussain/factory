@@ -1,1 +1,1 @@
-factory.py: --reason-file {home}/control-badreason2-reason.txt is empty; nothing was changed
+--reason-file {home}/control-badreason2-reason.txt is empty; nothing was changed

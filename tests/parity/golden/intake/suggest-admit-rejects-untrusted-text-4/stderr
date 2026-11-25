@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-untrusted-4.json: suggestions[0].reason: contains control, invisible or bidirectional characters; nothing admitted
+{home}/suggest-untrusted-4.json: suggestions[0].reason: contains control, invisible or bidirectional characters; nothing admitted

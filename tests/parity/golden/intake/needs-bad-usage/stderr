@@ -1,1 +1,1 @@
-factory.py: usage: needs answer <job-id> --answers <file> --chat-file <file>
+usage: needs answer <job-id> --answers <file> --chat-file <file>

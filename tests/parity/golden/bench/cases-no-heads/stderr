@@ -1,4 +1,4 @@
-factory.py: bench cases skips 1020-add-w: PR is not in example/alpha
-factory.py: bench cases skips 1018-add-y: no head commit from GitHub
-factory.py: bench cases skips 1019-add-z: no head commit from GitHub
-factory.py: bench: no reverted or reworked jobs to draft in alpha
+bench cases skips 1020-add-w: PR is not in example/alpha
+bench cases skips 1018-add-y: no head commit from GitHub
+bench cases skips 1019-add-z: no head commit from GitHub
+bench: no reverted or reworked jobs to draft in alpha

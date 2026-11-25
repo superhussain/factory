@@ -1,2 +1,2 @@
-factory.py: the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it
-factory.py: autonomy is paused; nothing admitted
+the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it
+autonomy is paused; nothing admitted

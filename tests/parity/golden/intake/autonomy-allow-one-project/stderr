@@ -1,1 +1,1 @@
-factory.py: only one project may be on the autonomy allowlist; run autonomy deny sample first
+only one project may be on the autonomy allowlist; run autonomy deny sample first

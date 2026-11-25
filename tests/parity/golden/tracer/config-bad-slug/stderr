@@ -1,1 +1,1 @@
-factory.py: {home}/tracer.json: project 'bad slug' must be a slug naming an object
+{home}/tracer.json: project 'bad slug' must be a slug naming an object

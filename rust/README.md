@@ -85,7 +85,7 @@ A handler keeps the Python function's name, except `where`, which is `where_cmd`
 
 ## Known divergences
 
-- Python tracebacks are not reproduced. Where Python raises uncaught, Rust fails 1 with `factory.py: <what>`. No parity case covers a traceback.
+- Python tracebacks are not reproduced. Where Python raises uncaught, Rust fails 1 with `<what>`. No parity case covers a traceback.
 - Non-UTF-8 argv fails 2. Invalid UTF-8 in subprocess output is decoded lossily, where Python would raise.
 - `serde_json` refuses `NaN` and `Infinity` in JSON input. Python accepts them. The Worker never writes them.
 - A lone surrogate escape (`\ud800` without its pair) in JSON input is dropped before parsing, since a Rust string cannot hold one. Python keeps it in the string, and its inbox output drops it too.

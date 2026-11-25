@@ -29,7 +29,7 @@ pub type Res<T> = Result<T, Exit>;
 pub fn fail(msg: impl std::fmt::Display, code: i32) -> Exit {
     Exit {
         code,
-        stderr: format!("factory.py: {msg}\n"),
+        stderr: format!("{msg}\n"),
         status: None,
     }
 }

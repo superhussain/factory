@@ -1,1 +1,1 @@
-factory.py: bench: {home}/bench/reasons/06.json: case 1: head must be a 40-character commit
+bench: {home}/bench/reasons/06.json: case 1: head must be a 40-character commit

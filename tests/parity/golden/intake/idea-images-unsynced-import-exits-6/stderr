@@ -1,1 +1,1 @@
-factory.py: sample/001-idea's imported artifacts do not match the factory's: idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png is missing from R2 or has a newer ETag there. Pull and reconcile before promotion; the local copies were not overwritten
+sample/001-idea's imported artifacts do not match the factory's: idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png is missing from R2 or has a newer ETag there. Pull and reconcile before promotion; the local copies were not overwritten

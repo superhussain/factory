@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-unsafe-18.json: suggestions[0].reason: must not hold control characters; nothing admitted
+{home}/suggest-unsafe-18.json: suggestions[0].reason: must not hold control characters; nothing admitted

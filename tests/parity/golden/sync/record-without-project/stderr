@@ -1,1 +1,1 @@
-factory.py: GET {api}/api/jobs/None/008-malformed/?etags=1 returned 404: 
+GET {api}/api/jobs/None/008-malformed/?etags=1 returned 404: 
