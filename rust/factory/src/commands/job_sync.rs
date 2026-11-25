@@ -676,10 +676,13 @@ mod tests {
             // The auto-pull: R2 holds another host's b1.
             (200, r#"[{"name":"build.md","etag":"\"b1\""}]"#, vec![]),
             (200, "B1 from the other host\n", vec![("ETag", "\"b1\"")]),
+            // A second auto-pull: R2 moved again to b2.
+            (200, r#"[{"name":"build.md","etag":"\"b2\""}]"#, vec![]),
+            (200, "B2 from the other host\n", vec![("ETag", "\"b2\"")]),
             // The push of the blind write.
-            (200, r#"[{"name":"build.md","etag":"\"b1\""}]"#, vec![]),
+            (200, r#"[{"name":"build.md","etag":"\"b2\""}]"#, vec![]),
             (412, "", vec![]),
-            (200, "B1 from the other host\n", vec![("ETag", "\"b1\"")]),
+            (200, "B2 from the other host\n", vec![("ETag", "\"b2\"")]),
         ]);
         let home = synced_b0("job-sync-blind-write", &origin);
         let f = folder(&home);
@@ -694,6 +697,13 @@ mod tests {
             fs::read(f.join("build.md")).unwrap(),
             b"B1 from the other host\n"
         );
+        // A later row change pulls b2 over the unchanged b1; the base stays b0.
+        sync.rows(&[row("review", "t1")], t0);
+        sync.run_due(t0, &log, &|| false);
+        assert_eq!(
+            fs::read(f.join("build.md")).unwrap(),
+            b"B2 from the other host\n"
+        );
         // 2. A session that read b0 earlier writes it back with a shell redirect.
         fs::write(f.join("build.md"), "B0 plus a stale edit\n").unwrap();
         // 3. The next push sends If-Match b0, not b1, so it meets a 412.
@@ -701,23 +711,61 @@ mod tests {
         sync.run_due(t0 + SCAN + QUIET, &log, &|| false);
         let seen = seen.lock().unwrap();
         assert_eq!(
-            (seen[3].method.as_str(), seen[3].header("If-Match")),
+            (seen[5].method.as_str(), seen[5].header("If-Match")),
             ("PUT", Some("\"b0\""))
         );
-        // Nothing is lost: the stale write stays local and b1 waits beside it, still in R2.
+        // Nothing is lost: the stale write stays local and b2 waits beside it, still in R2.
         assert_eq!(
             fs::read(f.join("build.md")).unwrap(),
             b"B0 plus a stale edit\n"
         );
         assert_eq!(
             fs::read(f.join("build.md.remote")).unwrap(),
-            b"B1 from the other host\n"
+            b"B2 from the other host\n"
         );
         assert!(lines
             .lock()
             .unwrap()
             .iter()
             .any(|l| l.contains("conflict in build.md")));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn interrupted_auto_pull_still_conflicts_a_stale_write() {
+        let listing =
+            r#"[{"name":"build.md","etag":"\"b1\""},{"name":"notes.md","etag":"\"n1\""}]"#;
+        let (origin, seen) = serve(vec![
+            // The first auto-pull writes build.md, then the notes.md fetch fails.
+            (200, listing, vec![]),
+            (200, "B1\n", vec![("ETag", "\"b1\"")]),
+            (500, "", vec![]),
+            // The next auto-pull finishes.
+            (200, listing, vec![]),
+            (200, "Notes\n", vec![("ETag", "\"n1\"")]),
+            // The push of the stale copy.
+            (200, listing, vec![]),
+            (412, "", vec![]),
+            (200, "B1\n", vec![("ETag", "\"b1\"")]),
+        ]);
+        let home = synced_b0("job-sync-interrupted", &origin);
+        let f = folder(&home);
+        assert!(crate::commands::sync::pull_job_files(&home, "alpha", JOB, true).is_err());
+        assert_eq!(fs::read(f.join("build.md")).unwrap(), b"B1\n");
+        crate::commands::sync::pull_job_files(&home, "alpha", JOB, true).unwrap();
+        fs::write(f.join("build.md"), "B0 plus a stale edit\n").unwrap();
+        let e = push_job(&home, "alpha", JOB, &mut Vec::new()).unwrap_err();
+        assert_eq!(e.code, 6);
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            (seen[6].method.as_str(), seen[6].header("If-Match")),
+            ("PUT", Some("\"b0\""))
+        );
+        assert_eq!(
+            fs::read(f.join("build.md")).unwrap(),
+            b"B0 plus a stale edit\n"
+        );
+        assert_eq!(fs::read(f.join("build.md.remote")).unwrap(), b"B1\n");
         fs::remove_dir_all(home).unwrap();
     }
 

@@ -738,8 +738,8 @@ pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Ve
 /// `pull_job`, also returning the files it downloaded. An automatic pull (the daemon's) records
 /// each replaced or created file's `base`: the ETag its local copy had before, or null when there
 /// was none. Push conditions on the base, so a session that read the old copy and writes it back
-/// blind gets a 412 and keeps both copies. A deliberate pull clears every base: the session took
-/// R2's version.
+/// blind gets a 412 and keeps both copies. A deliberate pull clears the base of each file it
+/// leaves matching R2, since the session took R2's version; a file edited here keeps its base.
 pub(crate) fn pull_job_files(
     home: &Path,
     slug: &str,
@@ -801,6 +801,11 @@ pub(crate) fn pull_job_files(
                 conflicts.push(rel.clone());
                 continue;
             }
+            // The entry, with its base, is saved before the bytes it describes. A pull cut short
+            // after this leaves the old bytes under the base, which a push conditions on; the
+            // reverse order would leave R2's bytes under the old entry, and the next reconcile
+            // would adopt them with no base.
+            save_manifest(&folder, &manifest)?;
             write_atomic(&path, &body).map_err(|e| os_fail(e, &path))?;
             got.push(rel.clone());
         } else if entry.is_some() && stored("etag") == Some(&tag_value) {
