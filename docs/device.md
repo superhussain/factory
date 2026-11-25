@@ -69,7 +69,8 @@ daemon on its own. To go back to the timer, run `daemon setup --uninstall`: it
 reinstalls the pickup timer, then removes the service. Elsewhere the 5-minute pickup
 timer runs pickup. The daemon logs to `<home>/logs/daemon.log` and trims it past 5 MiB.
 On Windows its restart loop writes startup errors to `<home>\logs\daemon-boot.log`
-instead, and catch-up rewrites a loop file that differs from what `--install` writes. See
+instead. Catch-up rewrites a loop file that differs from what `--install` writes: it ends
+the running loop and daemon first, then starts the task again on the new file. See
 [the pickup reference](../skills/factory/references/pickup.md#the-daemon-as-scheduler).
 
 ## Offline initialization and credentials
