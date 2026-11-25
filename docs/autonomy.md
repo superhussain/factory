@@ -780,7 +780,7 @@ Kept as guesses: 20 scanned jobs, no reverts and rework at most 10%. The board h
 
 ## Earned autonomy hold
 
-A revert in a project and job class holds that class's APPROVE PRs for a person. Pickup's hold pass covers PRs already waiting at `pr-open`, and `checks` exits 8 before any agent merge. Both write the hold.
+A revert in a project and job class holds that class's APPROVE PRs for a person. Pickup's hold pass covers PRs already waiting at `pr-open`, and `checks` exits 8 before any agent merge. Both write the hold. Exit 8 means this hold only for `checks`; `audit` uses 8 for a flag pattern that hit its regex backtrack limit.
 
 A class is held while a board job meets every condition:
 

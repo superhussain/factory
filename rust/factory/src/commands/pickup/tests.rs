@@ -4874,29 +4874,79 @@ mod audit_pickup_test {
 
     #[test]
     fn test_a_scan_past_the_backtrack_limit_skips_the_push() {
+        // Sets FACTORY_HOME, which every thread reads, so it runs alone.
+        if !crate::shared::in_own_process(
+            module_path!(),
+            "test_a_scan_past_the_backtrack_limit_skips_the_push",
+        ) {
+            return;
+        }
         let fx = setup();
+        let log = push_fakes(&fx, None);
+        fx.set_fakes(|f| f.audit_push = None);
+        let old = r#"{"host": "host-a", "job": "1017-add-x", "time": "2026-01-01 00:00:00", "session": "3f2a9c1d", "agent": "main", "tool": "Bash", "flags": ["force-push"], "target": "git push --force"}"#;
+        let marker = r#"{"host": "host-a", "job": "1017-add-x", "time": "2026-01-01 00:00:01", "session": "-", "agent": "-", "tool": "-", "flags": [], "target": "audit push skipped: a flag pattern hit its backtrack limit, so newer calls are not shown", "skipped": true}"#;
+        let other = r#"{"host": "host-b", "job": "1017-add-x", "time": "2026-01-01 00:00:02", "tool": "Read", "flags": [], "target": "-"}"#;
+        let pushed: &'static str =
+            Box::leak(format!("{old}\n{marker}\n{other}\n").into_boxed_str());
+        let (origin, seen) =
+            crate::shared::http::tests::serve(vec![(200, pushed, vec![]), (200, "", vec![])]);
+        fs::write(
+            fx.home.join("config.md"),
+            format!("---\ndevice: {DEVICE}\napi_url: {origin}\n---\n"),
+        )
+        .unwrap();
+        let session = fx.root.join(SESSION);
+        let usage = json!({"type": "assistant", "message": {"id": "u1", "model": "claude-opus-5-5",
+            "usage": {"input_tokens": 1200, "output_tokens": 48000}}});
+        fs::write(
+            &session,
+            read_text(&session).unwrap() + &usage.to_string() + "\n",
+        )
+        .unwrap();
         crate::commands::audit::limit_secret_file_for_test();
         // audit_push reads its device from factory_home, which follows XDG_CONFIG_HOME before
-        // HOME, so name the fixture home outright. fx holds the env lock until it drops.
-        let saved = std::env::var_os("FACTORY_HOME");
-        std::env::set_var("FACTORY_HOME", &fx.home);
+        // HOME, so name the fixture home outright.
+        fx.set_env("FACTORY_HOME", &fx.home);
         let (code, out, err) = fx.pickup(&[]);
-        match saved {
-            Some(v) => std::env::set_var("FACTORY_HOME", v),
-            None => std::env::remove_var("FACTORY_HOME"),
-        }
-        assert_eq!((code, out.as_str()), (0, ""));
+        assert_eq!(
+            (code, out.as_str()),
+            (0, "recorded host-a tokens on 1017-add-x\n")
+        );
         assert!(
             err.starts_with("audit push skipped 1017-add-x until its transcripts change: ")
                 && err.ends_with(&format!("{}\n", crate::shared::pyre::LIMIT_HIT))
                 && err.lines().count() == 1,
             "{err}"
         );
-        assert!(fx.calls().iter().all(|c| !c.1.contains("/api/audit/")));
+        let seen = seen.lock().unwrap();
+        let requests: Vec<String> = seen
+            .iter()
+            .map(|s| format!("{} {}", s.method, s.path))
+            .collect();
+        assert_eq!(
+            requests,
+            [
+                "GET /api/audit/1017-add-x",
+                "PUT /api/audit/1017-add-x/host-a.jsonl"
+            ]
+        );
+        let rows: Vec<Value> = std::str::from_utf8(&seen[1].body)
+            .unwrap()
+            .lines()
+            .map(|l| loads(l).unwrap())
+            .collect();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_eq!(rows[0], loads(old).unwrap());
+        let mut fresh = rows[1].clone();
+        assert_eq!(fresh["time"].as_str().unwrap().len(), 19);
+        fresh["time"] = loads(marker).unwrap()["time"].clone();
+        assert_eq!(fresh, loads(marker).unwrap());
         assert_eq!(
             record(&fx),
             json!({"version": 1, "jobs": {"1017-add-x": stamp_now()}})
         );
+        assert_eq!(*log.borrow(), ["record 1017-add-x"]);
     }
 
     #[test]
@@ -6444,12 +6494,7 @@ mod gh_pr_test {
         let fx = Fx::new();
         let bin = fx.root.join("bin");
         fs::create_dir(&bin).unwrap();
-        fs::write(bin.join("gh"), "#!/bin/sh\nprintf 'OPEN \\377\\n'\n").unwrap();
-        Command::new("chmod")
-            .arg("755")
-            .arg(bin.join("gh"))
-            .status()
-            .unwrap();
+        crate::shared::build::tests::script(&bin.join("gh"), "printf 'OPEN \\377\\n'\n");
         fx.set_env(
             "PATH",
             format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -9588,12 +9633,7 @@ mod pickup_setup_test {
         let st = St::new();
         let bin = st.fx.root.join("synthetic/brew/bin");
         fs::create_dir_all(&bin).unwrap();
-        fs::write(bin.join("gh"), "#!/bin/sh\n").unwrap();
-        Command::new("chmod")
-            .arg("755")
-            .arg(bin.join("gh"))
-            .status()
-            .unwrap();
+        crate::shared::build::tests::script(&bin.join("gh"), "");
         st.fx.set_env(
             "PATH",
             format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -9746,12 +9786,7 @@ mod pickup_setup_test {
         let st = St::new();
         let bin = st.fx.root.join("bin");
         fs::create_dir(&bin).unwrap();
-        fs::write(bin.join("fake-agent"), "#!/bin/sh\n").unwrap();
-        Command::new("chmod")
-            .arg("755")
-            .arg(bin.join("fake-agent"))
-            .status()
-            .unwrap();
+        crate::shared::build::tests::script(&bin.join("fake-agent"), "");
         st.fx.set_env(
             "PATH",
             format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),

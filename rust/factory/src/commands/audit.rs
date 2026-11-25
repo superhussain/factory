@@ -18,7 +18,7 @@ use crate::commands::pipeline::fetch_base;
 use crate::shared::board::{dump_board, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{JOB_ID, NEW_JOB_ID, PASEO_ID, ROUTE_MODEL, SLUG};
-use crate::shared::exit::{exit, fail, Res};
+use crate::shared::exit::{exit, fail, Res, LIMIT};
 use crate::shared::fs::{create_dir_private, read_text, resolve, temp_root};
 use crate::shared::home::{device_name, factory_home};
 use crate::shared::http::{access_message, api, cas};
@@ -110,6 +110,9 @@ static AUDIT_RUNS_OUTPUT: Pattern = Pattern::new(
 const AUDIT_FILE_TOOLS: &[&str] = &["Read", "Edit", "Write"];
 const AUDIT_MAX_BYTES: usize = 1 << 20;
 const AUDIT_WRITE_ONLY: &str = "audit rows are written only by the host's bound service token";
+/// The target of the row a push adds when a flag pattern could not finish reading the transcripts.
+const AUDIT_SKIPPED: &str =
+    "audit push skipped: a flag pattern hit its backtrack limit, so newer calls are not shown";
 
 static WORD_DOT_DASH: Pattern = Pattern::new(r"[\w.-]", Flags::NONE);
 static WORD_DASH: Pattern = Pattern::new(r"[\w-]", Flags::NONE);
@@ -574,7 +577,7 @@ fn audit_scan(path: &Path, main: bool) -> Res<Vec<Map<String, Value>>> {
         .map(|(id, stamp, name, inp)| {
             let raw = audit_target_raw(&name, &inp);
             let flags = audit_flags(&name, &inp, &raw, denied.contains(&id), main)
-                .map_err(|why| fail(format!("{}: {why}", path.display()), 1))?;
+                .map_err(|why| fail(format!("{}: {why}", path.display()), LIMIT))?;
             let target = audit_target(&raw, &home);
             let target = if target.is_empty() {
                 "-".into()
@@ -701,8 +704,32 @@ fn fit(lines: &[String], max: usize) -> usize {
     dropped
 }
 
+/// This host's rows the Worker holds for the job, without an earlier skip marker.
+fn audit_pushed_rows(home: &Path, job_id: &str, device: &str) -> Res<Vec<Map<String, Value>>> {
+    let r = api(
+        home,
+        "GET",
+        &format!("/api/audit/{job_id}"),
+        None,
+        &[200],
+        &[],
+    )?;
+    Ok(r.text()?
+        .lines()
+        .filter_map(|line| match loads(line) {
+            Ok(Value::Object(row)) => Some(row),
+            _ => None,
+        })
+        .filter(|row| {
+            row.get("host").and_then(Value::as_str) == Some(device)
+                && row.get("skipped") != Some(&Value::Bool(true))
+        })
+        .collect())
+}
+
 /// PUT this host's audit rows for the job to the Worker under its device name, oldest rows dropped
-/// past 1 MiB.
+/// past 1 MiB. A scan past the backtrack limit keeps the rows pushed before, adds an AUDIT_SKIPPED
+/// row, and still exits LIMIT.
 pub(crate) fn audit_push(job_id: &str) -> Res<()> {
     let home = factory_home()?;
     let config = home.join("config.md");
@@ -715,7 +742,17 @@ pub(crate) fn audit_push(job_id: &str) -> Res<()> {
     if !HOST_NAME.is_full(device) {
         return Err(fail(hint, 2));
     }
-    let rows = audit_rows(job_id)?.0;
+    let (rows, skipped) = match audit_rows(job_id) {
+        Ok((rows, _)) => (rows, None),
+        Err(e) if e.code == LIMIT => {
+            let mut rows = audit_pushed_rows(&home, job_id, device)?;
+            let time: String = now().replace('T', " ").chars().take(19).collect();
+            let marker = json!({"time": time, "session": "-", "agent": "-", "tool": "-", "flags": [], "target": AUDIT_SKIPPED, "skipped": true});
+            rows.push(marker.as_object().unwrap().clone());
+            (rows, Some(e))
+        }
+        Err(e) => return Err(e),
+    };
     let lines: Vec<String> = rows
         .into_iter()
         .map(|row| {
@@ -741,6 +778,9 @@ pub(crate) fn audit_push(job_id: &str) -> Res<()> {
     }
     if r.status == 403 {
         return Err(fail(access_message(&home.join(".env")), 5));
+    }
+    if let Some(e) = skipped {
+        return Err(e);
     }
     let n = lines.len();
     let calls = if n == 1 { "call" } else { "calls" };
