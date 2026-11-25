@@ -30,12 +30,13 @@ pub fn paseo_session() -> Option<Value> {
         .then(|| json!({"server": server, "agent": agent}))
 }
 
-/// This host's `paseo ls -g --json` list, with any further arguments, under PASEO_HOME when set;
-/// None when paseo is missing, fails, or prints no JSON.
+/// This host's `paseo ls -g --background --json` list, with any further arguments, under
+/// PASEO_HOME when set; None when paseo is missing, fails, or prints no JSON. `--background` keeps
+/// agents in background workspaces, which the plain list leaves out.
 pub fn paseo_ls(extra: &[&str]) -> Option<Value> {
     let exe = which("paseo")?.to_string_lossy().into_owned();
     let home = std::env::var("PASEO_HOME").unwrap_or_default();
-    let mut argv = vec![exe.as_str(), "ls", "-g", "--json"];
+    let mut argv = vec![exe.as_str(), "ls", "-g", "--background", "--json"];
     argv.extend(extra);
     if !home.is_empty() {
         argv.extend(["--home", home.as_str()]);
