@@ -12,7 +12,7 @@ const warm = parse(raw);
 const action = (step) => step.uses?.split("@")[0];
 const rustCache = (job) => job.steps.find((step) => action(step) === "Swatinem/rust-cache");
 const named = (job, name) => job.steps.find((step) => step.name === name);
-const JOBS = ["rust-build", "targets", "rust-test", "rust-check"];
+const JOBS = ["rust-build", "local", "rust-test", "rust-check"];
 
 test("warm runs on main pushes and by hand, reads only contents, and keeps the newest run", () => {
   assert.deepEqual(warm.on, { push: { branches: ["main"] }, workflow_dispatch: null });
@@ -42,8 +42,8 @@ test("each warm job's rust-cache key inputs match its ci.yml job", () => {
     assert.equal(rustCache(w).uses, rustCache(c).uses, id);
     for (const step of w.steps) assert.equal(step.env, undefined, `${id}: ${step.name}`);
   }
-  // targets never saves in CI, so warm is the only writer of its key.
-  assert.equal(rustCache(ci.jobs.targets).with["save-if"], false);
+  // local never saves in CI, so warm is the only writer of its key.
+  assert.equal(rustCache(ci.jobs.local).with["save-if"], false);
 });
 
 test("each warm job installs the same toolchain and compiles what its ci.yml job compiles", () => {
@@ -60,8 +60,8 @@ test("each warm job installs the same toolchain and compiles what its ci.yml job
     run(ci.jobs["rust-build"], "Build linux-x64"),
   );
   assert.equal(
-    run(warm.jobs.targets, "Build the factory binary"),
-    run(ci.jobs.targets, "Build the factory binary"),
+    run(warm.jobs.local, "Build the factory binary"),
+    run(ci.jobs.local, "Build the factory binary"),
   );
   assert.equal(
     run(warm.jobs["rust-test"], "Build the tests"),
@@ -73,20 +73,19 @@ test("each warm job installs the same toolchain and compiles what its ci.yml job
 });
 
 test("warm rust-build and rust-test save the incremental artifacts under the keys ci.yml restores", () => {
-  for (const name of ["Restore incremental artifacts", "Save incremental artifacts"]) {
-    const [w, c] = [named(warm.jobs["rust-build"], name), named(ci.jobs["rust-build"], name)];
-    assert.equal(w.uses, c.uses, name);
-    assert.deepEqual(w.with, c.with, name);
+  // CI's rust-build and rust-test only restore, under the keys warm saves.
+  for (const job of ["rust-build", "rust-test"]) {
+    const restore = named(ci.jobs[job], "Restore incremental artifacts");
+    assert.equal(named(warm.jobs[job], "Restore incremental artifacts").uses, restore.uses, job);
+    assert.deepEqual(
+      named(warm.jobs[job], "Restore incremental artifacts").with,
+      restore.with,
+      job,
+    );
+    const save = named(warm.jobs[job], "Save incremental artifacts");
+    assert.equal(action(save), "actions/cache/save", job);
+    assert.deepEqual(save.with, { path: restore.with.path, key: restore.with.key }, job);
   }
-  // CI's rust-test only restores, under the key warm saves.
-  const restore = named(ci.jobs["rust-test"], "Restore incremental artifacts");
-  assert.deepEqual(
-    named(warm.jobs["rust-test"], "Restore incremental artifacts").with,
-    restore.with,
-  );
-  const save = named(warm.jobs["rust-test"], "Save incremental artifacts");
-  assert.equal(action(save), "actions/cache/save");
-  assert.deepEqual(save.with, { path: restore.with.path, key: restore.with.key });
 });
 
 test("warm browser saves the provision under the key ci.yml's browser and targets jobs restore", () => {

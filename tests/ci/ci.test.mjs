@@ -69,6 +69,7 @@ test("ci aggregates every job and skips only cancelled runs", () => {
   assert.deepEqual(workflow.jobs.ci.needs, [
     "plan",
     "targets",
+    "local",
     "browser",
     "paseo-plugin",
     "rust-build",
@@ -83,7 +84,7 @@ test("the aggregate names each job in RESULTS", () => {
   const step = workflow.jobs.ci.steps.find((entry) => entry.name === "All CI jobs passed");
   assert.equal(
     step.env.RESULTS,
-    "plan=${{ needs.plan.result }} targets=${{ needs.targets.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }} rust-build=${{ needs.rust-build.result }} rust-test=${{ needs.rust-test.result }} rust-check=${{ needs.rust-check.result }} parity=${{ needs.parity.result }}",
+    "plan=${{ needs.plan.result }} targets=${{ needs.targets.result }} local=${{ needs.local.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }} rust-build=${{ needs.rust-build.result }} rust-test=${{ needs.rust-test.result }} rust-check=${{ needs.rust-check.result }} parity=${{ needs.parity.result }}",
   );
 });
 
@@ -234,7 +235,7 @@ test("the plan keys the whole merge tree and the rust inputs, and lookups never 
   for (const job of ["rust-build", "rust-test", "rust-check", "parity"]) {
     assert.ok(saves[0].if.includes(`needs.${job}.result == 'success'`), job);
   }
-  for (const job of ["targets", "paseo-plugin"]) {
+  for (const job of ["targets", "local", "paseo-plugin"]) {
     assert.equal(workflow.jobs[job].if, "needs.plan.outputs.all != 'true'", job);
   }
 });
@@ -247,22 +248,22 @@ test("targets and browser restore the browser cache read-only", () => {
   }
 });
 
-test("rust-build caches the binary under the rust key, and targets restores it or builds it on a miss", () => {
-  const { targets, "rust-build": build } = workflow.jobs;
+test("rust-build caches the binary under the rust key, and local restores it or builds it on a miss", () => {
+  const { local, "rust-build": build } = workflow.jobs;
   const key = "${{ needs.plan.outputs.rust-key }}-bin";
   const binary = "rust/target/host/factory";
-  const save = build.steps.find((step) => step.name === "Cache the factory binary for targets");
+  const save = build.steps.find((step) => step.name === "Cache the factory binary for local");
   assert.equal(action(save), "actions/cache/save");
   assert.deepEqual(save.with, { path: binary, key });
   const buildStep = build.steps.findIndex((step) => step.name === "Build linux-x64");
   assert.ok(build.steps.indexOf(save) > buildStep);
-  // targets never waits on rust-build, so it still runs when a rust hit skips rust-build.
-  assert.equal(targets.needs, "plan");
-  const restore = targets.steps.findIndex((step) => step.name === "Restore the factory binary");
-  assert.equal(action(targets.steps[restore]), "actions/cache/restore");
-  assert.deepEqual(targets.steps[restore].with, { path: binary, key });
+  // local never waits on rust-build, so it still runs when a rust hit skips rust-build.
+  assert.equal(local.needs, "plan");
+  const restore = local.steps.findIndex((step) => step.name === "Restore the factory binary");
+  assert.equal(action(local.steps[restore]), "actions/cache/restore");
+  assert.deepEqual(local.steps[restore].with, { path: binary, key });
   const miss = "steps.factory-bin.outputs.cache-hit != 'true'";
-  const onMiss = targets.steps.filter((step) => step.if === miss);
+  const onMiss = local.steps.filter((step) => step.if === miss);
   assert.deepEqual(
     onMiss.map((step) => step.run ?? action(step)),
     [
@@ -272,38 +273,65 @@ test("rust-build caches the binary under the rust key, and targets restores it o
       "CARGO_INCREMENTAL=1 cargo build --profile host --locked",
     ],
   );
-  // The rust jobs save the shared rust/target cache and rust-build's incremental artifacts; targets only reads them.
+  // warm.yml saves the shared rust/target cache and the incremental artifacts; local only reads them.
   assert.equal(onMiss[1].with["save-if"], false);
   const incremental = build.steps.find((step) => step.name === "Restore incremental artifacts");
   assert.deepEqual(onMiss[2].with, incremental.with);
-  assert.ok(!targets.steps.some((step) => action(step) === "actions/cache/save"));
-  const nx = targets.steps.findIndex((step) => step.name === "Nx affected");
-  assert.ok(onMiss.every((step) => targets.steps.indexOf(step) > restore));
-  assert.ok(onMiss.every((step) => targets.steps.indexOf(step) < nx));
+  assert.ok(!local.steps.some((step) => action(step) === "actions/cache/save"));
+  const nx = local.steps.findIndex((step) => step.name === "Nx affected local");
+  assert.ok(onMiss.every((step) => local.steps.indexOf(step) > restore));
+  assert.ok(onMiss.every((step) => local.steps.indexOf(step) < nx));
 });
 
-test("rust-build restores and saves this PR's incremental artifacts around an incremental build", () => {
+test("targets and local split the Nx targets, and only targets scans, formats and provisions the browser", () => {
+  const { targets, local } = workflow.jobs;
+  const runs = (job) => job.steps.map((step) => step.run ?? action(step));
+  const nx = (job, name) => job.steps.find((step) => step.name === name).run;
+  const base = '--base="$NX_BASE" --head="$NX_HEAD"';
+  assert.equal(
+    nx(targets, "Nx affected"),
+    `pnpm exec nx affected -t auth protocol assets deploy verify ${base}`,
+  );
+  assert.equal(nx(local, "Nx affected local"), `pnpm exec nx affected -t local ${base}`);
+  for (const job of [targets, local]) {
+    assert.equal(job.steps[0].with["fetch-depth"], 0);
+    assert.equal(runs(job)[1], "./.github/actions/ci-setup");
+  }
+  assert.ok(!targets.steps.some((step) => step.name === "Restore the factory binary"));
+  for (const run of [
+    "node tools/secret-scan.mjs",
+    "pnpm run format:check",
+    "pnpm run test:workflow",
+  ]) {
+    assert.ok(runs(targets).includes(run), run);
+    assert.ok(!runs(local).includes(run), run);
+  }
+  assert.ok(!local.steps.some((step) => step.name === "Restore browser provision"));
+});
+
+test("rust-build restores main's incremental artifacts before an incremental build and never saves them", () => {
   const steps = workflow.jobs["rust-build"].steps;
   const at = (name) => steps.findIndex((step) => step.name === name);
   const cache = steps.findIndex((step) => action(step) === "Swatinem/rust-cache");
   const restore = steps[at("Restore incremental artifacts")];
-  const save = steps[at("Save incremental artifacts")];
   assert.equal(action(restore), "actions/cache/restore");
-  assert.equal(action(save), "actions/cache/save");
-  // After rust-cache, whose restore would otherwise land on top; saved before its post step cleans target.
+  // After rust-cache, whose restore would otherwise land on top.
   assert.ok(cache < at("Restore incremental artifacts"));
   assert.ok(at("Restore incremental artifacts") < at("Build linux-x64"));
-  assert.ok(at("Build linux-x64") < at("Save incremental artifacts"));
   assert.equal(
     steps[at("Build linux-x64")].run,
     "CARGO_INCREMENTAL=1 cargo build --profile host --locked",
   );
+  // A PR run's save would add about 50 MB per run to the repo's cache budget; the binary is the only save.
+  assert.deepEqual(
+    steps.filter((step) => action(step) === "actions/cache/save").map((step) => step.with.path),
+    ["rust/target/host/factory"],
+  );
   const path = "rust/target/host/incremental";
   const prefix = "v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-";
   const key = `${prefix}\${{ github.run_id }}-\${{ github.run_attempt }}`;
-  // A fresh key per run, since a saved key never changes; restore takes the newest with the toolchain's prefix.
+  // restore takes the newest with the toolchain's prefix.
   assert.deepEqual(restore.with, { path, key, "restore-keys": prefix });
-  assert.deepEqual(save.with, { path, key });
 });
 
 test("the nextest config neither retries nor terminates tests", () => {

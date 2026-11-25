@@ -56,8 +56,6 @@ jobs:
           path: .ci-pass
           key: ${{ steps.keys.outputs.rust }}
           lookup-only: true
-  # The local target's device flows run the factory binary. targets restores the one rust-build cached under
-  # the rust key, and builds it only on a miss, so it never waits on rust-build.
   targets:
     needs: plan
     if: needs.plan.outputs.all != 'true'
@@ -90,6 +88,28 @@ jobs:
       - run: pnpm run format:check
       # Workflow-only changes select no Nx target; the workflow contracts always run.
       - run: pnpm run test:workflow
+      - name: Affected base and head
+        run: |
+          echo "NX_BASE=$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)" >> "$GITHUB_ENV"
+          echo "NX_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Nx affected
+        run: pnpm exec nx affected -t auth protocol assets deploy verify --base="$NX_BASE" --head="$NX_HEAD"
+      - run: git diff --check
+  # The local target runs device flows through the factory binary, so a Rust change always selects it. Its own job
+  # runs it beside targets' scans and checks instead of after them, and needs no gitleaks or browser.
+  local:
+    needs: plan
+    if: needs.plan.outputs.all != 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/ci-setup
+      # This job restores the binary rust-build cached under the rust key, and builds it only on a miss, so it never
+      # waits on rust-build.
       - name: Restore the factory binary
         id: factory-bin
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -106,8 +126,8 @@ jobs:
           prefix-key: v2-rust
           workspaces: rust
           save-if: false
-      # rust-build runs beside this job, so a PR that changes Rust always misses the binary above. rust-build's
-      # incremental artifacts, which this job only reads, cut that build from about 27 s to a few.
+      # rust-build runs beside this job, so a PR that changes Rust may miss the binary above. The incremental
+      # artifacts warm.yml saves from main, which this job only reads, cut that build from about 27 s to a few.
       - name: Restore incremental artifacts
         if: steps.factory-bin.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -123,9 +143,8 @@ jobs:
         run: |
           echo "NX_BASE=$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)" >> "$GITHUB_ENV"
           echo "NX_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-      - name: Nx affected
-        run: pnpm exec nx affected -t auth protocol assets deploy local verify --base="$NX_BASE" --head="$NX_HEAD"
-      - run: git diff --check
+      - name: Nx affected local
+        run: pnpm exec nx affected -t local --base="$NX_BASE" --head="$NX_HEAD"
   browser:
     needs: plan
     if: needs.plan.outputs.all != 'true' && needs.plan.outputs.browser == 'true'
@@ -203,9 +222,10 @@ jobs:
           prefix-key: v2-rust
           workspaces: rust
       # rust-cache keeps only dependencies and sets CARGO_INCREMENTAL=0, so each source change compiled the factory
-      # crate from scratch. This PR's previous build's incremental artifacts let rustc reuse the unchanged codegen
+      # crate from scratch. main's incremental artifacts, which warm.yml saves, let rustc reuse the unchanged codegen
       # units. rustc checks every artifact against the current source, compiler and dependencies, so a stale one
-      # only costs reuse; the key still pins the toolchain and lockfile so a bump starts clean.
+      # only costs reuse; the key still pins the toolchain and lockfile so a bump starts clean. A PR run only
+      # restores them: a save per run, about 50 MB each, filled the repo's cache budget and evicted main's caches.
       - name: Restore incremental artifacts
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -214,14 +234,8 @@ jobs:
           restore-keys: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-
       - name: Build linux-x64
         run: CARGO_INCREMENTAL=1 cargo build --profile host --locked
-      # Saved before rust-cache's post step, which deletes incremental artifacts from rust/target.
-      - name: Save incremental artifacts
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: rust/target/host/incremental
-          key: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
       # The rust key covers every input of this binary; the -bin suffix keeps it apart from the pass marker.
-      - name: Cache the factory binary for targets
+      - name: Cache the factory binary for local
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: rust/target/host/factory
@@ -341,13 +355,13 @@ jobs:
           node tests/parity/run.mjs --bin rust/target/host/factory --ids rust/parity --shard ${{ matrix.shard }}/6
   ci:
     if: ${{ !cancelled() }}
-    needs: [plan, targets, browser, paseo-plugin, rust-build, rust-test, rust-check, parity]
+    needs: [plan, targets, local, browser, paseo-plugin, rust-build, rust-test, rust-check, parity]
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
       - name: All CI jobs passed
         env:
-          RESULTS: plan=${{ needs.plan.result }} targets=${{ needs.targets.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }} rust-build=${{ needs.rust-build.result }} rust-test=${{ needs.rust-test.result }} rust-check=${{ needs.rust-check.result }} parity=${{ needs.parity.result }}
+          RESULTS: plan=${{ needs.plan.result }} targets=${{ needs.targets.result }} local=${{ needs.local.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }} rust-build=${{ needs.rust-build.result }} rust-test=${{ needs.rust-test.result }} rust-check=${{ needs.rust-check.result }} parity=${{ needs.parity.result }}
           ALL_HIT: ${{ needs.plan.outputs.all }}
           RUST_HIT: ${{ needs.plan.outputs.rust }}
           BROWSER_RUN: ${{ needs.plan.outputs.browser }}
