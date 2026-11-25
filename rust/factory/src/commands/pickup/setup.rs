@@ -585,7 +585,7 @@ pub(crate) fn timer_drift(scheduler: &str, values: &TimerValues) -> Option<Strin
     } else {
         let file = timer_path(scheduler, unit);
         if fs::read(&file).ok().as_deref() == Some(timer_text(scheduler, values).as_bytes()) {
-            if unit.keep_alive && !task_unlimited(unit) {
+            if scheduler == "schtasks" && unit.keep_alive && !task_unlimited(unit) {
                 return Some(format!(
                     "the {} task ends its loop after 72 hours; --install removes that limit",
                     unit.task
