@@ -96,10 +96,13 @@ jobs:
         run: pnpm exec nx affected -t auth protocol assets deploy verify --base="$NX_BASE" --head="$NX_HEAD"
       - run: git diff --check
   # The local target runs device flows through the factory binary, so a Rust change always selects it. Its own job
-  # runs it beside targets' scans and checks instead of after them, and needs no gitleaks or browser.
+  # runs it beside targets' scans and checks instead of after them, and needs no gitleaks or browser. It waits for
+  # rust-build: started beside it, it reached the binary restore before rust-build saved the binary, and spent
+  # 25-40 s installing the toolchain and building the same binary again. A rust hit skips rust-build, and local
+  # then restores the binary an earlier run cached.
   local:
-    needs: plan
-    if: needs.plan.outputs.all != 'true'
+    needs: [plan, rust-build]
+    if: ${{ !cancelled() && needs.plan.outputs.all != 'true' && (needs.rust-build.result == 'success' || needs.rust-build.result == 'skipped') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
@@ -108,8 +111,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/actions/ci-setup
-      # This job restores the binary rust-build cached under the rust key, and builds it only on a miss, so it never
-      # waits on rust-build.
+      # This job restores the binary rust-build cached under the rust key, and builds it only when that cache is gone.
       - name: Restore the factory binary
         id: factory-bin
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -126,8 +128,7 @@ jobs:
           prefix-key: v2-rust
           workspaces: rust
           save-if: false
-      # rust-build runs beside this job, so a PR that changes Rust may miss the binary above. The incremental
-      # artifacts warm.yml saves from main, which this job only reads, cut that build from about 27 s to a few.
+      # The incremental artifacts warm.yml saves from main, which this job only reads, cut that build to a few seconds.
       - name: Restore incremental artifacts
         if: steps.factory-bin.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

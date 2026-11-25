@@ -235,7 +235,7 @@ test("the plan keys the whole merge tree and the rust inputs, and lookups never 
   for (const job of ["rust-build", "rust-test", "rust-check", "parity"]) {
     assert.ok(saves[0].if.includes(`needs.${job}.result == 'success'`), job);
   }
-  for (const job of ["targets", "local", "paseo-plugin"]) {
+  for (const job of ["targets", "paseo-plugin"]) {
     assert.equal(workflow.jobs[job].if, "needs.plan.outputs.all != 'true'", job);
   }
 });
@@ -257,8 +257,12 @@ test("rust-build caches the binary under the rust key, and local restores it or 
   assert.deepEqual(save.with, { path: binary, key });
   const buildStep = build.steps.findIndex((step) => step.name === "Build linux-x64");
   assert.ok(build.steps.indexOf(save) > buildStep);
-  // local never waits on rust-build, so it still runs when a rust hit skips rust-build.
-  assert.equal(local.needs, "plan");
+  // local waits for rust-build's binary, and still runs when a rust hit skips rust-build.
+  assert.deepEqual(local.needs, ["plan", "rust-build"]);
+  assert.equal(
+    local.if,
+    "${{ !cancelled() && needs.plan.outputs.all != 'true' && (needs.rust-build.result == 'success' || needs.rust-build.result == 'skipped') }}",
+  );
   const restore = local.steps.findIndex((step) => step.name === "Restore the factory binary");
   assert.equal(action(local.steps[restore]), "actions/cache/restore");
   assert.deepEqual(local.steps[restore].with, { path: binary, key });
