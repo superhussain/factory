@@ -434,6 +434,6 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
   assert.equal(parity.strategy["fail-fast"], false);
   assert.match(
     runs(parity)[0],
-    /node tests\/parity\/run\.mjs --bin rust\/target\/host\/factory --ids rust\/parity --jobs 8 --shard \$\{\{ matrix\.shard \}\}\/6$/,
+    /node tests\/parity\/run\.mjs --bin rust\/target\/host\/factory --ids rust\/parity --shard \$\{\{ matrix\.shard \}\}\/6$/,
   );
 });

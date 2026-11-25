@@ -352,7 +352,7 @@ jobs:
       - name: Parity
         run: |
           chmod +x rust/target/host/factory
-          node tests/parity/run.mjs --bin rust/target/host/factory --ids rust/parity --jobs 8 --shard ${{ matrix.shard }}/6
+          node tests/parity/run.mjs --bin rust/target/host/factory --ids rust/parity --shard ${{ matrix.shard }}/6
   ci:
     if: ${{ !cancelled() }}
     needs: [plan, targets, local, browser, paseo-plugin, rust-build, rust-test, rust-check, parity]
