@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::cli::Call;
 use crate::commands::pickup;
-use crate::shared::build::{rust_binary, Host, BINARY};
+use crate::shared::build::{private_dir, rust_binary, Host, BINARY};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{read_text, resolve, temp_root};
@@ -1019,7 +1019,10 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                 .map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
             let src = tmp.join("src");
             let src_text = src.to_string_lossy().into_owned();
-            let binary = tmp.join(Path::new(BINARY).file_name().unwrap_or_default());
+            // The private copy lives under the factory home, not the temp root, which may be mounted
+            // noexec or, on Windows, fall back to a folder other users can write.
+            let copy = home.join("tmp").join(format!("catch-up-{}", random_hex(4)));
+            let binary = copy.join(Path::new(BINARY).file_name().unwrap_or_default());
             let mut r = run(
                 &git_argv(
                     &repo,
@@ -1030,8 +1033,10 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             if r.code == 0 {
                 // The installer comes from the fetched commit: build its binary, then run its install.
                 let mut said = Vec::new();
-                let built = build(&src, &mut said)
-                    .and_then(|bytes| private_binary(&binary, &bytes).map(|_| &binary));
+                let built = build(&src, &mut said).and_then(|bytes| {
+                    private_dir(&copy)?;
+                    private_binary(&binary, &bytes).map(|_| &binary)
+                });
                 for line in String::from_utf8_lossy(&said).lines() {
                     outln!(out, "skill: {}", line.trim_start_matches("install: "));
                 }
@@ -1056,9 +1061,9 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                     },
                 };
             }
-            if binary.exists() {
-                fs::remove_file(&binary).map_err(|e| fail(os_error(&e, Some(&binary)), 1))?;
-            }
+            // Best effort: a scanner can hold a just-run exe for a moment, and the install has finished.
+            let _ = fs::remove_file(&binary);
+            let _ = fs::remove_dir(&copy);
             if src.exists() {
                 run(&git_argv(&repo, &["worktree", "remove", &src_text]), None);
             }
@@ -1975,10 +1980,22 @@ mod tests {
         let expected = temp_root().unwrap();
         assert_eq!(tmp.parent().unwrap(), expected);
         assert!(!tmp.exists());
+        // The private copy ran from a fresh folder under the factory home, removed afterwards.
+        let installs = t.installs.borrow().clone();
+        let copy = Path::new(&installs[0][0]).parent().unwrap();
+        assert_eq!(copy.parent().unwrap(), t.home.join("tmp"));
+        assert!(copy
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("catch-up-"));
+        assert!(!copy.exists());
+        assert_eq!(fs::read_dir(t.home.join("tmp")).unwrap().count(), 0);
         assert_eq!(
-            *t.installs.borrow(),
+            installs,
             [[
-                text(&tmp.join("factory")),
+                text(&copy.join("factory")),
                 "install",
                 "--source",
                 text(&src),
