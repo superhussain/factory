@@ -51,10 +51,10 @@ test("each warm job installs the same toolchain and compiles what its ci.yml job
     job.steps.find((step) => step.run?.startsWith("rustup toolchain install")).run.trim();
   for (const id of JOBS) {
     assert.equal(toolchain(warm.jobs[id]), toolchain(ci.jobs[id]), id);
-    // Warm saves the toolchain cache under the key ci.yml's job looks up.
+    // Warm saves rust-check's toolchain cache under the key ci.yml's rust-check looks up, and only that one.
     const cache = named(warm.jobs[id], "Cache the pinned toolchain");
-    assert.equal(action(cache), "actions/cache", id);
-    assert.deepEqual(cache.with, named(ci.jobs[id], "Cache the pinned toolchain").with, id);
+    assert.deepEqual(cache?.with, named(ci.jobs[id], "Cache the pinned toolchain")?.with, id);
+    if (cache) assert.equal(action(cache), "actions/cache", id);
     assert.equal(action(warm.jobs[id].steps[0]), "actions/checkout", id);
     assert.equal(warm.jobs[id].steps[0].with["persist-credentials"], false, id);
   }

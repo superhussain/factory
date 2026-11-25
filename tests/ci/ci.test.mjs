@@ -266,7 +266,6 @@ test("rust-build caches the binary under the rust key, and targets restores it o
   assert.deepEqual(
     onMiss.map((step) => step.run ?? action(step)),
     [
-      "actions/cache/restore",
       "rustup toolchain install",
       "Swatinem/rust-cache",
       "actions/cache/restore",
@@ -274,9 +273,9 @@ test("rust-build caches the binary under the rust key, and targets restores it o
     ],
   );
   // warm.yml saves the shared rust/target cache and the incremental artifacts; targets only reads them.
-  assert.equal(onMiss[2].with["save-if"], false);
+  assert.equal(onMiss[1].with["save-if"], false);
   const incremental = build.steps.find((step) => step.name === "Restore incremental artifacts");
-  assert.deepEqual(onMiss[3].with, incremental.with);
+  assert.deepEqual(onMiss[2].with, incremental.with);
   assert.ok(!targets.steps.some((step) => action(step) === "actions/cache/save"));
   const nx = targets.steps.findIndex((step) => step.name === "Nx affected");
   assert.ok(onMiss.every((step) => targets.steps.indexOf(step) > restore));
@@ -358,32 +357,23 @@ test("the paseo-plugin job installs, typechecks and tests the plugin in order", 
   ]);
 });
 
-test("every rust job caches the pinned toolchain, keyed on its toolchain file, right before rustup installs it", () => {
+test("only rust-check caches the pinned toolchain, keyed on its toolchain file, right before rustup installs it", () => {
   const toml = readFileSync(new URL("../../rust/rust-toolchain.toml", import.meta.url), "utf8");
   const name = `${/^channel = "(.+)"$/m.exec(toml)[1]}-x86_64-unknown-linux-gnu`;
-  const hash = "${{ hashFiles('rust/rust-toolchain.toml') }}";
-  // targets only reads it, as it only reads its rust cache.
-  for (const [id, key, uses] of [
-    ["rust-build", "v1-rustup", "actions/cache"],
-    ["rust-test", "v1-rustup", "actions/cache"],
-    ["targets", "v1-rustup", "actions/cache/restore"],
-    ["rust-check", "v1-rustup-targets", "actions/cache"],
-  ]) {
-    const steps = workflow.jobs[id].steps;
-    const install = steps.findIndex((step) => step.run?.startsWith("rustup toolchain install"));
-    const cache = steps[install - 1];
-    assert.equal(cache.name, "Cache the pinned toolchain", id);
-    assert.equal(action(cache), uses, id);
-    assert.equal(cache.if, steps[install].if, id);
-    assert.deepEqual(
-      cache.with,
-      {
-        path: `~/.rustup/toolchains/${name}\n~/.rustup/update-hashes/${name}\n`,
-        key: `${key}-${hash}`,
-      },
-      id,
-    );
-  }
+  const steps = workflow.jobs["rust-check"].steps;
+  const install = steps.findIndex((step) => step.run?.startsWith("rustup toolchain install"));
+  const cache = steps[install - 1];
+  assert.equal(cache.name, "Cache the pinned toolchain");
+  assert.equal(action(cache), "actions/cache");
+  assert.deepEqual(cache.with, {
+    path: `~/.rustup/toolchains/${name}\n~/.rustup/update-hashes/${name}\n`,
+    key: "v1-rustup-targets-${{ hashFiles('rust/rust-toolchain.toml') }}",
+  });
+  // The other jobs gained 0-3 s from it, too little for about 190 MB of cache.
+  const cached = Object.keys(workflow.jobs).filter((id) =>
+    workflow.jobs[id].steps?.some((step) => step.name === "Cache the pinned toolchain"),
+  );
+  assert.deepEqual(cached, ["rust-check"]);
 });
 
 test("the rust jobs build, test and check in parallel and shard parity over the built binary", () => {
