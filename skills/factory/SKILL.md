@@ -156,7 +156,9 @@ on its own where it is installed:
 - Where the daemon runs, it pushes a changed job folder about 3 s after its
   last write, with the same rules. It pulls a job when its board row changes,
   unless a live session on this host holds the job; that session runs `pull`
-  itself. Still run `push` after writing; with the daemon synced it returns at once.
+  itself. Run `pull` before editing a file another host may have changed: an
+  edit made from a copy older than the daemon's pull is kept as a conflict.
+  Still run `push` after writing; with the daemon synced it returns at once.
 - When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
   the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
   each file. `push` never uploads a `.remote`, and refuses the file until a human

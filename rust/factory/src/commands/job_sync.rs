@@ -212,7 +212,7 @@ impl JobSync {
             let (slug, id) = key.split_once('/').unwrap();
             // A held job's pull stays queued until no live session here holds it.
             if !job.held && job.pull_at.is_some_and(|at| at <= now) {
-                job.pull_at = match pull_job_files(&self.home, slug, id) {
+                job.pull_at = match pull_job_files(&self.home, slug, id, true) {
                     Ok((line, _, got)) => {
                         if !got.is_empty() {
                             log(&format!("job sync {key}: pulled {}", got.join(", ")));
@@ -657,6 +657,124 @@ mod tests {
         let mut sync = JobSync::new(&home);
         sync.rows(&[row("build", "t1")], Instant::now());
         assert!(sync.jobs.is_empty());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    /// A home whose build.md is "B0\n", synced at ETag b0, for a job this host does not hold.
+    fn synced_b0(name: &str, origin: &str) -> PathBuf {
+        let home = with_job(name, origin);
+        let f = folder(&home);
+        fs::write(f.join("build.md"), "B0\n").unwrap();
+        let state = json!({"build.md": {"etag": "\"b0\"", "sha256": sha(b"B0\n")}});
+        fs::write(f.join(".sync.json"), state.to_string()).unwrap();
+        home
+    }
+
+    #[test]
+    fn blind_write_after_an_auto_pull_keeps_both_copies() {
+        let (origin, seen) = serve(vec![
+            // The auto-pull: R2 holds another host's b1.
+            (200, r#"[{"name":"build.md","etag":"\"b1\""}]"#, vec![]),
+            (200, "B1 from the other host\n", vec![("ETag", "\"b1\"")]),
+            // The push of the blind write.
+            (200, r#"[{"name":"build.md","etag":"\"b1\""}]"#, vec![]),
+            (412, "", vec![]),
+            (200, "B1 from the other host\n", vec![("ETag", "\"b1\"")]),
+        ]);
+        let home = synced_b0("job-sync-blind-write", &origin);
+        let f = folder(&home);
+        let mut sync = JobSync::new(&home);
+        let (lines, log) = logger();
+        let t0 = Instant::now();
+        // 1. The daemon pulls b1 over the unchanged b0.
+        sync.rows(&[row("build", "t1")], t0);
+        sync.scan(t0);
+        sync.run_due(t0, &log, &|| false);
+        assert_eq!(
+            fs::read(f.join("build.md")).unwrap(),
+            b"B1 from the other host\n"
+        );
+        // 2. A session that read b0 earlier writes it back with a shell redirect.
+        fs::write(f.join("build.md"), "B0 plus a stale edit\n").unwrap();
+        // 3. The next push sends If-Match b0, not b1, so it meets a 412.
+        sync.scan(t0 + SCAN);
+        sync.run_due(t0 + SCAN + QUIET, &log, &|| false);
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            (seen[3].method.as_str(), seen[3].header("If-Match")),
+            ("PUT", Some("\"b0\""))
+        );
+        // Nothing is lost: the stale write stays local and b1 waits beside it, still in R2.
+        assert_eq!(
+            fs::read(f.join("build.md")).unwrap(),
+            b"B0 plus a stale edit\n"
+        );
+        assert_eq!(
+            fs::read(f.join("build.md.remote")).unwrap(),
+            b"B1 from the other host\n"
+        );
+        assert!(lines
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|l| l.contains("conflict in build.md")));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn blind_create_after_an_auto_pull_keeps_both_copies() {
+        let (origin, seen) = serve(vec![
+            (200, r#"[{"name":"notes.md","etag":"\"n1\""}]"#, vec![]),
+            (200, "Other host's notes\n", vec![("ETag", "\"n1\"")]),
+            (200, r#"[{"name":"notes.md","etag":"\"n1\""}]"#, vec![]),
+            (412, "", vec![]),
+            (200, "Other host's notes\n", vec![("ETag", "\"n1\"")]),
+        ]);
+        let home = with_job("job-sync-blind-create", &origin);
+        let f = folder(&home);
+        let manifest = || {
+            crate::shared::pyjson::loads(&fs::read_to_string(f.join(".sync.json")).unwrap())
+                .unwrap()
+        };
+        crate::commands::sync::pull_job_files(&home, "alpha", JOB, true).unwrap();
+        assert_eq!(manifest()["notes.md"]["base"], Value::Null);
+        // A session that never saw the file creates it from scratch.
+        fs::write(f.join("notes.md"), "Mine\n").unwrap();
+        let e = push_job(&home, "alpha", JOB, &mut Vec::new()).unwrap_err();
+        assert_eq!(e.code, 6);
+        assert_eq!(seen.lock().unwrap()[3].header("If-None-Match"), Some("*"));
+        assert_eq!(fs::read(f.join("notes.md")).unwrap(), b"Mine\n");
+        assert_eq!(
+            fs::read(f.join("notes.md.remote")).unwrap(),
+            b"Other host's notes\n"
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_deliberate_pull_clears_the_base_so_edits_push() {
+        let (origin, seen) = serve(vec![
+            (200, r#"[{"name":"build.md","etag":"\"b1\""}]"#, vec![]),
+            (200, "B1\n", vec![("ETag", "\"b1\"")]),
+            // The session's own pull: nothing to fetch, but it takes b1 as its base.
+            (200, r#"[{"name":"build.md","etag":"\"b1\""}]"#, vec![]),
+            (200, r#"[{"name":"build.md","etag":"\"b1\""}]"#, vec![]),
+            (200, "", vec![("ETag", "\"b2\"")]),
+        ]);
+        let home = synced_b0("job-sync-deliberate", &origin);
+        let f = folder(&home);
+        crate::commands::sync::pull_job_files(&home, "alpha", JOB, true).unwrap();
+        // An unchanged auto-pulled folder has nothing to push.
+        assert!(locally_synced(&f));
+        crate::commands::sync::pull_job(&home, "alpha", JOB).unwrap();
+        fs::write(f.join("build.md"), "B1 plus my edit\n").unwrap();
+        push_job(&home, "alpha", JOB, &mut Vec::new()).unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(
+            (seen[4].method.as_str(), seen[4].header("If-Match")),
+            ("PUT", Some("\"b1\""))
+        );
+        assert!(!f.join("build.md.remote").exists());
         fs::remove_dir_all(home).unwrap();
     }
 

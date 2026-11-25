@@ -613,8 +613,14 @@ pub(crate) fn push_job(
             refused.push(rel);
             continue;
         }
-        let cond = match &entry {
-            Some(entry) => match entry.get("etag").and_then(Value::as_str) {
+        // An automatic pull refreshed the file but left its base: the version a session last took
+        // deliberately, with pull or push. Conditioning on that base means a write made from what
+        // the session read before the pull meets a 412, as it would with no daemon.
+        let base = entry.as_ref().and_then(|e| e.get("base"));
+        let cond = match (&entry, base) {
+            (_, Some(Value::Null)) => ("If-None-Match", "*".to_string()),
+            (_, Some(Value::String(etag))) => ("If-Match", etag.clone()),
+            (Some(entry), _) => match entry.get("etag").and_then(Value::as_str) {
                 Some(etag) => ("If-Match", etag.to_string()),
                 None => {
                     return Err(fail(
@@ -623,7 +629,7 @@ pub(crate) fn push_job(
                     ))
                 }
             },
-            None => ("If-None-Match", "*".to_string()),
+            (None, _) => ("If-None-Match", "*".to_string()),
         };
         let r = api(
             &home,
@@ -726,14 +732,19 @@ pub fn push(call: &Call) -> Res<()> {
 
 /// Download what changed in R2 and keep local edits. (summary line, conflicted files).
 pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Vec<String>)> {
-    pull_job_files(home, slug, job_id).map(|(line, conflicts, _)| (line, conflicts))
+    pull_job_files(home, slug, job_id, false).map(|(line, conflicts, _)| (line, conflicts))
 }
 
-/// `pull_job`, also returning the files it downloaded.
+/// `pull_job`, also returning the files it downloaded. An automatic pull (the daemon's) records
+/// each replaced or created file's `base`: the ETag its local copy had before, or null when there
+/// was none. Push conditions on the base, so a session that read the old copy and writes it back
+/// blind gets a 412 and keeps both copies. A deliberate pull clears every base: the session took
+/// R2's version.
 pub(crate) fn pull_job_files(
     home: &Path,
     slug: &str,
     job_id: &str,
+    auto: bool,
 ) -> Res<(String, Vec<String>, Vec<String>)> {
     let _lock = job_lock(home, slug, job_id)?;
     let (folder, mut manifest, remote) = sync_state(home, slug, job_id)?;
@@ -763,9 +774,22 @@ pub(crate) fn pull_job_files(
             .is_none_or(|d| entry.is_some() && stored("sha256") == Some(&Value::from(sha(d))))
         {
             if data.is_some() && stored("etag") == Some(&tag_value) {
+                if !auto {
+                    if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                        e.shift_remove("base");
+                    }
+                }
                 continue;
             }
-            let (body, fetched) = fetch(home, slug, job_id, rel)?;
+            let (body, mut fetched) = fetch(home, slug, job_id, rel)?;
+            if auto {
+                let base = match stored("base") {
+                    Some(base) => base.clone(),
+                    None if data.is_some() => stored("etag").cloned().unwrap_or(Value::Null),
+                    None => Value::Null,
+                };
+                fetched["base"] = base;
+            }
             manifest.insert(rel.clone(), fetched);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|e| os_fail(e, parent))?;

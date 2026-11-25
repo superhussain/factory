@@ -424,7 +424,11 @@ daemon is the host's only pickup scheduler and no pickup timer exists.
   through `push`'s own code once it has been still for 3 s and differs from its
   last sync. It pulls a job when its board row changes, ignoring the claim
   heartbeat, but never while a live session on this host holds the job (claim
-  device is this host and not stale). It never follows a symlinked job folder,
+  device is this host and not stale). An automatic pull keeps each file's
+  base, the version this host last took with `pull` or `push`. A later push
+  sends `If-Match` on that base, so a write made from a copy read before the
+  automatic pull meets a 412 and keeps both copies. Run `pull` before editing a
+  file another host may have changed; that takes R2's version as the new base. It never follows a symlinked job folder,
   never uploads a file that looks like it holds a secret, and logs each file it
   pushes or pulls by name. A conflict keeps the local file, saves `<file>.remote` and goes to
   the daemon log. A failed push or pull retries after 60 s, doubling to 30
