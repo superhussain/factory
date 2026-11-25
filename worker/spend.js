@@ -1,7 +1,6 @@
 // GET /api/spend: finished jobs rolled up by project and UTC week into tokens per merged
 // PR and a revert count. Read only, from board.json plus archive rows not on the board.
-import { ARCHIVE_KEY, jobsOf, readJson, reply, terminal } from "./archive.js";
-import { readBoardJson } from "./board-store.js";
+import { jobsOf, readHourly, readJson, reply, terminal } from "./archive.js";
 
 export const SPEND_WEEKS = 8;
 export const SPEND_SCHEMA = "factory.spend/1";
@@ -78,13 +77,13 @@ export function spendRows(jobs, now) {
 
 const weekOf = (now) => new Date(weekStart(now.getTime())).toISOString().slice(0, 10);
 
-/** Spend rows from board.json plus archive rows not on the board, at Date `now`. */
-export async function readSpendRows(env, now) {
-  const board = jobsOf(await readBoardJson(env)) ?? [];
+/** Spend rows from board.json plus archive rows not on the board, at Date `now`, from
+ * readHourly's read, or a read of its own. */
+export async function readSpendRows(env, now, hourly = readHourly(env)) {
+  const read = await hourly;
+  const board = jobsOf(read.board) ?? [];
   const boardIds = new Set(board.map((j) => j?.id));
-  const archive = (jobsOf(await readJson(env, ARCHIVE_KEY)) ?? []).filter(
-    (j) => !boardIds.has(j?.id),
-  );
+  const archive = (jobsOf(read.archive) ?? []).filter((j) => !boardIds.has(j?.id));
   return spendRows([...board, ...archive], now);
 }
 
@@ -132,8 +131,8 @@ export function spendNudges(expected, week, state) {
 }
 
 /** The spend events at Date `at` and the state to record once they are delivered. */
-export async function spendNudgePass(env, budgets, at) {
-  const expected = spendExpected(await readSpendRows(env, at), budgets, at);
+export async function spendNudgePass(env, budgets, at, hourly) {
+  const expected = spendExpected(await readSpendRows(env, at, hourly), budgets, at);
   return spendNudges(expected, weekOf(at), (await readJson(env, NUDGE_KEY))?.data);
 }
 

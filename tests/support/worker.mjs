@@ -172,6 +172,7 @@ export function memoryRoom(
         : fetch(input, init),
     boardHead: rpc("boardHead"),
     boardRead: rpc("boardRead"),
+    boardIds: rpc("boardIds"),
     boardRows: rpc("boardRows"),
     boardCommit: rpc("boardCommit"),
     boardReplace: rpc("boardReplace"),
