@@ -1,1 +1,1 @@
-warning: Tracer mirror of sample/001-sample failed: Tracer GET api/features/plan-1234 returned 401: bad token (check token_file). The board change was saved; run factory.py tracer sync sample/001-sample to retry.
+warning: Tracer mirror of sample/001-sample failed: Tracer GET api/features/plan-1234 returned 401: bad token (check token_file). The board change was saved; run factory tracer sync sample/001-sample to retry.

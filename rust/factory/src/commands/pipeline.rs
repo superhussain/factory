@@ -2809,7 +2809,7 @@ fn review_plan(home: &Path, slug: &str, job_id: &str, round_text: &str, o: &mut 
             write_file(
                 path,
                 &format!(
-                    "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: {reason}.\n"
+                    "VERDICT: SKIPPED\n\nfactory review-plan skipped this review: {reason}.\n"
                 ),
             )?;
         }
@@ -6371,7 +6371,7 @@ mod tests {
                 for name in ["ux", "ui"] {
                     let text = fs::read_to_string(self.review(round, name)).unwrap();
                     assert!(text.starts_with(
-                        "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: "
+                        "VERDICT: SKIPPED\n\nfactory review-plan skipped this review: "
                     ));
                 }
                 plan
@@ -8134,7 +8134,7 @@ mod tests {
         const SECURITY_REVIEW: &str =
             "VERDICT: PASS\n\nThe escaping at src/export.py:60-64 is fine.\n";
         const SKIPPED_REVIEW: &str =
-            "VERDICT: SKIPPED\n\nfactory.py review-plan skipped this review: src/nope.py:1.\n";
+            "VERDICT: SKIPPED\n\nfactory review-plan skipped this review: src/nope.py:1.\n";
         const UNVERIFIED: [&str; 3] = [
             "review-code.md export.py:412 bad-line",
             "review-code.md src/export_view.py:12 no-file",

@@ -220,7 +220,7 @@ pub(super) fn close_decision(
     let holders = recorded_holders(j);
     let uncovered: Vec<&String> = holders.iter().filter(|h| !pickup.lists(h)).collect();
     let (project, id) = (text_of(j.get("project")), text_of(j.get("id")));
-    let task = format!("`factory.py cleanup {project}/{id}`");
+    let task = format!("`factory cleanup {project}/{id}`");
     let quoted = |hosts: &[&String]| {
         hosts
             .iter()
@@ -246,7 +246,7 @@ pub(super) fn close_decision(
     let github = get_str(&j["close"], "via") == Some("github");
     let (summary, requested, unreviewed) = if github {
         (
-            format!("GitHub reported pull request {pr} closed without merging, so factory.py pickup closed the job at {at} while at stage `{stage}`."),
+            format!("GitHub reported pull request {pr} closed without merging, so factory pickup closed the job at {at} while at stage `{stage}`."),
             format!("GitHub reported the pull request closed. Pickup queued the close at {at}."),
             "No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` ref if the work is still wanted.".to_string(),
         )
@@ -268,7 +268,7 @@ pub(super) fn close_decision(
         }
         None => "none".into(),
     };
-    let text = format!("CLOSED: {reason}\n\n**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- {requested}\n- Stage when closed: `{stage}`, round {round}.\n- Branch: `{branch}`.\n- Pull request: {shown_pr}.\n- Written by factory.py pickup on {device}.\n\n## Left out\n\n- {unreviewed}\n{open_pr}- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup {project}/{id}` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup {project}/{id}` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n{manual}");
+    let text = format!("CLOSED: {reason}\n\n**Summary.** {summary} Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- {requested}\n- Stage when closed: `{stage}`, round {round}.\n- Branch: `{branch}`.\n- Pull request: {shown_pr}.\n- Written by factory pickup on {device}.\n\n## Left out\n\n- {unreviewed}\n{open_pr}- The next pickup run on each host that holds the worktree or branch runs `factory cleanup {project}/{id}` there when the project's pickup is on and lists that host. On any other host, run `factory cleanup {project}/{id}` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n{manual}");
     match earlier {
         Some(e) if !e.is_empty() => format!("{text}\n## Earlier decision\n\n{e}"),
         _ => text,

@@ -470,8 +470,10 @@ fn register_project(home: &Path, repo_path: &str) -> Res<()> {
     let paths_file = home.join("paths.md");
     write_atomic(
         &paths_file,
-        format!("---\n{listed}---\n\nThis device's checkout of each project. factory.py init writes it.\n")
-            .as_bytes(),
+        format!(
+            "---\n{listed}---\n\nThis device's checkout of each project. factory init writes it.\n"
+        )
+        .as_bytes(),
     )
     .map_err(|e| os_fail(e, &paths_file))?;
     println!(
@@ -1481,7 +1483,7 @@ pub fn with_cloudflare_cmd(call: &Call) -> Res<()> {
     let argv = &call.args;
     if argv.len() < 2 || argv[0] != "--" {
         return Err(fail(
-            "usage: factory.py with-cloudflare -- <command> [<arg>...]",
+            "usage: factory with-cloudflare -- <command> [<arg>...]",
             2,
         ));
     }

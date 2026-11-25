@@ -446,7 +446,7 @@ pub(super) fn orphan_summary(orphans: &[Orphan], skipped: &[String]) -> String {
     } else if !skipped.is_empty() {
         line += &format!(", {} sources skipped", skipped.len());
     }
-    line + "; run factory.py orphans to list them"
+    line + "; run factory orphans to list them"
 }
 
 /// True when a once-per-local-date hook's record already names today.

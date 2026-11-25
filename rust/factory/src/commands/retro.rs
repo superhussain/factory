@@ -225,7 +225,7 @@ const MAX_PER_RUN: usize = 5;
 const ENV_SECRET_MIN: usize = 12;
 static DIGITS: Pattern = Pattern::new(r"\d+", Flags::NONE);
 static ROUND_DIR: Pattern = Pattern::new(r"\bround-(\d+)/", Flags::NONE);
-const USAGE: &str = "usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>, N from 1 to 90 for digest and 1 to 30 for aggregate";
+const USAGE: &str = "usage: factory retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>, N from 1 to 90 for digest and 1 to 30 for aggregate";
 
 pub fn retro_cmd(call: &Call) -> Res<()> {
     let (action, args) = (call.args[0].as_str(), &call.args[1..]);
@@ -938,7 +938,7 @@ pub(crate) fn retro_push() -> Res<()> {
     let config = home.join("config.md");
     let device = config_device(&home)?;
     let hint = format!(
-        "set device: in {}; pair this host with factory.py host pair <id> <code>",
+        "set device: in {}; pair this host with factory host pair <id> <code>",
         config.display()
     );
     if !HOST_NAME.is_full(&device) {
@@ -5675,7 +5675,7 @@ mod tests {
         );
     }
 
-    const PAIR_HINT: &str = "pair this host with factory.py host pair <id> <code>";
+    const PAIR_HINT: &str = "pair this host with factory host pair <id> <code>";
 
     #[test]
     fn push_outcome_write_only_names_the_pairing() {

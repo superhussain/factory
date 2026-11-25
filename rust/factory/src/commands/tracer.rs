@@ -1284,9 +1284,9 @@ fn after_board_to(home: &Path, job: &Value, err: &mut dyn Write) {
     };
     let slug = py_str(slug);
     let retry = if step == "mirror" {
-        format!("run factory.py tracer sync {slug}/{job_id} to retry")
+        format!("run factory tracer sync {slug}/{job_id} to retry")
     } else {
-        "the next pickup retries (or run factory.py pickup)".to_string()
+        "the next pickup retries (or run factory pickup)".to_string()
     };
     let _ = writeln!(
         err,
@@ -2851,7 +2851,7 @@ Nothing.
         assert!(out.contains("nothing to mirror"), "{out}");
     }
 
-    const PICKUP_TAIL: &str = "the next pickup retries (or run factory.py pickup).";
+    const PICKUP_TAIL: &str = "the next pickup retries (or run factory pickup).";
     const APPROVED_AT: &str = "2026-01-02T00:00:00Z";
     const UNSIGNED_NEEDS: &str = "Tracer approved scope for factory-1 without a signed receipt: run /factory approve-spec 001-sample or press Approve spec to build";
 
@@ -3015,7 +3015,7 @@ Nothing.
         assert!(err.starts_with(
             "warning: Tracer mirror of sample/001-sample failed: can't reach Tracer at "
         ));
-        assert!(err.contains("run factory.py tracer sync sample/001-sample to retry."));
+        assert!(err.contains("run factory tracer sync sample/001-sample to retry."));
     }
 
     #[test]
@@ -3432,7 +3432,7 @@ Nothing.
             (e.code, e.stderr.as_str()),
             (
                 2,
-                "only factory.py and the dashboard set spec_approval. Nothing was written.\n"
+                "only factory and the dashboard set spec_approval. Nothing was written.\n"
             )
         );
         assert_eq!(fake.state().board, before);

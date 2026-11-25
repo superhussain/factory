@@ -1,1 +1,1 @@
-audit rows are written only by the host's bound service token. set device: in {home}/config.md; pair this host with factory.py host pair <id> <code>
+audit rows are written only by the host's bound service token. set device: in {home}/config.md; pair this host with factory host pair <id> <code>

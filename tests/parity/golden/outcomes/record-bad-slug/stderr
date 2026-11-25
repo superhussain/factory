@@ -1,1 +1,1 @@
-usage: factory.py outcomes [record] [<project-slug>]
+usage: factory outcomes [record] [<project-slug>]

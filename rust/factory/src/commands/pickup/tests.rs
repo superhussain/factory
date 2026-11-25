@@ -2928,7 +2928,7 @@ pub(super) fn export_job(fx: &Fx, extra: Value) {
 mod idle_watch_test {
     use super::*;
 
-    const NUDGE: &str = "Factory job 042-sample-export shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory.py hold for the job with your --session tag, then keep waiting.";
+    const NUDGE: &str = "Factory job 042-sample-export shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory hold for the job with your --session tag, then keep waiting.";
     const NOTE: &str = "idle: no progress 20 minutes after a nudge to agent synthetic-agent";
     const LINE: &str = "042-sample-export alpha: agent synthetic-agent";
 
@@ -3421,7 +3421,7 @@ mod token_cap_test {
             board_patch(&tc.fx, "042-sample-export", json!({"token_cap": {}})),
             (
                 2,
-                "only factory.py pickup sets token_cap. Nothing was written.\n".into()
+                "only factory pickup sets token_cap. Nothing was written.\n".into()
             )
         );
         assert!(tc.fx.puts().is_empty());
@@ -5027,7 +5027,7 @@ mod orphan_summary_test {
     fn example_line() {
         assert_eq!(
             orphan_summary(&rows(&["branch", "pr", "worktree", "workspace"]), &[]),
-            "orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory.py orphans to list them"
+            "orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory orphans to list them"
         );
     }
 
@@ -5036,12 +5036,12 @@ mod orphan_summary_test {
         let four = rows(&["branch", "branch", "workspace", "workspace"]);
         assert_eq!(
             orphan_summary(&four, &["prs: gh is not on PATH".to_string()]),
-            "orphan scan: 4 orphaned (2 branches, 2 Paseo workspaces), 1 source skipped; run factory.py orphans to list them"
+            "orphan scan: 4 orphaned (2 branches, 2 Paseo workspaces), 1 source skipped; run factory orphans to list them"
         );
         let two = ["prs: gh is not on PATH", "workspaces: paseo is not on PATH"].map(String::from);
         assert_eq!(
             orphan_summary(&[], &two),
-            "orphan scan: nothing orphaned, 2 sources skipped; run factory.py orphans to list them"
+            "orphan scan: nothing orphaned, 2 sources skipped; run factory orphans to list them"
         );
     }
 }
@@ -5097,7 +5097,7 @@ mod orphan_pickup_scan_test {
         assert_eq!(
             run_scan(&home),
             (
-                "orphan scan: 1 orphaned (1 open PR); run factory.py orphans to list them\n"
+                "orphan scan: 1 orphaned (1 open PR); run factory orphans to list them\n"
                     .to_string(),
                 String::new()
             )
@@ -5763,7 +5763,7 @@ mod close_test {
     const REASON: &str = "Duplicate of 041-sample-report";
     const PR: &str = "https://github.com/sample/alpha/pull/7";
     const RIDER_PR: &str = "https://github.com/sample/alpha/pull/8";
-    const TEXT: &str = "CLOSED: Duplicate of 041-sample-report\n\n**Summary.** Closed from the dashboard at 2026-01-02T12:00:00Z while at stage `build`. The owner's reason: Duplicate of 041-sample-report. Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- Close requested from the dashboard at 2026-01-02T12:00:00Z.\n- Stage when closed: `build`, round 1.\n- Branch: `factory/042-sample-export`.\n- Pull request: none.\n- Written by factory.py pickup on host-a.\n\n## Left out\n\n- No agent reviewed this close. The reason is the owner's own words.\n- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup alpha/042-sample-export` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup alpha/042-sample-export` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n";
+    const TEXT: &str = "CLOSED: Duplicate of 041-sample-report\n\n**Summary.** Closed from the dashboard at 2026-01-02T12:00:00Z while at stage `build`. The owner's reason: Duplicate of 041-sample-report. Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- Close requested from the dashboard at 2026-01-02T12:00:00Z.\n- Stage when closed: `build`, round 1.\n- Branch: `factory/042-sample-export`.\n- Pull request: none.\n- Written by factory pickup on host-a.\n\n## Left out\n\n- No agent reviewed this close. The reason is the owner's own words.\n- The next pickup run on each host that holds the worktree or branch runs `factory cleanup alpha/042-sample-export` there when the project's pickup is on and lists that host. On any other host, run `factory cleanup alpha/042-sample-export` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n";
 
     fn setup() -> (Fx, Files) {
         let fx = Fx::new();
@@ -6010,7 +6010,7 @@ mod close_test {
             fx.pickup(&[]),
             out_err(0, "closed 042-sample-export alpha\n", "")
         );
-        assert!(files.get(DECISION).unwrap().contains("Hosts that need `factory.py cleanup alpha/042-sample-export` run by hand: `host-b`, `host-c`. The board records them as holding this job, and the project's pickup does not list them.\n"));
+        assert!(files.get(DECISION).unwrap().contains("Hosts that need `factory cleanup alpha/042-sample-export` run by hand: `host-b`, `host-c`. The board records them as holding this job, and the project's pickup does not list them.\n"));
     }
 
     #[test]
@@ -6030,7 +6030,7 @@ mod close_test {
             fx.pickup(&[]),
             out_err(0, "closed 042-sample-export alpha\n", "")
         );
-        assert!(files.get(DECISION).unwrap().contains("- Host that needs `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup is off.\n"));
+        assert!(files.get(DECISION).unwrap().contains("- Host that needs `factory cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup is off.\n"));
     }
 
     #[test]
@@ -6041,7 +6041,7 @@ mod close_test {
             reason: None,
         };
         let text = close_decision(&closing(json!({})), REASON, DEVICE, None, None, &only);
-        assert!(text.contains("- Host that needs `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup does not list it.\n"));
+        assert!(text.contains("- Host that needs `factory cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup does not list it.\n"));
     }
 
     #[test]
@@ -6053,7 +6053,7 @@ mod close_test {
             fx.pickup(&[]),
             out_err(0, "closed 042-sample-export alpha\n", "")
         );
-        assert!(files.get(DECISION).unwrap().contains("- The board records `other-host` as holding this job, but host-a could not read the project's pickup hosts: no pipeline view; register the project or deploy the current Worker. Run `factory.py cleanup alpha/042-sample-export` by hand on each of those hosts that pickup does not cover.\n"));
+        assert!(files.get(DECISION).unwrap().contains("- The board records `other-host` as holding this job, but host-a could not read the project's pickup hosts: no pipeline view; register the project or deploy the current Worker. Run `factory cleanup alpha/042-sample-export` by hand on each of those hosts that pickup does not cover.\n"));
     }
 
     #[test]
@@ -7143,7 +7143,7 @@ mod pr_sync_test {
         let job = ps.job("043-sample-import");
         let at = job["close"]["at"].as_str().unwrap().to_string();
         assert_eq!(ps.files.get(DECISION).unwrap(), format!(
-            "CLOSED: PR closed on GitHub\n\n**Summary.** GitHub reported pull request {PR8} closed without merging, so factory.py pickup closed the job at {at} while at stage `pr-open`. Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- GitHub reported the pull request closed. Pickup queued the close at {at}.\n- Stage when closed: `pr-open`, round 0.\n- Branch: `factory/043-sample-import`.\n- Pull request: {PR8}, already closed.\n- Written by factory.py pickup on host-a.\n\n## Left out\n\n- No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` ref if the work is still wanted.\n- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup alpha/043-sample-import` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup alpha/043-sample-import` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n"));
+            "CLOSED: PR closed on GitHub\n\n**Summary.** GitHub reported pull request {PR8} closed without merging, so factory pickup closed the job at {at} while at stage `pr-open`. Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- GitHub reported the pull request closed. Pickup queued the close at {at}.\n- Stage when closed: `pr-open`, round 0.\n- Branch: `factory/043-sample-import`.\n- Pull request: {PR8}, already closed.\n- Written by factory pickup on host-a.\n\n## Left out\n\n- No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` ref if the work is still wanted.\n- The next pickup run on each host that holds the worktree or branch runs `factory cleanup alpha/043-sample-import` there when the project's pickup is on and lists that host. On any other host, run `factory cleanup alpha/043-sample-import` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n"));
         assert_eq!(
             (&job["stage"], &job["note"]),
             (&json!("closed"), &json!("PR closed on GitHub"))
@@ -7289,7 +7289,7 @@ mod pr_sync_test {
             ),
             (
                 2,
-                "only factory.py pickup sets github. Nothing was written.\n".into()
+                "only factory pickup sets github. Nothing was written.\n".into()
             )
         );
         assert!(ps.puts().is_empty());
@@ -7727,7 +7727,7 @@ mod deny_notes_test {
             ),
             (
                 2,
-                "only factory.py deny-notes sets backlog.notes_read\n".into()
+                "only factory deny-notes sets backlog.notes_read\n".into()
             )
         );
         assert!(fx.calls().is_empty());
@@ -8959,7 +8959,7 @@ mod auto_babysit_test {
             ),
             (
                 2,
-                "only factory.py pickup sets auto_babysit. Nothing was written.\n".into()
+                "only factory pickup sets auto_babysit. Nothing was written.\n".into()
             )
         );
         assert!(fx.puts().is_empty());
@@ -11454,7 +11454,7 @@ mod autonomy_hold_test {
             (&job["automerge"], &job["needs"], &job["note"]),
             (
                 &json!(false),
-                &json!("review and merge PR #631: earned autonomy holds alpha visible PRs after reverted 1019-add-z; a person lifts it with factory.py autonomy restore alpha visible"),
+                &json!("review and merge PR #631: earned autonomy holds alpha visible PRs after reverted 1019-add-z; a person lifts it with factory autonomy restore alpha visible"),
                 &json!("earned autonomy hold: a person reviews and merges")
             )
         );

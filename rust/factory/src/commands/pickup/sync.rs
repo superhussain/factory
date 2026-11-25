@@ -509,7 +509,7 @@ pub(super) fn autonomy_hold(data: &Value, job: &Value) -> Option<String> {
     let (project, cls) = (get_str(job, "project")?, job_class(job)?);
     let holds = autonomy_holds(data);
     let (_, held) = holds.iter().find(|((p, c), _)| p == project && *c == cls)?;
-    Some(format!("earned autonomy holds {project} {cls} PRs after reverted {}; a person lifts it with factory.py autonomy restore {project} {cls}", held.join(", ")))
+    Some(format!("earned autonomy holds {project} {cls} PRs after reverted {}; a person lifts it with factory autonomy restore {project} {cls}", held.join(", ")))
 }
 
 /// Set automerge false and needs on a held pr-open job. The needs line, or None with no write.

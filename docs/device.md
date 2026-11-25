@@ -223,7 +223,7 @@ needs the token by name:
 
 | Case | Exit | stderr |
 | --- | --- | --- |
-| no `--` or no command | 2 | `usage: factory.py with-cloudflare -- <command> [<arg>...]` |
+| no `--` or no command | 2 | `usage: factory with-cloudflare -- <command> [<arg>...]` |
 | no `.env` | 5 | `no <env path>. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there.` |
 | `.env` is a link or not a regular file | 5 | `<env path> is a link or not a regular file, so it was not read. Replace it with a regular file.` |
 | `.env` unreadable | 5 | `cannot read <env path>: check its permissions and that it is UTF-8 text.` |
@@ -396,7 +396,7 @@ host (`$PASEO_HOME/agents/*/<id>.json`) names the session. The job drawer's `aud
 `audit push` with no valid `device:` exits 2 with the pairing hint, as does a 403
 `audit rows are written only by the host's bound service token`. Any other 403
 exits 5. A bad job id, or a second argument without `push`, exits 2 with
-`usage: factory.py audit push <job-id>, a full job id such as 1017-add-x`.
+`usage: factory audit push <job-id>, a full job id such as 1017-add-x`.
 
 `pickup` also pushes this host's audit rows for each job at spec, build, review,
 approve or pr-open whose transcripts here changed since `<home>/audit-push.json`
@@ -522,7 +522,7 @@ It changes a job only when its result or evidence differs from what is stored,
 never touches the job's `updated`, and skips the write with
 `outcomes unchanged; nothing written` when nothing differs. An `unknown` job is
 never recorded. To clear a value, set `{"outcome": null}` with `factory board`.
-Bad arguments exit 2 with `usage: factory.py outcomes [record] [<project-slug>]`.
+Bad arguments exit 2 with `usage: factory outcomes [record] [<project-slug>]`.
 The only git write is the `origin/<base>` remote-tracking ref, and a failed fetch
 exits 5.
 
@@ -571,7 +571,7 @@ refuses a case with no defects, so delete any case you cannot label.
 
 | Input | Exit | Message |
 | --- | --- | --- |
-| not exactly one project slug | 2 | `usage: factory.py bench cases <project-slug>` |
+| not exactly one project slug | 2 | `usage: factory bench cases <project-slug>` |
 | no `projects/<slug>.md` | 4 | `bench: no project file for <slug>` |
 | GitHub lookup fails | 5 | `bench: <why>` |
 | nothing drafted | 3 | `bench: no reverted or reworked jobs to draft in <slug>` |
@@ -688,7 +688,7 @@ so a bad input prints nothing on stdout. Errors print on stderr:
 
 | Input | Exit | Message |
 | --- | --- | --- |
-| wrong arguments | 2 | `usage: factory.py bench score <cases-file> <arm-folder>... \| bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] \| bench cases <project-slug>` |
+| wrong arguments | 2 | `usage: factory bench score <cases-file> <arm-folder>... \| bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] \| bench cases <project-slug>` |
 | no cases file | 4 | `bench: no cases file at <path>` |
 | not `{"cases": [non-empty list]}` | 2 | `bench: <path> is not a cases file: needs {"cases": [...]}` |
 | bad case field | 2 | `bench: <path>: case <n>: <reason>` |

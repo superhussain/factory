@@ -351,7 +351,7 @@ pub(crate) fn autonomy_hold(data: &Value, job: &Value) -> Option<String> {
     let holds = autonomy_holds(data);
     let held = holds.get(&(project.to_string(), cls.to_string()))?;
     Some(format!(
-        "earned autonomy holds {project} {cls} PRs after reverted {}; a person lifts it with factory.py autonomy restore {project} {cls}",
+        "earned autonomy holds {project} {cls} PRs after reverted {}; a person lifts it with factory autonomy restore {project} {cls}",
         held.join(", ")
     ))
 }
@@ -1795,8 +1795,8 @@ const CI_FAILED: &[&str] = &[
     "CANCELLED",
     "ERROR",
 ];
-const PR_CLOSE_COMMENT: &str = "> \u{1f916} **Agent-authored report** \u{2014} written by factory.py pickup on the owner's behalf, posted automatically. Tests not run.\n\nThe owner closed factory job `{id}` from the dashboard, so this pull request will not merge. The decision page at {link} records the reason.";
-const STACKED_CLOSE_COMMENT: &str = "> \u{1f916} **Agent-authored report** \u{2014} written by factory.py on the owner's behalf, posted automatically. Tests not run.\n\nThis pull request was stacked on factory job `{lead}`, which closed without merging, so this pull request will not merge. Factory job `{id}` went back to the ideas column.";
+const PR_CLOSE_COMMENT: &str = "> \u{1f916} **Agent-authored report** \u{2014} written by factory pickup on the owner's behalf, posted automatically. Tests not run.\n\nThe owner closed factory job `{id}` from the dashboard, so this pull request will not merge. The decision page at {link} records the reason.";
+const STACKED_CLOSE_COMMENT: &str = "> \u{1f916} **Agent-authored report** \u{2014} written by factory on the owner's behalf, posted automatically. Tests not run.\n\nThis pull request was stacked on factory job `{lead}`, which closed without merging, so this pull request will not merge. Factory job `{id}` went back to the ideas column.";
 
 fn stacked_close_note(state: &str) -> &'static str {
     match state {

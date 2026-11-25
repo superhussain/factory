@@ -1,1 +1,1 @@
-042-sample-export is held: earned autonomy holds sample visible PRs after reverted 040-sample-import; a person lifts it with factory.py autonomy restore sample visible. A person reviews and merges https://github.com/example/sample/pull/42. Nothing merges.
+042-sample-export is held: earned autonomy holds sample visible PRs after reverted 040-sample-import; a person lifts it with factory autonomy restore sample visible. A person reviews and merges https://github.com/example/sample/pull/42. Nothing merges.

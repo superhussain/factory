@@ -1,220 +1,220 @@
 usage:
-  factory.py where [<project-slug>]         print this project's factory paths as JSON
-  factory.py init [<repo-path>]             set up the factory home and register a repo
-  factory.py claim <factory-dir> <feature-slug> <project-slug>
+  factory where [<project-slug>]            print this project's factory paths as JSON
+  factory init [<repo-path>]                set up the factory home and register a repo
+  factory claim <factory-dir> <feature-slug> <project-slug>
                                             allocate a job id, its folder, and its claim, print the id
-  factory.py board <factory-dir> <job-id>   apply a JSON merge patch (stdin) to one job; a new id must
+  factory board <factory-dir> <job-id>      apply a JSON merge patch (stdin) to one job; a new id must
                                             look like 003-rate-limiting
-  factory.py next                           claim the first backlog line this device can run,
+  factory next                              claim the first backlog line this device can run,
                                             print its id, project, and feature as JSON
-  factory.py backlog add "<slug>: <feature>" [--context <file>]
+  factory backlog add "<slug>: <feature>" [--context <file>]
                                             append a line to the backlog, with the file's reasons,
                                             recommendation, and questions indented under it
-  factory.py backlog rework <job-id>        read a reworded feature on stdin, append it as
+  factory backlog rework <job-id>           read a reworded feature on stdin, append it as
                                             (rework-of <job-id>), and close that rework job
-  factory.py backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes-file <file>]
-                         --chat-file <file>
+  factory backlog decide <key> <approve|deny|rework> [--answers <file>] [--notes-file <file>]
+                      --chat-file <file>
                                             make the dashboard's backlog decision from a person's chat
                                             message, print the job as JSON
-  factory.py lesson <slug>/<job-id> --fact-file <file> [--why-file <file>]
+  factory lesson <slug>/<job-id> --fact-file <file> [--why-file <file>]
                                             append a lesson to the project's notes.md under the retro caps,
                                             or queue it as a lesson card
-  factory.py triage replay <project-slug> [--threshold N] [--rules-file PATH]
+  factory triage replay <project-slug> [--threshold N] [--rules-file PATH]
                                             score a threshold against past human backlog decisions, print JSON
-  factory.py bench score <cases-file> <arm-folder>...
+  factory bench score <cases-file> <arm-folder>...
                                             score saved reviewer runs against labeled past defects, print JSON
                                             (offline)
-  factory.py bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]
+  factory bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>]
                                             run a reviewer on each case at its head, write review and run.json
                                             for bench score
-  factory.py bench cases <project-slug>
+  factory bench cases <project-slug>
                                             draft reviewer-benchmark cases from reverted or reworked jobs, print JSON
-  factory.py ideas [--limit N] [--max-inflight N] [--project <slug>]
+  factory ideas [--limit N] [--max-inflight N] [--project <slug>]
                                             claim the oldest ideas this device can run, print them as JSON
                                             (exit 3 when none are runnable or the cap is full)
-  factory.py routes pick|list|limit <name> [--minutes N]|clear <name>
+  factory routes pick|list|limit <name> [--minutes N]|clear <name>
                                             this host's dispatch routes from routes.md; pick prints
                                             the first not marked limited (exit 3 when all are)
-  factory.py experiment report <name>       print per-arm outcome metrics for one owner-model
+  factory experiment report <name>          print per-arm outcome metrics for one owner-model
                                             experiment as JSON (read-only)
-  factory.py trial settle                   keep, revert, supersede or time out each open retro
+  factory trial settle                      keep, revert, supersede or time out each open retro
                                             stage-note trial; 2 reverts pause a project's trials
-  factory.py trial resume <slug> <reason>   a person, or an agent a person asked, clears that pause
-  factory.py unclaim <job-id>               release this session's claim on an idea, so it waits again
-  factory.py deny-notes <job-id> [done]   print a denied job's unread notes wrapped as data, or mark them read
-  factory.py pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]
+  factory trial resume <slug> <reason>      a person, or an agent a person asked, clears that pause
+  factory unclaim <job-id>                  release this session's claim on an idea, so it waits again
+  factory deny-notes <job-id> [done]      print a denied job's unread notes wrapped as data, or mark them read
+  factory pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]
                                             claim and launch runnable ideas for the projects whose
                                             pipeline lists this host, through launchers.json; silent
                                             when there is nothing to do. The backlog triage sweep
                                             runs at most every 30 minutes; --triage-now runs it now
-  factory.py pickup setup [--install]       check every pickup prerequisite on this host and print each fix; --install writes and loads the 5 minute timer
-  factory.py catch-up                       bring this host to origin's skill, pickup timer and Worker, backing up first
-  factory.py host pair <id> <code>          pair this device with a host added in Settings and set
+  factory pickup setup [--install]          check every pickup prerequisite on this host and print each fix; --install writes and loads the 5 minute timer
+  factory catch-up                          bring this host to origin's skill, pickup timer and Worker, backing up first
+  factory host pair <id> <code>             pair this device with a host added in Settings and set
                                             device: <id> in config.md
-  factory.py pipeline <project-slug> [--board]
+  factory pipeline <project-slug> [--board]
                                             print the project's effective pipeline configuration as JSON,
                                             with stage notes wrapped as operator-preferences data;
                                             --board prints only the one-line board patch {"pipeline": <versions>}
-  factory.py documents <project-slug>       write the project's notes, decisions and runbook, wrapped as
+  factory documents <project-slug>          write the project's notes, decisions and runbook, wrapped as
                                             operator-preferences data, to projects/<slug>.documents.md
                                             and print its path
-  factory.py prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]
+  factory prompt <project-slug>/<job-id> <role> [--round N] [--port P] [--out <path>]
                                             print a role's full agent prompt (spec, build, review-security,
                                             review-ux, review-ui, review-code, approve), or write it to
                                             <path> with mode 600 and print the path
-  factory.py wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]
+  factory wait <project-slug>/<job-id> <artifact>... [--timeout S] [--hold]
                                             print each finished job file's first line, checking once a
                                             second for up to S seconds (default 60); exit 3 while one is
                                             missing, 5 while one has no valid first line; --hold runs
                                             hold first to refresh this session's claim
-  factory.py watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]
+  factory watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]
                                             print one JSON line when every job file has a valid first
                                             line, one keeps an invalid first line, --pr's next leaves
                                             wait, or S seconds pass (default and max 540); runs hold first
                                             when a session tag is set
-  factory.py round-wait <project-slug>/<job-id> <round> [--timeout S]
+  factory round-wait <project-slug>/<job-id> <round> [--timeout S]
                                             block until all four review files of round N have a verdict
                                             line, write each verdict to the board's rounds entry as it
                                             lands, print one JSON line (default and max 540 seconds); runs
                                             hold first
-  factory.py verdict <project-slug>/<job-id> <round> <reviewer> <verdict>
+  factory verdict <project-slug>/<job-id> <round> <reviewer> <verdict>
                                             set one reviewer's verdict in the board's rounds entry, print it
                                             as JSON
-  factory.py checks <project-slug>/<job-id> [--timeout S]
+  factory checks <project-slug>/<job-id> [--timeout S]
                                             print the job PR's checks as <bucket> <name> once none is
                                             pending, checking every 10 seconds for up to S seconds
                                             (default 300); no checks after 120 seconds exits 0, a failing
                                             check 1, pending at the deadline 3, a bad pr 4, a gh problem 5, an escalated job 7
-  factory.py pr-state <project-slug>/<job-id> [--wait S]
+  factory pr-state <project-slug>/<job-id> [--wait S]
                                             print one JSON reading of the job PR for /factory babysit:
                                             pr, state, review, checks, queued, conflict, items, capped,
                                             rearm, behind and next; --wait
                                             re-reads every 30 seconds for up to S seconds (1 to 600) while
                                             next is wait; a bad pr exits 4, a gh problem 5
-  factory.py pr-handled <project-slug>/<job-id> [--rearm] <sig>...
+  factory pr-handled <project-slug>/<job-id> [--rearm] <sig>...
                                             record that babysit acted on up to 32 pr-state item signatures:
                                             add 1 to each count in the job's handled field, or with --rearm
                                             drop them; keeps the newest 32 and prints one JSON line of id
                                             and handled; a bad sig exits 2, another session's claim 6
-  factory.py pr-queue <project-slug>/<job-id>
+  factory pr-queue <project-slug>/<job-id>
                                             print whether GitHub queued the job PR, by the enqueue mutation first, else merge-async:
                                             one JSON line of pr, status and detail; enqueued exits 0,
                                             failed or refused 1, pending after 120 seconds 3, a bad or
                                             stacked pr 4, a gh problem 5
-  factory.py pr-merge <project-slug>/<job-id>
+  factory pr-merge <project-slug>/<job-id>
                                             check the job PR can merge, then merge it pinned to the head
                                             checks passed, or queue it when the repo has a merge queue: one
                                             JSON line of pr, status and detail; merged or enqueued exits 0,
                                             blocked, draft or refused 1, behind, unknown or a head checks
                                             did not pass 3, a bad or stacked pr 4, a gh problem 5, a
                                             conflict 6, an escalated job 7, an autonomy hold 8
-  factory.py batch <project-slug>/<job-id> [<idea-id> ...]  list ideas to batch into a job at spec, or attach up to 20 of them
-  factory.py stack <project-slug>/<job-id> <rider-id>  mark one rider of a job at spec to ship as a PR stacked on the job's PR
-  factory.py escalation <project-slug>/<job-id> <round>
+  factory batch <project-slug>/<job-id> [<idea-id> ...]     list ideas to batch into a job at spec, or attach up to 20 of them
+  factory stack <project-slug>/<job-id> <rider-id>     mark one rider of a job at spec to ship as a PR stacked on the job's PR
+  factory escalation <project-slug>/<job-id> <round>
                                             ask whether a review round's CHANGES findings need a person,
                                             print one JSON verdict
-  factory.py repeats <project-slug>/<job-id> <round>
+  factory repeats <project-slug>/<job-id> <round>
                                             compare a review round's CHANGES signatures with every earlier round, print one JSON verdict
                                               and flag files changed in each of the last 3 fix rounds
-  factory.py review-plan <project-slug>/<job-id> <round>
+  factory review-plan <project-slug>/<job-id> <round>
                                             skip the ux and ui reviews of a round that changes nothing a person sees, print one JSON plan
-  factory.py review-floor <project-slug>/<job-id>
+  factory review-floor <project-slug>/<job-id>
                                             record the review tier and full-review flag so a later edit cannot lower them
-  factory.py pre-review <project-slug>/<job-id>
+  factory pre-review <project-slug>/<job-id>
                                             run the base branch's .factory/checks.json in the job
                                             worktree, write pre-review.md, print one JSON line; FAIL exits 1
-  factory.py grounding <project-slug>/<job-id> <round>
+  factory grounding <project-slug>/<job-id> <round>
                                             check each path:line a round's reviews cite, write
                                             round-N/grounding.md and the round's unverified list; flags only
-  factory.py stop <worktree>                stop processes running out of a worktree
-  factory.py cleanup <project-slug>/<job-id>
+  factory stop <worktree>                   stop processes running out of a worktree
+  factory cleanup <project-slug>/<job-id>
                                             stop the job's processes, remove its worktree and merged
                                             branch without forcing, print what was left as JSON
-  factory.py clean <project-slug>/<job-id> node_modules | scratch <name> | temp
+  factory clean <project-slug>/<job-id> node_modules | scratch <name> | temp
                                             remove the job worktree's git-ignored node_modules folders, or
                                             its .context/<name> scratch folder, or the job's temp folder
                                             under the system temp root, never through a link; print
                                             what was removed and left as JSON
-  factory.py archive-workspace <project-slug>/<job-id> [--check]
+  factory archive-workspace <project-slug>/<job-id> [--check]
                                             archive this session's Paseo worktree workspace and agent once
                                             the job is merged or closed, whatever its git state; print
                                             leftovers as JSON
                                             (--check: print only)
-  factory.py orphans                        list factory branches, open PRs, worktrees and Paseo workspaces
+  factory orphans                           list factory branches, open PRs, worktrees and Paseo workspaces
                                             that no open board job owns, with a reason each, as JSON;
                                             never removes anything
-  factory.py push <project-slug>[/<job-id>] upload a project file, or a job's changed markdown and images, to R2
-  factory.py pull <project-slug>[/<job-id>] download a project, or a job's changed markdown and images from R2
-  factory.py idea-images <project-slug>/<job-id>
+  factory push <project-slug>[/<job-id>] upload a project file, or a job's changed markdown and images, to R2
+  factory pull <project-slug>[/<job-id>] download a project, or a job's changed markdown and images from R2
+  factory idea-images <project-slug>/<job-id>
                                             materialize a job's pasted images and their
                                             Markdown into the job folder, then push them
-  factory.py idea-files <project-slug>/<job-id>
+  factory idea-files <project-slug>/<job-id>
                                             fetch a job's attached files into the job folder
                                             for the spec prompt, without pushing them
-  factory.py sync [<project-slug>]          pull every active job of one project
+  factory sync [<project-slug>]             pull every active job of one project
                                             or of all projects, skipping merged
                                             and closed jobs
-  factory.py tracer sync [<project-slug>[/<job-id>]]
+  factory tracer sync [<project-slug>[/<job-id>]]
                                             mirror jobs into Tracer for projects listed in tracer.json
-  factory.py hold <project-slug>/<job-id> [take|released]
+  factory hold <project-slug>/<job-id> [take|released]
                                             claim a job for this session, then pull it and print the seconds since the job started;
                                             released also verifies the pulled job artifacts
                                             against R2 before the resume may dispatch work
-  factory.py handoff <project-slug>/<job-id>
+  factory handoff <project-slug>/<job-id>
                                             publish a checkpoint and release this session's claim
-  factory.py worktree <project-slug>/<job-id>
+  factory worktree <project-slug>/<job-id>
                                             create or fast-forward the job's worktree from origin
-  factory.py job <job-id>                   print one job's board entry as JSON
-  factory.py inbox                          print the dashboard Inbox count across all projects and
+  factory job <job-id>                      print one job's board entry as JSON
+  factory inbox                             print the dashboard Inbox count across all projects and
                                             the jobs waiting on a person as JSON
-  factory.py builds <project-slug>          print the project's build queue and in-flight jobs as JSON
-  factory.py stuck [--limit N]              claim up to N (default 1) jobs a dead session left mid-loop,
+  factory builds <project-slug>             print the project's build queue and in-flight jobs as JSON
+  factory stuck [--limit N]                 claim up to N (default 1) jobs a dead session left mid-loop,
                                             print them as JSON for the resume schedule
-  factory.py autonomy status|pause|resume|allow <slug>|deny <slug>|self <slug>|restore <slug> <class>|promote <slug> <class>
+  factory autonomy status|pause|resume|allow <slug>|deny <slug>|self <slug>|restore <slug> <class>|promote <slug> <class>
                                             show or change the explorer kill switch and allowlist;
                                             resume and allow need a human typing at a terminal
-  factory.py autonomy report [<project-slug>]  recommend which project and job classes may automerge; writes nothing
-  factory.py autonomy restore <project-slug> internal|visible  lift an earned-autonomy hold; a human types at a terminal
-  factory.py autonomy promote <project-slug> internal|visible  lift a hold the class has earned; a human types at a terminal
-  factory.py halt status | halt set --reason <text>
+  factory autonomy report [<project-slug>]     recommend which project and job classes may automerge; writes nothing
+  factory autonomy restore <project-slug> internal|visible     lift an earned-autonomy hold; a human types at a terminal
+  factory autonomy promote <project-slug> internal|visible     lift a hold the class has earned; a human types at a terminal
+  factory halt status | halt set --reason <text>
                                             show or set the global stop flag that pickup, its takeover
                                             and stuck honor; only a signed-in person clears it
-  factory.py suggest admit <file>           turn an explorer's suggestions file into idea cards that
+  factory suggest admit <file>              turn an explorer's suggestions file into idea cards that
                                             wait on a human (exit 3 when paused or none admitted)
-  factory.py suggest approve <job-id> <A|B|C> [--chat-file <file>]
+  factory suggest approve <job-id> <A|B|C> [--chat-file <file>]
                                             a human at a terminal approves one option of such a card,
                                             or --chat-file records a person's chat message instead
-  factory.py control <job-id> <prioritize|unprioritize|pause|resume|babysit|rerun> --chat-file <file>
-  factory.py control <job-id> move <host> --chat-file <file>
-  factory.py control <job-id> close --reason-file <file> --chat-file <file>
+  factory control <job-id> <prioritize|unprioritize|pause|resume|babysit|rerun> --chat-file <file>
+  factory control <job-id> move <host> --chat-file <file>
+  factory control <job-id> close --reason-file <file> --chat-file <file>
                                             make the dashboard's Prioritize, Remove priority, Pause,
                                             Resume, Babysit PR, Move, Rerun or Close from a person's
                                             chat message, print the result as JSON
-  factory.py needs answer <job-id> --answers <file> --chat-file <file>
+  factory needs answer <job-id> --answers <file> --chat-file <file>
                                             submit a person's chat answers to a job's needs.md form
                                             with the dashboard's writes, print the result as JSON
-  factory.py explore <slug> [done <run>]   snapshot an allowlisted project for a read-only explorer, or remove that snapshot
-  factory.py retro digest [--days N]        print one redacted JSON line per Claude Code main session
+  factory explore <slug> [done <run>]      snapshot an allowlisted project for a read-only explorer, or remove that snapshot
+  factory retro digest [--days N]           print one redacted JSON line per Claude Code main session
                                             from the last N days (default 1)
-  factory.py retro push                     upload that digest (last day) to retro/<device>/<local date>.jsonl
-  factory.py retro pull YYYY-MM-DD          print every host's pushed digest for that date
-  factory.py retro aggregate [--days N]     pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
-  factory.py retro admit <run>              check retro/<run>/reply.json, write findings.md, add its cards to the backlog
-  factory.py audit <job-id>                 list this host's tool calls in the job's worktree, risky ones flagged
-  factory.py audit push <job-id>            upload this host's audit rows to audit/<job-id>/<device>.jsonl
-  factory.py usage <project-slug>/<job-id>  sum this host's transcript tokens for the job by model
-  factory.py usage record <project-slug>/<job-id>
+  factory retro push                        upload that digest (last day) to retro/<device>/<local date>.jsonl
+  factory retro pull YYYY-MM-DD             print every host's pushed digest for that date
+  factory retro aggregate [--days N]        pull every host's digest for the last N days (default 7, at most 30) into retro/<run>/
+  factory retro admit <run>                 check retro/<run>/reply.json, write findings.md, add its cards to the backlog
+  factory audit <job-id>                    list this host's tool calls in the job's worktree, risky ones flagged
+  factory audit push <job-id>               upload this host's audit rows to audit/<job-id>/<device>.jsonl
+  factory usage <project-slug>/<job-id>     sum this host's transcript tokens for the job by model
+  factory usage record <project-slug>/<job-id>
                                             write those totals to the board job under tokens.<device>
-  factory.py outcomes [record] [<project-slug>]
+  factory outcomes [record] [<project-slug>]
                                             sort jobs merged in the last 90 days into held, reworked or reverted;
                                             record writes outcome
-  factory.py with-cloudflare -- <command> [<arg>...]
+  factory with-cloudflare -- <command> [<arg>...]
                                             run one command with the CLOUDFLARE_* keys of this home's .env
                                             in its environment; prints no value
-  factory.py agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]
+  factory agent record <project-slug>/<job-id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]
                                             append one row to the job's agents, after checking this
                                             session holds the claim, and print it as JSON
-  factory.py agent report [<project-slug>]  count every job's agents rows by stage, role, harness, via,
+  factory agent report [<project-slug>]     count every job's agents rows by stage, role, harness, via,
                                             model and effort, as a plain-text table
 
 claim, next, hold, handoff, board, ideas, and stuck take --session <tag> (or

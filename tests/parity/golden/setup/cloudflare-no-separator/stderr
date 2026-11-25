@@ -1,1 +1,1 @@
-usage: factory.py with-cloudflare -- <command> [<arg>...]
+usage: factory with-cloudflare -- <command> [<arg>...]

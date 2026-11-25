@@ -709,7 +709,7 @@ pub(crate) fn audit_push(job_id: &str) -> Res<()> {
     let meta = config_meta(&config)?;
     let device = fm_get(&meta, "device").unwrap_or("");
     let hint = format!(
-        "set device: in {}; pair this host with factory.py host pair <id> <code>",
+        "set device: in {}; pair this host with factory host pair <id> <code>",
         config.display()
     );
     if !HOST_NAME.is_full(device) {
@@ -789,7 +789,7 @@ pub fn audit_cmd(call: &Call) -> Res<()> {
     if args.len() == 2 {
         if args[0] != "push" || !NEW_JOB_ID.is_full(&args[1]) {
             return Err(fail(
-                "usage: factory.py audit push <job-id>, a full job id such as 1017-add-x",
+                "usage: factory audit push <job-id>, a full job id such as 1017-add-x",
                 2,
             ));
         }
@@ -798,7 +798,7 @@ pub fn audit_cmd(call: &Call) -> Res<()> {
     let job_id = &args[0];
     if !NEW_JOB_ID.is_full(job_id) {
         return Err(fail(
-            "usage: factory.py audit <job-id>, a full job id such as 1017-add-x",
+            "usage: factory audit <job-id>, a full job id such as 1017-add-x",
             2,
         ));
     }
@@ -1139,7 +1139,7 @@ pub fn usage_cmd(call: &Call) -> Res<()> {
     let record = args.len() == 2;
     if record && args[0] != "record" {
         return Err(fail(
-            "usage: factory.py usage [record] <project-slug>/<job-id>",
+            "usage: factory usage [record] <project-slug>/<job-id>",
             2,
         ));
     }
@@ -1153,7 +1153,7 @@ pub fn usage_cmd(call: &Call) -> Res<()> {
         if !HOST_NAME.is_full(&host) {
             return Err(fail(
                 format!(
-                    "set device: in {}; pair this host with factory.py host pair <id> <code>",
+                    "set device: in {}; pair this host with factory host pair <id> <code>",
                     config.display()
                 ),
                 2,
@@ -1634,10 +1634,7 @@ pub fn outcomes_cmd(call: &Call) -> Res<()> {
     let record = args.first().is_some_and(|a| a == "record");
     let rest = if record { &args[1..] } else { &args[..] };
     if rest.len() > 1 || rest.first().is_some_and(|s| !SLUG.is_full(s)) {
-        return Err(fail(
-            "usage: factory.py outcomes [record] [<project-slug>]",
-            2,
-        ));
+        return Err(fail("usage: factory outcomes [record] [<project-slug>]", 2));
     }
     let mut out = String::new();
     let result = outcomes(record, rest.first().map(String::as_str), &mut out);
@@ -1652,8 +1649,8 @@ static CITATION: Pattern = Pattern::new(
 );
 static ARM_NAME: Pattern = Pattern::new(r"[\w.-]+", Flags::ASCII);
 const BENCH_WEIGHTS: [(&str, i64); 3] = [("high", 3), ("medium", 2), ("low", 1)];
-const BENCH_USAGE: &str = "usage: factory.py bench score <cases-file> <arm-folder>... | bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] | bench cases <project-slug>";
-const BENCH_DRAFT_USAGE: &str = "usage: factory.py bench cases <project-slug>";
+const BENCH_USAGE: &str = "usage: factory bench score <cases-file> <arm-folder>... | bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] | bench cases <project-slug>";
+const BENCH_DRAFT_USAGE: &str = "usage: factory bench cases <project-slug>";
 const ROLE_ALIASES: [(&str, &str); 10] = [
     ("builder", "build"),
     ("factory-builder", "build"),
@@ -1894,7 +1891,7 @@ fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<Vec<ReplayRow>> {
         if jobs.is_empty() {
             return Err(fail(
                 format!(
-                    "bench: {id}: no job folder with spec.md under {}; pull it with factory.py pull <project>/{id}",
+                    "bench: {id}: no job folder with spec.md under {}; pull it with factory pull <project>/{id}",
                     home.join("jobs").display()
                 ),
                 4,
@@ -1919,7 +1916,7 @@ fn bench_replay_plan(home: &Path, cases: &[Value]) -> Res<Vec<ReplayRow>> {
         if repo.is_empty() {
             return Err(fail(
                 format!(
-                    "bench: {id}: project {slug} has no repo; pull it with factory.py pull {slug}"
+                    "bench: {id}: project {slug} has no repo; pull it with factory pull {slug}"
                 ),
                 4,
             ));
@@ -4219,7 +4216,7 @@ mod bench_replay_error_test {
             None,
             &["--role", "review-code"],
             4,
-            &format!("bench: 1018-add-y: no job folder with spec.md under {}; pull it with factory.py pull <project>/1018-add-y", b.home.join("jobs").display()),
+            &format!("bench: 1018-add-y: no job folder with spec.md under {}; pull it with factory pull <project>/1018-add-y", b.home.join("jobs").display()),
         );
     }
 
@@ -4264,7 +4261,7 @@ mod bench_replay_error_test {
                 None,
                 &["--role", "review-code"],
                 4,
-                "bench: 1018-add-y: project alpha has no repo; pull it with factory.py pull alpha",
+                "bench: 1018-add-y: project alpha has no repo; pull it with factory pull alpha",
             );
         }
     }
