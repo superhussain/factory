@@ -236,10 +236,10 @@ fn own_build(
     host: &Host,
     files: &BTreeMap<String, Vec<u8>>,
 ) -> Option<(PathBuf, Vec<u8>)> {
-    if !files
-        .keys()
-        .all(|rel| rel.starts_with("rust/") || rel.starts_with("skills/factory/"))
-    {
+    if !files.keys().all(|rel| {
+        (rel.starts_with("rust/") && !rel.starts_with("rust/target/"))
+            || rel.starts_with("skills/factory/")
+    }) {
         return None;
     }
     let name = Path::new(BINARY).file_name()?;
@@ -927,8 +927,14 @@ pub(crate) mod tests {
         // An input outside what the stamp covers means a real build, though the stamp matches.
         let mut files = build_inputs(&checkout).unwrap();
         assert!(own_build(&checkout, &machine, &files).is_some());
-        files.insert("docs/embedded.md".into(), Vec::new());
-        assert!(own_build(&checkout, &machine, &files).is_none());
+        for outside in ["docs/embedded.md", "rust/target/embedded.md"] {
+            let mut files = files.clone();
+            files.insert(outside.into(), Vec::new());
+            assert!(
+                own_build(&checkout, &machine, &files).is_none(),
+                "{outside}"
+            );
+        }
         // An input edited after the stamp is rebuilt, however old its mtime.
         edit("// two\n");
         assert!(!accepted(&machine));
