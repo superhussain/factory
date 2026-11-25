@@ -1444,15 +1444,14 @@ mod tests {
     /// With no socket, a fallback pass runs at start and then every fallback.
     #[test]
     fn fallback_runs_while_the_socket_is_down() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-        drop(listener);
-        let home = home("down", &origin);
+        // Nothing listens on port 0, whereas a freed port can go to another test's server.
+        let origin = "http://127.0.0.1:0";
+        let home = home("down", origin);
         let t = Timing {
             fallback: Duration::from_millis(300),
             ..DRIVEN
         };
-        let (d, serving) = drive(&home, &origin, 2, t, None, || None, &[]);
+        let (d, serving) = drive(&home, origin, 2, t, None, || None, &[]);
         let start = *d.clock.lock().unwrap();
         d.advance_until("pickup pass (fallback)");
         d.advance_until("pickup pass (fallback)");
