@@ -195,7 +195,9 @@ fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String
         .iter()
         .filter(|a| a[0] == "kill" || a[0] == "taskkill")
         .find_map(|a| a.iter().find_map(|w| w.parse().ok()));
-    let pid = pickup::daemon_pid(home, killed, &mut || locked_pid(home))?;
+    let pid = pickup::daemon_pid(home, killed, pickup::RUNNING_POLLS, &mut || {
+        locked_pid(home)
+    })?;
     Ok(Some(format!("restarted (pid {pid})")))
 }
 
@@ -1008,7 +1010,13 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
     let leftover = timer && daemon.is_some();
     let stale = timer && (leftover || !current || timer_drift(scheduler, home));
     // Only drift reinstalls the daemon: a new skill keeps its binary path, so the unit still matches.
-    let daemon_stale = daemon.is_some_and(|s| daemon_drift(s, home));
+    // A Windows loop that died leaves no daemon on the lock and nothing restarts it before logon,
+    // so a current skill reinstalls too, and the install's /Run starts it. A new skill's restart
+    // already runs /Run.
+    let drifted = daemon.is_some_and(|s| daemon_drift(s, home));
+    let dead =
+        !drifted && current && daemon == Some("schtasks") && matches!(locked_pid(home), Ok(None));
+    let daemon_stale = drifted || dead;
     if current {
         outln!(out, "skill: current at {h7}");
     } else {
@@ -1025,19 +1033,23 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             outln!(out, "daemon service: current");
         }
     } else {
-        let backup = match catch_up_backup(home, skill) {
-            Ok(folder) => {
+        // Starting a dead loop rewrites nothing, so it takes no backup. A drifted unit does: this
+        // backup is the only copy of its old file.
+        let service_only = dead && !stale && !retro && legacy.is_empty();
+        let backup = match (!service_only).then(|| catch_up_backup(home, skill)) {
+            None => None,
+            Some(Ok(folder)) => {
                 wrote = true;
                 outln!(out, "backup: {}", folder.display());
                 Some(folder)
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 failed += 1;
                 outln!(out, "backup: {e}");
                 None
             }
         };
-        let mut ok = backup.is_some();
+        let mut ok = service_only || backup.is_some();
         if ok && !current {
             // The installer refuses a source path with a symlinked parent, and macOS's temp
             // root is under /var -> private/var, so build the path from the canonical root.
@@ -2688,6 +2700,7 @@ mod tests {
         t.daemon(Some("launchd"), true);
         let (code, lines) = t.lines();
         assert_eq!(code, 0);
+        // A drifted unit is backed up before the install rewrites it.
         assert_eq!(t.backups().len(), backups + 1);
         assert_eq!(
             lines[4..6],
@@ -2733,6 +2746,48 @@ mod tests {
         let (code, lines) = t.lines();
         assert_eq!((code, calls.borrow().len()), (0, 1));
         assert!(!lines.iter().any(|l| l.starts_with("daemon service:")));
+    }
+
+    /// A Windows loop that died leaves no daemon on the lock, so catch-up runs the install, whose
+    /// /Run starts it. With a daemon on the lock, the service is current.
+    #[test]
+    fn current_windows_service_without_a_daemon_is_reinstalled() {
+        let t = T::new("daemon-dead-loop");
+        t.timer(false);
+        t.drift(None);
+        let (reply, reply_code) = default_timer_reply();
+        t.timer_calls(reply, reply_code);
+        let calls = t.daemon_calls(
+            "started the stopped daemon with schtasks /Run: /synthetic/factory-daemon.cmd\n",
+            0,
+        );
+        // The first run installs the skill; a new skill's restart already runs /Run.
+        t.daemon(None, false);
+        assert_eq!(t.lines().0, 0);
+        t.daemon(Some("schtasks"), false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"daemon service: started the stopped daemon with schtasks /Run: /synthetic/factory-daemon.cmd".to_string()),
+            "{lines:?}"
+        );
+        assert_eq!(calls.borrow().len(), 1);
+        assert!(!lines.iter().any(|l| l.starts_with("backup:")), "{lines:?}");
+
+        daemon_runs(&t.home);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"daemon service: current".to_string()),
+            "{lines:?}"
+        );
+        assert_eq!(calls.borrow().len(), 1);
+
+        t.daemon(Some("launchd"), false);
+        stop();
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert_eq!(calls.borrow().len(), 1, "only Windows checks the lock");
     }
 
     /// With the daemon service installed, a leftover pickup timer is removed after the backup, and
