@@ -104,6 +104,7 @@ const EXTRA: &[(&str, Handler, usize, usize)] = &[
     ("stalls", pickup::stalls_cmd, 0, usize::MAX),
     ("pr-screenshots", screenshots::pr_screenshots, 0, usize::MAX),
     ("bootstrap", bootstrap::bootstrap, 0, usize::MAX),
+    ("keep-remote", sync::keep_remote, 2, 2),
 ];
 
 pub const USAGE: &str = include_str!("usage.txt");

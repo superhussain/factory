@@ -154,15 +154,16 @@ on its own where it is installed:
   `sync "$SLUG"` does that for every job of the project that is not `merged` or
   `closed`. Pull a finished job by id.
 - Where the daemon runs, it pushes a changed job folder about 3 s after its
-  last write, with the same rules. It pulls a job when its board row changes,
-  unless a live session on this host holds the job; that session runs `pull`
-  itself. An edit made from a copy older than the daemon's pull is kept as a
-  conflict, so `pull` first. Still run `push` after writing.
+  last write. It pulls a job when its board row changes, unless a live
+  session here holds it. `pull` before editing, or the edit conflicts. Still
+  run `push` after writing.
 - When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
   the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
-  each file. `push` never uploads a `.remote`, and refuses the file until a human
-  merges the copy into it and deletes the `.remote`. For an image, delete the
-  `.remote` to keep yours, or move it over the file to keep R2's.
+  each file; `push` refuses it while the `.remote` waits. Diff the two. If every
+  difference is text you wrote, or you never edited the file, run `"$RUNTIME"
+  keep-remote "$SLUG/<id>" <file>` to save R2's copy, then delete the
+  `.remote` or move it over the file you never edited, then push.
+  Otherwise set `needs-human`. For an image, run it and keep either.
 
 - In a UI job, the builder saves screenshots in `$JOBS/<id>/` and embeds them in
   build.md as a `| Before | After |` table. The builder never uploads to the public image host.
@@ -181,7 +182,7 @@ on its own where it is installed:
 
 ### Scratchpad
 
-Never create any other `.md` file in a job folder. Anything outside a stage goes in
+Never create any other `.md` file in a job folder but conflict copies. Anything outside a stage goes in
 `scratchpad.md`: analysis and research notes, monitoring or evidence logs,
 measurements, checklists, and notes kept across sessions. Push it like any job file.
 The dashboard shows it as the scratchpad tab, `#<id>/scratchpad`. Only the
@@ -241,7 +242,7 @@ says to.
 | --- | --- | --- |
 | `hold`, `board` | `<id> is held by <device> session <tag>` | Tell the user who holds the job and when it was last seen, then stop. Take over only when the user says so, with `hold <project>/<id> take`. |
 | `hold`, `board` | `<id> was moved to <host>` | Stop. Do not retry or take it. |
-| `hold`, `pull`, `push` | `conflict in <files>` | Set the job to `needs-human` with the message as the note, and stop. `hold` has already claimed the job, so the board write goes through. |
+| `hold`, `pull`, `push` | `conflict in <files>` | Settle each `.remote` as Where things live says. Else set `needs-human` with the message as note; `hold` holds it. |
 | `sync` | `conflict in <project>/<id>/<file>, ...` | Tell the user which jobs conflict. They don't block a new job. |
 | `push`, `pull`, `sync`, `hold`, `handoff` | `<path> is a symlink or junction...` or `cannot inspect job paths under <folder>...` | Report the stop and do nothing to the paths: never remove links, change permissions, or `take` the job automatically. Mark the job `needs-human` with the message as the note only if this session owns the claim (`hold` may have already claimed it). Links, their targets, and local edits are left untouched. |
 | `worktree` | `<wt> is N ahead and M behind` | Set the job to `needs-human` with the message as the note, and stop. |
