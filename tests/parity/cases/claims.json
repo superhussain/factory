@@ -4260,7 +4260,7 @@
               "close",
               "https://github.com/example/sample/pull/2",
               "--comment",
-              "> \ud83e\udd16 **Agent-authored report** \u2014 written by factory.py on the owner's behalf, posted automatically. Tests not run.\n\nThis pull request was stacked on factory job `001-lead`, which closed without merging, so this pull request will not merge. Factory job `002-rider` went back to the ideas column."
+              "> \ud83e\udd16 **Agent-authored report** \u2014 written by factory on the owner's behalf, posted automatically. Tests not run.\n\nThis pull request was stacked on factory job `001-lead`, which closed without merging, so this pull request will not merge. Factory job `002-rider` went back to the ideas column."
             ],
             "stdout": "",
             "stderr": "",

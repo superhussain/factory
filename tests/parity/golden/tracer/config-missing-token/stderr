@@ -1,1 +1,1 @@
-factory.py: tracer token_file for sample must be a readable regular file holding one token
+tracer token_file for sample must be a readable regular file holding one token

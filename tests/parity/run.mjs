@@ -63,7 +63,7 @@ const FIELDS = [
 ];
 // A golden's dates relative to the run's UTC date. --record writes these placeholders, and a compare expands them.
 const DAYS = { "{today}": 0, "{today-6}": 6 };
-// Every case runs at this instant: the harness's dates use it, and the binary reads it from FACTORY_NOW, so no
+// Every case runs at this instant: the harness's dates use it, and the binary reads it from FACTORY_PARITY_NOW, so no
 // golden depends on the day it runs.
 const NOW = Date.parse("2026-11-24T12:00:00Z");
 // The host's OS label (host_os in the binary) in host-status.json and its PUT body, raw or JSON-escaped.
@@ -265,7 +265,7 @@ function snapshot(root) {
   });
 }
 
-async function httpFixture(routes) {
+export async function httpFixture(routes) {
   const requests = [];
   const server = createServer((req, res) => {
     const chunks = [];
@@ -299,12 +299,12 @@ async function httpFixture(routes) {
   };
 }
 
-function loadCases() {
+export function loadCases(folder = CASES) {
   const cases = [];
-  for (const name of readdirSync(CASES)
+  for (const name of readdirSync(folder)
     .filter((n) => n.endsWith(".json"))
     .sort()) {
-    for (const c of parseCaseJson(readFileSync(join(CASES, name), "utf8")).cases) {
+    for (const c of parseCaseJson(readFileSync(join(folder, name), "utf8")).cases) {
       const prefix = c.id.split("/")[0];
       if (prefix !== basename(name, ".json"))
         throw new Error(`parity: ${name}: case ${c.id} belongs in ${prefix}.json`);
@@ -331,7 +331,7 @@ function loadCases() {
   return cases;
 }
 
-function readIds(path) {
+export function readIds(path) {
   const folder = statSync(path).isDirectory();
   const files = folder
     ? readdirSync(path)
@@ -375,7 +375,7 @@ function fnmatch(name, pattern) {
 }
 
 // Text with each {name} placeholder in values replaced by its value.
-function expand(s, values) {
+export function expand(s, values) {
   for (const [name, value] of Object.entries(values)) s = s.replaceAll("{" + name + "}", value);
   return s;
 }
@@ -396,7 +396,7 @@ function routesFor(c, values) {
   );
 }
 
-function requestLines(server, normalize) {
+export function requestLines(server, normalize) {
   return server.requests.map(([method, path, headers, body]) => {
     const kept = {};
     for (const [name, value] of headers)
@@ -457,7 +457,7 @@ function execute(command, args, env, cwd, stdin) {
   });
 }
 
-async function runSide(c, command) {
+export async function runSide(c, command, homes = join(HERE, "homes")) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "parity-")));
   let server;
   try {
@@ -472,7 +472,7 @@ async function runSide(c, command) {
       Object.assign(routes, routesFor(c, values));
     }
     if (c.home) {
-      cpSync(join(HERE, "homes", c.home), home, {
+      cpSync(join(homes, c.home), home, {
         recursive: true,
         dereference: true,
         preserveTimestamps: true,
@@ -503,7 +503,7 @@ async function runSide(c, command) {
     delete env.FACTORY_ACCESS_CLIENT_SECRET;
     // The binary's local dates are UTC dates, so a golden holds the same dates in every zone.
     env.TZ = "UTC";
-    env.FACTORY_NOW = String(NOW / 1000);
+    env.FACTORY_PARITY_NOW = String(NOW / 1000);
     Object.assign(env, c.env ?? {}, {
       PATH: binDir + ":" + (process.env.PATH ?? ""),
       FACTORY_STUB_DIR: stubDir,
@@ -558,7 +558,7 @@ async function runSide(c, command) {
     const fields = [
       ["exit code", String(result.code)],
       ["stdout", normalize(result.stdout)],
-      ["stderr", normalize(result.stderr)],
+      ["stderr", c.skip_stderr ? "" : normalize(result.stderr)],
       ["home tree", tree.join("\n")],
     ];
     for (const tool of TOOLS) {
@@ -631,7 +631,7 @@ function diff(want, got) {
   ];
 }
 
-async function runCase(c, command, record) {
+export async function runCase(c, command, record) {
   let fields = await runSide(c, command);
   if (c.host_scheduler && PICKUP_SCHEDULER !== "cron") {
     const i = FIELDS.indexOf("crontab calls");

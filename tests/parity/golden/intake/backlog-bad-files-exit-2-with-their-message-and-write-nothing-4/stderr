@@ -1,4 +1,4 @@
-factory.py: context file {home}/backlog-bad3.md: the first line must be "Recommend: approve" or "Recommend: deny"
+context file {home}/backlog-bad3.md: the first line must be "Recommend: approve" or "Recommend: deny"
 a context file looks like this:
 Recommend: approve
 

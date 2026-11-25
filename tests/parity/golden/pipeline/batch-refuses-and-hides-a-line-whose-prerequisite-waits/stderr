@@ -1,1 +1,1 @@
-factory.py: cannot batch backlog:d490eda97f9a: it depends on "sample: Parse recipe URLs (sub-job-of 041-recipe-import)", which is still unchecked. Nothing was written.
+cannot batch backlog:d490eda97f9a: it depends on "sample: Parse recipe URLs (sub-job-of 041-recipe-import)", which is still unchecked. Nothing was written.

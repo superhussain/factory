@@ -34,11 +34,15 @@ An identical install is a no-content-change success. `tools/install.sh` always p
 ```
 
 Replacement moves the old bundle to `factory.backup-<uuid>` beside the installed
-directory, switches in the new one, then deletes that backup and prints
-`removed <path>`. A failed switch restores the old bundle. If the delete fails,
-the install still succeeds and warns
-`install: could not remove <path>; remove it by hand`. It never merges trees
-or deletes older backups. Copy out any local edits before `--replace`. A completed
+directory, switches in the new one, then deletes that backup and any folder an
+earlier install left whose name is `factory.backup-` followed by hex digits and
+dashes, printing `removed <path>` for each. It leaves links, files and other
+names alone.
+On Windows it clears read-only marks first, and it tries each delete three times.
+A failed switch restores the old bundle. If a delete still fails, for example
+because that bundle's `factory.exe` is running, the install still succeeds and warns
+`install: could not remove <path>; the next install tries again`. It never merges
+trees. Copy out any local edits before `--replace`. A completed
 sibling stage is switched only after validation. Pause other installers and
 editors during replacement. `.factory-install.lock` serializes cooperating
 installers, not arbitrary external filesystem writers. An existing lock fails
@@ -221,12 +225,12 @@ needs the token by name:
 
 | Case | Exit | stderr |
 | --- | --- | --- |
-| no `--` or no command | 2 | `factory.py: usage: factory.py with-cloudflare -- <command> [<arg>...]` |
-| no `.env` | 5 | `factory.py: no <env path>. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there.` |
-| `.env` is a link or not a regular file | 5 | `factory.py: <env path> is a link or not a regular file, so it was not read. Replace it with a regular file.` |
-| `.env` unreadable | 5 | `factory.py: cannot read <env path>: check its permissions and that it is UTF-8 text.` |
-| no token | 5 | `factory.py: CLOUDFLARE_API_TOKEN missing from <env path>. docs/cloudflare.md, Device token, shows how to store it.` |
-| command not found | 127 | `factory.py: cannot run <command>` |
+| no `--` or no command | 2 | `usage: factory with-cloudflare -- <command> [<arg>...]` |
+| no `.env` | 5 | `no <env path>. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there.` |
+| `.env` is a link or not a regular file | 5 | `<env path> is a link or not a regular file, so it was not read. Replace it with a regular file.` |
+| `.env` unreadable | 5 | `cannot read <env path>: check its permissions and that it is UTF-8 text.` |
+| no token | 5 | `CLOUDFLARE_API_TOKEN missing from <env path>. docs/cloudflare.md, Device token, shows how to store it.` |
+| command not found | 127 | `cannot run <command>` |
 
 Otherwise it exits with the command's code, or `128 + N` when signal `N` ends it.
 
@@ -394,7 +398,7 @@ host (`$PASEO_HOME/agents/*/<id>.json`) names the session. The job drawer's `aud
 `audit push` with no valid `device:` exits 2 with the pairing hint, as does a 403
 `audit rows are written only by the host's bound service token`. Any other 403
 exits 5. A bad job id, or a second argument without `push`, exits 2 with
-`usage: factory.py audit push <job-id>, a full job id such as 1017-add-x`.
+`usage: factory audit push <job-id>, a full job id such as 1017-add-x`.
 
 `pickup` also pushes this host's audit rows for each job at spec, build, review,
 approve or pr-open whose transcripts here changed since `<home>/audit-push.json`
@@ -447,9 +451,9 @@ A parse failure warns and never blocks close-out:
 
 | Failure | Result, exit 0 |
 | --- | --- |
-| bad JSON lines | `factory.py: usage: 2 unreadable lines in agent-b1.jsonl` on stderr, the rest counted |
-| unreadable file | `factory.py: usage: cannot read <name>`, file skipped |
-| any other scan error | `factory.py: usage: scan failed (<Type>: <msg>); nothing recorded` |
+| bad JSON lines | `usage: 2 unreadable lines in agent-b1.jsonl` on stderr, the rest counted |
+| unreadable file | `usage: cannot read <name>`, file skipped |
+| any other scan error | `usage: scan failed (<Type>: <msg>); nothing recorded` |
 | no matching transcript | `no Claude Code transcripts on host-a name 1017-add-x; nothing recorded` |
 
 A bad target, a second argument other than `record`, or `record` without a valid
@@ -520,7 +524,7 @@ It changes a job only when its result or evidence differs from what is stored,
 never touches the job's `updated`, and skips the write with
 `outcomes unchanged; nothing written` when nothing differs. An `unknown` job is
 never recorded. To clear a value, set `{"outcome": null}` with `factory board`.
-Bad arguments exit 2 with `usage: factory.py outcomes [record] [<project-slug>]`.
+Bad arguments exit 2 with `usage: factory outcomes [record] [<project-slug>]`.
 The only git write is the `origin/<base>` remote-tracking ref, and a failed fetch
 exits 5.
 
@@ -529,7 +533,7 @@ Pickup runs `outcomes record <slug>` on its first run of each local date that
 checkout folder exists, and prints one line such as
 `outcomes record alpha: recorded 1 outcomes on the board`. When a job comes back
 unknown, it also prints the first one on stderr, such as
-`factory.py: outcomes record alpha: 1017-add-x is unknown: no merge commit from GitHub`.
+`outcomes record alpha: 1017-add-x is unknown: no merge commit from GitHub`.
 
 The Retros page's Cost per merged PR section shows recorded outcomes as a revert
 count beside tokens per merged PR.
@@ -569,7 +573,7 @@ refuses a case with no defects, so delete any case you cannot label.
 
 | Input | Exit | Message |
 | --- | --- | --- |
-| not exactly one project slug | 2 | `usage: factory.py bench cases <project-slug>` |
+| not exactly one project slug | 2 | `usage: factory bench cases <project-slug>` |
 | no `projects/<slug>.md` | 4 | `bench: no project file for <slug>` |
 | GitHub lookup fails | 5 | `bench: <why>` |
 | nothing drafted | 3 | `bench: no reverted or reworked jobs to draft in <slug>` |
@@ -682,11 +686,11 @@ For two cases with three defects of total weight 6, and arms `opus-medium` and
 ```
 
 The command checks the cases file and every arm folder before reading any review,
-so a bad input prints nothing on stdout. Errors print after `factory.py: `:
+so a bad input prints nothing on stdout. Errors print on stderr:
 
 | Input | Exit | Message |
 | --- | --- | --- |
-| wrong arguments | 2 | `usage: factory.py bench score <cases-file> <arm-folder>... \| bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] \| bench cases <project-slug>` |
+| wrong arguments | 2 | `usage: factory bench score <cases-file> <arm-folder>... \| bench replay <cases-file> <arm-folder> --role <reviewer> [--model <model>] \| bench cases <project-slug>` |
 | no cases file | 4 | `bench: no cases file at <path>` |
 | not `{"cases": [non-empty list]}` | 2 | `bench: <path> is not a cases file: needs {"cases": [...]}` |
 | bad case field | 2 | `bench: <path>: case <n>: <reason>` |

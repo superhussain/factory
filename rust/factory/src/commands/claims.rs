@@ -6,7 +6,6 @@ use std::fs;
 use std::hash::{BuildHasher, Hasher};
 use std::io::{ErrorKind, IsTerminal, Read};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Map, Value};
 
@@ -30,7 +29,7 @@ use crate::shared::py::{os_error, repr, splitlines, strip, universal_newlines};
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::pyval::{py_eq, py_int, py_repr, py_str, truthy};
-use crate::shared::time::{elapsed_seconds, now, parse_stamp};
+use crate::shared::time::{elapsed_seconds, now, parse_stamp, unix_now};
 
 static ID_DIGITS: Pattern = Pattern::new(r"(\d{3,})-", Flags::ASCII);
 
@@ -222,32 +221,32 @@ static APPROVE: Pattern = Pattern::new(r"APPROVE\b", Flags::NONE);
 /// Keys only factory.py, pickup or the dashboard set, in Python's order: (key, refused only when non-null, why).
 const REFUSED: &[(&str, bool, &str)] = &[
     ("claim", true, r#"only hold sets a claim. {"claim": null} releases it"#),
-    ("paseo", false, "only factory.py sets paseo"),
-    ("paseo_writer", false, "only factory.py sets paseo_writer"),
-    ("handoff", false, "only factory.py sets handoff"),
-    ("done", false, "only factory.py sets done"),
-    ("resumes", false, "only factory.py sets resumes"),
-    ("stacked", false, "only factory.py stack sets stacked"),
-    ("origin", false, "only factory.py suggest sets origin"),
-    ("started", false, "only factory.py sets started"),
-    ("goal", false, "only factory.py push sets goal"),
-    ("decision", false, "only factory.py push and pickup set decision"),
-    ("agents", false, "only factory.py agent and pickup set agents"),
-    ("move", false, "only the dashboard, factory.py pickup and factory.py control set move. To relay a person's chat, run factory.py control <job-id> move <host>|rerun --chat-file <file>"),
-    ("priority", false, "only the dashboard, factory.py pickup and factory.py control set priority. To relay a person's chat, run factory.py control <job-id> prioritize --chat-file <file>"),
-    ("paused", false, "only the dashboard and factory.py control set paused. To relay a person's chat, run factory.py control <job-id> pause|resume --chat-file <file>"),
-    ("babysit", true, "only the dashboard and factory.py control set babysit; a session clears it with null. To relay a person's chat, run factory.py control <job-id> babysit --chat-file <file>"),
+    ("paseo", false, "only factory sets paseo"),
+    ("paseo_writer", false, "only factory sets paseo_writer"),
+    ("handoff", false, "only factory sets handoff"),
+    ("done", false, "only factory sets done"),
+    ("resumes", false, "only factory sets resumes"),
+    ("stacked", false, "only factory stack sets stacked"),
+    ("origin", false, "only factory suggest sets origin"),
+    ("started", false, "only factory sets started"),
+    ("goal", false, "only factory push sets goal"),
+    ("decision", false, "only factory push and pickup set decision"),
+    ("agents", false, "only factory agent and pickup set agents"),
+    ("move", false, "only the dashboard, factory pickup and factory control set move. To relay a person's chat, run factory control <job-id> move <host>|rerun --chat-file <file>"),
+    ("priority", false, "only the dashboard, factory pickup and factory control set priority. To relay a person's chat, run factory control <job-id> prioritize --chat-file <file>"),
+    ("paused", false, "only the dashboard and factory control set paused. To relay a person's chat, run factory control <job-id> pause|resume --chat-file <file>"),
+    ("babysit", true, "only the dashboard and factory control set babysit; a session clears it with null. To relay a person's chat, run factory control <job-id> babysit --chat-file <file>"),
     ("resolve", true, "only the dashboard sets resolve; a session clears it with null. Nothing was written."),
     ("steer", false, "only the dashboard sets steer. Nothing was written."),
-    ("close", false, "only the dashboard, factory.py pickup and factory.py control set close. To relay a person's chat, run factory.py control <job-id> close --reason-file <file> --chat-file <file>"),
-    ("github", false, "only factory.py pickup sets github. Nothing was written."),
-    ("token_cap", false, "only factory.py pickup sets token_cap. Nothing was written."),
-    ("auto_babysit", false, "only factory.py pickup sets auto_babysit. Nothing was written."),
-    ("launch_failure", false, "only factory.py pickup sets launch_failure. Nothing was written."),
-    ("repeated", false, "only factory.py repeats sets repeated. Nothing was written."),
-    ("checked_head", false, "only factory.py checks sets checked_head. Nothing was written."),
-    ("handled", false, "only factory.py pr-handled sets handled. Nothing was written."),
-    ("spec_approval", false, "only factory.py and the dashboard set spec_approval. Nothing was written."),
+    ("close", false, "only the dashboard, factory pickup and factory control set close. To relay a person's chat, run factory control <job-id> close --reason-file <file> --chat-file <file>"),
+    ("github", false, "only factory pickup sets github. Nothing was written."),
+    ("token_cap", false, "only factory pickup sets token_cap. Nothing was written."),
+    ("auto_babysit", false, "only factory pickup sets auto_babysit. Nothing was written."),
+    ("launch_failure", false, "only factory pickup sets launch_failure. Nothing was written."),
+    ("repeated", false, "only factory repeats sets repeated. Nothing was written."),
+    ("checked_head", false, "only factory checks sets checked_head. Nothing was written."),
+    ("handled", false, "only factory pr-handled sets handled. Nothing was written."),
+    ("spec_approval", false, "only factory and the dashboard set spec_approval. Nothing was written."),
 ];
 
 fn get_str<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
@@ -277,11 +276,7 @@ fn seen_age(c: &Value) -> Res<f64> {
             1,
         ));
     };
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0);
-    Ok(now - stamp as f64)
+    Ok((unix_now() - stamp) as f64)
 }
 
 /// The job's claim if another session holds it and checked in within the last minutes.
@@ -473,7 +468,7 @@ fn check_tracer(value: Option<&Value>) -> Res<()> {
         return Ok(());
     }
     Err(fail(
-        r#"tracer must be {"follow": true} or null, optionally with "gather": true; only factory.py sets tracer.feature, tracer.url, tracer.scope, tracer.receipt, tracer.building, tracer.stopped and tracer.tasks"#,
+        r#"tracer must be {"follow": true} or null, optionally with "gather": true; only factory sets tracer.feature, tracer.url, tracer.scope, tracer.receipt, tracer.building, tracer.stopped and tracer.tasks"#,
         2,
     ))
 }
@@ -578,13 +573,13 @@ pub(crate) fn rounds_refusal(
     for (i, entry) in rounds.iter().enumerate() {
         if i < stored.len() && !py_eq(entry, &stored[i]) && Some(i + 1) != rewrite_round {
             return Some(format!(
-                "{job_id} cannot rewrite round {} in a board patch. Only factory.py verdict and round-wait change a recorded round. Nothing was written.",
+                "{job_id} cannot rewrite round {} in a board patch. Only factory verdict and round-wait change a recorded round. Nothing was written.",
                 i + 1
             ));
         }
         if i >= stored.len() && !py_eq(entry, &pending) {
             return Some(format!(
-                "{job_id} cannot add round {} with verdicts. A new round starts as {}. Record verdicts with factory.py verdict. Nothing was written.",
+                "{job_id} cannot add round {} with verdicts. A new round starts as {}. Record verdicts with factory verdict. Nothing was written.",
                 i + 1,
                 dumps(&pending, DEFAULT)
             ));
@@ -677,7 +672,7 @@ pub(crate) fn move_refusal(
             Ok(text) => text,
             Err(e) if e.kind() == ErrorKind::NotFound => {
                 return Some(format!(
-                    "{job_id} cannot set automerge true: decision.md is not on this host. Run factory.py pull {slug}/{job_id}, then retry. Nothing was written."
+                    "{job_id} cannot set automerge true: decision.md is not on this host. Run factory pull {slug}/{job_id}, then retry. Nothing was written."
                 ))
             }
             Err(_) => return Some(unreadable),
@@ -745,7 +740,7 @@ fn receipt_cas<T>(
         change(text, false, &mut Vec::new())
     })?;
     eprintln!(
-        "factory.py: the Worker refused Tracer's receipt (check tracer_receipt_key); {} waits at gate: spec-approval instead",
+        "the Worker refused Tracer's receipt (check tracer_receipt_key); {} waits at gate: spec-approval instead",
         sent.last().unwrap()
     );
     Ok(result)
@@ -832,7 +827,7 @@ pub(crate) fn board_write(
         .filter(|n| SPEC_APPROVED_NOTES.contains(n))
     {
         return Err(fail(
-            format!("only a person approves a spec, on the dashboard or in Tracer, so factory.py board cannot set the note '{note}'. Nothing was written."),
+            format!("only a person approves a spec, on the dashboard or in Tracer, so factory board cannot set the note '{note}'. Nothing was written."),
             2,
         ));
     }
@@ -844,10 +839,7 @@ pub(crate) fn board_write(
         .and_then(Value::as_object)
         .is_some_and(|b| b.contains_key("notes_read"))
     {
-        return Err(fail(
-            "only factory.py deny-notes sets backlog.notes_read",
-            2,
-        ));
+        return Err(fail("only factory deny-notes sets backlog.notes_read", 2));
     }
     for key in ["escalated", "automerge"] {
         let v = or_null(patch.get(key));
@@ -937,7 +929,7 @@ pub(crate) fn board_write(
             if let Some(m) = ID_DIGITS.match_start(job_id) {
                 if m[1].parse::<u128>().is_ok_and(|n| n <= floor) {
                     return Err(fail(
-                        format!("ids up to {floor} belong to archived jobs, so {job_id} cannot go back on the board. Read it with factory.py job {job_id}. Claim new ids with claim. Nothing was written."),
+                        format!("ids up to {floor} belong to archived jobs, so {job_id} cannot go back on the board. Read it with factory job {job_id}. Claim new ids with claim. Nothing was written."),
                         2,
                     ));
                 }
@@ -1008,7 +1000,7 @@ pub(crate) fn board_write(
         if let Some(refs) = patch.get("refs") {
             if batch_refs(refs) != batch_refs(or_null(found.and_then(|f| f.get("refs")))) {
                 return Err(fail(
-                    format!("only factory.py batch and the lead's mirror add or remove a batched-into ref. A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written."),
+                    format!("only factory batch and the lead's mirror add or remove a batched-into ref. A refs patch for {job_id} must keep exactly the batched-into refs it has now, none for a new row. Nothing was written."),
                     2,
                 ));
             }
@@ -1767,10 +1759,7 @@ mod tests {
         let e = board_write(&home, "042-sample-export", patch, &opts).unwrap_err();
         assert_eq!(
             (e.code, e.stderr.as_str()),
-            (
-                2,
-                "factory.py: only factory.py push and pickup set decision\n"
-            )
+            (2, "only factory push and pickup set decision\n")
         );
         fs::remove_dir_all(home).unwrap();
     }
@@ -1792,7 +1781,7 @@ mod tests {
             (e.code, e.stderr.as_str()),
             (
                 2,
-                "factory.py: only factory.py checks sets checked_head. Nothing was written.\n"
+                "only factory checks sets checked_head. Nothing was written.\n"
             )
         );
         fs::remove_dir_all(home).unwrap();
@@ -1810,10 +1799,7 @@ mod tests {
         let e = board_write(&home, "042-sample-export", patch, &opts).unwrap_err();
         assert_eq!(
             (e.code, e.stderr.as_str()),
-            (
-                2,
-                "factory.py: only factory.py agent and pickup set agents\n"
-            )
+            (2, "only factory agent and pickup set agents\n")
         );
         fs::remove_dir_all(home).unwrap();
     }
@@ -1832,7 +1818,7 @@ mod tests {
             (e.code, e.stderr.as_str()),
             (
                 2,
-                "factory.py: only factory.py repeats sets repeated. Nothing was written.\n"
+                "only factory repeats sets repeated. Nothing was written.\n"
             )
         );
         fs::remove_dir_all(home).unwrap();
@@ -1907,7 +1893,7 @@ mod tests {
         );
         assert_eq!(
             rounds_refusal("042-x", Some(&found), &json!([{"code": "CHANGES"}, {"code": "PASS"}]), Some(2)).unwrap(),
-            "042-x cannot rewrite round 1 in a board patch. Only factory.py verdict and round-wait change a recorded round. Nothing was written."
+            "042-x cannot rewrite round 1 in a board patch. Only factory verdict and round-wait change a recorded round. Nothing was written."
         );
         assert!(
             rounds_refusal("042-x", Some(&found), &json!([r1, {"code": "PASS"}]), None).is_some()
@@ -1933,7 +1919,7 @@ mod tests {
         });
     }
 
-    const UNRESOLVED: &str = "factory.py: factory home must be absolute. Nothing was written.\n";
+    const UNRESOLVED: &str = "factory home must be absolute. Nothing was written.\n";
 
     #[test]
     fn board_resolves_home_before_the_write() {
@@ -2097,7 +2083,7 @@ mod tests {
         };
         assert_eq!(
             why(&found, &set),
-            refused("decision.md is not on this host. Run factory.py pull sample/042-sample-export, then retry.")
+            refused("decision.md is not on this host. Run factory pull sample/042-sample-export, then retry.")
         );
         fs::create_dir_all(&folder).unwrap();
         for (text, head) in [

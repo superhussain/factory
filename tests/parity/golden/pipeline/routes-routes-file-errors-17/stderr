@@ -1,1 +1,1 @@
-factory.py: bad route 'alpha' in {home}/routes.md: use <name>: <provider> <model> [<effort>]
+bad route 'alpha' in {home}/routes.md: use <name>: <provider> <model> [<effort>]

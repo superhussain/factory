@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-untrusted-5.json: suggestions[0].diagram: contains control, invisible or bidirectional characters; nothing admitted
+{home}/suggest-untrusted-5.json: suggestions[0].diagram: contains control, invisible or bidirectional characters; nothing admitted

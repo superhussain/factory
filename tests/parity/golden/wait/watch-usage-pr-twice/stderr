@@ -1,1 +1,1 @@
-factory.py: --pr given twice. usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]
+--pr given twice. usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]

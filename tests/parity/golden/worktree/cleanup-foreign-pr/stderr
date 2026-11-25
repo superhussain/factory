@@ -1,1 +1,1 @@
-factory.py: cleanup skipped the GitHub lookup for https://github.com/other/beta/pull/7: it is in other/beta, not the project file's repo: octo/sample
+cleanup skipped the GitHub lookup for https://github.com/other/beta/pull/7: it is in other/beta, not the project file's repo: octo/sample

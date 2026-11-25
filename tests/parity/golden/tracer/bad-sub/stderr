@@ -1,1 +1,1 @@
-factory.py: usage: tracer sync [<project-slug>[/<job-id>]]
+usage: tracer sync [<project-slug>[/<job-id>]]

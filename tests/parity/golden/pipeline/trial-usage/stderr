@@ -1,1 +1,1 @@
-factory.py: usage: trial settle | trial resume <slug> <reason>
+usage: trial settle | trial resume <slug> <reason>

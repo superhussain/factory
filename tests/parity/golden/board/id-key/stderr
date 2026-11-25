@@ -1,1 +1,1 @@
-factory.py: the job id comes from the <job-id> argument, so the patch cannot set id. Nothing was written.
+the job id comes from the <job-id> argument, so the patch cannot set id. Nothing was written.

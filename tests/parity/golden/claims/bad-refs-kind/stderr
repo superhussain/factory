@@ -1,1 +1,1 @@
-factory.py: refs must be a list of {"id": "<job-id>", "kind": "rework-of | follow-up-of | sub-job-of | batched-into | depends-on"}
+refs must be a list of {"id": "<job-id>", "kind": "rework-of | follow-up-of | sub-job-of | batched-into | depends-on"}

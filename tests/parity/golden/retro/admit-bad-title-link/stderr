@@ -1,1 +1,1 @@
-factory.py: {home}/retro/bad-title-link/reply.json: findings[0].title: must not hold a code fence or a link; nothing written
+{home}/retro/bad-title-link/reply.json: findings[0].title: must not hold a code fence or a link; nothing written

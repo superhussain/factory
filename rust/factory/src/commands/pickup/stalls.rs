@@ -14,7 +14,7 @@ pub(super) const GITHUB_CLOSE_REASON: &str = "PR closed on GitHub";
 pub(super) const AUTO_BABYSIT_LIMIT: usize = 20;
 pub(super) const PRIORITY_NUDGE: &str = "The owner prioritized factory job {id}. If your turn ended while work on it is still owed, continue with the next step now.";
 pub(super) const IDLE_NUDGE_MINUTES: i64 = 20;
-pub(super) const IDLE_NUDGE: &str = "Factory job {id} shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory.py hold for the job with your --session tag, then keep waiting.";
+pub(super) const IDLE_NUDGE: &str = "Factory job {id} shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory hold for the job with your --session tag, then keep waiting.";
 pub(super) const PERMISSION_NOTE: &str = "permission: agent {agent} has waited at a permission dialog for {minutes} minutes; answer it in Paseo";
 pub(super) const TOKEN_WARN_PERCENT: i64 = 80;
 pub(super) const AUTONOMY_DAYS: i64 = 90;
@@ -509,7 +509,7 @@ pub(super) fn cached_settings(
     if !settings.contains_key(project) {
         let found = pickup_settings(home, project, repo, device)?;
         if let (Some(reason), false) = (&found.reason, dry) {
-            errln!(io, "factory.py: pickup skips {project}: {reason}");
+            errln!(io, "pickup skips {project}: {reason}");
         }
         settings.insert(project.to_string(), found);
     }
@@ -554,7 +554,7 @@ pub(super) fn takeover(
             if dry {
                 outln!(io, "skip takeover: {reason}");
             } else {
-                errln!(io, "factory.py: pickup skips takeover: {reason}");
+                errln!(io, "pickup skips takeover: {reason}");
             }
             return Ok(0);
         }
@@ -584,10 +584,8 @@ pub(super) fn takeover(
     for stall in &stalls {
         let session = get_str(stall, "session").unwrap();
         // Python subtracts a now with microseconds and truncates, so a whole-second reset reads
-        // one second short.
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0.0, |d| d.as_secs_f64());
+        // one second short. The half second stands in for the microseconds unix_now drops.
+        let now = unix_now() as f64 + 0.5;
         let seconds = (stamp_of(stall.get("reset")).unwrap() as f64 - now).trunc() as i64;
         if seconds.div_euclid(60) <= threshold {
             let line = format!(

@@ -1,1 +1,1 @@
-factory.py: bench: {home}/bench/reasons/18.json: case 1: defect 2: severity must be high, medium or low
+bench: {home}/bench/reasons/18.json: case 1: defect 2: severity must be high, medium or low

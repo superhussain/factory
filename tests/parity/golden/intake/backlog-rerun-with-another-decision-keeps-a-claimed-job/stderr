@@ -1,1 +1,1 @@
-factory.py: 004-guard-the-ls already holds the approved decision for this item and was picked up, so nothing was changed. To keep approved, rerun backlog decide cd4086d2362d approve. To change it, decide the item on the dashboard and close 004-guard-the-ls there.
+004-guard-the-ls already holds the approved decision for this item and was picked up, so nothing was changed. To keep approved, rerun backlog decide cd4086d2362d approve. To change it, decide the item on the dashboard and close 004-guard-the-ls there.

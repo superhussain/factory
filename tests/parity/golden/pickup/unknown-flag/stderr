@@ -1,1 +1,1 @@
-factory.py: usage: pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]
+usage: pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]

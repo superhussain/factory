@@ -1,1 +1,1 @@
-factory.py: {home}/retro/oversize/reply.json is larger than 131072 bytes; nothing written
+{home}/retro/oversize/reply.json is larger than 131072 bytes; nothing written

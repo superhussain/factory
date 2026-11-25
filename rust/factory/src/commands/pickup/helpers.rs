@@ -106,12 +106,9 @@ pub(super) fn exe() -> String {
         .unwrap_or_default()
 }
 
-/// The text a `fail` printed, without its prefix, as `setup_try` reads it.
+/// The text a `fail` printed, as `setup_try` reads it.
 pub(super) fn message(e: &Exit) -> String {
-    let text = strip(&e.stderr);
-    text.strip_prefix("factory.py: ")
-        .unwrap_or(text)
-        .to_string()
+    strip(&e.stderr).to_string()
 }
 
 // ---- OS helpers

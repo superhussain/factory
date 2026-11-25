@@ -1,1 +1,1 @@
-factory.py: usage: factory.py retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>, N from 1 to 90 for digest and 1 to 30 for aggregate
+usage: factory retro digest [--days N] | push | pull YYYY-MM-DD | aggregate [--days N] | admit <run>, N from 1 to 90 for digest and 1 to 30 for aggregate

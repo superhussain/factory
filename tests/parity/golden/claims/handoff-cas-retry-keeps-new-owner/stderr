@@ -1,1 +1,1 @@
-factory.py: handoff requires sample/001-test's current claim and --session tag
+handoff requires sample/001-test's current claim and --session tag

@@ -1,1 +1,1 @@
-factory.py: claim_stale_minutes in {home}/config.md must be a whole number of minutes, not 'soon'
+claim_stale_minutes in {home}/config.md must be a whole number of minutes, not 'soon'

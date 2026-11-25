@@ -1,1 +1,1 @@
-factory.py: unsafe checkout: origin/main has no root commit in checkout
+unsafe checkout: origin/main has no root commit in checkout

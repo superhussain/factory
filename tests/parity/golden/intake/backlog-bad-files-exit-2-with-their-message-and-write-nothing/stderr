@@ -1,4 +1,4 @@
-factory.py: context file {home}/backlog-bad0.md: cannot read it as UTF-8 text
+context file {home}/backlog-bad0.md: cannot read it as UTF-8 text
 a context file looks like this:
 Recommend: approve
 

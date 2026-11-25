@@ -577,7 +577,7 @@ mod tests {
         let e = wait(&home, &["decision.md"], &io).unwrap_err();
         assert_eq!(
             (e.code, e.stderr.as_str()),
-            (3, "factory.py: still missing: decision.md\n")
+            (3, "still missing: decision.md\n")
         );
         assert_eq!(clock.get(), 540.0);
         fs::remove_dir_all(home).unwrap();
@@ -837,10 +837,7 @@ mod tests {
         let e = run(&["0"]);
         assert_eq!(
             (e.code, e.stderr),
-            (
-                2,
-                format!("factory.py: bad round '0'. {ROUND_WAIT_USAGE}\n")
-            )
+            (2, format!("bad round '0'. {ROUND_WAIT_USAGE}\n"))
         );
         for args in [
             &["1", "--timeout"][..],
@@ -851,7 +848,12 @@ mod tests {
             let e = run(args);
             assert_eq!(
                 (e.code, e.stderr),
-                (2, format!("factory.py: --timeout takes one value from 1 to 540 seconds. {ROUND_WAIT_USAGE}\n")),
+                (
+                    2,
+                    format!(
+                        "--timeout takes one value from 1 to 540 seconds. {ROUND_WAIT_USAGE}\n"
+                    )
+                ),
                 "{args:?}"
             );
         }

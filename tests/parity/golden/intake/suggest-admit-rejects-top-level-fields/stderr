@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-top-1.json: schema: must be factory.suggestions/1; nothing admitted
+{home}/suggest-top-1.json: schema: must be factory.suggestions/1; nothing admitted

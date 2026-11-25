@@ -1,1 +1,1 @@
-factory.py: cannot stack 093-sample-login: not batched into 090-sample-export-csv. Nothing was written.
+cannot stack 093-sample-login: not batched into 090-sample-export-csv. Nothing was written.

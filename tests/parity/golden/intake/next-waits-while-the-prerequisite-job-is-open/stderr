@@ -1,2 +1,2 @@
 skipping "sample: Store imported recipes (sub-job-of 041-recipe-import)": it depends on 052-parse-recipe-urls, which is still open
-factory.py: nothing this device can run in the backlog
+nothing this device can run in the backlog

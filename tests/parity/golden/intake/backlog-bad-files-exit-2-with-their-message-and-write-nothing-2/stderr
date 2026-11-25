@@ -1,4 +1,4 @@
-factory.py: context file {home}/backlog-bad1.md: longer than 6000 characters
+context file {home}/backlog-bad1.md: longer than 6000 characters
 a context file looks like this:
 Recommend: approve
 

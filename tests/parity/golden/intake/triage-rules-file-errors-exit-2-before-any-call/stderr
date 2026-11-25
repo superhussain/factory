@@ -1,1 +1,1 @@
-factory.py: --rules-file: cannot read {home}/missing.txt
+--rules-file: cannot read {home}/missing.txt

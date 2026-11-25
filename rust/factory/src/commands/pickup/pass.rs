@@ -75,7 +75,7 @@ pub(super) fn launch_failed(
     if fatal {
         return Err(fail(message, 1));
     }
-    errln!(io, "factory.py: {message}");
+    errln!(io, "{message}");
     Ok(())
 }
 
@@ -179,10 +179,7 @@ pub(super) fn daily_cap_holds(
     let used = match daily_tokens(local_midnight()) {
         Ok(used) => used,
         Err(kind) => {
-            errln!(
-                io,
-                "factory.py: pickup skips the daily token cap: scan failed ({kind})"
-            );
+            errln!(io, "pickup skips the daily token cap: scan failed ({kind})");
             return Ok(HashMap::new());
         }
     };
@@ -195,10 +192,7 @@ pub(super) fn daily_cap_holds(
         commas(cap)
     );
     if !dry {
-        errln!(
-            io,
-            "factory.py: pickup launches no new job on {device}: {reached}"
-        );
+        errln!(io, "pickup launches no new job on {device}: {reached}");
     }
     Ok(held
         .into_iter()
@@ -427,7 +421,7 @@ pub(super) fn pickup_pass(
         if !settings.contains_key(&slug) {
             let found = pickup_settings(home, &slug, lookup(&paths, &slug).unwrap(), device)?;
             if let (Some(reason), false) = (&found.reason, dry) {
-                errln!(io, "factory.py: pickup skips {slug}: {reason}");
+                errln!(io, "pickup skips {slug}: {reason}");
             }
             settings.insert(slug.clone(), found);
         }

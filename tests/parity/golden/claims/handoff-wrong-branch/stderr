@@ -1,1 +1,1 @@
-factory.py: handoff needs factory/001-test checked out in {home}/worktrees/sample/001-test
+handoff needs factory/001-test checked out in {home}/worktrees/sample/001-test

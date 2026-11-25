@@ -52,6 +52,31 @@ struct Timing {
     agent_poll_max: Duration,
     /// How long after the last pass began a fallback pass is queued.
     fallback: Duration,
+    /// Where the read and run loops read the time.
+    clock: Clock,
+}
+
+/// The read and run loops' clock: the system's, or in tests one that moves only when the test
+/// advances it. Socket timeouts and sleeps stay real; the loops compare deadlines on this clock.
+#[derive(Clone, Copy)]
+enum Clock {
+    System,
+    #[cfg(test)]
+    Fake(&'static std::sync::Mutex<Instant>),
+}
+
+impl Clock {
+    fn now(self) -> Instant {
+        match self {
+            Clock::System => Instant::now(),
+            #[cfg(test)]
+            Clock::Fake(at) => *at.lock().unwrap(),
+        }
+    }
+
+    fn since(self, at: Instant) -> Duration {
+        self.now().saturating_duration_since(at)
+    }
 }
 
 const LIVE: Timing = Timing {
@@ -64,6 +89,7 @@ const LIVE: Timing = Timing {
     agent_poll: Duration::from_secs(15),
     agent_poll_max: Duration::from_secs(60),
     fallback: Duration::from_secs(300),
+    clock: Clock::System,
 };
 
 /// What the reader thread reports. `Ignored` carries a frame's length, never its body, and `Note`
@@ -522,12 +548,12 @@ fn frame(text: &str) -> Option<Frame> {
 
 /// Refetches the mirror and reports the result as a log line. Returns when to try again, if it
 /// failed.
-fn refetch(board: &Mirror, tx: &Sender<Event>) -> Option<Instant> {
+fn refetch(board: &Mirror, tx: &Sender<Event>, clock: Clock) -> Option<Instant> {
     let (note, retry) = match board.fetch() {
         Ok(jobs) => (format!("mirror: fetched the board ({jobs} jobs)"), None),
         Err(e) => (
             format!("mirror: fetch failed: {e}"),
-            Some(Instant::now() + REFETCH),
+            Some(clock.now() + REFETCH),
         ),
     };
     let _ = tx.send(Event::Note(note));
@@ -552,9 +578,9 @@ fn read_loop(
 ) {
     let mut retry = board.as_ref().and_then(|b| {
         b.connected();
-        refetch(b, &tx)
+        refetch(b, &tx, t.clock)
     });
-    let mut last = Instant::now();
+    let mut last = t.clock.now();
     let mut pinged = last;
     loop {
         if stop().is_some() {
@@ -570,11 +596,11 @@ fn read_loop(
         // mirror::REFRESH, say after a lost announcement, refetches once.
         if let Some(b) = &board {
             let due = match retry {
-                Some(at) => Instant::now() >= at,
+                Some(at) => t.clock.now() >= at,
                 None => b.stale(),
             };
             if due {
-                retry = refetch(b, &tx);
+                retry = refetch(b, &tx, t.clock);
             }
         }
         let event = match socket.read() {
@@ -583,13 +609,13 @@ fn read_loop(
                 frame.map_or(1005, |f| u16::from(f.code))
             )),
             Ok(message) => {
-                last = Instant::now();
+                last = t.clock.now();
                 match &message {
                     Message::Ping(_) | Message::Pong(_) => continue,
                     Message::Text(text) if text.as_str() == "pong" => continue,
                     Message::Text(text) => match (frame(text.as_str()), &board) {
                         (Some(Frame::Changed(key)), Some(b)) if key == "board.json" => {
-                            retry = refetch(b, &tx);
+                            retry = refetch(b, &tx, t.clock);
                             Event::Changed(key)
                         }
                         (Some(Frame::Changed(key)), _) => Event::Changed(key),
@@ -597,7 +623,7 @@ fn read_loop(
                         (Some(Frame::Rows(rows)), b) => {
                             if let Some(b) = b {
                                 if !b.apply(&rows) {
-                                    retry = refetch(b, &tx);
+                                    retry = refetch(b, &tx, t.clock);
                                 }
                             }
                             Event::Changed("board.json".to_string())
@@ -613,12 +639,12 @@ fn read_loop(
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                 ) =>
             {
-                if last.elapsed() >= t.silence {
+                if t.clock.since(last) >= t.silence {
                     Event::Closed(format!("no frame for {:.1}s", t.silence.as_secs_f64()))
-                } else if last.max(pinged).elapsed() < t.ping_every {
+                } else if t.clock.since(last.max(pinged)) < t.ping_every {
                     continue;
                 } else {
-                    pinged = Instant::now();
+                    pinged = t.clock.now();
                     match socket.send(Message::text("ping")) {
                         Ok(()) => continue,
                         Err(e) => Event::Closed(e.to_string()),
@@ -685,19 +711,19 @@ fn serve(
                 ));
                 // Without the socket, pickup still runs every fallback, and once at start, so
                 // takeover, schedules and the heartbeat keep going through an events outage.
-                if last_start.is_none_or(|at| at.elapsed() >= t.fallback) {
-                    last_start = Some(Instant::now());
+                if last_start.is_none_or(|at| t.clock.since(at) >= t.fallback) {
+                    last_start = Some(t.clock.now());
                     log("pickup pass (fallback)");
                     if pass("fallback").is_break() {
                         return;
                     }
                 }
-                nap(wait, stop);
+                nap(wait, stop, t.clock);
                 continue;
             }
         };
         log(&format!("connected {url}"));
-        let opened = Instant::now();
+        let opened = t.clock.now();
         let (tx, rx) = mpsc::channel();
         let timing = *t;
         let reader_board = board.clone();
@@ -709,16 +735,15 @@ fn serve(
                 wait_closed(&rx, t);
                 return;
             }
-            if (watch || !running.is_empty()) && polled.is_none_or(|at| at.elapsed() >= gap) {
-                polled = Some(Instant::now());
+            if (watch || !running.is_empty()) && polled.is_none_or(|at| t.clock.since(at) >= gap) {
+                polled = Some(t.clock.now());
                 if let Some(now_running) = agents() {
                     watch = false;
                     let gone = running.iter().find(|id| !now_running.contains(id)).cloned();
                     if let Some(id) = gone {
                         log(&format!("agent finished {id}"));
-                        pending.get_or_insert_with(|| {
-                            (Instant::now(), format!("agent finished {id}"))
-                        });
+                        pending
+                            .get_or_insert_with(|| (t.clock.now(), format!("agent finished {id}")));
                     }
                     gap = if now_running == running {
                         (gap * 2).min(t.agent_poll_max)
@@ -730,16 +755,16 @@ fn serve(
                     gap = (gap * 2).min(t.agent_poll_max);
                 }
             }
-            if pending.is_none() && last_start.is_some_and(|at| at.elapsed() >= t.fallback) {
-                pending = Some((Instant::now(), "fallback".to_string()));
+            if pending.is_none() && last_start.is_some_and(|at| t.clock.since(at) >= t.fallback) {
+                pending = Some((t.clock.now(), "fallback".to_string()));
             }
             let wait = pending.as_ref().map_or(POLL, |(first, _)| {
-                due(*first, last_start, t).saturating_duration_since(Instant::now())
+                due(*first, last_start, t).saturating_duration_since(t.clock.now())
             });
             match rx.recv_timeout(wait.min(POLL)) {
                 Ok(Event::Changed(key)) => {
                     log(&format!("changed {key}"));
-                    pending.get_or_insert_with(|| (Instant::now(), format!("changed {key}")));
+                    pending.get_or_insert_with(|| (t.clock.now(), format!("changed {key}")));
                 }
                 Ok(Event::Ignored(n)) => log(&format!("frame ignored ({n} bytes)")),
                 Ok(Event::Note(note)) => log(&note),
@@ -749,12 +774,12 @@ fn serve(
                 Err(RecvTimeoutError::Timeout) => {
                     if !pending
                         .as_ref()
-                        .is_some_and(|(first, _)| due(*first, last_start, t) <= Instant::now())
+                        .is_some_and(|(first, _)| due(*first, last_start, t) <= t.clock.now())
                     {
                         continue;
                     }
                     let (_, reason) = pending.take().unwrap();
-                    last_start = Some(Instant::now());
+                    last_start = Some(t.clock.now());
                     log(&format!("pickup pass ({reason})"));
                     match pass(&reason) {
                         ControlFlow::Break(()) => {
@@ -764,7 +789,7 @@ fn serve(
                             return;
                         }
                         ControlFlow::Continue(true) => {
-                            pending = Some((Instant::now(), "room left".to_string()));
+                            pending = Some((t.clock.now(), "room left".to_string()));
                             (watch, polled, gap) = (true, None, t.agent_poll);
                         }
                         ControlFlow::Continue(false) => {}
@@ -775,7 +800,7 @@ fn serve(
                 }
             }
         };
-        if opened.elapsed() >= t.silence {
+        if t.clock.since(opened) >= t.silence {
             attempt = 0;
         }
         let wait = backoff(attempt, t.max_backoff, roll());
@@ -784,15 +809,15 @@ fn serve(
             "closed: {reason}; retry in {:.1}s",
             wait.as_secs_f64()
         ));
-        nap(wait, stop);
+        nap(wait, stop, t.clock);
     }
 }
 
-/// Sleeps for `wait`, or less once `stop` reports a signal.
-fn nap(wait: Duration, stop: Stop) {
-    let end = Instant::now() + wait;
+/// Sleeps for `wait` on clock, or less once `stop` reports a signal.
+fn nap(wait: Duration, stop: Stop, clock: Clock) {
+    let end = clock.now() + wait;
     while stop().is_none() {
-        let left = end.saturating_duration_since(Instant::now());
+        let left = end.saturating_duration_since(clock.now());
         if left.is_zero() {
             return;
         }
@@ -802,10 +827,15 @@ fn nap(wait: Duration, stop: Stop) {
 
 /// Waits for the reader to send its close frame, which it does within one read timeout.
 fn wait_closed(rx: &Receiver<Event>, t: &Timing) {
-    let end = Instant::now() + tick(t) + Duration::from_secs(1);
-    while let Ok(event) = rx.recv_timeout(end.saturating_duration_since(Instant::now())) {
-        if matches!(event, Event::Closed(_)) {
+    let end = t.clock.now() + tick(t) + Duration::from_secs(1);
+    loop {
+        let left = end.saturating_duration_since(t.clock.now());
+        if left.is_zero() {
             return;
+        }
+        match rx.recv_timeout(left.min(POLL)) {
+            Ok(Event::Closed(_)) | Err(RecvTimeoutError::Disconnected) => return,
+            _ => {}
         }
     }
 }
@@ -989,6 +1019,7 @@ mod tests {
         agent_poll: Duration::from_millis(50),
         agent_poll_max: Duration::from_millis(200),
         fallback: Duration::from_secs(60),
+        clock: Clock::System,
     };
 
     type Seen = Arc<Mutex<Vec<Vec<(String, String)>>>>;
@@ -1079,6 +1110,112 @@ mod tests {
 
     fn no_stop() -> Option<&'static str> {
         None
+    }
+
+    /// t on a fake clock, which moves only when the test advances it.
+    fn on_fake_clock(t: Timing) -> (Timing, &'static Mutex<Instant>) {
+        let at = Box::leak(Box::new(Mutex::new(Instant::now())));
+        let clock = Clock::Fake(at);
+        (Timing { clock, ..t }, at)
+    }
+
+    /// TEST for the driven tests: the socket never closes for silence, since their servers send
+    /// no pongs, and a handshake on a loaded machine gets LIVE's connect timeout.
+    const DRIVEN: Timing = Timing {
+        silence: Duration::from_secs(3600),
+        connect_timeout: Duration::from_secs(10),
+        ..TEST
+    };
+
+    /// A loopback socket server that hands each accepted socket to the test.
+    fn held() -> (String, Seen, Receiver<WebSocket<TcpStream>>) {
+        let (tx, rx) = mpsc::channel();
+        let (origin, seen) = fake(None, move |socket| {
+            let _ = tx.send(socket);
+        });
+        (origin, seen, rx)
+    }
+
+    /// Moves a fake clock and reads the daemon's log lines, so a test steps `serve` by what it
+    /// logged rather than by how long it ran.
+    struct Driver {
+        clock: &'static Mutex<Instant>,
+        lines: Receiver<String>,
+    }
+
+    impl Driver {
+        fn advance(&self, by: Duration) {
+            *self.clock.lock().unwrap() += by;
+        }
+
+        /// Reads log lines until one starts with line.
+        fn wait_for(&self, line: &str) {
+            loop {
+                let next = self.lines.recv_timeout(Duration::from_secs(60));
+                match next {
+                    Ok(next) if next.starts_with(line) => return,
+                    Ok(_) => {}
+                    Err(e) => panic!("no log line {line:?}: {e}"),
+                }
+            }
+        }
+
+        /// Advances the clock 10 ms at a time until a log line starts with line.
+        fn advance_until(&self, line: &str) {
+            for _ in 0..6000 {
+                self.advance(Duration::from_millis(10));
+                while let Ok(next) = self.lines.recv_timeout(Duration::from_millis(20)) {
+                    if next.starts_with(line) {
+                        return;
+                    }
+                }
+            }
+            panic!("no log line {line:?} within 60 s on the clock");
+        }
+    }
+
+    /// Runs `serve` on its own thread with t on a fake clock until `passes` passes have started.
+    /// Returns the driver, and the thread, which returns the passes' reasons. The passes counted
+    /// from 1 in `launching` report a launch.
+    fn drive(
+        home: &Path,
+        origin: &str,
+        passes: usize,
+        t: Timing,
+        board: Option<Arc<Mirror>>,
+        agents: impl Fn() -> Option<Vec<String>> + Send + 'static,
+        launching: &'static [usize],
+    ) -> (Driver, std::thread::JoinHandle<Vec<String>>) {
+        let (t, clock) = on_fake_clock(t);
+        let (tx, lines) = mpsc::channel();
+        let (home, origin) = (home.to_path_buf(), origin.to_string());
+        let serving = std::thread::spawn(move || {
+            let headers = access_headers(&home, &origin).unwrap();
+            let mut seen = Vec::new();
+            serve(
+                &host_url(&origin),
+                &headers,
+                &t,
+                &home.join(".env"),
+                board,
+                no_stop,
+                &|msg| {
+                    log_line(&home, msg);
+                    let _ = tx.send(msg.to_string());
+                },
+                &agents,
+                &mut |reason| {
+                    seen.push(reason.to_string());
+                    if seen.len() == passes {
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(launching.contains(&seen.len()))
+                    }
+                },
+            );
+            seen
+        });
+        (Driver { clock, lines }, serving)
     }
 
     /// A real SIGTERM to the daemon: it logs the stop line, sends the Worker a close frame and
@@ -1201,20 +1338,28 @@ mod tests {
     /// agent stops the reads until the next launch.
     #[test]
     fn agent_reads_stop_when_none_run() {
-        let origin = quiet();
+        let (origin, _, sockets) = held();
         let home = home("agent-idle", &origin);
         let t = Timing {
             fallback: Duration::from_millis(600),
-            ..TEST
+            ..DRIVEN
         };
-        let reads = std::cell::Cell::new(0);
-        let agents = || {
-            reads.set(reads.get() + 1);
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counted = reads.clone();
+        let agents = move || {
+            counted.fetch_add(1, Ordering::SeqCst);
             Some(Vec::new())
         };
-        let seen = run_with(&home, &origin, 3, &t, &agents, &[1]);
-        assert_eq!(seen, ["connect", "room left", "fallback"]);
-        assert_eq!(reads.get(), 2);
+        let (d, serving) = drive(&home, &origin, 3, t, None, agents, &[1]);
+        let _socket = sockets.recv().unwrap();
+        d.advance_until("pickup pass (connect)");
+        d.advance_until("pickup pass (room left)");
+        d.advance_until("pickup pass (fallback)");
+        assert_eq!(
+            serving.join().unwrap(),
+            ["connect", "room left", "fallback"]
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
     }
 
     /// While the same agents keep running, the gap between reads doubles up to agent_poll_max.
@@ -1414,20 +1559,26 @@ mod tests {
         assert_eq!(get("User-Agent").as_deref(), Some("factory"));
     }
 
+    /// Five changed frames that land before the debounce ends start one pass.
     #[test]
     fn burst_runs_one_pass() {
-        let (origin, _) = fake(None, |mut socket| {
-            sleep(Duration::from_millis(100));
-            for _ in 0..5 {
-                send(&mut socket, BOARD);
-            }
-            answer_pings(&mut socket, Duration::from_millis(600));
-            send(&mut socket, BACKLOG);
-            sleep(Duration::from_secs(1));
-        });
+        let (origin, _, sockets) = held();
         let home = home("burst", &origin);
+        let (d, serving) = drive(&home, &origin, 3, DRIVEN, None, || None, &[]);
+        let mut socket = sockets.recv().unwrap();
+        d.advance_until("pickup pass (connect)");
+        for _ in 0..5 {
+            send(&mut socket, BOARD);
+        }
+        for _ in 0..5 {
+            d.wait_for("changed board.json");
+        }
+        d.advance_until("pickup pass (changed board.json)");
+        send(&mut socket, BACKLOG);
+        d.wait_for("changed backlog.md");
+        d.advance_until("pickup pass (changed backlog.md)");
         assert_eq!(
-            run(&home, &origin, 3),
+            serving.join().unwrap(),
             ["connect", "changed board.json", "changed backlog.md"]
         );
     }
@@ -1462,42 +1613,28 @@ mod tests {
             (200, first, vec![("ETag", "\"e1\"")]),
             (200, later, vec![("ETag", "\"e9\"")]),
         ]);
-        let (origin, _) = fake(None, |mut socket| {
-            sleep(Duration::from_millis(100));
-            send(
-                &mut socket,
-                r#"{"type":"rows","etag":"\"e2\"","prev":"\"e1\"","rows":[{"id":"2001-add-csv-export","stage":"idea"}],"removed":[]}"#,
-            );
-            answer_pings(&mut socket, Duration::from_millis(300));
-            send(
-                &mut socket,
-                r#"{"type":"rows","etag":"\"e5\"","prev":"\"e4\"","rows":[],"removed":[]}"#,
-            );
-            answer_pings(&mut socket, Duration::from_secs(1));
-        });
+        let (origin, _, sockets) = held();
         let home = home("mirror", &api_origin);
         let board = Mirror::new(&home);
-        let mut seen = Vec::new();
-        serve(
-            &host_url(&origin),
-            &access_headers(&home, &origin).unwrap(),
-            &TEST,
-            &home.join(".env"),
-            Some(board.clone()),
-            no_stop,
-            &|msg| log_line(&home, msg),
-            &|| None,
-            &mut |reason| {
-                seen.push(reason.to_string());
-                if seen.len() == 3 {
-                    ControlFlow::Break(())
-                } else {
-                    ControlFlow::Continue(false)
-                }
-            },
+        let (d, serving) = drive(&home, &origin, 3, DRIVEN, Some(board.clone()), || None, &[]);
+        let mut socket = sockets.recv().unwrap();
+        d.wait_for("mirror: fetched the board (1 jobs)");
+        d.advance_until("pickup pass (connect)");
+        send(
+            &mut socket,
+            r#"{"type":"rows","etag":"\"e2\"","prev":"\"e1\"","rows":[{"id":"2001-add-csv-export","stage":"idea"}],"removed":[]}"#,
         );
+        d.wait_for("changed board.json");
+        d.advance_until("pickup pass (changed board.json)");
+        send(
+            &mut socket,
+            r#"{"type":"rows","etag":"\"e5\"","prev":"\"e4\"","rows":[],"removed":[]}"#,
+        );
+        d.wait_for("mirror: fetched the board (3 jobs)");
+        d.wait_for("changed board.json");
+        d.advance_until("pickup pass (changed board.json)");
         assert_eq!(
-            seen,
+            serving.join().unwrap(),
             ["connect", "changed board.json", "changed board.json"]
         );
         assert_eq!(
@@ -1519,18 +1656,23 @@ mod tests {
         assert!(snap.starts_with(r#"{"etag":"\"e9\"""#), "{snap}");
     }
 
+    /// A close from the Worker reconnects after the backoff, and the new socket queues a connect
+    /// pass.
     #[test]
     fn close_reconnects_with_a_connect_pass() {
-        let (origin, seen) = fake(None, |mut socket| {
-            sleep(Duration::from_millis(100));
-            let _ = socket.close(None);
-            let _ = socket.flush();
-            sleep(Duration::from_millis(200));
-        });
+        let (origin, seen, sockets) = held();
         let home = home("close", &origin);
-        assert_eq!(run(&home, &origin, 2), ["connect", "connect"]);
+        let (d, serving) = drive(&home, &origin, 2, DRIVEN, None, || None, &[]);
+        let mut first = sockets.recv().unwrap();
+        d.advance_until("pickup pass (connect)");
+        first.close(None).unwrap();
+        first.flush().unwrap();
+        d.wait_for("closed: closed by the Worker (1005); retry in ");
+        d.advance_until("connected ");
+        let _second = sockets.recv().unwrap();
+        d.advance_until("pickup pass (connect)");
+        assert_eq!(serving.join().unwrap(), ["connect", "connect"]);
         assert_eq!(seen.lock().unwrap().len(), 2);
-        assert!(log_text(&home).contains("closed: closed by the Worker (1005); retry in "));
     }
 
     #[test]
@@ -1722,10 +1864,7 @@ mod tests {
         let home = temp_dir("daemon-token");
         let e = access_headers(&home, "https://f.example.test").unwrap_err();
         assert_eq!(e.code, 2);
-        assert_eq!(
-            e.stderr,
-            format!("factory.py: {}\n", token_message(&home.join(".env")))
-        );
+        assert_eq!(e.stderr, format!("{}\n", token_message(&home.join(".env"))));
     }
 
     /// The server holds the connection open until connect returns, so only the watchdog can end the
@@ -1759,26 +1898,33 @@ mod tests {
         assert_eq!(seen.lock().unwrap().len(), 1);
     }
 
+    /// The reader closes once silence has passed since the last frame, and not a moment before,
+    /// however many read timeouts that takes.
     #[test]
     fn silence_closes_on_time() {
-        let (origin, _) = fake(None, |_| sleep(Duration::from_secs(1)));
-        let t = Timing {
+        let (origin, _, sockets) = held();
+        let (t, clock) = on_fake_clock(Timing {
             silence: Duration::from_millis(240),
+            connect_timeout: DRIVEN.connect_timeout,
             ..TEST
-        };
+        });
         let socket = connect(&host_url(&origin), &[], &t, Path::new(".env")).unwrap();
+        let mut server = sockets.recv().unwrap();
         let (tx, rx) = mpsc::channel();
-        let start = Instant::now();
         std::thread::spawn(move || read_loop(socket, &t, no_stop, tx, None));
-        let Ok(Event::Closed(reason)) = rx.recv() else {
+        send(&mut server, OTHER);
+        assert!(matches!(rx.recv(), Ok(Event::Ignored(_))));
+        *clock.lock().unwrap() += t.silence - Duration::from_millis(1);
+        // Ten read timeouts on an idle machine, on a clock 1 ms short of silence.
+        assert!(matches!(
+            rx.recv_timeout(tick(&t) * 10),
+            Err(RecvTimeoutError::Timeout)
+        ));
+        *clock.lock().unwrap() += Duration::from_millis(1);
+        let Ok(Event::Closed(reason)) = rx.recv_timeout(Duration::from_secs(60)) else {
             panic!("expected Closed")
         };
         assert_eq!(reason, "no frame for 0.2s");
-        let took = start.elapsed();
-        assert!(
-            took >= t.silence && took < Duration::from_millis(290),
-            "{took:?}"
-        );
     }
 
     /// Each pass refreshes live claims first, in one board write: the first pass writes the two

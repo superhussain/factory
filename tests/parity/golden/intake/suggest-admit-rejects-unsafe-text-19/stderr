@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-unsafe-19.json: suggestions[0].title: must not hold control characters or line breaks; nothing admitted
+{home}/suggest-unsafe-19.json: suggestions[0].title: must not hold control characters or line breaks; nothing admitted

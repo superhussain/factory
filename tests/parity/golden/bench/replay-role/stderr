@@ -1,1 +1,1 @@
-factory.py: bench: --role must be review-security, review-ux, review-ui or review-code
+bench: --role must be review-security, review-ux, review-ui or review-code

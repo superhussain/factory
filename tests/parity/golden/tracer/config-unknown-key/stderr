@@ -1,1 +1,1 @@
-factory.py: {home}/tracer.json: sample: unknown key extra
+{home}/tracer.json: sample: unknown key extra

@@ -1,1 +1,1 @@
-factory.py: Project has an unresolved .remote file. Merge it into the project document and delete the .remote file before pushing.
+Project has an unresolved .remote file. Merge it into the project document and delete the .remote file before pushing.

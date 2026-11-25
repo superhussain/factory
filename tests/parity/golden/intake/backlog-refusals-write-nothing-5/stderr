@@ -1,1 +1,1 @@
-factory.py: --answers {home}/backlog-decide-answers-8.txt: Guard the ls alias takes one pick
+--answers {home}/backlog-decide-answers-8.txt: Guard the ls alias takes one pick

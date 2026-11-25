@@ -1,1 +1,1 @@
-factory.py: --reason must be a string of 1-200 characters
+--reason must be a string of 1-200 characters

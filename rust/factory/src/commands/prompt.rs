@@ -575,7 +575,7 @@ pub fn prompt_cmd(call: &Call) -> Res<()> {
     if !documents.is_file() {
         return Err(fail(
             format!(
-                "no {}: run factory.py documents {slug} first",
+                "no {}: run factory documents {slug} first",
                 documents.display()
             ),
             4,

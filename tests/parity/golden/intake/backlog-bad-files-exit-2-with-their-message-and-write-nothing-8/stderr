@@ -1,4 +1,4 @@
-factory.py: context file {home}/backlog-bad7.md: question 1 is not in the needs.md question format
+context file {home}/backlog-bad7.md: question 1 is not in the needs.md question format
 a context file looks like this:
 Recommend: approve
 
