@@ -4950,6 +4950,43 @@ mod audit_pickup_test {
     }
 
     #[test]
+    fn test_a_failed_read_past_the_backtrack_limit_still_exits_limit() {
+        // Sets FACTORY_HOME, which every thread reads, so it runs alone.
+        if !crate::shared::in_own_process(
+            module_path!(),
+            "test_a_failed_read_past_the_backtrack_limit_still_exits_limit",
+        ) {
+            return;
+        }
+        let fx = setup();
+        let (origin, seen) =
+            crate::shared::http::tests::serve(vec![(500, "made-up outage", vec![])]);
+        fs::write(
+            fx.home.join("config.md"),
+            format!("---\ndevice: {DEVICE}\napi_url: {origin}\n---\n"),
+        )
+        .unwrap();
+        crate::commands::audit::limit_secret_file_for_test();
+        fx.set_env("FACTORY_HOME", &fx.home);
+        let e = crate::commands::audit::audit_push("1017-add-x").unwrap_err();
+        assert_eq!(e.code, crate::shared::exit::LIMIT, "{}", e.stderr);
+        let lines: Vec<&str> = e.stderr.lines().collect();
+        assert_eq!(lines.len(), 2, "{}", e.stderr);
+        assert!(lines[0].contains("made-up outage"), "{}", e.stderr);
+        assert!(
+            lines[1].contains(crate::shared::pyre::LIMIT_HIT),
+            "{}",
+            e.stderr
+        );
+        let seen = seen.lock().unwrap();
+        let requests: Vec<String> = seen
+            .iter()
+            .map(|s| format!("{} {}", s.method, s.path))
+            .collect();
+        assert_eq!(requests, ["GET /api/audit/1017-add-x"]);
+    }
+
+    #[test]
     fn test_a_failing_audit_push_still_claims() {
         let fx = setup();
         let log = push_fakes(&fx, Some(("made-up push failure", 1)));

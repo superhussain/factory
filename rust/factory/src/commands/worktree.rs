@@ -958,7 +958,10 @@ fn cleanup_after_stop(
     let wt_text = wt.to_string_lossy();
     if wt.exists() {
         let error = match alive {
-            None => Some("processes were not checked".to_string()),
+            None => Some(
+                "processes were not checked; stop them or remove the link, then rerun factory cleanup"
+                    .to_string(),
+            ),
             Some(alive) if alive.is_empty() => {
                 first_error(repo, &["worktree", "remove", &wt_text], None)
             }
@@ -2089,7 +2092,10 @@ mod tests {
         t.merge();
         let out = cleanup_after_stop(&text(&t.repo), &t.wt, BRANCH, false, None, None);
         let left = vec![
-            format!("{}: processes were not checked", t.shown_wt()),
+            format!(
+                "{}: processes were not checked; stop them or remove the link, then rerun factory cleanup",
+                t.shown_wt()
+            ),
             format!("branch {BRANCH}: kept because its worktree remains"),
         ];
         assert_eq!(out, (vec![], left));

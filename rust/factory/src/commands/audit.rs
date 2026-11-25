@@ -729,7 +729,8 @@ fn audit_pushed_rows(home: &Path, job_id: &str, device: &str) -> Res<Vec<Map<Str
 
 /// PUT this host's audit rows for the job to the Worker under its device name, oldest rows dropped
 /// past 1 MiB. A scan past the backtrack limit keeps the rows pushed before, adds an AUDIT_SKIPPED
-/// row, and still exits LIMIT.
+/// row, and still exits LIMIT. When it cannot read those rows, it pushes nothing and exits LIMIT
+/// after the read's error.
 pub(crate) fn audit_push(job_id: &str) -> Res<()> {
     let home = factory_home()?;
     let config = home.join("config.md");
@@ -744,8 +745,14 @@ pub(crate) fn audit_push(job_id: &str) -> Res<()> {
     }
     let (rows, skipped) = match audit_rows(job_id) {
         Ok((rows, _)) => (rows, None),
-        Err(e) if e.code == LIMIT => {
-            let mut rows = audit_pushed_rows(&home, job_id, device)?;
+        Err(mut e) if e.code == LIMIT => {
+            let mut rows = match audit_pushed_rows(&home, job_id, device) {
+                Ok(rows) => rows,
+                Err(read) => {
+                    e.stderr = read.stderr + &e.stderr;
+                    return Err(e);
+                }
+            };
             let time: String = now().replace('T', " ").chars().take(19).collect();
             let marker = json!({"time": time, "session": "-", "agent": "-", "tool": "-", "flags": [], "target": AUDIT_SKIPPED, "skipped": true});
             rows.push(marker.as_object().unwrap().clone());
