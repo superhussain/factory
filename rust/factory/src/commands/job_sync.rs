@@ -1325,4 +1325,40 @@ mod tests {
         assert_eq!(in_r2(&store, "round-1/review.md"), "R1\n");
         fs::remove_dir_all(home).unwrap();
     }
+
+    #[test]
+    fn a_revert_after_a_pull_killed_past_its_rename_still_conflicts() {
+        use crate::commands::sync::AFTER_RENAME;
+        for auto in [true, false] {
+            let (origin, _seen, store) = fake_r2(&[("round-1/review.md", "R1\n", "r1")]);
+            let home = synced_r0(&format!("job-sync-killed-after-rename-{auto}"), &origin);
+            let f = folder(&home);
+            let review = f.join("round-1/review.md");
+            // The pull is killed right after R2's bytes replace the file.
+            AFTER_RENAME.set(Some(|_: &Path| panic!("killed after the rename")));
+            let killed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                pull_job_files(&home, "alpha", JOB, auto)
+            }));
+            AFTER_RENAME.set(None);
+            assert!(killed.is_err());
+            assert_eq!(fs::read_to_string(&review).unwrap(), "R1\n");
+            assert!(
+                manifest(&f)["round-1/review.md"]
+                    .get("pre_pull_sha256")
+                    .is_none(),
+                "auto {auto}"
+            );
+            // A person reverts to the old bytes on purpose. The push keeps both copies.
+            fs::write(&review, "R0\n").unwrap();
+            let e = push_job(&home, "alpha", JOB, &mut Vec::new()).unwrap_err();
+            assert_eq!(e.code, 6);
+            assert_eq!(fs::read_to_string(&review).unwrap(), "R0\n");
+            assert_eq!(
+                fs::read_to_string(f.join("round-1/review.md.remote")).unwrap(),
+                "R1\n"
+            );
+            assert_eq!(in_r2(&store, "round-1/review.md"), "R1\n");
+            fs::remove_dir_all(home).unwrap();
+        }
+    }
 }

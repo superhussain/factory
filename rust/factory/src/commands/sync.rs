@@ -45,11 +45,13 @@ static ACCESS_SECRET: Pattern = Pattern::new(
         ..Flags::NONE
     },
 );
-/// NOTE_SECRETS' private key header, only when key material follows it: base64 after the header
-/// and any `Proc-Type:` style lines, across real or escaped newlines. The bare header line, which
-/// specs quote in redaction rules, is no key.
+/// NOTE_SECRETS' private key header, only when key material follows it: after any `Proc-Type:`
+/// style lines, one base64 run of 40 or more characters, or runs of 16 or more on two lines or
+/// more. Between them it skips what quoting adds to each line: whitespace, real or escaped line
+/// breaks, blockquote, table, comment, diff and quote marks, `grep -n` and `cat -n` line numbers,
+/// and `<br>`. The bare header line, which specs quote in redaction rules, is no key.
 static PRIVATE_KEY: Pattern = Pattern::new(
-    r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\s|\\n)*(?:[A-Za-z-]+:[^\n]*(?:\s|\\n)+)*[A-Za-z0-9+/]{40,}",
+    r#"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s>|#*`'-]|\\[rn]|\d+[:\t]|<br\s*/?>)*(?:[A-Za-z-]+:[^\n]*(?:[\s>|#*`'-]|\\[rn]|\d+[:\t]|<br\s*/?>)+)*(?:[A-Za-z0-9+/]{40,}|[A-Za-z0-9+/]{16,}=*(?:[\s>|#*`'-]|\\[rn]|\d+[:\t]|<br\s*/?>)+[A-Za-z0-9+/]{16,})"#,
     Flags::ASCII,
 );
 
@@ -773,6 +775,9 @@ thread_local! {
     /// a session's edit.
     pub(crate) static BEFORE_REPLACE: std::cell::Cell<Option<fn(&Path)>> =
         const { std::cell::Cell::new(None) };
+    /// Runs in a pull right after the rename, where a test kills the pull by panicking.
+    pub(crate) static AFTER_RENAME: std::cell::Cell<Option<fn(&Path)>> =
+        const { std::cell::Cell::new(None) };
 }
 
 /// Download what changed in R2 and keep local edits. (summary line, conflicted files).
@@ -785,8 +790,9 @@ pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Ve
 /// there was none. Push conditions on the base, so a session that read the old copy and writes it
 /// back blind gets a 412 and keeps both copies. A deliberate pull clears the base of each file it
 /// leaves matching R2, since the session took R2's version; a file edited here keeps its base.
-/// Until a replaced file's write lands, its entry also holds `pre_pull_sha256`, the hash of the
-/// bytes being replaced, so a pull cut short before the write is finished by the next one.
+/// Until R2's bytes are written beside a replaced file, ready to rename, its entry also holds
+/// `pre_pull_sha256`, the hash of the bytes being replaced, so a pull cut short before then is
+/// finished by the next one.
 pub(crate) fn pull_job_files(
     home: &Path,
     slug: &str,
@@ -864,17 +870,17 @@ pub(crate) fn pull_job_files(
             // the .remote holds push back until a person merges it. Only a write that lands
             // between this read and the rename is still replaced.
             let edited = local_bytes(&path) != data;
-            if edited {
-                // The old hash goes before the .remote appears: a person may merge back to those
-                // very bytes, and a later pull must not take them as unedited. The base stays, so
-                // a kill on either side of the rename leaves the edit to meet a 412.
-                if let Some(Value::Object(e)) = manifest.get_mut(rel) {
-                    e.shift_remove(PRE_PULL);
-                }
-                save_manifest(&folder, &manifest).inspect_err(|_| {
-                    let _ = fs::remove_file(&tmp);
-                })?;
+            // The old hash goes before the rename, so it never sits beside the bytes that replace
+            // the old ones: a person may revert or merge back to those very bytes, and a later
+            // push or pull must not take them as unedited. The base stays, so a kill on either
+            // side of the rename leaves an edit to meet a 412. A kill between this save and the
+            // rename only costs the heal: the old bytes then push as an edit and meet a 412.
+            if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                e.shift_remove(PRE_PULL);
             }
+            save_manifest(&folder, &manifest).inspect_err(|_| {
+                let _ = fs::remove_file(&tmp);
+            })?;
             let target = if edited {
                 dot_remote(&path)
             } else {
@@ -884,22 +890,23 @@ pub(crate) fn pull_job_files(
                 let _ = fs::remove_file(&tmp);
                 os_fail(e, &target)
             })?;
+            #[cfg(test)]
+            if let Some(kill) = AFTER_RENAME.get() {
+                kill(&path);
+            }
             if edited {
                 manifest.insert(rel.clone(), fetched);
                 save_manifest(&folder, &manifest)?;
                 conflicts.push(rel.clone());
                 continue;
             }
-            // The bytes are here, so the old hash has done its job; kept, it would let a later
-            // pull replace a deliberate revert to those bytes. A deliberate pull also took R2's
-            // version, so its base goes too.
-            if let Some(Value::Object(e)) = manifest.get_mut(rel) {
-                e.shift_remove(PRE_PULL);
-                if !auto {
+            // A deliberate pull took R2's version, so once the bytes are here the base goes.
+            if !auto {
+                if let Some(Value::Object(e)) = manifest.get_mut(rel) {
                     e.shift_remove("base");
                 }
+                save_manifest(&folder, &manifest)?;
             }
-            save_manifest(&folder, &manifest)?;
             got.push(rel.clone());
         } else if entry.is_some() && stored("etag") == Some(&tag_value) {
             unpushed.push(rel.clone());
@@ -1598,10 +1605,24 @@ mod tests {
             format!("| `{header}` | `[redacted]` |\n"),
             format!("Redact any line like {header}.\n"),
             format!("{header}\n"),
+            format!("> {header}\n> then the key, which we never paste here.\n"),
+            format!("12:{header}\n13:[redacted]\n"),
+            format!("{header}<br>(redacted)"),
         ] {
             assert_eq!(secret_refusal("spec.md", text.as_bytes()), None, "{text}");
         }
+        let short = &line[..32];
         for text in [
+            format!("> {header}\n> {line}\n"),
+            format!("# {header}\n# {line}\n"),
+            format!("| {header} |\n| {line} |\n"),
+            format!("12:{header}\n13:{line}\n"),
+            format!("    12\t{header}\n    13\t{line}\n"),
+            format!("-{header}\n-{line}\n"),
+            format!("\"k\": \"{header}\\r\\n{line}\\r\\n\""),
+            format!("{header}<br>{line}"),
+            format!("{header}\n{short}\n{short}\n{short}\n"),
+            format!("> {header}\n> {short}\n> {short}\n"),
             format!("{header}\n{line}\n{line}\n-----END OPENSSH PRIVATE KEY-----\n"),
             format!("```\n{header}\r\n  {line}\n```\n"),
             format!("\"key\": \"{header}\\n{line}\\n\"\n"),
