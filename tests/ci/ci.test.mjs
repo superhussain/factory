@@ -357,6 +357,25 @@ test("the paseo-plugin job installs, typechecks and tests the plugin in order", 
   ]);
 });
 
+test("only rust-check caches the pinned toolchain, keyed on its toolchain file, right before rustup installs it", () => {
+  const toml = readFileSync(new URL("../../rust/rust-toolchain.toml", import.meta.url), "utf8");
+  const name = `${/^channel = "(.+)"$/m.exec(toml)[1]}-x86_64-unknown-linux-gnu`;
+  const steps = workflow.jobs["rust-check"].steps;
+  const install = steps.findIndex((step) => step.run?.startsWith("rustup toolchain install"));
+  const cache = steps[install - 1];
+  assert.equal(cache.name, "Cache the pinned toolchain");
+  assert.equal(action(cache), "actions/cache");
+  assert.deepEqual(cache.with, {
+    path: `~/.rustup/toolchains/${name}\n~/.rustup/update-hashes/${name}\n`,
+    key: "v1-rustup-targets-${{ hashFiles('rust/rust-toolchain.toml') }}",
+  });
+  // The other jobs gained 0-3 s from it, too little for about 190 MB of cache.
+  const cached = Object.keys(workflow.jobs).filter((id) =>
+    workflow.jobs[id].steps?.some((step) => step.name === "Cache the pinned toolchain"),
+  );
+  assert.deepEqual(cached, ["rust-check"]);
+});
+
 test("the rust jobs build, test and check in parallel and shard parity over the built binary", () => {
   const { "rust-build": build, "rust-test": unit, "rust-check": check, parity } = workflow.jobs;
   const runs = (job) => job.steps.filter((step) => step.run).map((step) => step.run.trim());

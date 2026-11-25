@@ -316,6 +316,21 @@ test("skip_stderr leaves stderr out of a case", { skip: windows }, async (t) => 
   assert.equal(await stderr({ skip_stderr: true }), "");
 });
 
+test("no_gh leaves gh off PATH and keeps the other stubs", { skip: windows }, async (t) => {
+  const probe = join(temp(t), "probe.mjs");
+  writeFileSync(
+    probe,
+    'import { spawnSync } from "node:child_process";\n' +
+      'const status = (tool) => { const r = spawnSync(tool, ["x"]); return r.error ? r.error.code : r.status; };\n' +
+      'console.log(status("gh"), status("git"));\n',
+  );
+  const c = { id: "main/probe", argv: [], home: null, stubs: {} };
+  const stdout = async (extra) =>
+    Object.fromEntries(await runSide({ ...c, ...extra }, [process.execPath, probe])).stdout;
+  assert.equal(await stdout({}), "127 127\n");
+  assert.equal(await stdout({ no_gh: true }), "ENOENT 127\n");
+});
+
 test("the slow cases exist and the workers take them first, then the rest in case order", () => {
   const ids = new Set(loadCases().map((c) => c.id));
   for (const id of SLOW) assert.ok(ids.has(id), id);

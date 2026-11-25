@@ -213,6 +213,7 @@ pub struct Poller {
 }
 
 /// A key's place among the gh calls in flight, freed if its gh call panics.
+/// The release and host profiles set `panic = "abort"`, so only unwinding builds, such as the tests', run this drop.
 struct Slot<'a> {
     poller: &'a Poller,
     key: &'a Key,

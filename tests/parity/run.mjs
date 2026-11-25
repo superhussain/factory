@@ -489,7 +489,7 @@ export async function runSide(c, command, homes = join(HERE, "homes")) {
     } else mkdirSync(home);
     mkdirSync(binDir);
     mkdirSync(stubDir);
-    for (const tool of TOOLS) launcher(binDir, tool);
+    for (const tool of TOOLS) if (!(c.no_gh && tool === "gh")) launcher(binDir, tool);
     // Stub files are JSON text, so each value goes in JSON-escaped.
     const jsonValues = Object.fromEntries(
       Object.entries(values).map(([k, v]) => [k, JSON.stringify(v).slice(1, -1)]),
@@ -504,8 +504,9 @@ export async function runSide(c, command, homes = join(HERE, "homes")) {
     // The binary's local dates are UTC dates, so a golden holds the same dates in every zone.
     env.TZ = "UTC";
     env.FACTORY_PARITY_NOW = String(NOW / 1000);
+    // A no_gh case has only the stub folder, which then holds no gh, on PATH, so the host's own gh cannot answer.
     Object.assign(env, c.env ?? {}, {
-      PATH: binDir + ":" + (process.env.PATH ?? ""),
+      PATH: c.no_gh ? binDir : binDir + ":" + (process.env.PATH ?? ""),
       FACTORY_STUB_DIR: stubDir,
     });
     const argv = c.argv.map((arg) => arg.replaceAll("{home}", home));

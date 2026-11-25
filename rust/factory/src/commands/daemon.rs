@@ -1063,7 +1063,9 @@ mod tests {
     type Seen = Arc<Mutex<Vec<Vec<(String, String)>>>>;
 
     /// A loopback socket server. The first `reject` handshake gets that status. Every accepted
-    /// socket runs `behave`. Each handshake's headers are recorded.
+    /// socket runs `behave`. Each handshake's headers are recorded. Only a handshake counts as
+    /// first: another test probing a port it freed, which this listener now holds, reaches the
+    /// accept but not the handshake.
     fn fake(
         reject: Option<u16>,
         behave: impl Fn(WebSocket<TcpStream>) + Send + Sync + 'static,
@@ -1074,20 +1076,21 @@ mod tests {
         let log = seen.clone();
         let behave = Arc::new(behave);
         std::thread::spawn(move || {
-            for (n, stream) in listener.incoming().enumerate() {
+            for stream in listener.incoming() {
                 let stream = stream.unwrap();
                 let log = log.clone();
                 let behave = behave.clone();
                 std::thread::spawn(move || {
                     let callback = |request: &Request, response: Response| {
-                        log.lock().unwrap().push(
+                        let mut log = log.lock().unwrap();
+                        log.push(
                             request
                                 .headers()
                                 .iter()
                                 .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
                                 .collect(),
                         );
-                        match reject.filter(|_| n == 0) {
+                        match reject.filter(|_| log.len() == 1) {
                             Some(status) => {
                                 let mut refused = ErrorResponse::new(None);
                                 *refused.status_mut() = status.try_into().unwrap();
@@ -1922,6 +1925,18 @@ mod tests {
         .unwrap();
         assert_eq!(run_pickup(&exe, &home, no_stop), (0, false, 1));
         assert_eq!(run_pickup(&exe, &home, no_stop), (0, false, 1));
+    }
+
+    /// A bare connection, as another test makes when it probes a port it freed, does not use up
+    /// the first handshake's rejection.
+    #[test]
+    fn a_stray_connection_leaves_the_rejection_for_the_daemon() {
+        let (origin, _) = fake(Some(403), |_| sleep(Duration::from_secs(1)));
+        let port: u16 = origin.rsplit(':').next().unwrap().parse().unwrap();
+        drop(TcpStream::connect(("127.0.0.1", port)).unwrap());
+        sleep(Duration::from_millis(100));
+        let home = home("stray", &origin);
+        assert_eq!(run(&home, &origin, 2), ["fallback", "connect"]);
     }
 
     #[test]

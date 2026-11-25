@@ -37,6 +37,8 @@ try { & $cargo build --profile host --locked } finally { Pop-Location }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $exe = Join-Path $checkout 'rust\target\host\factory.exe'
 $binary = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant()
+# Delete deletes a link itself, never its target, so the write below makes a new file, as install.sh's rm -f does.
+[IO.File]::Delete("$exe.stamp")
 [IO.File]::WriteAllText("$exe.stamp", "$inputs`n$binary`n")
 & $exe install --source $checkout --destination $Destination --replace
 exit $LASTEXITCODE
