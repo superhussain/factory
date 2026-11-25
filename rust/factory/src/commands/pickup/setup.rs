@@ -716,12 +716,17 @@ pub(super) fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -
         done = format!("installed cron {noun}: crontab");
     } else {
         let cmd = timer_path(scheduler, unit);
+        let same = fs::read(&cmd).ok().as_deref() == Some(text.as_bytes());
+        let task = || setup_run(&["schtasks", "/Query", "/TN", unit.task], None).0 == 0;
+        // cmd reads a batch file by byte offset, so a loop still running when its file is
+        // rewritten resumes mid-line in the new text. End it first; /Run below starts it again.
+        if unit.keep_alive && !same && task() {
+            end_loop(home)?;
+        }
         if unit.keep_alive {
             clear_stop_marker(home)?;
         }
-        if fs::read(&cmd).ok().as_deref() == Some(text.as_bytes())
-            && setup_run(&["schtasks", "/Query", "/TN", unit.task], None).0 == 0
-        {
+        if same && task() {
             return Ok(format!("{}: {}", unit.current, cmd.display()));
         }
         mkdirs(cmd.parent().unwrap())?;
@@ -1281,6 +1286,28 @@ pub(super) fn locked_kill(home: &Path) -> Result<Option<Vec<String>>, String> {
             .map(Some)
             .ok_or_else(|| format!("refusing to signal pid {pid}")),
     }
+}
+
+/// Ends the Windows loop and its daemon through the restart's stop path, without its /Run: the
+/// stop marker, /End, then the daemon's kill, waiting for it to let go of the lock. A failure
+/// clears the marker, so the loop is not left to exit at every logon.
+fn end_loop(home: &Path) -> Res<()> {
+    let ended = daemon_restart_argvs("schtasks", home).and_then(|mut argvs| {
+        argvs.pop();
+        for argv in argvs {
+            let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+            setup_run(&args, None);
+            if argv[0] != "schtasks" {
+                let pid = argv.iter().find_map(|w| w.parse().ok()).unwrap_or_default();
+                daemon_stopped(pid, &mut || daemon::locked_pid(home))?;
+            }
+        }
+        Ok(())
+    });
+    ended.map_err(|e| {
+        let _ = clear_stop_marker(home);
+        fail(format!("could not stop the running daemon loop: {e}"), 1)
+    })
 }
 
 /// The commands that restart an installed daemon service so it runs a newly installed binary, in

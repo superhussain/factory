@@ -10963,18 +10963,57 @@ mod daemon_setup_test {
         assert!(out.starts_with(&format!("service current: {}\n", cmd.display())));
         assert!(!ds.sched.borrow().runs.iter().any(|a| a[1] == "/Create"));
 
-        // A loop written before the boot log reads as drift, so catch-up reinstalls it.
-        fs::write(
-            &cmd,
-            text.replace(&format!("{trim}\r\n"), "")
-                .replace(&*boot.to_string(), &ds.log()),
-        )
-        .unwrap();
+        // A loop written before the boot log reads as drift, so catch-up reinstalls it. A running
+        // loop is ended first through the stop path, then its file is rewritten and /Run starts it.
+        let old = text
+            .replace(&format!("{trim}\r\n"), "")
+            .replace(&*boot.to_string(), &ds.log());
+        fs::write(&cmd, &old).unwrap();
         assert!(timer_drift("schtasks", &timer_values(&ds.fx.home, &DAEMON)).is_some());
+        let lock = Rc::new(RefCell::new(daemon::take_lock(&ds.fx.home).unwrap()));
+        let pid = std::process::id().to_string();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let (fake, held, log, path, stop2, kill) = (
+            ds.sched.clone(),
+            lock.clone(),
+            seen.clone(),
+            cmd.clone(),
+            stop.clone(),
+            pid.clone(),
+        );
+        ds.fx.set_fakes(|f| {
+            f.setup_run = Some(Rc::new(move |argv, stdin| {
+                let file = fs::read_to_string(&path).unwrap_or_default();
+                log.borrow_mut()
+                    .push((argv[..2].join(" "), file, stop2.exists()));
+                if argv == ["kill", kill.as_str()] {
+                    held.borrow_mut().take();
+                }
+                fake.borrow_mut().answer(argv, stdin)
+            }))
+        });
+        ds.sched.borrow_mut().runs.clear();
         let (code, out, _) = ds.run(Install);
-        assert_eq!(code, 0);
+        assert_eq!(code, 0, "{out}");
         assert!(out.starts_with(&format!("installed schtasks service: {}\n", cmd.display())));
         assert_eq!(fs::read_to_string(&cmd).unwrap(), text);
+        assert!(!stop.exists(), "install clears the stop marker");
+        let steps: Vec<(String, bool, bool)> = seen
+            .borrow()
+            .iter()
+            .filter(|(argv, ..)| argv != "schtasks /Query")
+            .map(|(argv, file, marker)| (argv.clone(), *file == old, *marker))
+            .collect();
+        assert_eq!(
+            steps[..4],
+            [
+                ("schtasks /End".to_string(), true, true),
+                (format!("kill {pid}"), true, true),
+                ("schtasks /Create".to_string(), false, false),
+                ("schtasks /Run".to_string(), false, false),
+            ],
+            "{steps:?}"
+        );
 
         // Uninstall writes the stop marker before /End, so a loop /End leaves behind exits, and
         // ends the loop's daemon by its pid.
