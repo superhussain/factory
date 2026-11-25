@@ -399,11 +399,15 @@ host (`$PASEO_HOME/agents/*/<id>.json`) names the session. The job drawer's `aud
 `audit rows are written only by the host's bound service token`. Any other 403
 exits 5. A bad job id, or a second argument without `push`, exits 2 with
 `usage: factory audit push <job-id>, a full job id such as 1017-add-x`.
+When a flag pattern hits its backtrack limit on a transcript, `audit` and
+`audit push` exit 8 with the pattern and file named. `audit push` then keeps this
+host's rows from before and adds one row whose target reads
+`audit push skipped: a flag pattern hit its backtrack limit, so newer calls are not shown`.
 
 `pickup` also pushes this host's audit rows for each job at spec, build, review,
 approve or pr-open whose transcripts here changed since `<home>/audit-push.json`
 records; a failed push prints one warning and the run goes on. When the push
-succeeds and this host's token totals for the job changed, it also writes them to
+succeeds or stops at the backtrack limit and this host's token totals for the job changed, it also writes them to
 `tokens.<device>` and prints `recorded <device> tokens on <job-id>`.
 
 ## Token usage
