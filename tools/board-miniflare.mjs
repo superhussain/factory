@@ -350,6 +350,9 @@ export async function roomWork(rows, script) {
     await measure("GET slim, same version", slim);
     await json("/bench/evict");
     await measure("GET slim, room evicted", slim);
+    // The archive read takes the board's ids from the room, not its rows.
+    await json("/bench/evict");
+    await measure("GET /api/board/archive, room evicted", () => json("/api/board/archive?page=1"));
     // The alarm copies a version no read has built, so it builds it.
     await touch(1);
     await json("/bench/evict");

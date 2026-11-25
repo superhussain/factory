@@ -381,8 +381,10 @@ test("an unreadable board.json is served as stored and refuses a PATCH", async (
 test("a one-row PATCH costs the same work at 2,300 and 4,600 rows", async () => {
   const cost = async (rows) => {
     const board = syntheticBoard(rows);
-    const s = setup(board);
+    // The board's first idea sits at another row at each size, so it gets one size at both.
     const active = board.jobs.find((j) => j.stage === "idea");
+    active.idea = "x".repeat(1000);
+    const s = setup(board);
     // The first PATCH seeds; the second is the one measured.
     const once = (stage) =>
       s.patch({
@@ -493,7 +495,9 @@ async function workerSlim(text) {
 // Made-up boards of random shape: emoji, U+2028, duplicate, missing and object ids, rows that
 // are not objects, projects named __proto__ and 123, unparseable done stamps, a top-level slim
 // key, and rows big enough to fill several pages. Every write is a room commit, so rows the
-// Worker would refuse are written too.
+// Worker would refuse are written too. Some updates grow a row to 100 to 300 KB, so pages pass
+// MAX_PAGE and split; after every write each index row names its row's page, the state's last
+// page is at least the highest, and ids() is the board's ids.
 test("the room's slim body is byte for byte the Worker's slimBoard, across random boards and writes", async () => {
   let seed = 2284;
   const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
@@ -521,7 +525,31 @@ test("the room's slim body is byte for byte the Worker's slimBoard, across rando
     assert.equal(slim.headers.get("ETag"), (await s.send("/board.json")).headers.get("ETag"));
     assert.ok(slim.headers.get("X-Factory-Version"));
     assert.equal(await slim.text(), await workerSlim(full), what);
+    const store = s.room.object.board();
+    const sql = (query, ...b) => store.sql.exec(query, ...b).toArray();
+    // The index stores a non-string id as NULL.
+    const key = (id) => (typeof id === "string" ? id : "\0null");
+    const pages = sql("SELECT page, json FROM board_pages ORDER BY page");
+    for (const p of pages) {
+      assert.ok(Buffer.byteLength(p.json) <= 3 << 19, `${what} page ${p.page} size`);
+      assert.deepEqual(
+        sql("SELECT id FROM board_index WHERE page = ?", p.page)
+          .map((r) => key(r.id))
+          .sort(),
+        JSON.parse(p.json)
+          .map((j) => key(j?.id))
+          .sort(),
+        `${what} index of page ${p.page}`,
+      );
+    }
+    if (pages.length) assert.ok(store.state().lastPage >= pages.at(-1).page, `${what} lastPage`);
+    assert.deepEqual(
+      new Set(await store.ids()),
+      new Set(JSON.parse(full).jobs?.map?.((j) => j?.id) ?? []),
+      `${what} ids`,
+    );
   };
+  let splits = 0;
   for (let b = 0; b < 40; b++) {
     const jobs = Array.from({ length: Math.floor(rand() * 70) }, () => row());
     // Some rows repeat an earlier id, as an unclean board can.
@@ -533,13 +561,19 @@ test("the room's slim body is byte for byte the Worker's slimBoard, across rando
     if (rand() < 0.2) board.note = pick(texts);
     const s = setup(board, JSON.stringify(board, null, rand() < 0.5 ? 2 : 0));
     await check(s, `board ${b}`);
-    for (let w = 0; w < 4; w++) {
+    for (let w = 0; w < 8; w++) {
       const store = s.room.object.board();
+      const split = store.split;
+      store.split = (...args) => (splits++, split.apply(store, args));
       const ids = jobs.map((j) => j?.id).filter((id) => typeof id === "string");
       const changes = [];
-      if (ids.length && rand() < 0.8) {
+      for (let k = Math.floor(rand() * 3); ids.length && k >= 0; k--) {
         const id = pick(ids);
-        changes.push({ id, row: rand() < 0.2 ? null : { ...row(id), id }, add: false });
+        if (changes.some((c) => c.id === id)) continue;
+        const next = rand() < 0.2 ? null : { ...row(id), id };
+        if (next?.constructor === Object && rand() < 0.5)
+          next.idea = "é".repeat(50_000 + Math.floor(rand() * 100_000));
+        changes.push({ id, row: next, add: false });
       }
       if (rand() < 0.6) {
         const added = row();
@@ -560,6 +594,7 @@ test("the room's slim body is byte for byte the Worker's slimBoard, across rando
     const left = s.room.object.board().sql.exec("SELECT page FROM board_pages WHERE meta IS NULL");
     assert.equal(left.toArray().length, 0);
   }
+  assert.ok(splits >= 20, `${splits} splits`);
 });
 
 // Ids 12 and "12", or null and "null", are different ids to slimBoard's per-stage count, and
@@ -673,32 +708,248 @@ test("a pages table from before meta, or with meta after json, is rebuilt meta f
   }
 });
 
-// Rows a PATCH grows in place grow their page. Past MAX_PAGE (1.5 MiB) the pages are packed
-// anew, so none nears SQLite's 2 MB row limit, which setup's room enforces as workerd does.
+// Rows a PATCH grows in place grow their page. Past MAX_PAGE (1.5 MiB) that page alone is packed
+// anew into pages, and the pages after it move up, so none nears SQLite's 2 MB row limit, which
+// setup's room enforces as workerd does.
 test("a PATCH that grows a page past its limit splits it, and the board reads back the same", async () => {
   const jobs = Array.from({ length: 6 }, (_, n) => ({
     id: `${3000 + n}-grows`,
     project: "sample",
     stage: "build",
   }));
+  // Rows of 20 KB after them fill two more pages, which the split moves.
+  for (let n = 0; n < 30; n++)
+    jobs.push({
+      id: `${3100 + n}-after`,
+      project: "sample",
+      stage: "merged",
+      done: "2026-11-01T00:00:00Z",
+      idea: "x".repeat(20_000),
+    });
   const s = setup({ ...BOARD, jobs });
   await s.send("/board.json");
+  const store = () => s.room.object.board();
+  const sql = (query) => store().sql.exec(query).toArray();
   const sizes = () =>
-    s.room.object
-      .board()
-      .sql.exec("SELECT length(CAST(json AS BLOB)) AS n FROM board_pages ORDER BY page")
-      .toArray()
-      .map((p) => p.n);
-  assert.equal(sizes().length, 1);
-  for (const [n, row] of [...jobs].entries()) {
-    // 450,000 bytes in UTF-8, so four such rows pass MAX_PAGE and five pass 2 MB.
-    jobs[n] = { ...row, idea: "é".repeat(225_000) };
-    const ok = await s.patch({ rows: [{ id: row.id, expect: row, row: jobs[n] }] });
-    assert.equal(ok.status, 200, await ok.text());
+    sql("SELECT length(CAST(json AS BLOB)) AS n FROM board_pages ORDER BY page").map((p) => p.n);
+  // Pages are numbered from 0 with no gap, each index row names the page its row is on, and the
+  // state's last page is the highest.
+  const indexed = () => {
+    const pages = sql("SELECT page, json FROM board_pages ORDER BY page");
+    assert.deepEqual(
+      pages.map((p) => p.page),
+      pages.map((_, i) => i),
+    );
+    for (const p of pages)
+      assert.deepEqual(
+        sql(`SELECT id FROM board_index WHERE page = ${p.page} ORDER BY id`).map((r) => r.id),
+        JSON.parse(p.json)
+          .map((j) => j.id)
+          .sort(),
+        `page ${p.page}`,
+      );
+    assert.equal(store().state().lastPage, pages.length - 1);
+  };
+  const check = async () => {
     const full = await (await s.send("/board.json")).text();
     assert.deepEqual(JSON.parse(full).jobs, jobs);
     assert.equal(await (await s.send("/board.json?view=slim")).text(), await workerSlim(full));
     assert.ok(Math.max(...sizes()) <= 3 << 19, JSON.stringify(sizes()));
+    indexed();
+  };
+  assert.equal(sizes().length, 3);
+  const pageOf = (id) => sql(`SELECT page FROM board_index WHERE id = '${id}'`)[0].page;
+  const last = jobs.at(-1).id;
+  assert.equal(pageOf(last), 2);
+  for (const [n, row] of jobs.slice(0, 6).entries()) {
+    // 450,000 bytes in UTF-8, so four such rows pass MAX_PAGE and five pass 2 MB.
+    jobs[n] = { ...row, idea: "é".repeat(225_000) };
+    const ok = await s.patch({ rows: [{ id: row.id, expect: row, row: jobs[n] }] });
+    assert.equal(ok.status, 200, await ok.text());
+    await check();
   }
-  assert.ok(sizes().length > 1, JSON.stringify(sizes()));
+  assert.ok(sizes().length > 3 && pageOf(last) > 2, JSON.stringify(sizes()));
+  // A row on a moved page, and a new row, write through the index and the last page.
+  const moved = jobs.at(-1);
+  jobs[jobs.length - 1] = { ...moved, title: "Moved" };
+  const added = { id: "3200-added", project: "sample", stage: "idea" };
+  jobs.push(added);
+  const ok = await s.patch({
+    rows: [
+      { id: moved.id, expect: moved, row: jobs.at(-2) },
+      { id: added.id, expect: null, row: added },
+    ],
+  });
+  assert.equal(ok.status, 200, await ok.text());
+  await check();
+});
+
+// GET /api/board/archive as it answered before the room kept the board's ids: the whole board
+// and the whole archive parsed on every request.
+function archiveBefore(boardText, archiveText, query) {
+  const parse = (text) => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  };
+  const jobsOf = (doc) => (Array.isArray(doc?.jobs) ? doc.jobs : null);
+  const boardIds = new Set((jobsOf(parse(boardText)) ?? []).map((j) => j?.id));
+  const jobs = (jobsOf(parse(archiveText)) ?? []).filter((j) => !boardIds.has(j?.id));
+  const params = new URLSearchParams(query);
+  if (params.has("id")) {
+    const row = jobs.find((j) => j?.id === params.get("id"));
+    return row ? [200, JSON.stringify({ jobs: [row] })] : [404, "not found"];
+  }
+  const q = params.get("q");
+  if (q !== null) {
+    const fields = ["id", "title", "project", "jira", "pr", "idea", "goal"];
+    const pr = /^(?:pr\s*)?#(\d+)$/i.exec(q)?.[1];
+    const matches = jobs.filter(
+      (j) =>
+        fields.some(
+          (k) => typeof j?.[k] === "string" && j[k].toLowerCase().includes(q.toLowerCase()),
+        ) ||
+        (pr !== undefined && typeof j?.pr === "string" && j.pr.endsWith(`/pull/${pr}`)),
+    );
+    return [200, JSON.stringify({ jobs: matches.slice(0, 50), total: matches.length })];
+  }
+  const n = Number(params.get("page") ?? "1");
+  return [
+    200,
+    JSON.stringify({
+      jobs: jobs.slice((n - 1) * 50, n * 50),
+      page: n,
+      pages: Math.ceil(jobs.length / 50),
+      total: jobs.length,
+    }),
+  ];
+}
+
+// Made-up boards and archives that share ids, with duplicate, missing, null, number and object
+// ids and rows that are not objects. The room's id list and the isolate's parsed archive must
+// answer every query the dashboard and the CLI send byte for byte as before, through room
+// commits and archive rewrites, and so must a Worker with R2 alone.
+test("the archive read answers byte for byte as before, across random boards and archives", async () => {
+  let seed = 2323;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const pick = (list) => list[Math.floor(rand() * list.length)];
+  const shared = Array.from({ length: 40 }, (_, i) => `${700 + i}-shared`);
+  const row = () => {
+    if (rand() < 0.03) return pick([null, "a string row", 7]);
+    const out = {
+      id: rand() < 0.08 ? pick([null, 12, { nested: 1 }, undefined]) : pick(shared),
+      stage: pick(["merged", "closed", "build"]),
+      project: pick(["sample", "demo", "Émoji 🎉"]),
+      title: pick(["Fix login", "ADD export", "é 中文", 'quote " and \\']),
+      done: "2026-10-01T12:00:00Z",
+    };
+    if (rand() < 0.5) out.pr = `https://github.example.test/sample/pull/${Math.floor(rand() * 30)}`;
+    return out;
+  };
+  const queries = (archive) => [
+    ...archive.jobs
+      .map((j) => j?.id)
+      .filter((id) => typeof id === "string")
+      .map((id) => `id=${encodeURIComponent(id)}`),
+    "id=999-none",
+    ...["1", "2", "3"].map((p) => `page=${p}`),
+    ...["sample", "SHARED", "#12", "PR #7", "é", "🎉", '"', "x"].map(
+      (q) => `q=${encodeURIComponent(q)}`,
+    ),
+  ];
+  for (let b = 0; b < 25; b++) {
+    const board = {
+      updated: "2026-11-24T00:00:00Z",
+      jobs: Array.from({ length: Math.floor(rand() * 30) }, row),
+    };
+    const archive = { jobs: Array.from({ length: Math.floor(rand() * 120) }, row) };
+    const s = setup(board);
+    s.bucket.objects.set("board-archive.json", {
+      key: "board-archive.json",
+      bytes: Buffer.from(JSON.stringify(archive)),
+      httpEtag: `"archive-${b}"`,
+    });
+    const check = async (what) => {
+      const boardText = await (await s.send("/board.json")).text();
+      const archiveText = s.bucket.objects.get("board-archive.json").bytes.toString();
+      for (const query of queries(JSON.parse(archiveText))) {
+        const want = archiveBefore(boardText, archiveText, query);
+        const request = () => new Request("http://local/api/board/archive?" + query);
+        for (const env of [s.env, { BUCKET: s.bucket }]) {
+          const got = await serveFactory(request(), env, person);
+          assert.deepEqual([got.status, await got.text()], want, `${what} ${query}`);
+        }
+      }
+    };
+    await check(`board ${b}`);
+    const store = s.room.object.board();
+    const ids = board.jobs.map((j) => j?.id).filter((id) => typeof id === "string");
+    const changes = [{ id: pick(shared), row: null, add: false }];
+    if (ids.length) changes.push({ id: pick(ids), row: null, add: false });
+    const added = row();
+    changes.push({ id: added?.id ?? "1-x", row: added, add: true });
+    const out = await store.commit({
+      base: store.state().etag,
+      changes,
+      updated: "2026-11-24T01:00:00Z",
+    });
+    assert.ok(out.etag, JSON.stringify(out));
+    await check(`board ${b} after a commit`);
+    archive.jobs.push(row());
+    await s.bucket.put("board-archive.json", JSON.stringify(archive));
+    await check(`board ${b} after an archive write`);
+  }
+});
+
+// The isolate parses each archive version once, whichever BUCKET object a request brings, and
+// holds no archive past 8 MiB, which it parses on every read instead.
+test("the archive read parses each archive version once, and one past 8 MiB on every read", async () => {
+  const s = setup(BOARD);
+  const archive = (jobs, httpEtag) =>
+    s.bucket.objects.set("board-archive.json", {
+      key: "board-archive.json",
+      bytes: Buffer.from(JSON.stringify({ jobs })),
+      httpEtag,
+    });
+  const gets = () =>
+    s.bucket.calls.filter(([op, key]) => op === "get" && key === "board-archive.json").length;
+  // Each request's BUCKET is a new object over the same store.
+  const read = async () => {
+    const bucket = { head: (k) => s.bucket.head(k), get: (k, o) => s.bucket.get(k, o) };
+    const response = await serveFactory(
+      new Request("http://local/api/board/archive?page=1"),
+      { BUCKET: bucket },
+      person,
+    );
+    return response.text();
+  };
+  const small = { ...IDEA, id: "2002-archived-small", stage: "merged" };
+  archive([small], '"archive-small"');
+  const first = gets();
+  assert.equal(await read(), JSON.stringify({ jobs: [small], page: 1, pages: 1, total: 1 }));
+  assert.equal(await read(), JSON.stringify({ jobs: [small], page: 1, pages: 1, total: 1 }));
+  assert.equal(gets() - first, 1);
+  const big = { ...small, id: "2003-archived-big", idea: "x".repeat(9 << 20) };
+  archive([big], '"archive-big"');
+  const before = gets();
+  const want = JSON.stringify({ jobs: [big], page: 1, pages: 1, total: 1 });
+  assert.equal(await read(), want);
+  assert.equal(await read(), want);
+  assert.equal(gets() - before, 2);
+  // The big archive lands between a small one's HEAD and its GET: the HEAD's size is not the
+  // rows', so the big rows are not held, and the next read of them parses again.
+  archive([small], '"archive-small-2"');
+  const head = s.bucket.head;
+  s.bucket.head = async (key) => {
+    const out = await head(key);
+    archive([big], '"archive-big"');
+    s.bucket.head = head;
+    return out;
+  };
+  const raced = gets();
+  assert.equal(await read(), want);
+  assert.equal(await read(), want);
+  assert.equal(gets() - raced, 2);
 });
