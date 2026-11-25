@@ -260,6 +260,8 @@ jobs:
           test -x "$root/skills/factory/runtime/factory"
           grep -q '"entry": \["runtime/factory"\]' "$root/skills/factory/bundle.json"
   rust-test:
+    # Without a name, the check would carry each shard's whole heavy-test filter.
+    name: rust-test (${{ matrix.shard }})
     needs: plan
     if: needs.plan.outputs.all != 'true' && needs.plan.outputs.rust != 'true'
     runs-on: ubuntu-22.04

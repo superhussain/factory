@@ -430,6 +430,7 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
     ].join("\n"),
   );
   assert.equal(unitRuns.length, 4);
+  assert.equal(unit.name, "rust-test (${{ matrix.shard }})");
   const shards = unit.strategy.matrix.include;
   assert.deepEqual(
     shards.map((entry) => entry.shard),
