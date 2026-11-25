@@ -485,8 +485,11 @@ fn attempt_install(
         .flatten()
         .map(|e| e.path())
         .filter(|p| {
-            p.file_name()
-                .is_some_and(|n| n.to_string_lossy().starts_with("factory.backup-"))
+            let name = p.file_name().unwrap_or_default().to_string_lossy();
+            name.strip_prefix("factory.backup-").is_some_and(|rest| {
+                !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+            }) && !is_link(p).unwrap_or(true)
+                && fs::symlink_metadata(p).is_ok_and(|m| m.is_dir())
         })
         .collect();
     backups.sort();
@@ -769,9 +772,20 @@ mod tests {
     fn refusal_keeps_install_and_replacement_removes_every_backup() {
         let t = T::new("refusal");
         t.install(false);
-        let older = t.destination.join("factory.backup-older");
+        let older = t.destination.join("factory.backup-0123abcd-ef45");
         fs::create_dir_all(&older).unwrap();
         fs::write(older.join("left"), "left").unwrap();
+        // Not names install writes, or not real folders: each is kept.
+        let kept = [
+            t.destination.join("factory.backup-notes"),
+            t.destination.join("factory.backup-"),
+            t.destination.join("factory.backup-feed"),
+            t.destination.join("factory.backup-beef"),
+        ];
+        fs::create_dir_all(&kept[0]).unwrap();
+        fs::create_dir_all(&kept[1]).unwrap();
+        fs::write(&kept[2], "a file").unwrap();
+        std::os::unix::fs::symlink(&older, &kept[3]).unwrap();
         fs::write(t.target().join("SKILL.md"), "locally edited").unwrap();
         let old = snapshot(&t.target());
         assert_eq!(
@@ -782,7 +796,7 @@ mod tests {
             )
         );
         assert_eq!(snapshot(&t.target()), old);
-        assert_eq!(t.backups(), [older.clone()]);
+        assert!(lexists(&older));
         let (lines, _) = t.install(true);
         assert_eq!(lines[0], t.target().display().to_string());
         let removed: Vec<PathBuf> = lines[1..]
@@ -799,7 +813,7 @@ mod tests {
                 .starts_with("factory.backup-"));
             assert!(!lexists(backup));
         }
-        assert!(t.backups().is_empty());
+        assert!(kept.iter().all(|k| lexists(k)));
     }
 
     #[test]

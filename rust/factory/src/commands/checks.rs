@@ -3412,11 +3412,7 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(e.code, 1);
-        assert!(
-            e.stderr.starts_with("") && e.stderr.contains(".env"),
-            "{}",
-            e.stderr
-        );
+        assert!(e.stderr.contains(".env"), "{}", e.stderr);
     }
 
     #[test]

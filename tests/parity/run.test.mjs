@@ -19,9 +19,9 @@ import { launcher } from "./stub.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RUN = join(HERE, "run.mjs");
-const BIN = process.env.FACTORY_BIN || resolve(HERE, "../../rust/target/host/factory");
+const BIN = resolve(process.env.FACTORY_BIN || join(HERE, "../../rust/target/host/factory"));
 const noBin = !existsSync(BIN) && `no factory binary at ${BIN}`;
-const posix = process.platform === "win32" && "stub launchers and the runner are POSIX only";
+const windows = process.platform === "win32" && "stub launchers and the runner are POSIX only";
 
 function temp(t) {
   const dir = mkdtempSync(join(tmpdir(), "parity-test-"));
@@ -49,7 +49,7 @@ function run(args, env = {}) {
 
 const caseById = (id) => loadCases().find((c) => c.id === id);
 
-test("the stub replays, logs and rejects unrecorded calls", { skip: posix }, (t) => {
+test("the stub replays, logs and rejects unrecorded calls", { skip: windows }, (t) => {
   const dir = temp(t);
   const [bin, stub] = [join(dir, "bin"), join(dir, "stub")];
   mkdirSync(bin);
@@ -75,7 +75,7 @@ test("the stub replays, logs and rejects unrecorded calls", { skip: posix }, (t)
   ]);
 });
 
-test("the launcher quotes a tool name with shell characters", { skip: posix }, (t) => {
+test("the launcher quotes a tool name with shell characters", { skip: windows }, (t) => {
   const dir = temp(t);
   launcher(dir, "it's $x");
   const r = spawnSync(join(dir, "it's $x"), ["y"], {
@@ -86,7 +86,7 @@ test("the launcher quotes a tool name with shell characters", { skip: posix }, (
   assert.deepEqual([r.status, r.stderr], [127, "stub: no recorded response for it's $x y\n"]);
 });
 
-test("a wrong binary fails", { skip: posix }, (t) => {
+test("a wrong binary fails", { skip: windows }, (t) => {
   const wrong = script(join(temp(t), "wrong"), "#!/bin/sh\necho wrong\n");
   const [code, out, err] = run(["--bin", wrong, "--case", "main/no-args"]);
   assert.deepEqual([code, err], [1, ""]);
@@ -96,14 +96,14 @@ test("a wrong binary fails", { skip: posix }, (t) => {
   assert.equal(lines.at(-1), "parity: 0 passed, 1 failed");
 });
 
-test("an ids file or --case that matches no case exits 2", { skip: posix }, (t) => {
+test("an ids file or --case that matches no case exits 2", { skip: windows }, (t) => {
   const ids = join(temp(t), "ids.txt");
   writeFileSync(ids, "# comment\nmain/no-args\nnope/*\n");
   assert.deepEqual(run(["--ids", ids]), [2, "", "parity: no case matches nope/*\n"]);
   assert.deepEqual(run(["--case", "nope"]), [2, "", "parity: no case matches nope\n"]);
 });
 
-test("a missing ids file or binary exits 2", { skip: posix }, (t) => {
+test("a missing ids file or binary exits 2", { skip: windows }, (t) => {
   const dir = temp(t);
   const missing = join(dir, "missing");
   assert.deepEqual(run(["--ids", missing]), [2, "", `parity: no such file or folder ${missing}\n`]);
@@ -127,7 +127,7 @@ test("the cases cover CLI v1 with unique ids", () => {
   );
 });
 
-test("an HTTP case records its requests and home", { skip: posix || noBin }, async () => {
+test("an HTTP case records its requests and home", { skip: windows || noBin }, async () => {
   const fields = Object.fromEntries(await runSide(caseById("pipeline/view"), [BIN]));
   assert.equal(fields["exit code"], "0");
   assert.deepEqual(fields.requests.split("\n").map(JSON.parse), [
@@ -145,7 +145,7 @@ test("an HTTP case records its requests and home", { skip: posix || noBin }, asy
   assert.ok(fields["home tree"].includes("b'---\\napi_url: {api}\\ndevice: parity\\n---\\n'"));
 });
 
-test("the host's access token never reaches a side", { skip: posix }, async (t) => {
+test("the host's access token never reaches a side", { skip: windows }, async (t) => {
   const show = join(temp(t), "show.mjs");
   writeFileSync(
     show,
@@ -169,7 +169,7 @@ test("the host's access token never reaches a side", { skip: posix }, async (t) 
   assert.equal(fields.stdout, "None None\n");
 });
 
-test("a request the golden lacks fails the case", { skip: posix || noBin }, (t) => {
+test("a request the golden lacks fails the case", { skip: windows || noBin }, (t) => {
   const drift = script(
     join(temp(t), "drift.mjs"),
     `#!${process.execPath}\n` +
@@ -191,7 +191,7 @@ test("a request the golden lacks fails the case", { skip: posix || noBin }, (t) 
   );
 });
 
-test("--record refuses a run whose exit the case does not expect", { skip: posix }, async (t) => {
+test("--record refuses a run whose exit the case does not expect", { skip: windows }, async (t) => {
   const ok = join(temp(t), "ok.mjs");
   writeFileSync(ok, "");
   const c = { ...caseById("pipeline/view"), exit: 3 };
@@ -212,7 +212,7 @@ test("a case lives in its subsystem file and its id is unique", (t) => {
   assert.throws(() => loadCases(dir), { message: "parity: duplicate case id pipeline/x" });
 });
 
-test("an ids folder reads every file, each under its own subsystem", { skip: posix }, (t) => {
+test("an ids folder reads every file, each under its own subsystem", { skip: windows }, (t) => {
   const dir = temp(t);
   writeFileSync(join(dir, "main.txt"), "# comment\nmain/no-args\n");
   writeFileSync(join(dir, "doctor.txt"), "doctor/extra\n");
@@ -225,7 +225,7 @@ test("an ids folder reads every file, each under its own subsystem", { skip: pos
   ]);
 });
 
-test("an ids folder runs every case it names", { skip: posix || noBin }, (t) => {
+test("an ids folder runs every case it names", { skip: windows || noBin }, (t) => {
   const dir = temp(t);
   writeFileSync(join(dir, "main.txt"), "# comment\nmain/no-args\n");
   writeFileSync(join(dir, "doctor.txt"), "doctor/extra\n");
@@ -252,7 +252,7 @@ test("stub values are JSON-escaped", () => {
   assert.deepEqual(JSON.parse(expand(JSON.stringify(["{home}/x"]), jsonValues)), ['a"b\\c/x']);
 });
 
-test("home files, stubs and routes are expanded", { skip: posix }, async (t) => {
+test("home files, stubs and routes are expanded", { skip: windows }, async (t) => {
   const dir = temp(t);
   mkdirSync(join(dir, "homes/placeholders"), { recursive: true });
   writeFileSync(join(dir, "homes/placeholders/f.txt"), "{home}|{api}|{today}");
@@ -296,7 +296,7 @@ test("a PATCH is served and its authorization recorded", async () => {
   assert.deepEqual([line.method, line.headers.authorization], ["PATCH", "Bearer fake"]);
 });
 
-test("skip_stderr leaves stderr out of a case", { skip: posix }, async (t) => {
+test("skip_stderr leaves stderr out of a case", { skip: windows }, async (t) => {
   const noisy = join(temp(t), "noisy.mjs");
   writeFileSync(noisy, 'process.stderr.write("noise\\n");\n');
   const c = { id: "main/noisy", argv: [], home: null, stubs: {} };
