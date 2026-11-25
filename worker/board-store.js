@@ -528,7 +528,8 @@ export class BoardRows {
 
   // Writes the rows of a page grown past MAX_PAGE as pages packed as seed packs them, from page
   // on, with their index rows. The later pages and their index rows move up to make room. SQLite
-  // checks the page key row by row, so the pages pass through negative numbers on the way.
+  // checks the page key row by row, and moving a page copies its bytes, so each page moves once,
+  // the last first.
   split(state, page, rows, meta) {
     const jsons = rows.map((row) => JSON.stringify(row));
     const starts = [0];
@@ -542,8 +543,10 @@ export class BoardRows {
       size += bytes + 1;
     }
     const extra = starts.length - 1;
-    this.sql.exec("UPDATE board_pages SET page = -page - ? WHERE page > ?", extra, page);
-    this.sql.exec("UPDATE board_pages SET page = -page WHERE page < 0");
+    for (const { page: at } of this.sql
+      .exec("SELECT page FROM board_pages WHERE page > ? ORDER BY page DESC", page)
+      .toArray())
+      this.sql.exec("UPDATE board_pages SET page = ? WHERE page = ?", at + extra, at);
     this.sql.exec("UPDATE board_index SET page = page + ? WHERE page > ?", extra, page);
     this.sql.exec("DELETE FROM board_index WHERE page = ?", page);
     for (const [k, start] of starts.entries()) {
