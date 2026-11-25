@@ -3859,14 +3859,17 @@ export default {
     }
     return serveFactory(request, { ...env, config }, principal, ctx);
   },
-  // The board and the archive are read and parsed once, and the passes share them.
+  // The board and the archive are read and parsed once, and the passes share them. A failed
+  // read fails the passes that need it, each logged.
   scheduled(controller, env, ctx) {
     const now = new Date(controller.scheduledTime);
     const hourly = readHourly(env);
-    ctx.waitUntil(runArchive(env, now, hourly));
+    const failed = (pass) => (error) =>
+      console.warn(`${pass} failed: ${error instanceof Error ? error.message : error}`);
+    ctx.waitUntil(runArchive(env, now, hourly).catch(failed("archive pass")));
     ctx.waitUntil(pruneRetro(env, now));
     ctx.waitUntil(pruneRetroRuns(env, now));
-    ctx.waitUntil(pruneIdeaUploads(env, now, hourly));
+    ctx.waitUntil(pruneIdeaUploads(env, now, hourly).catch(failed("idea upload sweep")));
     ctx.waitUntil(pushHourly(env, now, hourly).catch(() => {}));
   },
 };

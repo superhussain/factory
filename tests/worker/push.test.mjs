@@ -621,6 +621,40 @@ test("the hourly cron reads the board and the archive once for all its passes", 
   assert.equal(sent.length, 1);
 });
 
+// A board read that throws fails the archive pass and the idea upload sweep, each with a
+// warning, rather than leaving a rejected promise.
+test("the hourly cron logs a failed board read in the archive pass and the idea sweep", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const bucket = memoryBucket();
+  await bucket.put(
+    "pipeline/global.json",
+    JSON.stringify({ schema: 1, archive: { mode: "age", n: 30 } }),
+  );
+  const get = bucket.get;
+  bucket.get = (key, options) => {
+    if (key === "board.json") throw new Error("board read failed");
+    return get(key, options);
+  };
+  const { scheduled } = (await loadProduction()).default;
+  const pending = [];
+  scheduled(
+    { scheduledTime: at("10:17").getTime() },
+    { ...serverEnv, BUCKET: bucket },
+    {
+      waitUntil: (p) => pending.push(p),
+    },
+  );
+  const results = await Promise.allSettled(pending);
+  assert.deepEqual(
+    results.map((r) => r.status),
+    ["fulfilled", "fulfilled", "fulfilled", "fulfilled", "fulfilled"],
+  );
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]).sort(), [
+    "archive pass failed: board read failed",
+    "idea upload sweep failed: board read failed",
+  ]);
+});
+
 test("the hourly cron still pushes 042-sample-retry when the spend pass throws", async (t) => {
   const sent = stubFetch(t);
   const { env, call } = setup();
