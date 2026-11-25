@@ -37,7 +37,7 @@ static BACKGROUND: AtomicBool = AtomicBool::new(true);
 /// This host's `paseo ls -g --background --json` list, with any further arguments, under
 /// PASEO_HOME when set; None when paseo is missing, fails, or prints no JSON. `--background` keeps
 /// agents in background workspaces, which the plain list leaves out. A Paseo that rejects the
-/// flag is asked once more without it, and is never sent it again by this process.
+/// flag is asked once more without it, and the flag stays off until the daemon restarts.
 pub fn paseo_ls(extra: &[&str]) -> Option<Value> {
     let exe = which("paseo")?.to_string_lossy().into_owned();
     paseo_ls_with(&exe, extra)
@@ -100,5 +100,6 @@ mod tests {
             calls,
             ["ls -g --background --json", "ls -g --json", "ls -g --json"]
         );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
