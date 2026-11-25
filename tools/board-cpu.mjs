@@ -8,7 +8,9 @@ import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { CLOUDFLARE_WORKERS } from "../tests/support/worker.mjs";
 
-// The made-up board: row n has a size drawn from the live distribution's quantiles.
+// The made-up board: row n has a size drawn from the live distribution's quantiles. As on the
+// live board, rows finish in board order, so the unfinished ones, about 4%, sit in the last
+// fifth, and the older pages hold finished rows alone.
 export function syntheticBoard(rows) {
   let seed = 7;
   const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
@@ -17,11 +19,15 @@ export function syntheticBoard(rows) {
   for (let n = 1; n <= rows; n++) {
     const r = rand();
     const stage =
-      r < 0.89 ? "merged" : r < 0.97 ? "closed" : ["idea", "spec", "build", "pr-open"][n % 4];
-    const day = String(1 + (n % 28)).padStart(2, "0");
+      n > rows * 0.8 && r < 0.2
+        ? ["idea", "spec", "build", "pr-open"][n % 4]
+        : r < 0.92
+          ? "merged"
+          : "closed";
+    const at = new Date(Date.UTC(2026, 9, 1) + n * 600_000).toISOString().replace(".000", "");
     const row = {
       id: `${n}-synthetic-job-${n}`,
-      updated: `2026-10-${day}T12:00:00Z`,
+      updated: at,
       project: ["factory", "sample", "demo"][n % 3],
       stage,
       title: `Synthetic job ${n}`,
@@ -30,7 +36,7 @@ export function syntheticBoard(rows) {
       refs: [{ kind: "followup", id: `${n + 1}-synthetic-job-${n + 1}` }],
       round: 1,
       rounds: [{ n: 1, verdict: "PASS" }],
-      ...(stage === "merged" || stage === "closed" ? { done: `2026-10-${day}T13:00:00Z` } : {}),
+      ...(stage === "merged" || stage === "closed" ? { done: at } : {}),
     };
     const want = sizes[Math.floor(rand() * sizes.length)];
     row.idea = "x".repeat(Math.max(0, want - JSON.stringify(row).length));
