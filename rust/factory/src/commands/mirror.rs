@@ -148,6 +148,9 @@ impl Mirror {
         let doc = loads(&text).map_err(|e| format!("the board is not valid JSON: {e}"))?;
         let jobs = doc["jobs"].as_array().map_or(0, Vec::len);
         let mut s = self.state.lock().unwrap();
+        // After a close since this fetch began, whatever the socket's own close and connect set
+        // stands: not live, or live again on a new socket.
+        let was_live = s.live;
         // A frame applied while this fetch ran already moved past the version it read.
         if s.etag != etag && s.seen.contains(&etag) {
             s.synced = Some(Instant::now());
@@ -157,7 +160,7 @@ impl Mirror {
             s.doc = Some(doc);
             self.moved_to(&mut s, etag);
         }
-        s.live = s.closes == closes;
+        s.live = s.closes == closes || was_live;
         Ok(jobs)
     }
 
@@ -978,6 +981,29 @@ mod tests {
         assert_eq!(m.fetch(), Ok(2));
         assert!(m.board(&json!({})).is_none());
         assert_eq!(m.state.lock().unwrap().etag, "\"e2\"");
+    }
+
+    /// A fetch that spans a close and a reconnect leaves the reconnected mirror live: the new
+    /// socket's connect, not the old fetch, decides.
+    #[test]
+    fn a_fetch_across_a_reconnect_keeps_the_mirror_live() {
+        use crate::shared::http::tests::serve_hooked;
+        let (m, _) = fetched("reconnect-mid-fetch", vec![]);
+        let socket = m.clone();
+        let (origin, _) = serve_hooked(
+            vec![(200, board_json(), vec![("ETag", "\"e2\"")])],
+            move |_| {
+                socket.closed();
+                socket.connected();
+            },
+        );
+        std::fs::write(
+            m.home.join("config.md"),
+            format!("---\napi_url: {origin}\n---\n"),
+        )
+        .unwrap();
+        assert_eq!(m.fetch(), Ok(2));
+        assert!(m.board(&json!({})).is_some());
     }
 
     /// A write sent while the Worker socket is down doesn't revive the mirror: a mirror that is
