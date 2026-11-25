@@ -18,7 +18,8 @@ use serde_json::{json, Map, Value};
 
 use crate::commands::catch_up::random_hex;
 use crate::shared::board_client::{
-    addr_path, proof, same_secret, socket_path, view, Stream, PROTOCOL,
+    addr_path, proof, same_secret, socket_path, view, Stream, MAX_PATCH_BYTES, MAX_PATCH_ROWS,
+    PROTOCOL,
 };
 use crate::shared::fs::write_atomic;
 use crate::shared::http::api;
@@ -156,6 +157,11 @@ impl Mirror {
             return false;
         };
         let mut s = self.state.lock().unwrap();
+        self.apply_locked(&mut s, frame, etag, prev)
+    }
+
+    /// `apply` with the state already locked.
+    fn apply_locked(&self, s: &mut State, frame: &Value, etag: &str, prev: &str) -> bool {
         if s.seen.iter().any(|e| e == etag) {
             return true;
         }
@@ -192,7 +198,7 @@ impl Mirror {
             doc["updated"] = updated.clone();
         }
         s.text = Arc::new(dumps(s.doc.as_ref().unwrap(), COMPACT));
-        self.moved_to(&mut s, etag.to_string());
+        self.moved_to(s, etag.to_string());
         true
     }
 
@@ -251,20 +257,28 @@ impl Mirror {
         Some((head, Arc::new(text)))
     }
 
-    /// Forwards a row PATCH to the Worker. A committed one waits until the mirror has it.
-    fn patch(&self, body: &str) -> Value {
+    /// Forwards a row PATCH to the Worker and returns its answer unchanged. A committed one goes
+    /// into the mirror at once when the Worker names the version it applied to and the mirror
+    /// holds that version, else the daemon waits for its frame. A refused one never touches it.
+    fn patch(&self, body: &Value, text: &str) -> Value {
         let sent = api(
             &self.home,
             "PATCH",
             "/api/board",
-            Some(body.as_bytes()),
+            Some(text.as_bytes()),
             &[200, 409],
             &[("Content-Type", "application/json")],
         );
         match sent {
             Ok(r) if r.status == 200 => {
                 if let Some(etag) = r.header("ETag") {
-                    self.wait_for(etag.strip_prefix("W/").unwrap_or(etag));
+                    let etag = etag.strip_prefix("W/").unwrap_or(etag);
+                    let applied = r
+                        .header("X-Board-Prev")
+                        .is_some_and(|prev| self.apply_own(body, etag, prev));
+                    if !applied {
+                        self.wait_for(etag);
+                    }
                 }
                 json!({"v": PROTOCOL, "ok": true, "status": 200})
             }
@@ -272,6 +286,36 @@ impl Mirror {
             Err(e) => json!({"v": PROTOCOL, "ok": true, "code": e.code, "stderr": e.stderr,
                              "status": e.status.map(|(code, detail)| json!([code, detail]))}),
         }
+    }
+
+    /// Applies a committed row PATCH as the rows frame the Worker announces for it: its written
+    /// rows, its removed ids, and `updated` moved forward only when the PATCH's is later. False
+    /// when the mirror is not live or does not hold `prev`, the version the Worker applied it to.
+    fn apply_own(&self, body: &Value, etag: &str, prev: &str) -> bool {
+        let mut s = self.state.lock().unwrap();
+        // A mirror that is not live has stopped hearing frames, so a write must not revive it.
+        if !s.live || s.etag != prev {
+            return false;
+        }
+        let Some(doc) = s.doc.as_ref() else {
+            return false;
+        };
+        let was = doc["updated"].as_str().unwrap_or("");
+        let updated = match body["updated"].as_str() {
+            Some(at) if at > was => Value::from(at),
+            _ => doc.get("updated").cloned().unwrap_or(Value::Null),
+        };
+        let entries = body["rows"].as_array().into_iter().flatten();
+        let (rows, removed): (Vec<&Value>, Vec<&Value>) =
+            entries.partition(|e| !e["row"].is_null());
+        let frame = json!({
+            "etag": etag,
+            "prev": prev,
+            "updated": updated,
+            "rows": rows.iter().map(|e| e["row"].clone()).collect::<Vec<_>>(),
+            "removed": removed.iter().map(|e| e["id"].clone()).collect::<Vec<_>>(),
+        });
+        self.apply_locked(&mut s, &frame, etag, prev)
     }
 
     /// Answers one request on stream. With a token, as on the loopback endpoint, the first line
@@ -330,9 +374,9 @@ impl Mirror {
                     }
                     None => refused("the mirror is not live"),
                 },
-                Some("patch") => match request["body"].as_str() {
-                    Some(body) => self.patch(body),
-                    None => refused("patch needs a body"),
+                Some("patch") => match request["body"].as_str().and_then(row_patch_body) {
+                    Some((body, text)) => self.patch(&body, text),
+                    None => refused("patch needs a board row PATCH body"),
                 },
                 Some("await") => {
                     if let Some(etag) = request["etag"].as_str() {
@@ -346,6 +390,41 @@ impl Mirror {
         };
         let _ = reader.get_mut().write_all(format!("{reply}\n").as_bytes());
     }
+}
+
+/// The PATCH body a client may send through the daemon, parsed: a board row PATCH of at most
+/// MAX_PATCH_BYTES, `{"rows": [{id, expect, row}], "reads"?: [...], "updated"?: "..."}`, where
+/// each expect and row is null or an object with the entry's id. The Worker checks the rest.
+fn row_patch_body(text: &str) -> Option<(Value, &str)> {
+    if text.len() > MAX_PATCH_BYTES {
+        return None;
+    }
+    let body: Value = serde_json::from_str(text).ok()?;
+    let doc = body.as_object()?;
+    if doc
+        .keys()
+        .any(|k| !["rows", "reads", "updated"].contains(&k.as_str()))
+        || !doc.get("reads").is_none_or(Value::is_array)
+        || !doc.get("updated").is_none_or(Value::is_string)
+    {
+        return None;
+    }
+    let rows = doc.get("rows")?.as_array()?;
+    let row_of = |v: &Value, id: &Value| v.is_null() || (v.is_object() && v.get("id") == Some(id));
+    let entry = |e: &Value| {
+        let e = e.as_object()?;
+        let id = e.get("id").filter(|id| id.is_string())?;
+        let (expect, row) = (e.get("expect")?, e.get("row")?);
+        (e.len() == 3
+            && row_of(expect, id)
+            && row_of(row, id)
+            && !(expect.is_null() && row.is_null()))
+        .then_some(())
+    };
+    if rows.is_empty() || rows.len() > MAX_PATCH_ROWS || !rows.iter().all(|e| entry(e).is_some()) {
+        return None;
+    }
+    Some((body, text))
 }
 
 /// Serves the loopback endpoint and writes `<address> <token>` to `daemon.addr`, 0600.
@@ -716,5 +795,157 @@ mod tests {
             .collect();
         assert_eq!(methods, ["GET", "PATCH", "GET", "PATCH"]);
         unlisten(&m.home);
+    }
+
+    /// Read-your-writes: a write through the daemon goes into its mirror as soon as the Worker
+    /// commits it and names the version it applied to, so an immediate `factory job` read on this
+    /// host sees it, with no wait for the frame and no refetch.
+    #[cfg(unix)]
+    #[test]
+    fn a_write_through_the_daemon_is_read_back_at_once() {
+        let (m, seen) = fetched(
+            "ryw",
+            vec![(200, "ok", vec![("ETag", "\"e2\""), ("X-Board-Prev", E1)])],
+        );
+        let home = m.home.clone();
+        listen(m.clone()).unwrap();
+        let started = Instant::now();
+        board_client::cas(&home, |text| {
+            let mut b = loads(text.unwrap()).unwrap();
+            b["jobs"][1]["stage"] = "build".into();
+            b["jobs"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"id": "2001-add-csv-export", "stage": "idea"}));
+            b["updated"] = "2026-11-23T10:00:05Z".into();
+            Ok((Some(dumps(&b, COMPACT)), ()))
+        })
+        .unwrap();
+        assert!(started.elapsed() < OWN_FRAME, "no wait for the frame");
+        let row = crate::commands::lookup::job_row(&home, "2000-synthetic-spec").unwrap();
+        assert_eq!(row["stage"], "build");
+        let added = crate::commands::lookup::job_row(&home, "2001-add-csv-export").unwrap();
+        assert_eq!(added["stage"], "idea");
+        {
+            let s = m.state.lock().unwrap();
+            assert_eq!(s.etag, "\"e2\"");
+            assert_eq!(s.doc.as_ref().unwrap()["updated"], "2026-11-23T10:00:05Z");
+        }
+        let methods: Vec<String> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.method.clone())
+            .collect();
+        assert_eq!(methods, ["GET", "PATCH"]);
+        // The Worker's own frame for the write, arriving later, changes nothing.
+        assert!(m.apply(&frame(
+            "\"e2\"",
+            E1,
+            json!([{"id": "2000-synthetic-spec", "stage": "build"}]),
+            json!([])
+        )));
+        assert_eq!(jobs(&m).as_array().unwrap().len(), 3);
+        unlisten(&home);
+    }
+
+    /// The Worker's refusal or failure comes back unchanged and leaves the mirror alone, and a
+    /// commit built on a version the mirror doesn't hold isn't applied over it.
+    #[test]
+    fn a_refused_patch_never_touches_the_mirror() {
+        let (m, _) = fetched(
+            "refused-patch",
+            vec![
+                (409, r#"{"error":"conflict"}"#, vec![]),
+                (503, "error code: 1102", vec![]),
+            ],
+        );
+        let text = r#"{"rows":[{"id":"2000-synthetic-spec","expect":{"id":"2000-synthetic-spec","stage":"spec"},"row":{"id":"2000-synthetic-spec","stage":"build"}}]}"#;
+        let (body, text) = row_patch_body(text).unwrap();
+        let before = jobs(&m);
+        assert_eq!(m.patch(&body, text)["status"], 409);
+        let busy = m.patch(&body, text);
+        assert_eq!(busy["status"][0], 503);
+        assert_eq!(busy["code"], 5);
+        assert_eq!(jobs(&m), before);
+        assert!(!m.apply_own(&body, "\"e3\"", "\"e2\""));
+        assert_eq!(jobs(&m), before);
+        assert_eq!(m.state.lock().unwrap().etag, E1);
+    }
+
+    /// Only a board row PATCH body goes through the daemon. Anything else is refused before it
+    /// reaches the Worker, and the client then writes straight to the Worker.
+    #[test]
+    fn the_daemon_forwards_only_row_patch_bodies() {
+        let (m, seen) = fetched("patch-shape", vec![]);
+        listen_tcp(m.clone()).unwrap();
+        let row = r#"{"id":"2001-x"}"#;
+        let big = format!(
+            r#"{{"rows":[{{"id":"2001-x","expect":null,"row":{{"id":"2001-x","note":"{}"}}}}]}}"#,
+            "x".repeat(MAX_PATCH_BYTES)
+        );
+        let many = format!(
+            r#"{{"rows":[{}]}}"#,
+            (0..=MAX_PATCH_ROWS)
+                .map(|n| format!(r#"{{"id":"{n}","expect":null,"row":{{"id":"{n}"}}}}"#))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        for body in [
+            "not json".to_string(),
+            "[]".to_string(),
+            r#"{"rows":[]}"#.to_string(),
+            r#"{"jobs":[],"updated":"x"}"#.to_string(),
+            format!(r#"{{"rows":[{{"id":"2001-x","expect":null,"row":{row}}}],"autonomy":{{}}}}"#),
+            format!(r#"{{"rows":[{{"id":"2001-x","expect":null,"row":{row},"url":"/x"}}]}}"#),
+            r#"{"rows":[{"id":"2001-x","expect":null,"row":{"id":"2001-y"}}]}"#.to_string(),
+            r#"{"rows":[{"id":"2001-x","expect":null,"row":null}]}"#.to_string(),
+            r#"{"rows":[{"id":7,"expect":null,"row":{"id":7}}]}"#.to_string(),
+            format!(r#"{{"rows":[{{"id":"2001-x","expect":null,"row":{row}}}],"updated":1}}"#),
+            format!(r#"{{"rows":[{{"id":"2001-x","expect":null,"row":{row}}}],"reads":{{}}}}"#),
+            big,
+            many,
+        ] {
+            let mut reader = board_client::connect_tcp(&m.home).unwrap();
+            let request = json!({"v": 1, "op": "patch", "body": body});
+            reader
+                .get_mut()
+                .write_all(format!("{request}\n").as_bytes())
+                .unwrap();
+            let mut reply = String::new();
+            reader.read_line(&mut reply).unwrap();
+            let reply: Value = serde_json::from_str(&reply).unwrap();
+            assert_eq!(reply["ok"], false, "{}", &body[..body.len().min(80)]);
+        }
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            1,
+            "only the connect GET reached the Worker"
+        );
+        let good = format!(
+            r#"{{"rows":[{{"id":"2001-x","expect":null,"row":{row}}}],"reads":[{{"id":"1999-synthetic-build","stage":"build"}}],"updated":"2026-11-23T10:00:05Z"}}"#
+        );
+        assert!(row_patch_body(&good).is_some());
+    }
+
+    /// A write sent while the Worker socket is down doesn't revive the mirror: a mirror that is
+    /// not live hears no frames, so it must keep answering nothing until the next connect.
+    #[test]
+    fn a_write_does_not_revive_a_closed_mirror() {
+        let (m, _) = fetched(
+            "closed-write",
+            vec![(200, "ok", vec![("ETag", "\"e2\""), ("X-Board-Prev", E1)])],
+        );
+        m.closed();
+        let text = r#"{"rows":[{"id":"2000-synthetic-spec","expect":{"id":"2000-synthetic-spec","stage":"spec"},"row":{"id":"2000-synthetic-spec","stage":"build"}}]}"#;
+        let (body, text) = row_patch_body(text).unwrap();
+        let started = Instant::now();
+        assert_eq!(m.patch(&body, text)["status"], 200);
+        assert!(
+            started.elapsed() < OWN_FRAME,
+            "no wait on a mirror that is not live"
+        );
+        assert!(m.board(&json!({})).is_none());
+        assert_eq!(m.state.lock().unwrap().etag, E1);
     }
 }

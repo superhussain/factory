@@ -193,7 +193,7 @@ pub fn job(call: &Call) -> Res<()> {
 }
 
 /// The board or archive row job prints, with an inferred spec_approval on an old row.
-fn job_row(home: &Path, job_id: &str) -> Res<Value> {
+pub(crate) fn job_row(home: &Path, job_id: &str) -> Res<Value> {
     let one = Map::from_iter([("job".to_string(), Value::from(job_id))]);
     let board = load_board(board_client::read_view(home, one)?.as_deref())?;
     let found = board["jobs"].as_array().and_then(|jobs| {

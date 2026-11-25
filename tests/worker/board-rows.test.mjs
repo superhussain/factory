@@ -89,6 +89,16 @@ each("patch frame", async () => {
     rows: [IDEA],
     removed: [],
   });
+  assert.equal(response.headers.get("X-Board-Prev"), SEED, "the version the frame follows");
+});
+
+each("a patch announced as changed names no prev version", async () => {
+  const s = setup();
+  const merged = { ...BUILD, stage: "merged" };
+  const response = await s.patch({ rows: [{ id: BUILD.id, expect: BUILD, row: merged }] });
+  assert.equal(response.status, 200);
+  assert.equal(s.bodies[0][1], "", "a changed notice, not a rows frame");
+  assert.equal(response.headers.get("X-Board-Prev"), null);
 });
 
 each("put frame", async () => {
