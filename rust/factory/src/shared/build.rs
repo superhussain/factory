@@ -1,5 +1,5 @@
 //! The host-profile build that `install` and `catch-up` share: one private synced source folder, a
-//! per-user target folder, and a cache of built binaries keyed by everything that shapes them.
+//! per-user target folder, and a cache of built binaries keyed by everything that shapes them. Probe.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
