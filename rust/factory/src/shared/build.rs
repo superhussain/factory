@@ -162,8 +162,7 @@ fn build(
             return Ok((binary, bytes));
         }
     }
-    if let Some(own) = own_build(checkout, host, &files) {
-        let bytes = fs::read(&own).map_err(|e| os_error(&e, Some(&own)))?;
+    if let Some((own, bytes)) = own_build(checkout, host) {
         store(&bins, &stored, &binary, &sum, &bytes)?;
         let _ = writeln!(err, "install: Rust binary from {}", own.display());
         return Ok((binary, bytes));
@@ -226,10 +225,12 @@ fn build(
     Ok((binary, built))
 }
 
-/// The running binary when it is this checkout's own rust/target host build and no input changed
-/// after it was built. install.sh and install.ps1 build there, then run its install, so the cache
-/// takes that build rather than compiling the same inputs again at the build-src path.
-fn own_build(checkout: &Path, host: &Host, files: &BTreeMap<String, Vec<u8>>) -> Option<PathBuf> {
+/// The running binary and its bytes when it is this checkout's own rust/target host build and its
+/// stamp still holds: the inputs hash and the binary's sha256 both match now. install.sh and
+/// install.ps1 build there and write the stamp, then run its install, so the cache takes that
+/// build rather than compiling the same inputs again at the build-src path. A build without a
+/// stamp, such as a plain cargo build, is rebuilt.
+fn own_build(checkout: &Path, host: &Host) -> Option<(PathBuf, Vec<u8>)> {
     let name = Path::new(BINARY).file_name()?;
     let own = checkout
         .join("rust")
@@ -239,13 +240,35 @@ fn own_build(checkout: &Path, host: &Host, files: &BTreeMap<String, Vec<u8>>) ->
     if !host.exe.as_deref().is_some_and(|exe| same_path(exe, &own)) {
         return None;
     }
-    let built = fs::metadata(&own).and_then(|m| m.modified()).ok()?;
-    let fresh = files.keys().all(|rel| {
-        fs::metadata(checkout.join(rel))
-            .and_then(|m| m.modified())
-            .is_ok_and(|m| m <= built)
-    });
-    fresh.then_some(own)
+    let stamp =
+        fs::read_to_string(own.with_file_name(format!("{}.stamp", name.to_string_lossy()))).ok()?;
+    let bytes = fs::read(&own).ok()?;
+    let want = [stamp_inputs(checkout).ok()?, sha(&bytes)];
+    stamp
+        .lines()
+        .eq(want.iter().map(String::as_str))
+        .then_some((own, bytes))
+}
+
+/// The stamp's inputs hash, as install.sh computes it: the sha256 of `sha256sum` lines, sorted by
+/// path, for every regular file under rust/ but rust/target and under skills/factory, which holds
+/// every file outside rust/ the crate embeds.
+fn stamp_inputs(checkout: &Path) -> io::Result<String> {
+    let mut files = BTreeMap::new();
+    for (dir, skip) in [("rust", "target"), ("skills/factory", "")] {
+        let root = checkout.join(dir);
+        for rel in files_under(&root, &root, skip)? {
+            let path = root.join(&rel);
+            if fs::symlink_metadata(&path)?.is_file() {
+                files.insert(format!("{dir}/{}", posix(&rel)), sha(&fs::read(&path)?));
+            }
+        }
+    }
+    let lines: String = files
+        .iter()
+        .map(|(rel, sum)| format!("{sum}  {rel}\n"))
+        .collect();
+    Ok(sha(lines.as_bytes()))
 }
 
 /// Store bytes as the cached binary under stored, then keep only the newest KEEP folders in bins.
@@ -821,49 +844,91 @@ pub(crate) mod tests {
         assert!(!files.keys().any(|r| r.starts_with("rust/target/")));
     }
 
+    /// Runs install.sh's stamp lines on checkout, so the stamp is the one the installer writes.
+    fn install_sh_stamp(checkout: &Path) {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let script = fs::read_to_string(repo.join("tools/install.sh")).unwrap();
+        let start = script.find("if command -v sha256sum").unwrap();
+        let end = start + script[start..].find("\n)\n").unwrap() + 3;
+        let run = Command::new("/bin/sh")
+            .args(["-eu", "-c"])
+            .arg(format!("checkout=\"$1\"\n{}", &script[start..end]))
+            .arg("sh")
+            .arg(checkout)
+            .output()
+            .unwrap();
+        assert!(
+            run.status.success(),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+    }
+
     #[test]
-    fn the_checkouts_own_fresh_build_is_cached_instead_of_rebuilt() {
+    fn the_checkouts_own_stamped_build_is_cached_instead_of_rebuilt() {
         let root = temp_dir("build-own");
         let checkout = checkout(&root);
         fake_rustc(&root.join("bin"), "1.100.0");
         let cargo = fake_cargo(&root, "rebuilt");
         let own = checkout.join("rust/target/host/factory");
+        let stamp = checkout.join("rust/target/host/factory.stamp");
         fs::create_dir_all(own.parent().unwrap()).unwrap();
         fs::write(&own, "own build").unwrap();
+        let lib = checkout.join("rust/lib.rs");
         let mut machine = host(&root, &[], Some(cargo));
         machine.exe = Some(own.clone());
-        let mut err = Vec::new();
-        let (path, bytes) = rust_binary(&checkout, &machine, &mut err).unwrap();
-        assert_eq!(
-            (fs::read(&path).unwrap(), bytes),
-            (b"own build".to_vec(), b"own build".to_vec())
-        );
-        assert_eq!(
-            String::from_utf8(err).unwrap(),
-            format!("install: Rust binary from {}\n", own.display())
-        );
-        assert!(!root.join("runs").exists());
-        // An input edited after the build, or another running binary, means a real build.
-        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
-        fs::write(checkout.join("rust/lib.rs"), "// edited\n").unwrap();
-        fs::File::options()
-            .write(true)
-            .open(checkout.join("rust/lib.rs"))
-            .unwrap()
-            .set_modified(later)
-            .unwrap();
-        let path = rust_binary(&checkout, &machine, &mut Vec::new()).unwrap().0;
-        assert_eq!(fs::read(path).unwrap(), b"rebuilt");
-        fs::write(checkout.join("rust/lib.rs"), "// edited again\n").unwrap();
-        machine.exe = Some(root.join("elsewhere/factory"));
-        rust_binary(&checkout, &machine, &mut Vec::new()).unwrap();
-        assert_eq!(
-            fs::read_to_string(root.join("runs"))
+        let runs = || fs::read_to_string(root.join("runs")).map_or(0, |t| t.lines().count());
+        let edit = |text: &str| {
+            fs::write(&lib, text).unwrap();
+            // An mtime from long ago, so only the content can tell the edit apart.
+            fs::File::options()
+                .write(true)
+                .open(&lib)
                 .unwrap()
-                .lines()
-                .count(),
-            2
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1))
+                .unwrap();
+        };
+        let accepted = |machine: &Host| {
+            let mut err = Vec::new();
+            let (path, bytes) = rust_binary(&checkout, machine, &mut err).unwrap();
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+            String::from_utf8(err).unwrap()
+                == format!("install: Rust binary from {}\n", own.display())
+        };
+        edit("// one\n");
+        install_sh_stamp(&checkout);
+        assert_eq!(mode(&stamp), 0o600);
+        assert_eq!(
+            fs::read_to_string(&stamp).unwrap(),
+            format!(
+                "{}\n{}\n",
+                stamp_inputs(&checkout).unwrap(),
+                sha(b"own build")
+            )
         );
+        assert!(accepted(&machine));
+        assert_eq!(runs(), 0);
+        // An input edited after the stamp is rebuilt, however old its mtime.
+        edit("// two\n");
+        assert!(!accepted(&machine));
+        assert_eq!(runs(), 1);
+        // A fresh stamp is trusted again.
+        edit("// three\n");
+        install_sh_stamp(&checkout);
+        assert!(accepted(&machine));
+        // A binary changed after its stamp, a missing stamp, or another running binary means a real build.
+        edit("// four\n");
+        install_sh_stamp(&checkout);
+        fs::write(&own, "changed build").unwrap();
+        assert!(!accepted(&machine));
+        edit("// five\n");
+        fs::remove_file(&stamp).unwrap();
+        assert!(!accepted(&machine));
+        edit("// six\n");
+        install_sh_stamp(&checkout);
+        machine.exe = Some(root.join("elsewhere/factory"));
+        assert!(!accepted(&machine));
+        assert_eq!(runs(), 4);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -21,5 +21,21 @@ Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
 Push-Location (Join-Path $checkout 'rust')
 try { & $cargo build --profile host --locked } finally { Pop-Location }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& (Join-Path $checkout 'rust\target\host\factory.exe') install --source $checkout --destination $Destination --replace
+# The stamp factory install checks before it trusts this build, computed as install.sh does: a hash of every
+# file under rust\ but rust\target and under skills\factory, then the binary's sha256.
+$files = @(Get-ChildItem -LiteralPath (Join-Path $checkout 'rust') -Force | Where-Object Name -ne 'target' |
+    ForEach-Object { if ($_.PSIsContainer) { Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Force } else { $_ } }) +
+  @(Get-ChildItem -LiteralPath (Join-Path $checkout 'skills\factory') -Recurse -File -Force)
+[string[]]$rels = $files | Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
+  ForEach-Object { $_.FullName.Substring($checkout.Length + 1).Replace('\', '/') }
+[Array]::Sort($rels, [StringComparer]::Ordinal)
+$lines = foreach ($rel in $rels) {
+  (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $checkout $rel)).Hash.ToLowerInvariant() + '  ' + $rel + "`n"
+}
+$digest = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes(-join $lines))
+$inputs = -join ($digest | ForEach-Object { $_.ToString('x2') })
+$exe = Join-Path $checkout 'rust\target\host\factory.exe'
+$binary = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant()
+[IO.File]::WriteAllText("$exe.stamp", "$inputs`n$binary`n")
+& $exe install --source $checkout --destination $Destination --replace
 exit $LASTEXITCODE
