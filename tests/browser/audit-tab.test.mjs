@@ -206,14 +206,19 @@ test("the audit tab counts a skip marker row as no call", { timeout: 120000 }, a
         session: "-",
         skipped: true,
       };
-      await openAudit(page, origin, 1440, 900, [ROWS[0], ROWS[1], marker]);
+      // A flagged row that also carries skipped: true still counts as a flagged call.
+      const flaggedSkip = {
+        ...call(8, "main", "Bash", ["recursive-delete"], "rm -rf build"),
+        skipped: true,
+      };
+      await openAudit(page, origin, 1440, 900, [ROWS[0], ROWS[1], marker, flaggedSkip]);
       const doc = await page.$eval("#d-doc", (d) => ({
         summary: d.querySelector("p").textContent,
         rows: d.querySelectorAll("table.audit tbody tr").length,
       }));
       assert.deepEqual(doc, {
-        summary: "2 calls from 1 host, 1 flagged. Each host redacted its targets before upload.",
-        rows: 3,
+        summary: "3 calls from 1 host, 2 flagged. Each host redacted its targets before upload.",
+        rows: 4,
       });
     } finally {
       await context.close();

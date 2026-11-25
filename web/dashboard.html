@@ -5688,8 +5688,9 @@ function renderAudit(f) {
     const [x, y] = [key(a), key(b)];
     return x < y ? -1 : x > y ? 1 : 0;
   });
-  // A row with skipped: true is the marker a push leaves when it could not read its transcripts, not a call.
-  const calls = rows.filter((r) => r.skipped !== true);
+  // A row with skipped: true and no flags is the marker a push leaves when it could not read its transcripts, not a call.
+  // A flagged row always counts, whatever else it carries.
+  const calls = rows.filter((r) => r.skipped !== true || (Array.isArray(r.flags) && r.flags.length));
   const hosts = new Set(calls.map((r) => r.host)).size;
   const flagged = calls.filter((r) => Array.isArray(r.flags) && r.flags.length).length;
   const n = (count, word) => count + ' ' + word + (count === 1 ? '' : 's');
