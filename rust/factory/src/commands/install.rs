@@ -477,15 +477,28 @@ fn attempt_install(
     }
     attempt.stage = None;
     let _ = writeln!(out, "{}", target.display());
-    if let Some(backup) = backup {
-        match hook("rmtree-backup").and_then(|_| fs::remove_dir_all(&backup)) {
+    // This install's backup and any an earlier install could not remove, such as one whose
+    // factory.exe was still running on Windows.
+    let mut backups: Vec<PathBuf> = fs::read_dir(&destination)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("factory.backup-"))
+        })
+        .collect();
+    backups.sort();
+    for backup in backups {
+        match hook("rmtree-backup").and_then(|_| remove_tree(&backup)) {
             Ok(()) => {
                 let _ = writeln!(out, "removed {}", backup.display());
             }
             Err(_) => {
                 let _ = writeln!(
                     err,
-                    "install: could not remove {}; remove it by hand",
+                    "install: could not remove {}; the next install tries again",
                     backup.display()
                 );
             }
@@ -494,6 +507,43 @@ fn attempt_install(
     attempt.current = destination.join(LEGACY);
     drop_legacy(&destination, out, err)?;
     Ok(target)
+}
+
+/// Removes a backup tree, trying three times. Windows refuses to delete a read-only file or
+/// one another process holds open, so each try first clears read-only marks there.
+fn remove_tree(path: &Path) -> io::Result<()> {
+    let mut tries = 1;
+    loop {
+        #[cfg(windows)]
+        clear_readonly(path);
+        match fs::remove_dir_all(path) {
+            Err(_) if tries < 3 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            done => return done,
+        }
+    }
+}
+
+/// Clears the read-only mark on every file under path, never following a link or junction.
+#[cfg(windows)]
+fn clear_readonly(path: &Path) {
+    if is_link(path).unwrap_or(true) {
+        return;
+    }
+    let Ok(meta) = fs::metadata(path) else {
+        return;
+    };
+    if meta.is_dir() {
+        for entry in fs::read_dir(path).into_iter().flatten().flatten() {
+            clear_readonly(&entry.path());
+        }
+    } else if meta.permissions().readonly() {
+        let mut permissions = meta.permissions();
+        permissions.set_readonly(false);
+        let _ = fs::set_permissions(path, permissions);
+    }
 }
 
 /// (source checkout, skills root, replace) from the operands, or None when they do not fit.
@@ -716,12 +766,12 @@ mod tests {
     }
 
     #[test]
-    fn refusal_keeps_install_and_replacement_removes_its_backup() {
+    fn refusal_keeps_install_and_replacement_removes_every_backup() {
         let t = T::new("refusal");
+        t.install(false);
         let older = t.destination.join("factory.backup-older");
         fs::create_dir_all(&older).unwrap();
-        fs::write(older.join("keep"), "keep").unwrap();
-        t.install(false);
+        fs::write(older.join("left"), "left").unwrap();
         fs::write(t.target().join("SKILL.md"), "locally edited").unwrap();
         let old = snapshot(&t.target());
         assert_eq!(
@@ -732,19 +782,24 @@ mod tests {
             )
         );
         assert_eq!(snapshot(&t.target()), old);
-        let (lines, _) = t.install(true);
-        let backup = PathBuf::from(lines[1].strip_prefix("removed ").unwrap());
-        assert_eq!(lines[0], t.target().display().to_string());
-        assert!(backup
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with("factory.backup-"));
-        assert!(!lexists(&backup));
-        fs::write(t.target().join("SKILL.md"), "second edit").unwrap();
-        t.install(true);
         assert_eq!(t.backups(), [older.clone()]);
-        assert_eq!(fs::read_to_string(older.join("keep")).unwrap(), "keep");
+        let (lines, _) = t.install(true);
+        assert_eq!(lines[0], t.target().display().to_string());
+        let removed: Vec<PathBuf> = lines[1..]
+            .iter()
+            .map(|l| PathBuf::from(l.strip_prefix("removed ").unwrap()))
+            .collect();
+        assert_eq!(removed.len(), 2, "{lines:?}");
+        assert!(removed.contains(&older));
+        for backup in &removed {
+            assert!(backup
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("factory.backup-"));
+            assert!(!lexists(backup));
+        }
+        assert!(t.backups().is_empty());
     }
 
     #[test]
@@ -763,7 +818,7 @@ mod tests {
         assert_eq!(
             err,
             format!(
-                "install: could not remove {}; remove it by hand\n",
+                "install: could not remove {}; the next install tries again\n",
                 backups[0].display()
             )
         );
@@ -776,6 +831,13 @@ mod tests {
             "old contents"
         );
         assert!(!t.destination.join(".factory-install.lock").exists());
+        // The next replacement removes the leftover along with its own backup.
+        t.hook(|_| Ok(()));
+        fs::write(t.target().join("SKILL.md"), "edited again").unwrap();
+        let (lines, err) = t.install(true);
+        assert_eq!((lines.len(), err.as_str()), (3, ""));
+        assert!(lines.contains(&format!("removed {}", backups[0].display())));
+        assert!(t.backups().is_empty());
     }
 
     #[test]
@@ -1097,5 +1159,25 @@ mod tests {
         ] {
             assert!(feature.contains(rule), "{rule}");
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use crate::shared::fs::temp_dir;
+
+    /// Windows refuses to delete a read-only file, so the removal clears the mark first.
+    #[test]
+    fn read_only_backup_is_removed() {
+        let backup = temp_dir("read-only-backup").join("factory.backup-0");
+        fs::create_dir_all(backup.join("runtime")).unwrap();
+        let file = backup.join("runtime/factory.exe");
+        fs::write(&file, "old").unwrap();
+        let mut permissions = fs::metadata(&file).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&file, permissions).unwrap();
+        remove_tree(&backup).unwrap();
+        assert!(!lexists(&backup));
     }
 }

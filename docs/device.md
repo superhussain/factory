@@ -34,11 +34,13 @@ An identical install is a no-content-change success. `tools/install.sh` always p
 ```
 
 Replacement moves the old bundle to `factory.backup-<uuid>` beside the installed
-directory, switches in the new one, then deletes that backup and prints
-`removed <path>`. A failed switch restores the old bundle. If the delete fails,
-the install still succeeds and warns
-`install: could not remove <path>; remove it by hand`. It never merges trees
-or deletes older backups. Copy out any local edits before `--replace`. A completed
+directory, switches in the new one, then deletes that backup and any
+`factory.backup-*` an earlier install left, printing `removed <path>` for each.
+On Windows it clears read-only marks first, and it tries each delete three times.
+A failed switch restores the old bundle. If a delete still fails, for example
+because that bundle's `factory.exe` is running, the install still succeeds and warns
+`install: could not remove <path>; the next install tries again`. It never merges
+trees. Copy out any local edits before `--replace`. A completed
 sibling stage is switched only after validation. Pause other installers and
 editors during replacement. `.factory-install.lock` serializes cooperating
 installers, not arbitrary external filesystem writers. An existing lock fails
