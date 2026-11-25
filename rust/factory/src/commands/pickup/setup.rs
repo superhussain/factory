@@ -366,10 +366,20 @@ const KEEP_ALIVE: [&str; 3] = [
     "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>",
 ];
 
-/// True when the unit's scheduled task has every KEEP_ALIVE setting.
-fn task_unlimited(unit: &Unit) -> bool {
+/// The unit's scheduled task definition from `schtasks /Query /XML`, or None when there is no task.
+fn task_definition(unit: &Unit) -> Option<String> {
     let (code, xml) = setup_run(&["schtasks", "/Query", "/TN", unit.task, "/XML"], None);
-    code == 0 && KEEP_ALIVE.iter().all(|s| xml.contains(s))
+    (code == 0).then_some(xml)
+}
+
+/// True when a task definition, as `schtasks /Query /XML` prints it, has every KEEP_ALIVE setting.
+pub(super) fn keeps_alive(xml: &str) -> bool {
+    KEEP_ALIVE.iter().all(|s| xml.contains(s))
+}
+
+/// True when the unit's scheduled task exists and has every KEEP_ALIVE setting.
+fn task_unlimited(unit: &Unit) -> bool {
+    task_definition(unit).is_some_and(|xml| keeps_alive(&xml))
 }
 
 /// Creates or replaces the daemon task from task_xml, through a UTF-16 file beside cmd, the only
@@ -590,11 +600,17 @@ pub(crate) fn timer_drift(scheduler: &str, values: &TimerValues) -> Option<Strin
     } else {
         let file = timer_path(scheduler, unit);
         if fs::read(&file).ok().as_deref() == Some(timer_text(scheduler, values).as_bytes()) {
-            if scheduler == "schtasks" && unit.keep_alive && !task_unlimited(unit) {
-                return Some(format!(
-                    "the {} task ends its loop after 72 hours or on battery; --install removes those limits",
-                    unit.task
-                ));
+            if scheduler == "schtasks" && unit.keep_alive {
+                match task_definition(unit) {
+                    None => return Some(format!("no scheduled task {}", unit.task)),
+                    Some(xml) if !keeps_alive(&xml) => {
+                        return Some(format!(
+                            "the {} task ends its loop after 72 hours or on battery; --install removes those limits",
+                            unit.task
+                        ))
+                    }
+                    Some(_) => {}
+                }
             }
             return None;
         }

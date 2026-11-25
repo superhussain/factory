@@ -11279,6 +11279,112 @@ mod daemon_setup_test {
         assert!(timer_drift("schtasks", &timer_values(&ds.fx.home, &DAEMON)).is_none());
     }
 
+    /// What `schtasks /Query /XML` printed through a pipe for a task created from task_xml, on a
+    /// Windows host: Task Scheduler reorders the settings and ends lines with CR CR LF. The
+    /// names, SID and path are placeholders.
+    const QUERIED_TASK: [&str; 32] = [
+        "<?xml version=\"1.0\" encoding=\"UTF-16\"?>",
+        "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">",
+        "  <RegistrationInfo>",
+        "    <URI>\\factory-daemon</URI>",
+        "  </RegistrationInfo>",
+        "  <Principals>",
+        "    <Principal id=\"Author\">",
+        "      <UserId>S-1-5-21-0-0-0-1001</UserId>",
+        "      <LogonType>InteractiveToken</LogonType>",
+        "    </Principal>",
+        "  </Principals>",
+        "  <Settings>",
+        "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>",
+        "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>",
+        "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>",
+        "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+        "    <IdleSettings>",
+        "      <StopOnIdleEnd>true</StopOnIdleEnd>",
+        "      <RestartOnIdle>false</RestartOnIdle>",
+        "    </IdleSettings>",
+        "  </Settings>",
+        "  <Triggers>",
+        "    <LogonTrigger>",
+        "      <UserId>HOST\\someone</UserId>",
+        "    </LogonTrigger>",
+        "  </Triggers>",
+        "  <Actions Context=\"Author\">",
+        "    <Exec>",
+        "      <Command>\"C:\\Users\\someone\\.config\\factory-daemon.cmd\"</Command>",
+        "    </Exec>",
+        "  </Actions>",
+        "</Task>",
+    ];
+
+    /// The drift check reads every keep-alive setting in the real query output, so a current task
+    /// does not drift on every catch-up, and a missing setting does.
+    #[test]
+    fn queried_task_keeps_alive() {
+        let xml = QUERIED_TASK.join("\r\r\n") + "\r\r\n";
+        assert!(keeps_alive(&xml));
+        let battery = "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>";
+        assert!(!keeps_alive(&xml.replace(battery, "")));
+    }
+
+    /// With no task to query, drift names the missing task rather than its limits.
+    #[test]
+    fn schtasks_drift_names_a_missing_task() {
+        let ds = Ds::new("schtasks");
+        assert_eq!(ds.run(Install).0, 0);
+        ds.sched.borrow_mut().task = false;
+        assert_eq!(
+            timer_drift("schtasks", &timer_values(&ds.fx.home, &DAEMON)).as_deref(),
+            Some("no scheduled task factory-daemon")
+        );
+    }
+
+    /// A /Create /XML that fails on a limited task leaves the running loop alone: no /End, kill or
+    /// /Run.
+    #[test]
+    fn failed_task_replace_leaves_the_loop_running() {
+        let ds = Ds::new("schtasks");
+        assert_eq!(ds.run(Install).0, 0);
+        ds.sched.borrow_mut().task_xml = "<Task><Settings /></Task>".into();
+        let fake = ds.sched.clone();
+        ds.fx.set_fakes(|f| {
+            f.setup_run = Some(Rc::new(move |argv, stdin| {
+                let answer = fake.borrow_mut().answer(argv, stdin);
+                if argv[..2] == ["schtasks", "/Create"] {
+                    return (1, "ERROR: Access is denied.\n".into());
+                }
+                answer
+            }))
+        });
+        ds.sched.borrow_mut().runs.clear();
+        let (code, _, err) = ds.run(Install);
+        assert_eq!(code, 1);
+        assert!(
+            err.contains("could not install the schtasks service: ERROR: Access is denied."),
+            "{err}"
+        );
+        let runs = &ds.sched.borrow().runs;
+        assert!(runs.iter().any(|a| a[1] == "/Create"));
+        assert!(
+            !runs
+                .iter()
+                .any(|a| a[1] == "/End" || a[1] == "/Run" || a[0] == "kill"),
+            "{runs:?}"
+        );
+        assert!(ds.sched.borrow().daemon.is_some(), "the daemon still runs");
+    }
+
+    /// `<` and `>` in the path are escaped in the task's XML.
+    #[test]
+    fn daemon_task_xml_escapes_angle_brackets() {
+        let xml = task_xml(Path::new(r"C:\Users\x<y>\factory-daemon.cmd"), r"HOST\a<b>");
+        assert!(
+            xml.contains("<Command>\"C:\\Users\\x&lt;y&gt;\\factory-daemon.cmd\"</Command>"),
+            "{xml}"
+        );
+        assert!(xml.contains("<UserId>HOST\\a&lt;b&gt;</UserId>"), "{xml}");
+    }
+
     #[test]
     fn fix_lines_quote_the_schtasks_path() {
         let ds = Ds::new("schtasks");

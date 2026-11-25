@@ -1013,10 +1013,10 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
     // A Windows loop that died leaves no daemon on the lock and nothing restarts it before logon,
     // so a current skill reinstalls too, and the install's /Run starts it. A new skill's restart
     // already runs /Run.
-    let daemon_stale = daemon.is_some_and(|s| {
-        daemon_drift(s, home)
-            || (current && s == "schtasks" && matches!(locked_pid(home), Ok(None)))
-    });
+    let drifted = daemon.is_some_and(|s| daemon_drift(s, home));
+    let dead =
+        !drifted && current && daemon == Some("schtasks") && matches!(locked_pid(home), Ok(None));
+    let daemon_stale = drifted || dead;
     if current {
         outln!(out, "skill: current at {h7}");
     } else {
@@ -1033,9 +1033,9 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             outln!(out, "daemon service: current");
         }
     } else {
-        // Reinstalling only the daemon service changes no skill or timer this backup keeps;
-        // `daemon setup --install` backs up what it replaces.
-        let service_only = current && !stale && !retro && legacy.is_empty();
+        // Starting a dead loop rewrites nothing, so it takes no backup. A drifted unit does: this
+        // backup is the only copy of its old file.
+        let service_only = dead && !stale && !retro && legacy.is_empty();
         let backup = match (!service_only).then(|| catch_up_backup(home, skill)) {
             None => None,
             Some(Ok(folder)) => {
@@ -2700,11 +2700,10 @@ mod tests {
         t.daemon(Some("launchd"), true);
         let (code, lines) = t.lines();
         assert_eq!(code, 0);
-        // The skill is current, so reinstalling only the service takes no skill backup.
-        assert_eq!(t.backups().len(), backups);
-        assert!(!lines.iter().any(|l| l.starts_with("backup:")), "{lines:?}");
+        // A drifted unit is backed up before the install rewrites it.
+        assert_eq!(t.backups().len(), backups + 1);
         assert_eq!(
-            lines[3..5],
+            lines[4..6],
             [
                 "pickup timer: none on this host, left alone",
                 "daemon service: installed launchd service: /synthetic/factory.daemon.plist"
