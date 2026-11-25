@@ -54,8 +54,9 @@ struct Job {
     /// Whether the job is still active on the board. An inactive job is dropped once it has
     /// nothing left to push.
     active: bool,
-    /// Whether a live session on this host holds the job, so it is not pulled automatically.
-    held: bool,
+    /// Until when a live session on this host holds the job, so it is not pulled automatically:
+    /// the moment its claim goes stale, even if the board never changes again.
+    held_until: Option<Instant>,
     push_at: Option<Instant>,
     pull_at: Option<Instant>,
     /// Failed pushes and pulls in a row, for the retry backoff.
@@ -105,14 +106,16 @@ fn active(row: &Value) -> Option<(&str, &str)> {
     valid_job_target(slug, id).then_some((slug, id))
 }
 
-/// Whether a row's claim names device and was seen within stale_minutes.
-fn held_by(row: &Value, device: &str, stale_minutes: u32) -> bool {
+/// How much longer a row's claim holds the job here: while it names device and was seen within
+/// stale_minutes. None once it doesn't.
+fn held_for(row: &Value, device: &str, stale_minutes: u32) -> Option<Duration> {
     let claim = &row["claim"];
-    claim["device"].as_str() == Some(device)
-        && claim["seen"]
-            .as_str()
-            .and_then(elapsed_seconds)
-            .is_some_and(|age| age < i64::from(stale_minutes) * 60)
+    if claim["device"].as_str() != Some(device) {
+        return None;
+    }
+    let age = claim["seen"].as_str().and_then(elapsed_seconds)?;
+    let left = i64::from(stale_minutes) * 60 - age;
+    (left > 0).then(|| Duration::from_secs(left as u64))
 }
 
 /// A job folder the sync may read: a real directory, with no symlink or junction at it or at
@@ -169,11 +172,11 @@ impl JobSync {
             if !real_dir(&self.folder(&key)) {
                 continue;
             }
-            let held = held_by(row, &device, stale_minutes);
+            let held_until = held_for(row, &device, stale_minutes).map(|left| now + left);
             let row = row_key(row);
             let job = self.jobs.entry(key).or_default();
             job.active = true;
-            job.held = held;
+            job.held_until = held_until;
             if job.row != row {
                 job.row = row;
                 job.pull_at.get_or_insert(now);
@@ -210,8 +213,10 @@ impl JobSync {
                 return;
             }
             let (slug, id) = key.split_once('/').unwrap();
-            // A held job's pull stays queued until no live session here holds it.
-            if !job.held && job.pull_at.is_some_and(|at| at <= now) {
+            // A held job's pull stays queued until no live session here holds it: until the claim
+            // moves or its deadline passes, whichever comes first.
+            let held = job.held_until.is_some_and(|until| now < until);
+            if !held && job.pull_at.is_some_and(|at| at <= now) {
                 job.pull_at = match pull_job_files(&self.home, slug, id, true) {
                     Ok((line, _, got)) => {
                         if !got.is_empty() {
@@ -305,7 +310,7 @@ pub fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::http::tests::{home_for, serve};
+    use crate::shared::http::tests::{home_for, serve, Seen};
     use crate::shared::project::sha;
     use serde_json::json;
     use std::fs;
@@ -320,11 +325,18 @@ mod tests {
     /// under test makes more or fewer requests.
     fn serve_routes(
         route: impl Fn(&str, &str, usize) -> Reply + Send + 'static,
-    ) -> (String, Arc<Mutex<Vec<crate::shared::http::tests::Seen>>>) {
+    ) -> (String, Arc<Mutex<Vec<Seen>>>) {
+        serve_requests(move |r, nth| route(&r.method, &r.path, nth))
+    }
+
+    /// `serve_routes`, with the whole request, headers and body included, for the route.
+    fn serve_requests(
+        route: impl Fn(&Seen, usize) -> Reply + Send + 'static,
+    ) -> (String, Arc<Mutex<Vec<Seen>>>) {
         use std::io::{BufRead, BufReader, Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-        let seen: Arc<Mutex<Vec<crate::shared::http::tests::Seen>>> = Arc::default();
+        let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
         let log = seen.clone();
         std::thread::spawn(move || {
             let mut counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -355,15 +367,18 @@ mod tests {
                     .map_or(0, |(_, v)| v.parse().unwrap());
                 let mut body = vec![0; length];
                 reader.read_exact(&mut body).unwrap();
-                let nth = counts.entry(format!("{method} {path}")).or_default();
-                let (status, reply, extra) = route(&method, &path, *nth);
-                *nth += 1;
-                log.lock().unwrap().push(crate::shared::http::tests::Seen {
+                let request = Seen {
                     method,
                     path,
                     headers,
                     body,
-                });
+                };
+                let nth = counts
+                    .entry(format!("{} {}", request.method, request.path))
+                    .or_default();
+                let (status, reply, extra) = route(&request, *nth);
+                *nth += 1;
+                log.lock().unwrap().push(request);
                 let mut head = format!("HTTP/1.0 {status} X\r\n");
                 for (k, v) in extra {
                     head.push_str(&format!("{k}: {v}\r\n"));
@@ -385,6 +400,68 @@ mod tests {
             .map(|(name, etag)| json!({"name": name, "etag": format!("\"{etag}\"")}))
             .collect();
         (200, Value::from(rows).to_string(), vec![])
+    }
+
+    /// One job's files in a fake R2, by name: (body, ETag without quotes).
+    type Store = Arc<Mutex<BTreeMap<String, (String, String)>>>;
+
+    /// A fake R2 holding files for the job. A PUT honours `If-Match` and `If-None-Match: *` as
+    /// R2 does, so a stale condition really meets a 412, and a PUT that lands gets a new ETag.
+    fn fake_r2(files: &[(&str, &str, &str)]) -> (String, Arc<Mutex<Vec<Seen>>>, Store) {
+        let store: Store = Arc::new(Mutex::new(
+            files
+                .iter()
+                .map(|(name, body, etag)| (name.to_string(), (body.to_string(), etag.to_string())))
+                .collect(),
+        ));
+        let r2 = store.clone();
+        let job = format!("/api/jobs/alpha/{JOB}/");
+        let puts = std::sync::atomic::AtomicUsize::new(0);
+        let (origin, seen) = serve_requests(move |r, _| {
+            let mut files = r2.lock().unwrap();
+            let rel = r.path.strip_prefix(&job).unwrap_or(&r.path);
+            let current = files.get(rel).map(|(_, etag)| format!("\"{etag}\""));
+            match r.method.as_str() {
+                "GET" if rel == "?etags=1" => {
+                    let rows: Vec<(&str, &str)> = files
+                        .iter()
+                        .map(|(name, (_, etag))| (name.as_str(), etag.as_str()))
+                        .collect();
+                    listing(&rows)
+                }
+                "GET" => files
+                    .get(rel)
+                    .map_or((404, String::new(), vec![]), |(body, etag)| {
+                        file(body, etag)
+                    }),
+                "PUT" => {
+                    let allowed = match (r.header("If-Match"), r.header("If-None-Match")) {
+                        (Some(tag), _) => current.as_deref() == Some(tag),
+                        (None, Some("*")) => current.is_none(),
+                        _ => true,
+                    };
+                    if !allowed {
+                        return (412, String::new(), vec![]);
+                    }
+                    let n = puts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let etag = format!("put{n}");
+                    let body = String::from_utf8(r.body.clone()).unwrap();
+                    files.insert(rel.to_string(), (body, etag.clone()));
+                    (200, String::new(), vec![("ETag", format!("\"{etag}\""))])
+                }
+                _ => (404, String::new(), vec![]),
+            }
+        });
+        (origin, seen, store)
+    }
+
+    /// R2's body for a file.
+    fn in_r2(store: &Store, rel: &str) -> String {
+        store.lock().unwrap()[rel].0.clone()
+    }
+
+    fn manifest(f: &Path) -> Value {
+        crate::shared::pyjson::loads(&fs::read_to_string(f.join(".sync.json")).unwrap()).unwrap()
     }
 
     fn row(stage: &str, seen: &str) -> Value {
@@ -653,12 +730,32 @@ mod tests {
         let home = with_job("job-sync-stale-claim", "http://127.0.0.1:9");
         let mut sync = JobSync::new(&home);
         let t0 = Instant::now();
+        let held_until = |sync: &JobSync| sync.jobs.values().next().unwrap().held_until;
         sync.rows(&[claimed(&home, "build", "2020-01-01T00:00:00Z")], t0);
-        assert!(!sync.jobs.values().next().unwrap().held);
+        assert_eq!(held_until(&sync), None);
         sync.rows(&[row("build", &crate::shared::time::now())], t0);
-        assert!(!sync.jobs.values().next().unwrap().held);
+        assert_eq!(held_until(&sync), None);
         sync.rows(&[claimed(&home, "build", &crate::shared::time::now())], t0);
-        assert!(sync.jobs.values().next().unwrap().held);
+        assert!(held_until(&sync).is_some_and(|at| at > t0 + Duration::from_secs(119 * 60)));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_claim_that_goes_stale_on_a_quiet_board_releases_its_pull() {
+        let (origin, seen, _store) = fake_r2(&[]);
+        let home = with_job("job-sync-quiet-stale", &origin);
+        let mut sync = JobSync::new(&home);
+        let (_lines, log) = logger();
+        let t0 = Instant::now();
+        // Seen 119 minutes ago: one minute from stale at the default 120.
+        let seen_at = crate::shared::time::format_stamp(crate::shared::time::unix_now() - 119 * 60);
+        sync.rows(&[claimed(&home, "build", &seen_at)], t0);
+        sync.run_due(t0, &log, &|| false);
+        assert!(seen.lock().unwrap().is_empty(), "a held job was pulled");
+        // No new board version arrives. Once the claim's deadline passes, the queued pull runs.
+        sync.run_due(t0 + Duration::from_secs(61), &log, &|| false);
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert_eq!(sync.jobs.values().next().unwrap().pull_at, None);
         fs::remove_dir_all(home).unwrap();
     }
 
@@ -970,5 +1067,192 @@ mod tests {
         fs::write(f.join("build.md"), "new\n").unwrap();
         assert!(!locally_synced(&f), "a local-only file");
         fs::remove_dir_all(home).unwrap();
+    }
+
+    /// A home whose round-1/review.md is "R0\n", synced at ETag r0.
+    fn synced_r0(name: &str, origin: &str) -> PathBuf {
+        let home = with_job(name, origin);
+        let f = folder(&home);
+        fs::create_dir_all(f.join("round-1")).unwrap();
+        fs::write(f.join("round-1/review.md"), "R0\n").unwrap();
+        let state = json!({"round-1/review.md": {"etag": "\"r0\"", "sha256": sha(b"R0\n")}});
+        fs::write(f.join(".sync.json"), state.to_string()).unwrap();
+        home
+    }
+
+    /// A pull cut short after it saved the manifest and before its write landed: round-1/ is
+    /// read-only, as a full disk or a locked file would leave it.
+    #[cfg(unix)]
+    fn cut_short_pull(home: &Path, auto: bool) {
+        use std::os::unix::fs::PermissionsExt;
+        let round = folder(home).join("round-1");
+        fs::set_permissions(&round, fs::Permissions::from_mode(0o555)).unwrap();
+        let pulled = pull_job_files(home, "alpha", JOB, auto);
+        fs::set_permissions(&round, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(pulled.is_err());
+        assert_eq!(fs::read_to_string(round.join("review.md")).unwrap(), "R0\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_retried_pull_heals_one_cut_short_before_its_write() {
+        for auto in [true, false] {
+            let (origin, _seen, store) = fake_r2(&[("round-1/review.md", "R1\n", "r1")]);
+            let home = synced_r0(&format!("job-sync-heal-{auto}"), &origin);
+            let f = folder(&home);
+            let review = f.join("round-1/review.md");
+            cut_short_pull(&home, auto);
+            // The retry knows the old bytes are the ones the cut-short pull meant to replace.
+            let (line, _, _) = pull_job_files(&home, "alpha", JOB, auto).unwrap();
+            assert_eq!(line, "pulled 1 files", "auto {auto}");
+            assert_eq!(fs::read_to_string(&review).unwrap(), "R1\n");
+            assert!(locally_synced(&f));
+            if auto {
+                // The base is still r0, so a session's write of the old copy still conflicts.
+                fs::write(&review, "R0 plus a stale edit\n").unwrap();
+                let e = push_job(&home, "alpha", JOB, &mut Vec::new()).unwrap_err();
+                assert_eq!(e.code, 6);
+                assert_eq!(in_r2(&store, "round-1/review.md"), "R1\n");
+                assert_eq!(
+                    fs::read_to_string(f.join("round-1/review.md.remote")).unwrap(),
+                    "R1\n"
+                );
+            } else {
+                // A deliberate pull took R2's version, so an edit pushes against it.
+                fs::write(&review, "R1 plus an edit\n").unwrap();
+                assert_eq!(
+                    push_job(&home, "alpha", JOB, &mut Vec::new()).map_err(|e| e.stderr),
+                    Ok(vec!["round-1/review.md".to_string()])
+                );
+                assert_eq!(in_r2(&store, "round-1/review.md"), "R1 plus an edit\n");
+            }
+            fs::remove_dir_all(home).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_retried_auto_pull_heals_after_an_earlier_one_landed() {
+        let (origin, _seen, store) = fake_r2(&[("round-1/review.md", "R1\n", "r1")]);
+        let home = synced_r0("job-sync-heal-twice", &origin);
+        let f = folder(&home);
+        let review = f.join("round-1/review.md");
+        pull_job_files(&home, "alpha", JOB, true).unwrap();
+        assert_eq!(fs::read_to_string(&review).unwrap(), "R1\n");
+        store.lock().unwrap().insert(
+            "round-1/review.md".to_string(),
+            ("R2\n".to_string(), "r2".to_string()),
+        );
+        // The second pull is cut short over R1, the bytes the first pull wrote, not the base's R0.
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(f.join("round-1"), fs::Permissions::from_mode(0o555)).unwrap();
+        let pulled = pull_job_files(&home, "alpha", JOB, true);
+        fs::set_permissions(f.join("round-1"), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(pulled.is_err());
+        let (line, _, _) = pull_job_files(&home, "alpha", JOB, true).unwrap();
+        assert_eq!(line, "pulled 1 files");
+        assert_eq!(fs::read_to_string(&review).unwrap(), "R2\n");
+        // The base stays r0 through all three pulls.
+        fs::write(&review, "R0 plus a stale edit\n").unwrap();
+        assert_eq!(
+            push_job(&home, "alpha", JOB, &mut Vec::new())
+                .unwrap_err()
+                .code,
+            6
+        );
+        assert_eq!(in_r2(&store, "round-1/review.md"), "R2\n");
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn an_entry_without_the_pre_pull_hash_keeps_the_old_behavior() {
+        let (origin, _seen, _store) = fake_r2(&[("round-1/review.md", "R1\n", "r1")]);
+        let home = synced_r0("job-sync-old-manifest", &origin);
+        let f = folder(&home);
+        // A manifest a cut-short pull left before the hash was recorded.
+        let state = json!({"round-1/review.md":
+            {"etag": "\"r1\"", "sha256": sha(b"R1\n"), "base": "\"r0\""}});
+        fs::write(f.join(".sync.json"), state.to_string()).unwrap();
+        let (line, _, _) = pull_job_files(&home, "alpha", JOB, true).unwrap();
+        assert_eq!(line, "pulled 0 files, unpushed: round-1/review.md");
+        assert_eq!(
+            fs::read_to_string(f.join("round-1/review.md")).unwrap(),
+            "R0\n"
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_deleted_file_an_auto_pull_restores_keeps_its_etag_as_base() {
+        // R2 unchanged: an edit after the restore pushes.
+        let (origin, _seen, store) = fake_r2(&[("build.md", "B0\n", "b0")]);
+        let home = synced_b0("job-sync-restore", &origin);
+        let f = folder(&home);
+        fs::remove_file(f.join("build.md")).unwrap();
+        pull_job_files(&home, "alpha", JOB, true).unwrap();
+        assert_eq!(fs::read_to_string(f.join("build.md")).unwrap(), "B0\n");
+        assert_eq!(manifest(&f)["build.md"]["base"], "\"b0\"");
+        fs::write(f.join("build.md"), "B0 plus an edit\n").unwrap();
+        assert_eq!(
+            push_job(&home, "alpha", JOB, &mut Vec::new()).map_err(|e| e.stderr),
+            Ok(vec!["build.md".to_string()])
+        );
+        assert_eq!(in_r2(&store, "build.md"), "B0 plus an edit\n");
+        fs::remove_dir_all(home).unwrap();
+        // R2 moved: a write from the copy deleted here still conflicts.
+        let (origin, _seen, store) = fake_r2(&[("build.md", "B1\n", "b1")]);
+        let home = synced_b0("job-sync-restore-moved", &origin);
+        let f = folder(&home);
+        fs::remove_file(f.join("build.md")).unwrap();
+        pull_job_files(&home, "alpha", JOB, true).unwrap();
+        fs::write(f.join("build.md"), "B0 plus a stale edit\n").unwrap();
+        assert_eq!(
+            push_job(&home, "alpha", JOB, &mut Vec::new())
+                .unwrap_err()
+                .code,
+            6
+        );
+        assert_eq!(in_r2(&store, "build.md"), "B1\n");
+        assert_eq!(
+            fs::read_to_string(f.join("build.md.remote")).unwrap(),
+            "B1\n"
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn an_edit_in_the_rename_window_is_kept() {
+        use crate::commands::sync::BEFORE_REPLACE;
+        for auto in [true, false] {
+            let (origin, _seen, store) = fake_r2(&[("build.md", "B1\n", "b1")]);
+            let home = synced_b0(&format!("job-sync-rename-window-{auto}"), &origin);
+            let f = folder(&home);
+            // A session saves its edit after the pull saved the manifest, before the replace.
+            BEFORE_REPLACE.set(Some(|path: &Path| {
+                fs::write(path, "B0 plus an edit\n").unwrap()
+            }));
+            let pulled = pull_job_files(&home, "alpha", JOB, auto);
+            BEFORE_REPLACE.set(None);
+            let (_, conflicts, got) = pulled.unwrap();
+            assert_eq!(
+                fs::read_to_string(f.join("build.md")).unwrap(),
+                "B0 plus an edit\n",
+                "auto {auto}"
+            );
+            assert_eq!((conflicts, got), (vec!["build.md".to_string()], vec![]));
+            assert_eq!(
+                fs::read_to_string(f.join("build.md.remote")).unwrap(),
+                "B1\n"
+            );
+            // Once a person merges and deletes the .remote, the push conditions on R2's b1.
+            fs::write(f.join("build.md"), "B1 plus an edit\n").unwrap();
+            fs::remove_file(f.join("build.md.remote")).unwrap();
+            assert_eq!(
+                push_job(&home, "alpha", JOB, &mut Vec::new()).map_err(|e| e.stderr),
+                Ok(vec!["build.md".to_string()])
+            );
+            assert_eq!(in_r2(&store, "build.md"), "B1 plus an edit\n");
+            fs::remove_dir_all(home).unwrap();
+        }
     }
 }

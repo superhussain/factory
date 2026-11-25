@@ -26,6 +26,14 @@ fn private_options() -> OpenOptions {
 
 /// `write_atomic` and `write_atomic_private`: a 0600 temp file in the same folder, renamed over p.
 pub fn write_atomic(p: &Path, data: &[u8]) -> io::Result<()> {
+    let tmp = write_temp(p, data)?;
+    fs::rename(&tmp, p).inspect_err(|_| {
+        let _ = fs::remove_file(&tmp);
+    })
+}
+
+/// A closed 0600 temp file in p's folder holding data, for the caller to rename.
+pub fn write_temp(p: &Path, data: &[u8]) -> io::Result<PathBuf> {
     let folder = p.parent().unwrap_or(Path::new("."));
     let (tmp, mut file) = loop {
         let mut h = RandomState::new().build_hasher();
@@ -42,14 +50,15 @@ pub fn write_atomic(p: &Path, data: &[u8]) -> io::Result<()> {
             Err(e) => return Err(e),
         }
     };
-    let written = file.write_all(data).and_then(|_| {
-        drop(file);
-        fs::rename(&tmp, p)
-    });
-    if written.is_err() {
-        let _ = fs::remove_file(&tmp);
+    let written = file.write_all(data);
+    drop(file);
+    match written {
+        Ok(()) => Ok(tmp),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(e)
+        }
     }
-    written
 }
 
 /// `seed`: write p only if it does not exist. True if written.

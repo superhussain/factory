@@ -12,7 +12,7 @@ use crate::commands::pipeline::decision_verdict;
 use crate::shared::board::{dump_board, load_board, read_board};
 use crate::shared::consts::{IDEA, JOB_REL, NOTE_SECRETS, TERMINAL};
 use crate::shared::exit::{fail, Exit, Res};
-use crate::shared::fs::{is_link, read_text, write_atomic};
+use crate::shared::fs::{is_link, read_text, write_atomic, write_temp};
 use crate::shared::home::factory_home;
 use crate::shared::http::{api, cas};
 use crate::shared::project::{
@@ -27,9 +27,23 @@ use crate::shared::time::now;
 
 pub(crate) type Manifest = serde_json::Map<String, Value>;
 
+/// The manifest key a pull saves before replacing a file: the hash of the local bytes it replaces.
+const PRE_PULL: &str = "pre_pull_sha256";
+
 static GOAL_HEADING: Pattern = Pattern::new(r"^##\s+(?:\d+\.\s*)?Goal\b", Flags::I);
 static HEADING: Pattern = Pattern::new(r"^##\s", Flags::NONE);
 static PATH_LINE: Pattern = Pattern::new(r"\s*path\s*:", Flags::NONE);
+/// NOTE_SECRETS' AWS access key ID, except keys ending in EXAMPLE, as AWS's documentation uses.
+static AWS_KEY: Pattern = Pattern::new(r"\bAKIA(?![0-9A-Z]{9}EXAMPLE)[0-9A-Z]{16}\b", Flags::ASCII);
+/// The Access client secret header with a value after it.
+static ACCESS_SECRET: Pattern = Pattern::new(
+    r#"cf-access-client-secret["'`]?\s*[:=]\s*["'`]?[A-Za-z0-9]{32,}"#,
+    Flags {
+        ascii: true,
+        ignore_case: true,
+        ..Flags::NONE
+    },
+);
 
 /// Where Python would raise an `OSError`: fail 1 with its text.
 fn os_fail(e: io::Error, p: &Path) -> Exit {
@@ -539,15 +553,26 @@ fn secret_refusal(rel: &str, data: &[u8]) -> Option<String> {
         return None;
     }
     let text = String::from_utf8_lossy(data);
-    // The token-shaped patterns only. The last one matches the Access header's bare name, which
-    // job notes and reviews quote with no value; the name alone is no credential.
-    NOTE_SECRETS[..7]
-        .iter()
-        .find_map(|p| match p.search_or_err(&text) {
-            Ok(None) => None,
-            Ok(Some(_)) => Some("it looks like it holds a secret".to_string()),
-            Err(reason) => Some(reason),
-        })
+    // NOTE_SECRETS' token-shaped patterns, with two swapped for job files. AWS_KEY lets through the
+    // documentation's example keys, which specs and reviews quote. NOTE_SECRETS' last pattern
+    // matches the Access header's bare name, which job files quote with no value; ACCESS_SECRET
+    // needs a value after it.
+    [
+        &NOTE_SECRETS[0],
+        &NOTE_SECRETS[1],
+        &NOTE_SECRETS[2],
+        &AWS_KEY,
+        &NOTE_SECRETS[4],
+        &NOTE_SECRETS[5],
+        &NOTE_SECRETS[6],
+        &ACCESS_SECRET,
+    ]
+    .iter()
+    .find_map(|p| match p.search_or_err(&text) {
+        Ok(None) => None,
+        Ok(Some(_)) => Some("it looks like it holds a secret".to_string()),
+        Err(reason) => Some(reason),
+    })
 }
 
 /// Pushes one job's changed files, writing what `factory push` prints to out. Returns the files
@@ -730,16 +755,26 @@ pub fn push(call: &Call) -> Res<()> {
     push_target(&call.args[0])
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Runs in a pull between saving a file's new entry and replacing the file, where a test lands
+    /// a session's edit.
+    pub(crate) static BEFORE_REPLACE: std::cell::Cell<Option<fn(&Path)>> =
+        const { std::cell::Cell::new(None) };
+}
+
 /// Download what changed in R2 and keep local edits. (summary line, conflicted files).
 pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Vec<String>)> {
     pull_job_files(home, slug, job_id, false).map(|(line, conflicts, _)| (line, conflicts))
 }
 
 /// `pull_job`, also returning the files it downloaded. An automatic pull (the daemon's) records
-/// each replaced or created file's `base`: the ETag its local copy had before, or null when there
-/// was none. Push conditions on the base, so a session that read the old copy and writes it back
-/// blind gets a 412 and keeps both copies. A deliberate pull clears the base of each file it
+/// each replaced or created file's `base`: the ETag its manifest entry had before, or null when
+/// there was none. Push conditions on the base, so a session that read the old copy and writes it
+/// back blind gets a 412 and keeps both copies. A deliberate pull clears the base of each file it
 /// leaves matching R2, since the session took R2's version; a file edited here keeps its base.
+/// Until a replaced file's write lands, its entry also holds `pre_pull_sha256`, the hash of the
+/// bytes being replaced, so a pull cut short before the write is finished by the next one.
 pub(crate) fn pull_job_files(
     home: &Path,
     slug: &str,
@@ -755,6 +790,8 @@ pub(crate) fn pull_job_files(
         let entry = manifest.get(rel).filter(|e| truthy(Some(*e))).cloned();
         let tag_value = Value::from(tag.as_str());
         let stored = |key: &str| entry.as_ref().and_then(|e| e.get(key));
+        let digest = data.as_deref().map(|d| Value::from(sha(d)));
+        let matches = |key: &str| digest.is_some() && stored(key) == digest.as_ref();
         if dot_remote(&path).exists() {
             // Still unmerged. Refresh the saved copy if R2 moved again.
             if stored("etag") != Some(&tag_value) {
@@ -769,13 +806,13 @@ pub(crate) fn pull_job_files(
                 )?;
             }
             conflicts.push(rel.clone());
-        } else if data
-            .as_ref()
-            .is_none_or(|d| entry.is_some() && stored("sha256") == Some(&Value::from(sha(d))))
-        {
-            if data.is_some() && stored("etag") == Some(&tag_value) {
-                if !auto {
-                    if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+        } else if data.is_none() || matches("sha256") || matches(PRE_PULL) {
+            // The local bytes are the last sync's, or the ones a pull cut short before its write
+            // meant to replace: either way they hold no edit, so R2's copy may replace them.
+            if matches("sha256") && stored("etag") == Some(&tag_value) {
+                if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                    e.shift_remove(PRE_PULL);
+                    if !auto {
                         e.shift_remove("base");
                     }
                 }
@@ -785,37 +822,56 @@ pub(crate) fn pull_job_files(
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|e| os_fail(e, parent))?;
             }
-            // Written here while the fetch ran: keep it, and save R2's copy beside it, as
-            // reconcile does. The .remote holds push back until a person merges it.
-            if local_bytes(&path) != data {
-                manifest.insert(rel.clone(), fetched);
-                let remote = dot_remote(&path);
-                write_atomic(&remote, &body).map_err(|e| os_fail(e, &remote))?;
-                conflicts.push(rel.clone());
-                continue;
-            }
             // The entry claims R2's ETag before the bytes are here, so it is saved with a base: the
             // ETag the local bytes came from, or null when there were none. A write that fails or
             // is cut short leaves the old bytes under that base, and a push conditions on it and
             // meets a 412. Saving after the write instead would leave R2's bytes under the old
-            // entry, which the next reconcile adopts with no base.
+            // entry, which the next reconcile adopts with no base. A file deleted here takes its
+            // entry's ETag too, so an edit after the restore pushes unless R2 moved. The hash of
+            // the bytes being replaced goes with it, so a retry knows them as unedited.
             let base = match stored("base") {
                 Some(base) => base.clone(),
-                None if data.is_some() => stored("etag").cloned().unwrap_or(Value::Null),
-                None => Value::Null,
+                None => stored("etag").cloned().unwrap_or(Value::Null),
             };
-            let mut entry = fetched;
+            let mut entry = fetched.clone();
             entry["base"] = base;
+            entry[PRE_PULL] = digest.clone().unwrap_or(Value::Null);
             manifest.insert(rel.clone(), entry);
             save_manifest(&folder, &manifest)?;
-            write_atomic(&path, &body).map_err(|e| os_fail(e, &path))?;
-            // A deliberate pull took R2's version, so once the bytes are here the base goes.
-            if !auto {
-                if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+            #[cfg(test)]
+            if let Some(edit) = BEFORE_REPLACE.get() {
+                edit(&path);
+            }
+            let tmp = write_temp(&path, &body).map_err(|e| os_fail(e, &path))?;
+            // Read again with R2's bytes ready to rename, as late as possible. A file written here
+            // since the fetch is kept, and R2's copy goes beside it instead, as reconcile does;
+            // the .remote holds push back until a person merges it. Only a write that lands
+            // between this read and the rename is still replaced.
+            let edited = local_bytes(&path) != data;
+            let target = if edited {
+                dot_remote(&path)
+            } else {
+                path.clone()
+            };
+            fs::rename(&tmp, &target).map_err(|e| {
+                let _ = fs::remove_file(&tmp);
+                os_fail(e, &target)
+            })?;
+            if edited {
+                manifest.insert(rel.clone(), fetched);
+                conflicts.push(rel.clone());
+                continue;
+            }
+            // The bytes are here, so the old hash has done its job; kept, it would let a later
+            // pull replace a deliberate revert to those bytes. A deliberate pull also took R2's
+            // version, so its base goes too.
+            if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                e.shift_remove(PRE_PULL);
+                if !auto {
                     e.shift_remove("base");
                 }
-                save_manifest(&folder, &manifest)?;
             }
+            save_manifest(&folder, &manifest)?;
             got.push(rel.clone());
         } else if entry.is_some() && stored("etag") == Some(&tag_value) {
             unpushed.push(rel.clone());
@@ -1474,6 +1530,51 @@ mod tests {
         let token = format!("{name}: ghp_{}\n", "c".repeat(30));
         assert!(secret_refusal("review.md", token.as_bytes()).is_some());
         assert_eq!(secret_refusal("shot.png", token.as_bytes()), None);
+    }
+
+    #[test]
+    fn an_access_secret_value_is_refused() {
+        let hex = "0123456789abcdef".repeat(4);
+        for text in [
+            format!("CF-Access-Client-Secret: {hex}\n"),
+            format!("cf-access-client-secret={hex}\n"),
+            format!("\"Cf-Access-Client-Secret\": \"{hex}\"\n"),
+            format!("`CF-ACCESS-CLIENT-SECRET`:`{hex}`\n"),
+        ] {
+            assert!(
+                secret_refusal("review.md", text.as_bytes()).is_some(),
+                "{text}"
+            );
+        }
+        for text in [
+            "Send the CF-Access-Client-Secret header.\n".to_string(),
+            "CF-Access-Client-Secret: $FACTORY_ACCESS_CLIENT_SECRET\n".to_string(),
+            format!("CF-Access-Client-Secret: {}\n", "a".repeat(31)),
+        ] {
+            assert_eq!(secret_refusal("review.md", text.as_bytes()), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn aws_documentation_keys_upload_but_real_keys_are_refused() {
+        // Built at runtime, so no AWS-shaped key sits in the source.
+        let example = format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE");
+        let other_example = format!("{}{}EXAMPLE", "AKIA", "Z".repeat(9));
+        let real = format!("{}{}", "AKIA", "Q".repeat(16));
+        assert_eq!(
+            secret_refusal(
+                "spec.md",
+                format!("aws_access_key_id = {example}\n").as_bytes()
+            ),
+            None
+        );
+        assert_eq!(
+            secret_refusal("spec.md", format!("{other_example}\n").as_bytes()),
+            None
+        );
+        assert!(secret_refusal("spec.md", format!("{real}\n").as_bytes()).is_some());
+        let both = format!("{example} then {real}\n");
+        assert!(secret_refusal("spec.md", both.as_bytes()).is_some());
     }
 
     #[test]
