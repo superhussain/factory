@@ -961,13 +961,24 @@ mod tests {
         fs::set_permissions(&round, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(pulled.is_err());
         assert_eq!(fs::read(round.join("review.md")).unwrap(), b"R0\n");
-        // Nobody edits. The push still conditions on r0, the bytes' own version, and conflicts.
+        // Nobody edits. The old bytes are the ones the pull meant to replace, so nothing goes up.
+        assert_eq!(
+            push_job(&home, "alpha", JOB, &mut Vec::new()).ok(),
+            Some(vec![])
+        );
+        assert!(seen.lock().unwrap().iter().all(|r| r.method != "PUT"));
+        assert!(!round.join("review.md.remote").exists());
+        // An edit made from the old bytes still conditions on r0, their own version, and conflicts.
+        fs::write(round.join("review.md"), "R0 plus an edit\n").unwrap();
         let e = push_job(&home, "alpha", JOB, &mut Vec::new()).unwrap_err();
         let seen = seen.lock().unwrap();
         let put = seen.iter().find(|r| r.method == "PUT").unwrap();
         assert_eq!(put.header("If-Match"), Some("\"r0\""));
         assert_eq!(e.code, 6);
-        assert_eq!(fs::read(round.join("review.md")).unwrap(), b"R0\n");
+        assert_eq!(
+            fs::read(round.join("review.md")).unwrap(),
+            b"R0 plus an edit\n"
+        );
         assert_eq!(fs::read(round.join("review.md.remote")).unwrap(), b"R1\n");
         fs::remove_dir_all(home).unwrap();
     }
@@ -1254,5 +1265,64 @@ mod tests {
             assert_eq!(in_r2(&store, "build.md"), "B1 plus an edit\n");
             fs::remove_dir_all(home).unwrap();
         }
+    }
+
+    #[test]
+    fn a_merge_back_to_the_old_bytes_survives_a_pull_cut_short_after_a_conflict() {
+        use crate::commands::sync::BEFORE_REPLACE;
+        let (origin, _seen) = serve_requests(|r, nth| match (r.method.as_str(), r.path.as_str()) {
+            (_, p) if p.ends_with("?etags=1") => listing(&[("build.md", "b1"), ("spec.md", "s1")]),
+            (_, p) if p.ends_with("/build.md") => file("B1\n", "b1"),
+            (_, p) if p.ends_with("/spec.md") && nth == 0 => (500, String::new(), vec![]),
+            (_, p) if p.ends_with("/spec.md") => file("S1\n", "s1"),
+            _ => (404, String::new(), vec![]),
+        });
+        let home = synced_b0("job-sync-merge-back", &origin);
+        let f = folder(&home);
+        BEFORE_REPLACE.set(Some(|path: &Path| {
+            if path.ends_with("build.md") {
+                fs::write(path, "B0 plus an edit\n").unwrap()
+            }
+        }));
+        let pulled = pull_job_files(&home, "alpha", JOB, true);
+        BEFORE_REPLACE.set(None);
+        // build.md conflicted, then the spec.md fetch failed before the loop's last save.
+        assert!(pulled.is_err());
+        assert!(manifest(&f)["build.md"].get("pre_pull_sha256").is_none());
+        // A person settles the conflict by keeping the old bytes and deletes the .remote.
+        fs::write(f.join("build.md"), "B0\n").unwrap();
+        fs::remove_file(f.join("build.md.remote")).unwrap();
+        pull_job_files(&home, "alpha", JOB, true).unwrap();
+        assert_eq!(fs::read_to_string(f.join("build.md")).unwrap(), "B0\n");
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_push_before_the_healing_pull_uploads_nothing() {
+        let (origin, seen, store) = fake_r2(&[("round-1/review.md", "R1\n", "r1")]);
+        let home = synced_r0("job-sync-push-before-heal", &origin);
+        let f = folder(&home);
+        cut_short_pull(&home, true);
+        let mut out = Vec::new();
+        assert_eq!(
+            push_job(&home, "alpha", JOB, &mut out).map_err(|e| e.stderr),
+            Ok(vec![])
+        );
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "round-1/review.md: remote newer, run pull\npushed 0 files\n"
+        );
+        assert!(seen.lock().unwrap().iter().all(|r| r.method != "PUT"));
+        assert!(!f.join("round-1/review.md.remote").exists());
+        // The retried pull still heals, and R2 keeps R1.
+        let (line, _, _) = pull_job_files(&home, "alpha", JOB, true).unwrap();
+        assert_eq!(line, "pulled 1 files");
+        assert_eq!(
+            fs::read_to_string(f.join("round-1/review.md")).unwrap(),
+            "R1\n"
+        );
+        assert_eq!(in_r2(&store, "round-1/review.md"), "R1\n");
+        fs::remove_dir_all(home).unwrap();
     }
 }

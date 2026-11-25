@@ -35,14 +35,22 @@ static HEADING: Pattern = Pattern::new(r"^##\s", Flags::NONE);
 static PATH_LINE: Pattern = Pattern::new(r"\s*path\s*:", Flags::NONE);
 /// NOTE_SECRETS' AWS access key ID, except keys ending in EXAMPLE, as AWS's documentation uses.
 static AWS_KEY: Pattern = Pattern::new(r"\bAKIA(?![0-9A-Z]{9}EXAMPLE)[0-9A-Z]{16}\b", Flags::ASCII);
-/// The Access client secret header with a value after it.
+/// The Access client secret with a value after it: the header, its environment variable forms
+/// such as the factory's own `.env` line, and either inside escaped JSON.
 static ACCESS_SECRET: Pattern = Pattern::new(
-    r#"cf-access-client-secret["'`]?\s*[:=]\s*["'`]?[A-Za-z0-9]{32,}"#,
+    r#"(?:cf[-_]access[-_]client[-_]secret|access_client_secret)\\?["'`]?\s*[:=]\s*\\?["'`]?[A-Za-z0-9]{32,}"#,
     Flags {
         ascii: true,
         ignore_case: true,
         ..Flags::NONE
     },
+);
+/// NOTE_SECRETS' private key header, only when key material follows it: base64 after the header
+/// and any `Proc-Type:` style lines, across real or escaped newlines. The bare header line, which
+/// specs quote in redaction rules, is no key.
+static PRIVATE_KEY: Pattern = Pattern::new(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\s|\\n)*(?:[A-Za-z-]+:[^\n]*(?:\s|\\n)+)*[A-Za-z0-9+/]{40,}",
+    Flags::ASCII,
 );
 
 /// Where Python would raise an `OSError`: fail 1 with its text.
@@ -553,16 +561,15 @@ fn secret_refusal(rel: &str, data: &[u8]) -> Option<String> {
         return None;
     }
     let text = String::from_utf8_lossy(data);
-    // NOTE_SECRETS' token-shaped patterns, with two swapped for job files. AWS_KEY lets through the
-    // documentation's example keys, which specs and reviews quote. NOTE_SECRETS' last pattern
-    // matches the Access header's bare name, which job files quote with no value; ACCESS_SECRET
-    // needs a value after it.
+    // NOTE_SECRETS' patterns, with three swapped for job files, which quote names and headers in
+    // specs and reviews. AWS_KEY lets through the documentation's example keys. PRIVATE_KEY and
+    // ACCESS_SECRET need a value after the header or name, which alone is no credential.
     [
         &NOTE_SECRETS[0],
         &NOTE_SECRETS[1],
         &NOTE_SECRETS[2],
         &AWS_KEY,
-        &NOTE_SECRETS[4],
+        &PRIVATE_KEY,
         &NOTE_SECRETS[5],
         &NOTE_SECRETS[6],
         &ACCESS_SECRET,
@@ -609,8 +616,13 @@ pub(crate) fn push_job(
                 writeln!(out, "{rel}: deleted in R2, not uploaded again").ok();
                 continue;
             };
-            if entry.get("sha256") == Some(&Value::from(sha(&data))) {
-                if entry.get("etag") != Some(&Value::from(tag.as_str())) {
+            let digest = Value::from(sha(&data));
+            // The bytes a pull cut short before its write meant to replace hold no edit, and R2
+            // has newer ones: uploading them would only make a conflict the pull can't heal.
+            if entry.get("sha256") == Some(&digest) || entry.get(PRE_PULL) == Some(&digest) {
+                if entry.get("etag") != Some(&Value::from(tag.as_str()))
+                    || entry.get(PRE_PULL) == Some(&digest)
+                {
                     writeln!(out, "{rel}: remote newer, run pull").ok();
                     spec_stale = spec_stale || rel == "spec.md";
                 }
@@ -805,6 +817,10 @@ pub(crate) fn pull_job_files(
                     data.as_deref(),
                 )?;
             }
+            // A merge may go back to the bytes an earlier pull meant to replace; they are an edit.
+            if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                e.shift_remove(PRE_PULL);
+            }
             conflicts.push(rel.clone());
         } else if data.is_none() || matches("sha256") || matches(PRE_PULL) {
             // The local bytes are the last sync's, or the ones a pull cut short before its write
@@ -848,6 +864,17 @@ pub(crate) fn pull_job_files(
             // the .remote holds push back until a person merges it. Only a write that lands
             // between this read and the rename is still replaced.
             let edited = local_bytes(&path) != data;
+            if edited {
+                // The old hash goes before the .remote appears: a person may merge back to those
+                // very bytes, and a later pull must not take them as unedited. The base stays, so
+                // a kill on either side of the rename leaves the edit to meet a 412.
+                if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                    e.shift_remove(PRE_PULL);
+                }
+                save_manifest(&folder, &manifest).inspect_err(|_| {
+                    let _ = fs::remove_file(&tmp);
+                })?;
+            }
             let target = if edited {
                 dot_remote(&path)
             } else {
@@ -859,6 +886,7 @@ pub(crate) fn pull_job_files(
             })?;
             if edited {
                 manifest.insert(rel.clone(), fetched);
+                save_manifest(&folder, &manifest)?;
                 conflicts.push(rel.clone());
                 continue;
             }
@@ -1540,6 +1568,10 @@ mod tests {
             format!("cf-access-client-secret={hex}\n"),
             format!("\"Cf-Access-Client-Secret\": \"{hex}\"\n"),
             format!("`CF-ACCESS-CLIENT-SECRET`:`{hex}`\n"),
+            format!("FACTORY_ACCESS_CLIENT_SECRET={hex}\n"),
+            format!("export CF_ACCESS_CLIENT_SECRET=\"{hex}\"\n"),
+            format!("{{\\\"CF-Access-Client-Secret\\\": \\\"{hex}\\\"}}\n"),
+            format!("-H 'CF-Access-Client-Secret:\n  {hex}'\n"),
         ] {
             assert!(
                 secret_refusal("review.md", text.as_bytes()).is_some(),
@@ -1550,8 +1582,38 @@ mod tests {
             "Send the CF-Access-Client-Secret header.\n".to_string(),
             "CF-Access-Client-Secret: $FACTORY_ACCESS_CLIENT_SECRET\n".to_string(),
             format!("CF-Access-Client-Secret: {}\n", "a".repeat(31)),
+            "Set FACTORY_ACCESS_CLIENT_SECRET in .env.\n".to_string(),
+            "FACTORY_ACCESS_CLIENT_SECRET=test-secret\n".to_string(),
         ] {
             assert_eq!(secret_refusal("review.md", text.as_bytes()), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_private_key_header_alone_uploads_but_key_material_is_refused() {
+        // Built at runtime, so no key-shaped block sits in the source.
+        let header = format!("-----BEGIN {}PRIVATE KEY-----", "OPENSSH ");
+        let line = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtz";
+        for text in [
+            format!("| `{header}` | `[redacted]` |\n"),
+            format!("Redact any line like {header}.\n"),
+            format!("{header}\n"),
+        ] {
+            assert_eq!(secret_refusal("spec.md", text.as_bytes()), None, "{text}");
+        }
+        for text in [
+            format!("{header}\n{line}\n{line}\n-----END OPENSSH PRIVATE KEY-----\n"),
+            format!("```\n{header}\r\n  {line}\n```\n"),
+            format!("\"key\": \"{header}\\n{line}\\n\"\n"),
+            format!(
+                "{}\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00FF\n\n{line}\n",
+                header.replace("OPENSSH", "RSA")
+            ),
+        ] {
+            assert!(
+                secret_refusal("spec.md", text.as_bytes()).is_some(),
+                "{text}"
+            );
         }
     }
 
@@ -1604,11 +1666,8 @@ mod tests {
     fn manual_push_refuses_a_secret() {
         use crate::shared::http::tests::serve;
         let (origin, seen) = serve(vec![(200, "[]", vec![])]);
-        let home = job_home(
-            "sync-push-secret",
-            &origin,
-            &[("notes.md", b"-----BEGIN RSA PRIVATE KEY-----\n")],
-        );
+        let key = format!("-----BEGIN RSA PRIVATE KEY-----\n{}\n", "A".repeat(64));
+        let home = job_home("sync-push-secret", &origin, &[("notes.md", key.as_bytes())]);
         let mut out = Vec::new();
         let e = push_job(&home, "alpha", "042-sample-export", &mut out).unwrap_err();
         assert_eq!(e.code, 6);
