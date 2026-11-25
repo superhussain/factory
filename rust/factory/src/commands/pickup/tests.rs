@@ -11373,7 +11373,10 @@ mod daemon_setup_test {
         );
         assert!(ds.sched.borrow().daemon.is_some(), "the daemon still runs");
         let xml = ds.fx.root.join(".config/factory-daemon.xml");
-        assert!(!xml.exists(), "the task XML is removed after a failed /Create");
+        assert!(
+            !xml.exists(),
+            "the task XML is removed after a failed /Create"
+        );
     }
 
     /// `<` and `>` in the path are escaped in the task's XML.
