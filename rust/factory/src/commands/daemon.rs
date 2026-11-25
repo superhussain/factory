@@ -2,8 +2,9 @@
 //! scheduler where it is installed. A pass runs per burst of board or backlog writes, when a local
 //! factory agent stops running, right after a pass that launched a job, and after 5 minutes with
 //! no pass. It also keeps the board mirror (`mirror.rs`) current from the socket's rows frames and
-//! serves it to this host's commands, sends the host status heartbeat every 5 minutes, and pushes
-//! the retro digest at the retro-push timer's times, in place of that timer.
+//! serves it to this host's commands, sends the host status heartbeat every 5 minutes, pushes
+//! the retro digest at the retro-push timer's times, in place of that timer, and syncs this host's
+//! active job folders with R2 as they change (`job_sync.rs`).
 
 use std::collections::hash_map::RandomState;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -24,6 +25,7 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{HandshakeError, Message, WebSocket};
 
 use crate::cli::Call;
+use crate::commands::job_sync;
 use crate::commands::mirror::{self, Mirror};
 use crate::shared::conf::read_conf;
 use crate::shared::exit::{fail, Res};
@@ -176,6 +178,16 @@ fn run(home: &Path) -> Res<()> {
         "factory daemon: watching {url}; log {}",
         home.join("logs").join("daemon").display()
     );
+    // Job sync runs only on Unix, where sync.rs can lock a job folder against a manual push.
+    let sync_home = home.clone();
+    let syncer = cfg!(unix).then(|| {
+        job_sync::spawn(
+            &home,
+            board.clone(),
+            signal_stop,
+            Arc::new(move |msg: &str| log_line(&sync_home, msg)),
+        )
+    });
     let terminal = io::stderr().is_terminal();
     let poller_home = home.clone();
     let gh_poller = crate::commands::ghpoll::start(
@@ -218,6 +230,9 @@ fn run(home: &Path) -> Res<()> {
         },
     );
     mirror::unlisten(&home);
+    if let Some(syncer) = syncer {
+        let _ = syncer.join();
+    }
     let _ = gh_poller.join();
     Ok(())
 }

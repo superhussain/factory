@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use crate::cli::Call;
 use crate::commands::pipeline::decision_verdict;
 use crate::shared::board::{dump_board, load_board, read_board};
-use crate::shared::consts::{IDEA, JOB_REL, TERMINAL};
+use crate::shared::consts::{IDEA, JOB_REL, NOTE_SECRETS, TERMINAL};
 use crate::shared::exit::{fail, Exit, Res};
 use crate::shared::fs::{is_link, read_text, write_atomic};
 use crate::shared::home::factory_home;
@@ -37,7 +37,7 @@ fn os_fail(e: io::Error, p: &Path) -> Exit {
 }
 
 /// `sorted(folder.rglob("*"))` as (rel with `/`, path), never entering links.
-fn walk(folder: &Path) -> io::Result<Vec<(String, PathBuf)>> {
+pub(crate) fn walk(folder: &Path) -> io::Result<Vec<(String, PathBuf)>> {
     fn visit(
         dir: &Path,
         parts: &[String],
@@ -286,7 +286,7 @@ fn decode_error(data: &[u8], e: &std::str::Utf8Error) -> String {
 pub(crate) fn conflict_exit(conflicts: &[String]) -> Exit {
     fail(
         format!(
-            "conflict in {}: changed both here and in R2. Local copies were kept and nothing was overwritten. R2's copy of each is saved beside it as <file>.remote. Merge it into the local file and delete the .remote, then push. For an image, keep one copy: delete the .remote, or move it over the image",
+            "conflict in {}: changed both here and in R2. Local copies were kept and nothing was overwritten. R2's copy of each is saved beside it as <file>.remote. Merge it into the local file and delete the .remote, then push. For an image, keep one copy: delete the .remote, or move it over the image. If the .remote is the copy you edited from, your file already holds its changes: delete the .remote and push",
             conflicts.join(", ")
         ),
         6,
@@ -371,18 +371,26 @@ fn goal_change(
     Ok((Some(dump_board(&data)), true))
 }
 
-fn record_goal(home: &Path, slug: &str, job_id: &str, goal: Option<String>) -> Res<()> {
+fn record_goal(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    goal: Option<String>,
+    out: &mut dyn Write,
+) -> Res<()> {
     if cas(home, "/api/board", |text| {
         goal_change(text, slug, job_id, goal.as_deref())
     })? {
-        println!(
+        writeln!(
+            out,
             "{}",
             if goal.is_some() {
                 "recorded the spec Goal on the board"
             } else {
                 "cleared the board goal: spec.md has no Goal section"
             }
-        );
+        )
+        .ok();
     }
     Ok(())
 }
@@ -467,7 +475,94 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
         println!("pushed projects/{slug}.md");
         return Ok(());
     }
-    let (folder, mut manifest, remote) = sync_state(&home, &slug, &job_id)?;
+    // The daemon pushes each change itself, so with one running a folder that matches its
+    // last sync has nothing to send.
+    let folder = safe_job_folder(&home, &slug, &job_id)?;
+    if crate::commands::daemon::running(&home) == Some(true) && locally_synced(&folder) {
+        println!(
+            "pushed 0 files: the daemon already synced {slug}/{job_id}; run pull for R2 changes"
+        );
+        return Ok(());
+    }
+    push_job(&home, &slug, &job_id, &mut io::stdout()).map(|_| ())
+}
+
+/// True when every job file in folder matches its last sync, with no conflict copy waiting and
+/// no board Goal still to record: a push would upload nothing. Reads no network.
+pub(crate) fn locally_synced(folder: &Path) -> bool {
+    let path = folder.join(".sync.json");
+    let manifest = match path.exists().then(|| read_text(&path).map(|t| loads(&t))) {
+        None => Manifest::new(),
+        Some(Ok(Ok(Value::Object(m)))) => m,
+        Some(_) => return false,
+    };
+    if folder.join(".goal-pending").exists() || folder.join(".decision-pending").exists() {
+        return false;
+    }
+    let Ok(files) = walk(folder) else {
+        return false;
+    };
+    files.into_iter().all(|(rel, path)| {
+        if rel.ends_with(".remote") {
+            return false;
+        }
+        if !JOB_REL.is_full(&rel) || !fs::symlink_metadata(&path).is_ok_and(|m| m.is_file()) {
+            return true;
+        }
+        let stored = manifest.get(&rel).and_then(|e| e.get("sha256"));
+        local_bytes(&path).is_some_and(|data| stored == Some(&Value::from(sha(&data))))
+    })
+}
+
+/// The job's sync lock: an exclusive lock on the job folder itself, held while a push or pull
+/// reads and rewrites the folder and its manifest, so the daemon and a command never interleave
+/// on one job. It leaves no file behind. None when the folder doesn't exist yet, so there is
+/// nothing local to race on. None on Windows too: std can't open a folder as a file there, and
+/// the daemon runs job sync only on Unix, so no second writer exists to exclude.
+fn job_lock(home: &Path, slug: &str, job_id: &str) -> Res<Option<fs::File>> {
+    let folder = safe_job_folder(home, slug, job_id)?;
+    if cfg!(windows) || !folder.is_dir() {
+        return Ok(None);
+    }
+    let file = fs::File::open(&folder).map_err(|e| os_fail(e, &folder))?;
+    file.lock().map_err(|e| os_fail(e, &folder))?;
+    Ok(Some(file))
+}
+
+/// Why a job file must not be uploaded, or None. Text files are checked against NOTE_SECRETS,
+/// and a pattern that can't finish reading the text refuses it too. Images are not text.
+fn secret_refusal(rel: &str, data: &[u8]) -> Option<String> {
+    if [".png", ".jpg", ".jpeg", ".gif", ".webp"]
+        .iter()
+        .any(|ext| rel.ends_with(ext))
+    {
+        return None;
+    }
+    let text = String::from_utf8_lossy(data);
+    // The token-shaped patterns only. The last one matches the Access header's bare name, which
+    // job notes and reviews quote with no value; the name alone is no credential.
+    NOTE_SECRETS[..7]
+        .iter()
+        .find_map(|p| match p.search_or_err(&text) {
+            Ok(None) => None,
+            Ok(Some(_)) => Some("it looks like it holds a secret".to_string()),
+            Err(reason) => Some(reason),
+        })
+}
+
+/// Pushes one job's changed files, writing what `factory push` prints to out. Returns the files
+/// it uploaded, or exit 6 with each conflict's R2 copy saved beside its file, or naming each file
+/// it refused because it looks like it holds a secret.
+pub(crate) fn push_job(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    out: &mut dyn Write,
+) -> Res<Vec<String>> {
+    let _lock = job_lock(home, slug, job_id)?;
+    let (folder, mut manifest, remote) = sync_state(home, slug, job_id)?;
+    let goal_pending = folder.join(".goal-pending");
+    let decision_pending = folder.join(".decision-pending");
     // Skip symlinks, so a stray link can't upload a file from outside the job folder.
     let rels = walk(&folder)
         .map_err(|e| os_fail(e, &folder))?
@@ -475,8 +570,8 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
         .filter(|(rel, p)| {
             fs::symlink_metadata(p).is_ok_and(|m| m.is_file()) && JOB_REL.is_full(rel)
         });
-    let (mut pushed, mut conflicts, mut spec_pushed, mut spec_stale, mut decision_pushed) =
-        (0, Vec::new(), false, false, false);
+    let (mut pushed, mut conflicts, mut refused, mut spec_stale) =
+        (Vec::new(), Vec::new(), Vec::new(), false);
     for (rel, path) in rels {
         let data = fs::read(&path).map_err(|e| os_fail(e, &path))?;
         let entry = manifest.get(&rel).filter(|e| truthy(Some(*e))).cloned();
@@ -486,12 +581,12 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
         }
         if let Some(entry) = &entry {
             let Some(tag) = remote.get(&rel) else {
-                println!("{rel}: deleted in R2, not uploaded again");
+                writeln!(out, "{rel}: deleted in R2, not uploaded again").ok();
                 continue;
             };
             if entry.get("sha256") == Some(&Value::from(sha(&data))) {
                 if entry.get("etag") != Some(&Value::from(tag.as_str())) {
-                    println!("{rel}: remote newer, run pull");
+                    writeln!(out, "{rel}: remote newer, run pull").ok();
                     spec_stale = spec_stale || rel == "spec.md";
                 }
                 continue;
@@ -511,8 +606,21 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
             }
             continue;
         }
-        let cond = match &entry {
-            Some(entry) => match entry.get("etag").and_then(Value::as_str) {
+        // Checked before every upload: the daemon pushes seconds after a write, so a draft with a
+        // secret in it would otherwise reach R2 before anyone could remove it.
+        if let Some(reason) = secret_refusal(&rel, &data) {
+            writeln!(out, "{rel}: not uploaded: {reason}").ok();
+            refused.push(rel);
+            continue;
+        }
+        // An automatic pull refreshed the file but left its base: the version a session last took
+        // deliberately, with pull or push. Conditioning on that base means a write made from what
+        // the session read before the pull meets a 412, as it would with no daemon.
+        let base = entry.as_ref().and_then(|e| e.get("base"));
+        let cond = match (&entry, base) {
+            (_, Some(Value::Null)) => ("If-None-Match", "*".to_string()),
+            (_, Some(Value::String(etag))) => ("If-Match", etag.clone()),
+            (Some(entry), _) => match entry.get("etag").and_then(Value::as_str) {
                 Some(etag) => ("If-Match", etag.to_string()),
                 None => {
                     return Err(fail(
@@ -521,7 +629,7 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
                     ))
                 }
             },
-            None => ("If-None-Match", "*".to_string()),
+            (None, _) => ("If-None-Match", "*".to_string()),
         };
         let r = api(
             &home,
@@ -555,41 +663,67 @@ pub(crate) fn push_target(target: &str) -> Res<()> {
             rel.clone(),
             json!({"etag": strong(tag), "sha256": sha(&data)}),
         );
-        pushed += 1;
-        spec_pushed = spec_pushed || rel == "spec.md";
-        decision_pushed = decision_pushed || rel == "decision.md";
+        pushed.push(rel.clone());
+        // Marked at once, so a later file's failure still leaves the board write due.
+        for (name, marker) in [
+            ("spec.md", &goal_pending),
+            ("decision.md", &decision_pending),
+        ] {
+            if rel == name {
+                write_atomic(marker, b"").map_err(|e| os_fail(e, marker))?;
+            }
+        }
     }
-    let pending = folder.join(".goal-pending");
-    if spec_pushed {
-        write_atomic(&pending, b"").map_err(|e| os_fail(e, &pending))?;
-    }
-    let goal_due = spec_pushed || pending.exists();
+    let pending = goal_pending;
+    let goal_due = pending.exists();
     save_manifest(&folder, &manifest)?;
-    println!("pushed {pushed} files");
+    writeln!(out, "pushed {} files", pushed.len()).ok();
     let spec = folder.join("spec.md");
-    if goal_due && spec.exists() && !conflicts.iter().any(|c| c == "spec.md") && !spec_stale {
+    // A refused spec keeps .goal-pending, so its Goal goes up once the secret is gone.
+    if goal_due
+        && spec.exists()
+        && !conflicts.iter().any(|c| c == "spec.md")
+        && !refused.iter().any(|r| r == "spec.md")
+        && !spec_stale
+    {
         let text = read_text(&spec).map_err(|e| os_fail(e, &spec))?;
-        record_goal(&home, &slug, &job_id, spec_goal(&text))?;
+        record_goal(&home, &slug, &job_id, spec_goal(&text), out)?;
         match fs::remove_file(&pending) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(os_fail(e, &pending)),
             _ => {}
         }
     }
-    if decision_pushed && !conflicts.iter().any(|c| c == "decision.md") {
-        let path = folder.join("decision.md");
+    let path = folder.join("decision.md");
+    if decision_pending.exists() && path.exists() && !conflicts.iter().any(|c| c == "decision.md") {
         let text = read_text(&path).map_err(|e| os_fail(e, &path))?;
-        record_decision(
-            &home,
-            &slug,
-            &job_id,
-            decision_verdict(&text),
-            &mut io::stdout(),
-        )?;
+        record_decision(home, slug, job_id, decision_verdict(&text), out)?;
+        match fs::remove_file(&decision_pending) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => {
+                return Err(os_fail(e, &decision_pending))
+            }
+            _ => {}
+        }
     }
     if !conflicts.is_empty() {
         return Err(conflict_exit(&conflicts));
     }
-    Ok(())
+    if !refused.is_empty() {
+        return Err(fail(
+            if refused.len() == 1 {
+                format!(
+                    "refused {}: it looks like it holds a secret and was not uploaded. Remove the secret, then push again",
+                    refused[0]
+                )
+            } else {
+                format!(
+                    "refused {}: they look like they hold secrets and were not uploaded. Remove the secrets, then push again",
+                    refused.join(", ")
+                )
+            },
+            6,
+        ));
+    }
+    Ok(pushed)
 }
 
 pub fn push(call: &Call) -> Res<()> {
@@ -598,8 +732,23 @@ pub fn push(call: &Call) -> Res<()> {
 
 /// Download what changed in R2 and keep local edits. (summary line, conflicted files).
 pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Vec<String>)> {
+    pull_job_files(home, slug, job_id, false).map(|(line, conflicts, _)| (line, conflicts))
+}
+
+/// `pull_job`, also returning the files it downloaded. An automatic pull (the daemon's) records
+/// each replaced or created file's `base`: the ETag its local copy had before, or null when there
+/// was none. Push conditions on the base, so a session that read the old copy and writes it back
+/// blind gets a 412 and keeps both copies. A deliberate pull clears the base of each file it
+/// leaves matching R2, since the session took R2's version; a file edited here keeps its base.
+pub(crate) fn pull_job_files(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    auto: bool,
+) -> Res<(String, Vec<String>, Vec<String>)> {
+    let _lock = job_lock(home, slug, job_id)?;
     let (folder, mut manifest, remote) = sync_state(home, slug, job_id)?;
-    let (mut got, mut unpushed, mut conflicts) = (0, Vec::new(), Vec::new());
+    let (mut got, mut unpushed, mut conflicts) = (Vec::new(), Vec::new(), Vec::new());
     for (rel, tag) in &remote {
         let path = folder.join(rel);
         let data = local_bytes(&path);
@@ -625,15 +774,49 @@ pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Ve
             .is_none_or(|d| entry.is_some() && stored("sha256") == Some(&Value::from(sha(d))))
         {
             if data.is_some() && stored("etag") == Some(&tag_value) {
+                if !auto {
+                    if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                        e.shift_remove("base");
+                    }
+                }
                 continue;
             }
             let (body, fetched) = fetch(home, slug, job_id, rel)?;
-            manifest.insert(rel.clone(), fetched);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|e| os_fail(e, parent))?;
             }
+            // Written here while the fetch ran: keep it, and save R2's copy beside it, as
+            // reconcile does. The .remote holds push back until a person merges it.
+            if local_bytes(&path) != data {
+                manifest.insert(rel.clone(), fetched);
+                let remote = dot_remote(&path);
+                write_atomic(&remote, &body).map_err(|e| os_fail(e, &remote))?;
+                conflicts.push(rel.clone());
+                continue;
+            }
+            // The entry claims R2's ETag before the bytes are here, so it is saved with a base: the
+            // ETag the local bytes came from, or null when there were none. A write that fails or
+            // is cut short leaves the old bytes under that base, and a push conditions on it and
+            // meets a 412. Saving after the write instead would leave R2's bytes under the old
+            // entry, which the next reconcile adopts with no base.
+            let base = match stored("base") {
+                Some(base) => base.clone(),
+                None if data.is_some() => stored("etag").cloned().unwrap_or(Value::Null),
+                None => Value::Null,
+            };
+            let mut entry = fetched;
+            entry["base"] = base;
+            manifest.insert(rel.clone(), entry);
+            save_manifest(&folder, &manifest)?;
             write_atomic(&path, &body).map_err(|e| os_fail(e, &path))?;
-            got += 1;
+            // A deliberate pull took R2's version, so once the bytes are here the base goes.
+            if !auto {
+                if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                    e.shift_remove("base");
+                }
+                save_manifest(&folder, &manifest)?;
+            }
+            got.push(rel.clone());
         } else if entry.is_some() && stored("etag") == Some(&tag_value) {
             unpushed.push(rel.clone());
         } else if reconcile(
@@ -649,14 +832,14 @@ pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Ve
         }
     }
     save_manifest(&folder, &manifest)?;
-    let mut line = format!("pulled {got} files");
+    let mut line = format!("pulled {} files", got.len());
     if !unpushed.is_empty() {
         line += &format!(", unpushed: {}", unpushed.join(", "));
     }
     if !conflicts.is_empty() {
         line += &format!(", conflict: {}", conflicts.join(", "));
     }
-    Ok((line, conflicts))
+    Ok((line, conflicts, got))
 }
 
 pub fn pull(call: &Call) -> Res<()> {
@@ -1160,6 +1343,176 @@ mod tests {
         assert_eq!(seen.len(), 3);
         assert_eq!(seen[1].header("If-Match"), Some("\"d0\""));
         assert!(seen.iter().all(|s| s.path != "/api/board"));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn push_target_skips_the_network_when_the_daemon_synced() {
+        if !in_child("push_target_skips_the_network_when_the_daemon_synced") {
+            return;
+        }
+        // Port 9 answers nothing, so any request would fail the push.
+        let state = json!({"decision.md": {"etag": "\"d1\"", "sha256": sha(DECISION)}});
+        let home = job_home(
+            "sync-push-daemon",
+            "http://127.0.0.1:9",
+            &[
+                ("decision.md", DECISION),
+                (".sync.json", dumps(&state, INDENT2_SORTED).as_bytes()),
+            ],
+        );
+        let lock = crate::commands::daemon::take_lock(&home).unwrap().unwrap();
+        push_with_home(&home, "alpha/042-sample-export").unwrap();
+        fs::write(
+            home.join("jobs/alpha/042-sample-export/decision.md"),
+            "edited\n",
+        )
+        .unwrap();
+        assert!(push_with_home(&home, "alpha/042-sample-export").is_err());
+        drop(lock);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn job_lock_excludes_a_second_holder_and_leaves_no_file() {
+        let home = job_home("sync-job-lock", "http://127.0.0.1:9", &[]);
+        let held = job_lock(&home, "alpha", "042-sample-export")
+            .unwrap()
+            .unwrap();
+        let other = fs::File::open(home.join("jobs/alpha/042-sample-export")).unwrap();
+        assert!(matches!(
+            other.try_lock(),
+            Err(fs::TryLockError::WouldBlock)
+        ));
+        drop(held);
+        other.try_lock().unwrap();
+        assert!(walk(&home.join("jobs/alpha/042-sample-export"))
+            .unwrap()
+            .is_empty());
+        assert!(job_lock(&home, "alpha", "043-missing").unwrap().is_none());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn decision_pending_survives_a_later_failure() {
+        use crate::shared::http::tests::serve;
+        let board = r#"{"updated":"","jobs":[{"id":"042-sample-export","project":"alpha","stage":"needs-human"}]}"#;
+        // decision.md goes up, then the image after it is refused, so the push stops early.
+        let (origin, seen) = serve(vec![
+            (200, "[]", vec![]),
+            (200, "", vec![("ETag", "\"d1\"")]),
+            (413, "image over 5 MiB", vec![]),
+        ]);
+        let home = job_home(
+            "sync-decision-pending",
+            &origin,
+            &[("decision.md", DECISION), ("shot.png", b"png")],
+        );
+        let folder = home.join("jobs/alpha/042-sample-export");
+        let mut out = Vec::new();
+        assert!(push_job(&home, "alpha", "042-sample-export", &mut out).is_err());
+        assert!(folder.join(".decision-pending").exists());
+        assert!(!locally_synced(&folder));
+        // The next push adopts R2's matching decision.md and still records the verdict.
+        let (origin, seen2) = serve(vec![
+            (200, r#"[{"name":"decision.md","etag":"\"d1\""}]"#, vec![]),
+            (
+                200,
+                std::str::from_utf8(DECISION).unwrap(),
+                vec![("ETag", "\"d1\"")],
+            ),
+            (200, "", vec![("ETag", "\"p1\"")]),
+            (200, board, vec![("ETag", "\"b1\"")]),
+            (200, "{}", vec![("ETag", "\"b2\"")]),
+        ]);
+        fs::write(
+            home.join("config.md"),
+            format!("---\napi_url: {origin}\n---\n"),
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        push_job(&home, "alpha", "042-sample-export", &mut out).unwrap();
+        assert!(String::from_utf8(out)
+            .unwrap()
+            .contains("recorded the decision.md verdict"));
+        assert!(!folder.join(".decision-pending").exists());
+        assert_eq!(seen.lock().unwrap().len(), 3);
+        assert_eq!(seen2.lock().unwrap()[4].path, "/api/board");
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn goal_pending_is_marked_mid_push() {
+        use crate::shared::http::tests::serve;
+        // spec.md goes up, then the next file's PUT fails before the loop ends.
+        let (origin, _seen) = serve(vec![
+            (200, "[]", vec![]),
+            (200, "", vec![("ETag", "\"s1\"")]),
+        ]);
+        let home = job_home(
+            "sync-goal-pending",
+            &origin,
+            &[("spec.md", b"## Goal\nShip it.\n"), ("z.md", b"z\n")],
+        );
+        let folder = home.join("jobs/alpha/042-sample-export");
+        assert!(push_job(&home, "alpha", "042-sample-export", &mut Vec::new()).is_err());
+        assert!(folder.join(".goal-pending").exists());
+        assert!(!locally_synced(&folder));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn header_name_alone_uploads_but_a_value_is_refused() {
+        let name = "CF-Access-Client-Secret";
+        assert_eq!(
+            secret_refusal("review.md", format!("Never log {name}.\n").as_bytes()),
+            None
+        );
+        let jwt = format!("{name}: eyJ{}.{}.sig\n", "a".repeat(20), "b".repeat(20));
+        assert!(secret_refusal("review.md", jwt.as_bytes()).is_some());
+        let token = format!("{name}: ghp_{}\n", "c".repeat(30));
+        assert!(secret_refusal("review.md", token.as_bytes()).is_some());
+        assert_eq!(secret_refusal("shot.png", token.as_bytes()), None);
+    }
+
+    #[test]
+    fn refused_spec_skips_the_goal_and_keeps_the_marker() {
+        use crate::shared::http::tests::serve;
+        let (origin, seen) = serve(vec![(200, "[]", vec![])]);
+        let spec = format!("## Goal\nShip ghp_{}\n", "a".repeat(30));
+        let home = job_home(
+            "sync-refused-spec",
+            &origin,
+            &[("spec.md", spec.as_bytes()), (".goal-pending", b"")],
+        );
+        let folder = home.join("jobs/alpha/042-sample-export");
+        let e = push_job(&home, "alpha", "042-sample-export", &mut Vec::new()).unwrap_err();
+        assert_eq!(
+            e.stderr,
+            "factory.py: refused spec.md: it looks like it holds a secret and was not uploaded. Remove the secret, then push again\n"
+        );
+        assert!(folder.join(".goal-pending").exists());
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert!(seen.iter().all(|r| r.path != "/api/board"));
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn manual_push_refuses_a_secret() {
+        use crate::shared::http::tests::serve;
+        let (origin, seen) = serve(vec![(200, "[]", vec![])]);
+        let home = job_home(
+            "sync-push-secret",
+            &origin,
+            &[("notes.md", b"-----BEGIN RSA PRIVATE KEY-----\n")],
+        );
+        let mut out = Vec::new();
+        let e = push_job(&home, "alpha", "042-sample-export", &mut out).unwrap_err();
+        assert_eq!(e.code, 6);
+        assert!(e.stderr.contains("refused notes.md"), "{}", e.stderr);
+        assert_eq!(seen.lock().unwrap().len(), 1);
         fs::remove_dir_all(home).unwrap();
     }
 

@@ -8,6 +8,7 @@ pub mod ghpoll;
 pub mod heartbeat;
 pub mod install;
 pub mod intake;
+pub mod job_sync;
 pub mod lookup;
 pub mod mirror;
 pub mod ops;

@@ -110,6 +110,16 @@ impl Mirror {
             .is_none_or(|at| at.elapsed() >= REFRESH)
     }
 
+    /// The board's version and job rows, when the mirror holds a version other than `seen`.
+    pub fn jobs_since(&self, seen: &str) -> Option<(String, Vec<Value>)> {
+        let s = self.state.lock().unwrap();
+        if s.etag == seen {
+            return None;
+        }
+        let jobs = s.doc.as_ref()?["jobs"].as_array()?.clone();
+        Some((s.etag.clone(), jobs))
+    }
+
     /// Fetches the whole board. Returns how many jobs it holds, or the failure.
     pub fn fetch(&self) -> Result<usize, String> {
         let _turn = self.fetching.lock().unwrap();
