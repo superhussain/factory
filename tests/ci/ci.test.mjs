@@ -69,7 +69,6 @@ test("ci aggregates every job and skips only cancelled runs", () => {
   assert.deepEqual(workflow.jobs.ci.needs, [
     "plan",
     "targets",
-    "local",
     "browser",
     "paseo-plugin",
     "rust-build",
@@ -84,7 +83,7 @@ test("the aggregate names each job in RESULTS", () => {
   const step = workflow.jobs.ci.steps.find((entry) => entry.name === "All CI jobs passed");
   assert.equal(
     step.env.RESULTS,
-    "plan=${{ needs.plan.result }} targets=${{ needs.targets.result }} local=${{ needs.local.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }} rust-build=${{ needs.rust-build.result }} rust-test=${{ needs.rust-test.result }} rust-check=${{ needs.rust-check.result }} parity=${{ needs.parity.result }}",
+    "plan=${{ needs.plan.result }} targets=${{ needs.targets.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }} rust-build=${{ needs.rust-build.result }} rust-test=${{ needs.rust-test.result }} rust-check=${{ needs.rust-check.result }} parity=${{ needs.parity.result }}",
   );
 });
 
@@ -248,26 +247,22 @@ test("targets and browser restore the browser cache read-only", () => {
   }
 });
 
-test("rust-build caches the binary under the rust key, and local restores it or builds it on a miss", () => {
-  const { local, "rust-build": build } = workflow.jobs;
+test("rust-build caches the binary under the rust key, and targets restores it or builds it on a miss", () => {
+  const { targets, "rust-build": build } = workflow.jobs;
   const key = "${{ needs.plan.outputs.rust-key }}-bin";
   const binary = "rust/target/host/factory";
-  const save = build.steps.find((step) => step.name === "Cache the factory binary for local");
+  const save = build.steps.find((step) => step.name === "Cache the factory binary for targets");
   assert.equal(action(save), "actions/cache/save");
   assert.deepEqual(save.with, { path: binary, key });
   const buildStep = build.steps.findIndex((step) => step.name === "Build linux-x64");
   assert.ok(build.steps.indexOf(save) > buildStep);
-  // local waits for rust-build's binary, and still runs when a rust hit skips rust-build.
-  assert.deepEqual(local.needs, ["plan", "rust-build"]);
-  assert.equal(
-    local.if,
-    "${{ !cancelled() && needs.plan.outputs.all != 'true' && (needs.rust-build.result == 'success' || needs.rust-build.result == 'skipped') }}",
-  );
-  const restore = local.steps.findIndex((step) => step.name === "Restore the factory binary");
-  assert.equal(action(local.steps[restore]), "actions/cache/restore");
-  assert.deepEqual(local.steps[restore].with, { path: binary, key });
+  // targets never waits on rust-build, so it still runs when a rust hit skips rust-build.
+  assert.equal(targets.needs, "plan");
+  const restore = targets.steps.findIndex((step) => step.name === "Restore the factory binary");
+  assert.equal(action(targets.steps[restore]), "actions/cache/restore");
+  assert.deepEqual(targets.steps[restore].with, { path: binary, key });
   const miss = "steps.factory-bin.outputs.cache-hit != 'true'";
-  const onMiss = local.steps.filter((step) => step.if === miss);
+  const onMiss = targets.steps.filter((step) => step.if === miss);
   assert.deepEqual(
     onMiss.map((step) => step.run ?? action(step)),
     [
@@ -277,40 +272,14 @@ test("rust-build caches the binary under the rust key, and local restores it or 
       "CARGO_INCREMENTAL=1 cargo build --profile host --locked",
     ],
   );
-  // warm.yml saves the shared rust/target cache and the incremental artifacts; local only reads them.
+  // warm.yml saves the shared rust/target cache and the incremental artifacts; targets only reads them.
   assert.equal(onMiss[1].with["save-if"], false);
   const incremental = build.steps.find((step) => step.name === "Restore incremental artifacts");
   assert.deepEqual(onMiss[2].with, incremental.with);
-  assert.ok(!local.steps.some((step) => action(step) === "actions/cache/save"));
-  const nx = local.steps.findIndex((step) => step.name === "Nx affected local");
-  assert.ok(onMiss.every((step) => local.steps.indexOf(step) > restore));
-  assert.ok(onMiss.every((step) => local.steps.indexOf(step) < nx));
-});
-
-test("targets and local split the Nx targets, and only targets scans, formats and provisions the browser", () => {
-  const { targets, local } = workflow.jobs;
-  const runs = (job) => job.steps.map((step) => step.run ?? action(step));
-  const nx = (job, name) => job.steps.find((step) => step.name === name).run;
-  const base = '--base="$NX_BASE" --head="$NX_HEAD"';
-  assert.equal(
-    nx(targets, "Nx affected"),
-    `pnpm exec nx affected -t auth protocol assets deploy verify ${base}`,
-  );
-  assert.equal(nx(local, "Nx affected local"), `pnpm exec nx affected -t local ${base}`);
-  for (const job of [targets, local]) {
-    assert.equal(job.steps[0].with["fetch-depth"], 0);
-    assert.equal(runs(job)[1], "./.github/actions/ci-setup");
-  }
-  assert.ok(!targets.steps.some((step) => step.name === "Restore the factory binary"));
-  for (const run of [
-    "node tools/secret-scan.mjs",
-    "pnpm run format:check",
-    "pnpm run test:workflow",
-  ]) {
-    assert.ok(runs(targets).includes(run), run);
-    assert.ok(!runs(local).includes(run), run);
-  }
-  assert.ok(!local.steps.some((step) => step.name === "Restore browser provision"));
+  assert.ok(!targets.steps.some((step) => action(step) === "actions/cache/save"));
+  const nx = targets.steps.findIndex((step) => step.name === "Nx affected");
+  assert.ok(onMiss.every((step) => targets.steps.indexOf(step) > restore));
+  assert.ok(onMiss.every((step) => targets.steps.indexOf(step) < nx));
 });
 
 test("rust-build restores main's incremental artifacts before an incremental build and never saves them", () => {

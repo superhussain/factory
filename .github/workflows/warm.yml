@@ -34,7 +34,7 @@ jobs:
         with:
           prefix-key: v2-rust
           workspaces: rust
-      # CI's rust-build and local jobs restore these by prefix and never save them.
+      # CI's rust-build and targets jobs restore these by prefix and never save them.
       - name: Restore incremental artifacts
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -48,9 +48,9 @@ jobs:
         with:
           path: rust/target/host/incremental
           key: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
-  # CI's local builds the binary only when rust-build has not cached it yet, and never saves its rust cache,
+  # CI's targets builds the binary only when rust-build has not cached it yet, and never saves its rust cache,
   # so its key is saved only here.
-  local:
+  targets:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     timeout-minutes: 8

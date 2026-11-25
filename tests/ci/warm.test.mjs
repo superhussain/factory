@@ -12,7 +12,7 @@ const warm = parse(raw);
 const action = (step) => step.uses?.split("@")[0];
 const rustCache = (job) => job.steps.find((step) => action(step) === "Swatinem/rust-cache");
 const named = (job, name) => job.steps.find((step) => step.name === name);
-const JOBS = ["rust-build", "local", "rust-test", "rust-check"];
+const JOBS = ["rust-build", "targets", "rust-test", "rust-check"];
 
 test("warm runs on main pushes and by hand, reads only contents, and keeps the newest run", () => {
   assert.deepEqual(warm.on, { push: { branches: ["main"] }, workflow_dispatch: null });
@@ -42,8 +42,8 @@ test("each warm job's rust-cache key inputs match its ci.yml job", () => {
     assert.equal(rustCache(w).uses, rustCache(c).uses, id);
     for (const step of w.steps) assert.equal(step.env, undefined, `${id}: ${step.name}`);
   }
-  // local never saves in CI, so warm is the only writer of its key.
-  assert.equal(rustCache(ci.jobs.local).with["save-if"], false);
+  // targets never saves in CI, so warm is the only writer of its key.
+  assert.equal(rustCache(ci.jobs.targets).with["save-if"], false);
 });
 
 test("each warm job installs the same toolchain and compiles what its ci.yml job compiles", () => {
@@ -60,8 +60,8 @@ test("each warm job installs the same toolchain and compiles what its ci.yml job
     run(ci.jobs["rust-build"], "Build linux-x64"),
   );
   assert.equal(
-    run(warm.jobs.local, "Build the factory binary"),
-    run(ci.jobs.local, "Build the factory binary"),
+    run(warm.jobs.targets, "Build the factory binary"),
+    run(ci.jobs.targets, "Build the factory binary"),
   );
   assert.equal(
     run(warm.jobs["rust-test"], "Build the tests"),
