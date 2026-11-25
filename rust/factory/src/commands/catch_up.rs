@@ -17,7 +17,7 @@ use crate::commands::pickup;
 use crate::shared::build::{private_dir, rust_binary, Host, BINARY};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{exit, fail, Res};
-use crate::shared::fs::{read_text, resolve, temp_root};
+use crate::shared::fs::{is_link, read_text, resolve, temp_root};
 use crate::shared::home::factory_home;
 use crate::shared::proc::{capture, git, origin_git, Out};
 use crate::shared::project::{project_files, read_paths};
@@ -333,6 +333,9 @@ fn build(checkout: &Path, err: &mut dyn Write) -> Result<Vec<u8>, String> {
 /// effort. A folder is removed only when it passes the same private checks it was made with.
 fn sweep_copies(out: &mut dyn Write, home: &Path) {
     let tmp = home.join("tmp");
+    if is_link(&tmp).unwrap_or(true) {
+        return;
+    }
     let Ok(entries) = fs::read_dir(&tmp) else {
         return;
     };
@@ -355,7 +358,8 @@ fn sweep_copies(out: &mut dyn Write, home: &Path) {
     if removed > 0 {
         outln!(
             out,
-            "skill: removed {removed} leftover binary copies over a day old from {}",
+            "skill: removed {removed} leftover binary {} over a day old from {}",
+            if removed == 1 { "copy" } else { "copies" },
             tmp.display()
         );
     }
@@ -2025,6 +2029,18 @@ mod tests {
         left.sort();
         // A fresh copy, one another user could have written, and anything else stay.
         assert_eq!(left, ["catch-up-new", "catch-up-open", "unrelated-old"]);
+        // One removed copy reads in the singular.
+        let dir = tmp.join("catch-up-old3");
+        fs::create_dir_all(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::File::open(&dir).unwrap().set_modified(old).unwrap();
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0, "{out}");
+        let line = format!(
+            "skill: removed 1 leftover binary copy over a day old from {}",
+            tmp.display()
+        );
+        assert!(out.lines().any(|l| l == line), "{out}");
     }
 
     #[test]
