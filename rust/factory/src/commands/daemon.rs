@@ -1924,7 +1924,7 @@ mod tests {
             Err(RecvTimeoutError::Timeout)
         ));
         *clock.lock().unwrap() += Duration::from_millis(1);
-        let Ok(Event::Closed(reason)) = rx.recv() else {
+        let Ok(Event::Closed(reason)) = rx.recv_timeout(Duration::from_secs(60)) else {
             panic!("expected Closed")
         };
         assert_eq!(reason, "no frame for 0.2s");
