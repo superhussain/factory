@@ -155,13 +155,14 @@ on its own where it is installed:
   `closed`. Pull a finished job by id.
 - Where the daemon runs, it pushes a changed job folder about 3 s after its
   last write. It pulls a job when its board row changes, unless a live
-  session here holds it. An edit from a copy older than the daemon's pull
-  conflicts, so `pull` first. Still run `push` after writing.
+  session here holds it. `pull` before editing, or the edit conflicts. Still
+  run `push` after writing.
 - When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
   the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
   each file; `push` refuses it while the `.remote` waits. Diff the two. If every
   difference is text you wrote, or you never edited the file, copy the
-  `.remote` to `round-N/conflict-<name>` (no round: top level), then
+  `.remote` to `round-N/conflict-<name>` (else top level; if taken,
+  `conflict-2-<name>`...), then
   delete it or move it over the unedited file, and push. Else `needs-human`.
   Images: copy, then keep either.
 
