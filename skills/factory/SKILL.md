@@ -212,14 +212,11 @@ timeout. See [pickup](references/pickup.md#prebuilt-dependencies).
 ## Claims
 
 Every job carries a `claim` naming the session running it, so two sessions, on one
-device or two, never run the same job. The first `claim` or `hold` without a session
-prints `new session <tag>` on stderr, so read stderr. `next`
-does the same. Once you know the tag, from that stderr line or from a launch prompt's
-`--session <tag>`, start every shell call that runs the runtime with
-`export FACTORY_SESSION=<tag>`. The runtime reads it whenever a command has no
-`--session` flag. Each shell call starts fresh, so repeat the export in every call.
-Without it, a write treats this session's own claim as another session's, exits 6
-and writes nothing.
+device or two, never run the same job. The first `claim`, `hold` or `next` without a
+session prints `new session <tag>` on stderr, so read stderr. With that tag or a
+launch prompt's `--session <tag>`, start every shell call that runs the runtime
+with `export FACTORY_SESSION=<tag>`, since shells start fresh. Without it, a write
+exits 6.
 
 - Run `hold` before spawning each agent and after each one finishes, so a long
   build keeps the claim fresh. A claim goes stale after `claim_stale_minutes` in
