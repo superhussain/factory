@@ -26,9 +26,8 @@ use crate::shared::pyre::{Flags, Pattern};
 
 const USAGE: &str = "factory install: usage: factory install --source <checkout> --destination <skills root> [--replace]\n";
 const LEGACY: &str = "huss-factory";
-const FILES: [&str; 18] = [
+const FILES: [&str; 17] = [
     "SKILL.md",
-    "runtime/factory.py",
     "templates/config.md",
     "templates/project.md",
     "references/execution.md",
@@ -87,13 +86,6 @@ pub(crate) fn required() -> BTreeSet<String> {
                 .map(|c| format!("references/commands/{c}.md")),
         )
         .chain(AGENTS.iter().map(|a| format!("agents/factory-{a}.md")))
-        .collect()
-}
-
-fn required_dirs() -> BTreeSet<String> {
-    required()
-        .iter()
-        .filter_map(|f| f.rsplit_once('/').map(|(d, _)| d.to_string()))
         .collect()
 }
 
@@ -188,7 +180,6 @@ fn tree(root: &Path, source: bool) -> Result<Tree, Why> {
         files: BTreeMap::new(),
         ids: BTreeMap::new(),
     };
-    let mut directories = BTreeSet::new();
     let mut stack = vec![(root.to_path_buf(), String::new())];
     while let Some((folder, prefix)) = stack.pop() {
         for entry in fs::read_dir(&folder)? {
@@ -205,7 +196,6 @@ fn tree(root: &Path, source: bool) -> Result<Tree, Why> {
             let rel = format!("{prefix}{name}");
             out.ids.insert(rel.clone(), ident(&info));
             if info.is_dir() {
-                directories.insert(rel.clone());
                 if !(source && (name.starts_with('.') || name == "__pycache__")) {
                     stack.push((path, format!("{rel}/")));
                 }
@@ -221,19 +211,10 @@ fn tree(root: &Path, source: bool) -> Result<Tree, Why> {
             out.files.insert(rel, fs::read(&path)?);
         }
     }
-    if source {
-        let dirs: BTreeSet<String> = directories
-            .into_iter()
-            .filter(|d| {
-                !d.split('/')
-                    .any(|p| p.starts_with('.') || p == "__pycache__")
-            })
-            .collect();
-        if out.files.keys().cloned().collect::<BTreeSet<_>>() != required()
-            || dirs != required_dirs()
-        {
-            return Err(Why::Unsafe);
-        }
+    // Folders are not compared: a checkout that once ran the Python runtime keeps a
+    // runtime/__pycache__ folder after runtime/factory.py is gone.
+    if source && out.files.keys().cloned().collect::<BTreeSet<_>>() != required() {
+        return Err(Why::Unsafe);
     }
     Ok(out)
 }
@@ -418,7 +399,11 @@ fn attempt_install(
     hook("prior")?;
     if let Some(prior) = &prior {
         let mut expected: BTreeSet<String> = content.keys().cloned().collect();
-        expected.extend(required_dirs());
+        expected.extend(
+            content
+                .keys()
+                .filter_map(|f| f.rsplit_once('/').map(|(d, _)| d.to_string())),
+        );
         if prior.files == content && prior.ids.keys().cloned().collect::<BTreeSet<_>>() == expected
         {
             let _ = writeln!(out, "{}", target.display());
@@ -1083,91 +1068,6 @@ mod tests {
         ] {
             assert_eq!(parse(&args(bad)), None, "{bad:?}");
         }
-    }
-
-    /// The deprecated runtime/factory.py stub runs the binary beside it under sh and under Python,
-    /// and picks factory.exe when Python reports Windows: argv, stdin and the exit code pass through.
-    #[test]
-    fn factory_py_stub_runs_the_binary_beside_it() {
-        let root = temp_dir("factory-py-stub");
-        let runtime = root.join("runtime");
-        fs::create_dir_all(&runtime).unwrap();
-        let stub = runtime.join("factory.py");
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        fs::copy(repo.join("skills/factory/runtime/factory.py"), &stub).unwrap();
-        for name in ["factory", "factory.exe"] {
-            script(
-                &runtime.join(name),
-                &format!("printf '{name}:%s|' \"$@\"; cat; exit 7\n"),
-            );
-        }
-        let text = stub.to_string_lossy().into_owned();
-        let windows = format!(
-            "import os, runpy, sys; os.name = 'nt'; sys.argv = [{text:?}, 'a', 'b c']; runpy.run_path({text:?}, run_name='__main__')"
-        );
-        for (argv, binary) in [
-            (vec!["sh", &text, "a", "b c"], "factory"),
-            (vec!["python3", &text, "a", "b c"], "factory"),
-            (vec!["python3", "-c", &windows], "factory.exe"),
-        ] {
-            let mut child = std::process::Command::new(argv[0])
-                .args(&argv[1..])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .unwrap();
-            child.stdin.take().unwrap().write_all(b"piped").unwrap();
-            let p = child.wait_with_output().unwrap();
-            let err = String::from_utf8(p.stderr).unwrap();
-            assert_eq!(p.status.code(), Some(7), "{argv:?}");
-            assert_eq!(
-                String::from_utf8(p.stdout).unwrap(),
-                format!("{binary}:a|{binary}:b c|piped"),
-                "{argv:?}"
-            );
-            assert!(
-                err.starts_with("factory.py is deprecated and runs "),
-                "{argv:?}"
-            );
-            assert!(err.contains("FACTORY_RUNTIME=python is gone"), "{argv:?}");
-        }
-        // With a binary that is not executable, then with none, one line names the installer and
-        // nothing runs.
-        for missing in [false, true] {
-            for name in ["factory", "factory.exe"] {
-                if missing {
-                    fs::remove_file(runtime.join(name)).unwrap();
-                } else {
-                    fs::set_permissions(runtime.join(name), fs::Permissions::from_mode(0o644))
-                        .unwrap();
-                }
-            }
-            for argv in [
-                vec!["sh", &text, "a"],
-                vec!["python3", &text, "a"],
-                vec!["python3", "-c", &windows],
-            ] {
-                let p = std::process::Command::new(argv[0])
-                    .args(&argv[1..])
-                    .stdin(std::process::Stdio::null())
-                    .output()
-                    .unwrap();
-                let err = String::from_utf8(p.stderr).unwrap();
-                assert_eq!(
-                    (p.status.code(), p.stdout.len()),
-                    (Some(127), 0),
-                    "{argv:?}"
-                );
-                assert_eq!(err.lines().count(), 1, "{argv:?}: {err}");
-                assert!(
-                    err.starts_with("factory.py: no factory binary at ")
-                        && err.contains("sh tools/install.sh <skills folder>"),
-                    "{argv:?}: {err}"
-                );
-            }
-        }
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// Ported from tests/cli/test_roles.py: security-relevant rules the shipped prompts must keep.

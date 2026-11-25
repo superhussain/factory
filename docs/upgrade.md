@@ -68,7 +68,7 @@ Catch-up never prunes these folders. To roll back:
 3. Copy the files in `home/` back into the factory home.
 
 This restore is the only rollback. The Python runtime and its `FACTORY_RUNTIME=python`
-switch are gone, and `runtime/factory.py` is now a stub that runs the binary beside it.
+switch are gone, and so is the `runtime/factory.py` stub that ran the binary beside it.
 
 See [device.md](device.md) for the installer's lock and backup rules.
 
