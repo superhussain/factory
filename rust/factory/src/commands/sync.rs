@@ -925,6 +925,74 @@ pub(crate) fn pull_job_files(
     Ok((line, conflicts, got))
 }
 
+/// The nth conflict copy's name for rel, in rel's own folder: `conflict-<name>`, then
+/// `conflict-2-<name>`, or `conflict.walkthrough.html` for the spec's walkthrough, so every
+/// copy keeps a name job sync uploads.
+fn conflict_rel(rel: &str, n: usize) -> String {
+    let (dir, name) = match rel.rsplit_once('/') {
+        Some((dir, name)) => (format!("{dir}/"), name),
+        None => (String::new(), rel),
+    };
+    let num = if n == 1 {
+        String::new()
+    } else {
+        format!("-{n}")
+    };
+    if name == "walkthrough.html" {
+        format!("{dir}conflict{num}.walkthrough.html")
+    } else {
+        format!("{dir}conflict{num}-{name}")
+    }
+}
+
+/// Copies rel's `.remote` to the first free conflict copy beside it and returns the copy's rel.
+/// The copy is a job file, so R2's version uploads with the next push, and the `.remote` can then
+/// be settled without losing it. Never overwrites.
+fn keep_remote_in(home: &Path, slug: &str, job_id: &str, rel: &str) -> Res<String> {
+    if !JOB_REL.is_full(rel) {
+        return Err(fail(format!("{rel} is not a job file"), 2));
+    }
+    let folder = safe_job_folder(home, slug, job_id)?;
+    let remote = dot_remote(&folder.join(rel));
+    let data = match fs::read(&remote) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(fail(format!("{rel}.remote does not exist"), 4))
+        }
+        read => read.map_err(|e| os_fail(e, &remote))?,
+    };
+    for n in 1.. {
+        let copy = conflict_rel(rel, n);
+        if !JOB_REL.is_full(&copy) {
+            return Err(fail(format!("{copy} would not sync"), 1));
+        }
+        let path = folder.join(&copy);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                file.write_all(&data).map_err(|e| os_fail(e, &path))?;
+                return Ok(copy);
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(os_fail(e, &path)),
+        }
+    }
+    unreachable!()
+}
+
+/// `keep-remote <project>/<id> <file>`: prints the conflict copy it made of `<file>.remote`.
+pub fn keep_remote(call: &Call) -> Res<()> {
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    let copy = keep_remote_in(&home, &slug, &job_id, &call.args[1])?;
+    println!(
+        "{}",
+        safe_job_folder(&home, &slug, &job_id)?.join(copy).display()
+    );
+    Ok(())
+}
+
 pub fn pull(call: &Call) -> Res<()> {
     let (home, slug, job_id) = r2_target(&call.args[0], false)?;
     if job_id.is_empty() {
@@ -1602,6 +1670,105 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn conflict_copies_keep_names_that_sync() {
+        for (rel, first, second) in [
+            ("build.md", "conflict-build.md", "conflict-2-build.md"),
+            (
+                "round-2/review-code.md",
+                "round-2/conflict-review-code.md",
+                "round-2/conflict-2-review-code.md",
+            ),
+            ("shot.png", "conflict-shot.png", "conflict-2-shot.png"),
+            (
+                "walkthrough.html",
+                "conflict.walkthrough.html",
+                "conflict-2.walkthrough.html",
+            ),
+            (
+                "build.walkthrough.html",
+                "conflict-build.walkthrough.html",
+                "conflict-2-build.walkthrough.html",
+            ),
+            (
+                "round-1/review-ui.walkthrough.html",
+                "round-1/conflict-review-ui.walkthrough.html",
+                "round-1/conflict-2-review-ui.walkthrough.html",
+            ),
+        ] {
+            assert_eq!(
+                (conflict_rel(rel, 1), conflict_rel(rel, 2)),
+                (first.to_string(), second.to_string())
+            );
+            assert!(JOB_REL.is_full(first) && JOB_REL.is_full(second), "{rel}");
+        }
+    }
+
+    #[test]
+    fn keep_remote_copies_beside_the_file_and_never_overwrites() {
+        let home = job_home(
+            "sync-keep-remote",
+            "http://127.0.0.1:9",
+            &[
+                ("build.md", b"Mine\n"),
+                ("build.md.remote", b"R2 one\n"),
+                ("walkthrough.html", b"<p>mine</p>"),
+                ("walkthrough.html.remote", b"<p>r2</p>"),
+            ],
+        );
+        let folder = home.join("jobs/alpha/042-sample-export");
+        fs::create_dir_all(folder.join("round-1")).unwrap();
+        fs::write(folder.join("round-1/review.md.remote"), "R2 review\n").unwrap();
+        let keep = |rel: &str| keep_remote_in(&home, "alpha", "042-sample-export", rel);
+        assert_eq!(keep("build.md").unwrap(), "conflict-build.md");
+        // R2 moved again: the next copy takes the next number and the first is untouched.
+        fs::write(folder.join("build.md.remote"), "R2 two\n").unwrap();
+        assert_eq!(keep("build.md").unwrap(), "conflict-2-build.md");
+        assert_eq!(
+            fs::read(folder.join("conflict-build.md")).unwrap(),
+            b"R2 one\n"
+        );
+        assert_eq!(
+            fs::read(folder.join("conflict-2-build.md")).unwrap(),
+            b"R2 two\n"
+        );
+        assert!(folder.join("build.md.remote").exists());
+        assert_eq!(
+            keep("round-1/review.md").unwrap(),
+            "round-1/conflict-review.md"
+        );
+        assert_eq!(
+            fs::read(folder.join("round-1/conflict-review.md")).unwrap(),
+            b"R2 review\n"
+        );
+        assert_eq!(
+            keep("walkthrough.html").unwrap(),
+            "conflict.walkthrough.html"
+        );
+        assert_eq!(keep("notes.md").unwrap_err().code, 4);
+        assert_eq!(keep("../other/build.md").unwrap_err().code, 2);
+        assert_eq!(keep("scratch/build.md").unwrap_err().code, 2);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keep_remote_refuses_links() {
+        let home = job_home(
+            "sync-keep-remote-link",
+            "http://127.0.0.1:9",
+            &[("build.md", b"Mine\n")],
+        );
+        let folder = home.join("jobs/alpha/042-sample-export");
+        let outside = home.join("outside.md");
+        fs::write(&outside, "secret elsewhere\n").unwrap();
+        std::os::unix::fs::symlink(&outside, folder.join("build.md.remote")).unwrap();
+        let e = keep_remote_in(&home, "alpha", "042-sample-export", "build.md").unwrap_err();
+        assert_eq!(e.code, 6);
+        assert!(!folder.join("conflict-build.md").exists());
+        fs::remove_dir_all(home).unwrap();
     }
 
     #[test]
