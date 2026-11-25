@@ -1,4 +1,3 @@
-// CI timing probe; reverted in this PR.
 pub mod board;
 pub mod board_client;
 pub mod build;
