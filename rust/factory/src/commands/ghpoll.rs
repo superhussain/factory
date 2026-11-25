@@ -44,6 +44,9 @@ const MAX_ARGV: usize = 8192;
 /// The most gh processes the daemon runs at once; a read that would start another is refused and
 /// the command runs gh itself.
 const MAX_GH: usize = 4;
+/// Why a read that would start a gh process past MAX_GH gets no answer. The daemon replies
+/// `{"busy": true}`, and the command runs that one call itself.
+const BUSY: &str = "the daemon already runs as many gh calls as it allows";
 /// The longest single gh-wait; a longer sleep waits again.
 const MAX_WAIT: f64 = 50.0;
 /// How young a cached answer must be for a command's first read of a key.
@@ -209,6 +212,21 @@ pub struct Poller {
     env: fn(&str) -> bool,
 }
 
+/// A key's place among the gh calls in flight, freed if its gh call panics.
+struct Slot<'a> {
+    poller: &'a Poller,
+    key: &'a Key,
+}
+
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.poller.state.lock() {
+            s.inflight.remove(self.key);
+            self.poller.moved.notify_all();
+        }
+    }
+}
+
 static POLLER: OnceLock<Arc<Poller>> = OnceLock::new();
 /// The daemon's log, and whether it already holds the line about the daemon's own gh environment.
 type Log = Box<dyn Fn(&str) + Send + Sync>;
@@ -239,7 +257,10 @@ impl Poller {
     /// would, with the version the cache holds for key (0 when it holds none).
     fn fetch(&self, key: &Key, every: Duration) -> Option<(GhOut, u64)> {
         let args: Vec<&str> = key.iter().map(String::as_str).collect();
+        let slot = Slot { poller: self, key };
         let out = (self.gh)(&args);
+        // Freed below, under the same lock that stores the answer.
+        std::mem::forget(slot);
         let now = Instant::now();
         let mut s = self.state.lock().unwrap();
         s.inflight.remove(key);
@@ -318,7 +339,7 @@ impl Poller {
             s = self.moved.wait(s).unwrap();
         }
         if s.inflight.len() >= MAX_GH {
-            return Err("the daemon already runs as many gh calls as it allows");
+            return Err(BUSY);
         }
         s.inflight.insert(key.clone());
         drop(s);
@@ -429,6 +450,7 @@ impl Poller {
                 }
                 let every = secs(&request["every"], 3600.0).max(FASTEST);
                 match self.read(&key, secs(&request["max_age"], TRUSTED), every) {
+                    Err(BUSY) => json!({"v": PROTOCOL, "ok": true, "busy": true}),
                     Err(why) => refused(why),
                     Ok((out, version)) => {
                         let code = match out.code {
@@ -516,7 +538,9 @@ impl Cached {
         }
     }
 
-    fn ask_gh(&mut self, args: &[&str]) -> Option<GhOut> {
+    /// The daemon's answer to one gh read: None when it can't answer, Some(None) when it is busy,
+    /// so this one call runs gh itself.
+    fn ask_gh(&mut self, args: &[&str]) -> Option<Option<GhOut>> {
         let key: Key = args.iter().map(|a| a.to_string()).collect();
         let max_age = if self.held.contains_key(&key) {
             TRUSTED
@@ -532,6 +556,9 @@ impl Cached {
         request.insert("every".into(), json!(self.every));
         request.insert("env".into(), gh_env());
         let (reply, _) = ask(&self.home, request, GH_REPLY).ok()?;
+        if reply["busy"] == true {
+            return Some(None);
+        }
         let code = match &reply["code"] {
             Value::String(s) if s == "timeout" => GhCode::Timeout,
             c => GhCode::Exit(i32::try_from(c.as_i64()?).ok()?),
@@ -549,7 +576,7 @@ impl Cached {
                 self.held.insert(key, v)
             }
         };
-        Some(out)
+        Some(Some(out))
     }
 }
 
@@ -558,10 +585,11 @@ impl Host for Cached {
         if self.live && cacheable(args) {
             // Without gh on this command's PATH the answer is "not installed", as without a daemon.
             which("gh")?;
-            if let Some(out) = self.ask_gh(args) {
-                return Some(out);
+            match self.ask_gh(args) {
+                Some(Some(out)) => return Some(out),
+                Some(None) => {}
+                None => self.live = false,
             }
-            self.live = false;
         } else if !cacheable(args) {
             // A write may have moved the PR, so nothing read before it is trusted after it.
             self.wrote = true;
@@ -1058,7 +1086,7 @@ mod tests {
         }
         assert_eq!(
             p.read(&pr(MAX_GH), Duration::ZERO, FASTEST).err(),
-            Some("the daemon already runs as many gh calls as it allows")
+            Some(BUSY)
         );
         assert_eq!(calls.load(Ordering::SeqCst), MAX_GH);
         *gate.0.lock().unwrap() = true;
@@ -1068,6 +1096,71 @@ mod tests {
         }
         p.read(&pr(MAX_GH), Duration::ZERO, FASTEST).unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), MAX_GH + 1);
+    }
+
+    /// A gh call that panics frees its place, so panics never use up the cap.
+    #[test]
+    fn a_panicking_gh_call_frees_its_slot() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = calls.clone();
+        let gh: RunGh = Box::new(move |_| {
+            if seen.fetch_add(1, Ordering::SeqCst) < MAX_GH {
+                panic!("synthetic gh failure");
+            }
+            Some(out(0, "OPEN\n", ""))
+        });
+        let p = Poller::new(gh);
+        let pr = |n: usize| {
+            key(&[
+                "pr",
+                "view",
+                &format!("https://github.com/example/sample/pull/{n}"),
+                "--json",
+                "state",
+            ])
+        };
+        for n in 0..MAX_GH {
+            let (p, k) = (p.clone(), pr(n));
+            let read = std::thread::spawn(move || p.read(&k, Duration::ZERO, FASTEST).is_ok());
+            assert!(read.join().is_err());
+        }
+        assert!(p.state.lock().unwrap().inflight.is_empty());
+        let (o, _) = p.read(&pr(MAX_GH), Duration::ZERO, FASTEST).unwrap();
+        assert_eq!(o.stdout, "OPEN\n");
+    }
+
+    /// A busy daemon sends that one read to gh directly; the command keeps reading through the
+    /// daemon afterwards.
+    #[cfg(unix)]
+    #[test]
+    fn a_busy_reply_runs_one_call_directly() {
+        use crate::shared::board_client::socket_path;
+        use std::io::{BufRead, BufReader, Write};
+        if which("gh").is_none() {
+            return;
+        }
+        let home = crate::shared::fs::temp_dir("ghpoll-busy");
+        let listener = std::os::unix::net::UnixListener::bind(socket_path(&home)).unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut reader = BufReader::new(stream);
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let reply = json!({"v": PROTOCOL, "ok": true, "busy": true});
+                let _ = reader.get_mut().write_all(format!("{reply}\n").as_bytes());
+            }
+        });
+        let calls = Arc::new(AtomicUsize::new(0));
+        let direct = Box::new(Direct {
+            calls: calls.clone(),
+            clock: 0.0,
+        });
+        let mut h = Cached::with(&home, 10.0, direct, true);
+        let args = ["pr", "view", PR, "--json", "state", "--jq", ".state"];
+        assert_eq!(h.gh(&args).unwrap().stdout, "DIRECT\n");
+        assert!(h.live, "a busy daemon is asked again next time");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     /// During a rate-limit backoff no read calls GitHub: a held key gets its cached answer even
