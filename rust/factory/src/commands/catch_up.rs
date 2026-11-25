@@ -1008,7 +1008,13 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
     let leftover = timer && daemon.is_some();
     let stale = timer && (leftover || !current || timer_drift(scheduler, home));
     // Only drift reinstalls the daemon: a new skill keeps its binary path, so the unit still matches.
-    let daemon_stale = daemon.is_some_and(|s| daemon_drift(s, home));
+    // A Windows loop that died leaves no daemon on the lock and nothing restarts it before logon,
+    // so a current skill reinstalls too, and the install's /Run starts it. A new skill's restart
+    // already runs /Run.
+    let daemon_stale = daemon.is_some_and(|s| {
+        daemon_drift(s, home)
+            || (current && s == "schtasks" && matches!(locked_pid(home), Ok(None)))
+    });
     if current {
         outln!(out, "skill: current at {h7}");
     } else {
@@ -2733,6 +2739,47 @@ mod tests {
         let (code, lines) = t.lines();
         assert_eq!((code, calls.borrow().len()), (0, 1));
         assert!(!lines.iter().any(|l| l.starts_with("daemon service:")));
+    }
+
+    /// A Windows loop that died leaves no daemon on the lock, so catch-up runs the install, whose
+    /// /Run starts it. With a daemon on the lock, the service is current.
+    #[test]
+    fn current_windows_service_without_a_daemon_is_reinstalled() {
+        let t = T::new("daemon-dead-loop");
+        t.timer(false);
+        t.drift(None);
+        let (reply, reply_code) = default_timer_reply();
+        t.timer_calls(reply, reply_code);
+        let calls = t.daemon_calls(
+            "service current: /synthetic/factory-daemon.cmd; the daemon was not running, so /Run started it\n",
+            0,
+        );
+        // The first run installs the skill; a new skill's restart already runs /Run.
+        t.daemon(None, false);
+        assert_eq!(t.lines().0, 0);
+        t.daemon(Some("schtasks"), false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"daemon service: service current: /synthetic/factory-daemon.cmd; the daemon was not running, so /Run started it".to_string()),
+            "{lines:?}"
+        );
+        assert_eq!(calls.borrow().len(), 1);
+
+        daemon_runs(&t.home);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"daemon service: current".to_string()),
+            "{lines:?}"
+        );
+        assert_eq!(calls.borrow().len(), 1);
+
+        t.daemon(Some("launchd"), false);
+        stop();
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert_eq!(calls.borrow().len(), 1, "only Windows checks the lock");
     }
 
     /// With the daemon service installed, a leftover pickup timer is removed after the backup, and

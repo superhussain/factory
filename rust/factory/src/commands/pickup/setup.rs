@@ -717,30 +717,68 @@ pub(super) fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -
     } else {
         let cmd = timer_path(scheduler, unit);
         let same = fs::read(&cmd).ok().as_deref() == Some(text.as_bytes());
-        let task = || setup_run(&["schtasks", "/Query", "/TN", unit.task], None).0 == 0;
+        let task = setup_run(&["schtasks", "/Query", "/TN", unit.task], None).0 == 0;
         // cmd reads a batch file by byte offset, so a loop still running when its file is
         // rewritten resumes mid-line in the new text. End it first; /Run below starts it again.
-        if unit.keep_alive && !same && task() {
+        let ended = unit.keep_alive && task && !same;
+        if ended {
             end_loop(home)?;
         }
         if unit.keep_alive {
-            clear_stop_marker(home)?;
+            clear_stop_marker(home).map_err(|e| {
+                if !ended {
+                    return e;
+                }
+                let marker = daemon::stop_marker(home);
+                fail(
+                    format!(
+                        "the daemon is stopped, but {}; delete {}, then run factory daemon setup --install",
+                        message(&e),
+                        marker.display()
+                    ),
+                    1,
+                )
+            })?;
         }
-        if same && task() {
+        // A loop that died leaves no daemon on the lock, so a current loop still gets /Run.
+        let stopped = unit.keep_alive && matches!(daemon::locked_pid(home), Ok(None));
+        if same && task && !stopped {
             return Ok(format!("{}: {}", unit.current, cmd.display()));
         }
-        mkdirs(cmd.parent().unwrap())?;
-        write_file(&cmd, &text)?;
-        let run = schtasks_run(&cmd);
-        let mut create = vec!["schtasks", "/Create", "/TN", unit.task];
-        create.extend(schtasks_schedule(unit));
-        create.extend(["/TR", &run, "/F"]);
-        let mut result = setup_run(&create, None);
+        if !same {
+            mkdirs(cmd.parent().unwrap())?;
+            write_file(&cmd, &text)?;
+        }
+        let mut result = (0, String::new());
+        // The task's /TR names this fixed path, so an existing service task needs no /Create,
+        // which can fail without elevation after end_loop has stopped the daemon.
+        if !task || !unit.keep_alive {
+            let run = schtasks_run(&cmd);
+            let mut create = vec!["schtasks", "/Create", "/TN", unit.task];
+            create.extend(schtasks_schedule(unit));
+            create.extend(["/TR", &run, "/F"]);
+            result = setup_run(&create, None);
+        }
         if result.0 == 0 && unit.keep_alive {
             result = setup_run(&["schtasks", "/Run", "/TN", unit.task], None);
+            if result.0 != 0 {
+                result.1 = format!(
+                    "{}; the daemon is not running. Start it with: schtasks /Run /TN {}",
+                    strip(&result.1),
+                    unit.task
+                );
+            }
         }
         (code, out) = result;
-        done = format!("installed schtasks {noun}: {}", cmd.display());
+        done = if same && task {
+            format!(
+                "{}: {}; the daemon was not running, so /Run started it",
+                unit.current,
+                cmd.display()
+            )
+        } else {
+            format!("installed schtasks {noun}: {}", cmd.display())
+        };
     }
     if code != 0 {
         let label = if scheduler == "launchd" {

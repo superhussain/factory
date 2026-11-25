@@ -10957,14 +10957,32 @@ mod daemon_setup_test {
         let trim = format!("if exist \"{boot}\" for %%F in (\"{boot}\") do if %%~zF GTR 262144 type nul > \"{boot}\"");
         assert!(text.contains(&format!("\r\n:run\r\n{check}\r\n{trim}\r\n\"/opt/my skill/runtime/factory\" --home {} daemon >> \"{boot}\" 2>&1\r\n{check}\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n", ds.fx.home.display())), "{text:?}");
 
+        // A current loop with no daemon on the lock gets /Run, so a loop that died comes back.
         ds.sched.borrow_mut().runs.clear();
         let (code, out, _) = ds.run(Install);
         assert_eq!(code, 0);
-        assert!(out.starts_with(&format!("service current: {}\n", cmd.display())));
+        assert!(
+            out.starts_with(&format!(
+                "service current: {}; the daemon was not running, so /Run started it\n",
+                cmd.display()
+            )),
+            "{out}"
+        );
+        assert!(ds.ran(&["schtasks", "/Run", "/TN", "factory-daemon"]));
         assert!(!ds.sched.borrow().runs.iter().any(|a| a[1] == "/Create"));
+        {
+            let _running = daemon::take_lock(&ds.fx.home).unwrap();
+            ds.sched.borrow_mut().runs.clear();
+            let (code, out, _) = ds.run(Install);
+            assert_eq!(code, 0);
+            assert!(out.starts_with(&format!("service current: {}\n", cmd.display())));
+            let runs = &ds.sched.borrow().runs;
+            assert!(!runs.iter().any(|a| a[1] == "/Create" || a[1] == "/Run"));
+        }
 
         // A loop written before the boot log reads as drift, so catch-up reinstalls it. A running
-        // loop is ended first through the stop path, then its file is rewritten and /Run starts it.
+        // loop is ended first through the stop path, then its file is rewritten and /Run starts
+        // it. The task exists, so there is no /Create, which can fail without elevation.
         let old = text
             .replace(&format!("{trim}\r\n"), "")
             .replace(&*boot.to_string(), &ds.log());
@@ -11005,15 +11023,15 @@ mod daemon_setup_test {
             .map(|(argv, file, marker)| (argv.clone(), *file == old, *marker))
             .collect();
         assert_eq!(
-            steps[..4],
+            steps[..3],
             [
                 ("schtasks /End".to_string(), true, true),
                 (format!("kill {pid}"), true, true),
-                ("schtasks /Create".to_string(), false, false),
                 ("schtasks /Run".to_string(), false, false),
             ],
             "{steps:?}"
         );
+        assert!(!steps.iter().any(|(argv, ..)| argv == "schtasks /Create"));
 
         // Uninstall writes the stop marker before /End, so a loop /End leaves behind exits, and
         // ends the loop's daemon by its pid.
@@ -11048,6 +11066,92 @@ mod daemon_setup_test {
             out.contains("schtasks): running\n    no scheduled task factory-daemon\n"),
             "{out}"
         );
+    }
+
+    /// A schtasks service install with a drifted loop file, after the first install.
+    fn drifted_schtasks() -> (Ds, PathBuf) {
+        let ds = Ds::new("schtasks");
+        let cmd = ds.fx.root.join(".config/factory-daemon.cmd");
+        assert_eq!(ds.run(Install).0, 0);
+        fs::write(&cmd, "old loop").unwrap();
+        ds.sched.borrow_mut().runs.clear();
+        (ds, cmd)
+    }
+
+    /// A /Run that fails after the loop was ended says the daemon is stopped and how to start it.
+    #[test]
+    fn schtasks_run_failure_names_the_next_step() {
+        let (ds, cmd) = drifted_schtasks();
+        let fake = ds.sched.clone();
+        ds.fx.set_fakes(|f| {
+            f.setup_run = Some(Rc::new(move |argv, stdin| {
+                let answer = fake.borrow_mut().answer(argv, stdin);
+                if argv[..2] == ["schtasks", "/Run"] {
+                    return (1, "ERROR: Access is denied.\n".into());
+                }
+                answer
+            }))
+        });
+        let (code, _, err) = ds.run(Install);
+        assert_eq!(code, 1);
+        assert!(
+            err.contains("could not install the schtasks service: ERROR: Access is denied.; the daemon is not running. Start it with: schtasks /Run /TN factory-daemon"),
+            "{err}"
+        );
+        assert!(ds.ran(&["schtasks", "/End", "/TN", "factory-daemon"]));
+        assert!(!ds.sched.borrow().runs.iter().any(|a| a[1] == "/Create"));
+        assert_ne!(fs::read_to_string(&cmd).unwrap(), "old loop");
+        assert!(!daemon::stop_marker(&ds.fx.home).exists());
+    }
+
+    /// A stop marker that can't be removed after the loop was ended fails the install with the
+    /// path to delete, before the file is rewritten or /Run starts a loop that would exit.
+    #[test]
+    fn schtasks_stuck_marker_names_its_path() {
+        let (ds, cmd) = drifted_schtasks();
+        let marker = daemon::stop_marker(&ds.fx.home);
+        let (fake, stuck) = (ds.sched.clone(), marker.clone());
+        ds.fx.set_fakes(|f| {
+            f.setup_run = Some(Rc::new(move |argv, stdin| {
+                if argv[..2] == ["schtasks", "/End"] {
+                    fs::remove_file(&stuck).unwrap();
+                    fs::create_dir(&stuck).unwrap();
+                }
+                fake.borrow_mut().answer(argv, stdin)
+            }))
+        });
+        let (code, _, err) = ds.run(Install);
+        assert_eq!(code, 1);
+        assert!(err.contains("the daemon is stopped, but "), "{err}");
+        assert!(
+            err.contains(&format!(
+                "; delete {}, then run factory daemon setup --install",
+                marker.display()
+            )),
+            "{err}"
+        );
+        assert_eq!(fs::read_to_string(&cmd).unwrap(), "old loop");
+        assert!(!ds.ran(&["schtasks", "/Run", "/TN", "factory-daemon"]));
+    }
+
+    /// A daemon that keeps its lock after the kill fails the install: the stop marker is cleared,
+    /// so the loop still starts at logon, and the old loop file stays.
+    #[test]
+    fn schtasks_stop_timeout_clears_the_marker() {
+        let (ds, cmd) = drifted_schtasks();
+        let _lock = daemon::take_lock(&ds.fx.home).unwrap().unwrap();
+        let (code, _, err) = ds.run(Install);
+        assert_eq!(code, 1);
+        let pid = std::process::id();
+        assert!(
+            err.contains(&format!("could not stop the running daemon loop: the old daemon (pid {pid}) still holds its lock 35 s after the kill")),
+            "{err}"
+        );
+        assert!(ds.ran(&["kill", &pid.to_string()]));
+        assert!(!daemon::stop_marker(&ds.fx.home).exists());
+        assert_eq!(fs::read_to_string(&cmd).unwrap(), "old loop");
+        let runs = &ds.sched.borrow().runs;
+        assert!(!runs.iter().any(|a| a[1] == "/Create" || a[1] == "/Run"));
     }
 
     #[test]
