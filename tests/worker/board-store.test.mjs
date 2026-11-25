@@ -381,8 +381,10 @@ test("an unreadable board.json is served as stored and refuses a PATCH", async (
 test("a one-row PATCH costs the same work at 2,300 and 4,600 rows", async () => {
   const cost = async (rows) => {
     const board = syntheticBoard(rows);
-    const s = setup(board);
+    // The board's first idea sits at another row at each size, so it gets one size at both.
     const active = board.jobs.find((j) => j.stage === "idea");
+    active.idea = "x".repeat(1000);
+    const s = setup(board);
     // The first PATCH seeds; the second is the one measured.
     const once = (stage) =>
       s.patch({

@@ -9,7 +9,7 @@ import { parseArgs } from "node:util";
 import { CLOUDFLARE_WORKERS } from "../tests/support/worker.mjs";
 
 // The made-up board: row n has a size drawn from the live distribution's quantiles. As on the
-// live board, rows finish in board order, so the unfinished ones, about 4%, sit in the last
+// live board, rows finish in board order, so the unfinished ones, about 3%, sit in the last
 // fifth, and the older pages hold finished rows alone.
 export function syntheticBoard(rows) {
   let seed = 7;
@@ -19,7 +19,7 @@ export function syntheticBoard(rows) {
   for (let n = 1; n <= rows; n++) {
     const r = rand();
     const stage =
-      n > rows * 0.8 && r < 0.2
+      n > rows * 0.8 && r < 0.15
         ? ["idea", "spec", "build", "pr-open"][n % 4]
         : r < 0.92
           ? "merged"
