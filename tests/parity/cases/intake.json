@@ -11312,6 +11312,22 @@
       "from": "tests/cli/test_factory.py::StopCheckTest.test_unclaimed_dead_job_resumes"
     },
     {
+      "id": "intake/stuck-non-object-paseo-link-exits-1",
+      "argv": ["--home", "{home}", "stuck"],
+      "home": "intake-paseo",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "sender"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"2026-01-01T00:00:00Z\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":1,\"paseo\":\"synthetic-agent\",\"updated\":\"2999-01-01T00:00:00Z\"}]}\n"
+        ]
+      },
+      "exit": 1
+    },
+    {
       "id": "intake/stuck-needs-verdicts",
       "argv": ["--home", "{home}", "stuck"],
       "home": "intake-paseo",
