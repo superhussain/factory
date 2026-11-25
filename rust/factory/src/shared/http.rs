@@ -585,15 +585,19 @@ pub(crate) mod tests {
         let log = seen.clone();
         std::thread::spawn(move || {
             for (index, (status, body, extra)) in replies.into_iter().enumerate() {
-                let (mut stream, _) = listener.accept().unwrap();
-                let mut reader = BufReader::new(stream.try_clone().unwrap());
-                let mut line = String::new();
-                reader.read_line(&mut line).unwrap();
-                let mut parts = line.split_whitespace();
-                let (method, path) = (
-                    parts.next().unwrap().to_string(),
-                    parts.next().unwrap().to_string(),
-                );
+                // Only a request takes a reply: another test's bare connection to a port it freed,
+                // which this listener now holds, is dropped.
+                let (mut stream, mut reader, method, path) = loop {
+                    let (stream, _) = listener.accept().unwrap();
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut line = String::new();
+                    let _ = reader.read_line(&mut line);
+                    let mut parts = line.split_whitespace();
+                    if let (Some(method), Some(path)) = (parts.next(), parts.next()) {
+                        let (method, path) = (method.to_string(), path.to_string());
+                        break (stream, reader, method, path);
+                    }
+                };
                 let mut headers = Vec::new();
                 loop {
                     let mut h = String::new();
@@ -818,6 +822,18 @@ pub(crate) mod tests {
         assert_eq!(seen[1].header("If-Match"), Some("\"x\""));
         assert_eq!(seen[3].header("If-None-Match"), Some("*"));
         assert_eq!(seen[3].body, b"new");
+    }
+
+    /// A bare connection, as another test makes when it probes a port it freed, takes no reply.
+    #[test]
+    fn a_stray_connection_leaves_the_reply_for_the_request() {
+        let (origin, seen) = serve(vec![(200, "ok", vec![])]);
+        let port: u16 = origin.rsplit(':').next().unwrap().parse().unwrap();
+        drop(std::net::TcpStream::connect(("127.0.0.1", port)).unwrap());
+        let home = home_for("http-stray", &origin);
+        let r = api(&home, "GET", "/projects.json", None, &[200], &[]).unwrap();
+        assert_eq!(r.text().unwrap(), "ok");
+        assert_eq!(seen.lock().unwrap().len(), 1);
     }
 
     #[test]
