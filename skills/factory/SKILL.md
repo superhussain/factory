@@ -160,11 +160,10 @@ on its own where it is installed:
 - When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
   the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
   each file; `push` refuses it while the `.remote` waits. Diff the two. If every
-  difference is text you wrote, or you never edited the file, copy the
-  `.remote` to `round-N/conflict-<name>` (else top level; if taken,
-  `conflict-2-<name>`...), then
-  delete it or move it over the unedited file, and push. Else `needs-human`.
-  Images: copy, then keep either.
+  difference is text you wrote, or you never edited the file, run `"$RUNTIME"
+  keep-remote "$SLUG/<id>" <file>` to save R2's copy, then delete the
+  `.remote` or move it over the file you never edited, then push.
+  Otherwise set `needs-human`. For an image, run it and keep either.
 
 - In a UI job, the builder saves screenshots in `$JOBS/<id>/` and embeds them in
   build.md as a `| Before | After |` table. The builder never uploads to the public image host.
