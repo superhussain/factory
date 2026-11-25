@@ -35,7 +35,7 @@ jobs:
       - name: Browser inputs
         id: browser
         run: |
-          if git diff --quiet "$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)" HEAD -- web worker tools ':!tools/deploy.mjs' tests/browser tests/support tests/fixtures/browser-cases.json tests/fixtures/inbox-count.json tests/fixtures/project-documents.md tests/fixtures/project-document-notes.md tests/fixtures/project-settings-board.json package.json pnpm-lock.yaml .node-version THIRD_PARTY_NOTICES.md nx.json paseo-plugin .github/workflows/ci.yml .github/actions; then
+          if git diff --quiet "$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)" HEAD -- web worker tools ':!tools/deploy.mjs' tests/browser tests/support tests/fixtures/browser-cases.json tests/fixtures/inbox-count.json tests/fixtures/project-documents.md tests/fixtures/project-document-notes.md tests/fixtures/project-settings-board.json tests/fixtures/hosts-list.json tests/fixtures/walkthrough-map.html tests/fixtures/walkthrough-rich.html tests/fixtures/retro-backlog-context.txt skills/factory/references/pickup.md tsconfig.json package.json pnpm-lock.yaml .node-version THIRD_PARTY_NOTICES.md nx.json paseo-plugin .github/workflows/ci.yml .github/actions; then
             echo "run=false" >> "$GITHUB_OUTPUT"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"

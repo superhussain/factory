@@ -192,6 +192,7 @@ test("the browser inputs step skips a Rust-only change and runs a web change", (
   try {
     assert.equal(touched("rust/factory/src/main.rs"), "run=false\n");
     assert.equal(touched("tools/deploy.mjs"), "run=false\n");
+    assert.equal(touched("tests/fixtures/hosts-list.json"), "run=true\n");
     assert.equal(touched("web/app.js"), "run=true\n");
   } finally {
     rmSync(repo, { recursive: true, force: true });
