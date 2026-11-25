@@ -212,7 +212,9 @@ async function archiveRows(env) {
   if (archiveMemo.etag === head.httpEtag) return archiveMemo.jobs;
   const doc = await readJson(env, ARCHIVE_KEY);
   const jobs = jobsOf(doc) ?? [];
-  if (doc && head.size <= ARCHIVE_MEMO_MAX) archiveMemo = { etag: doc.etag, jobs };
+  // The size is the HEAD's, so only the version it measured is held.
+  if (doc?.etag === head.httpEtag && head.size <= ARCHIVE_MEMO_MAX)
+    archiveMemo = { etag: doc.etag, jobs };
   return jobs;
 }
 

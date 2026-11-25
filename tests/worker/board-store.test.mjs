@@ -938,4 +938,18 @@ test("the archive read parses each archive version once, and one past 8 MiB on e
   assert.equal(await read(), want);
   assert.equal(await read(), want);
   assert.equal(gets() - before, 2);
+  // The big archive lands between a small one's HEAD and its GET: the HEAD's size is not the
+  // rows', so the big rows are not held, and the next read of them parses again.
+  archive([small], '"archive-small-2"');
+  const head = s.bucket.head;
+  s.bucket.head = async (key) => {
+    const out = await head(key);
+    archive([big], '"archive-big"');
+    s.bucket.head = head;
+    return out;
+  };
+  const raced = gets();
+  assert.equal(await read(), want);
+  assert.equal(await read(), want);
+  assert.equal(gets() - raced, 2);
 });
