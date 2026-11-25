@@ -114,7 +114,7 @@ fn py_error(kind: &str) -> Exit {
 
 /// The exception name a `py_error` carries.
 fn py_kind(e: &Exit) -> Option<&str> {
-    let kind = e.stderr.strip_prefix("factory.py: ")?.strip_suffix('\n')?;
+    let kind = e.stderr.strip_suffix('\n')?;
     (e.code == 1 && PY_KINDS.contains(&kind)).then_some(kind)
 }
 
@@ -1111,7 +1111,7 @@ pub(crate) fn receipt_cas<T>(
         change(text, false, &mut Vec::new())
     })?;
     log.push_str(&format!(
-        "factory.py: the Worker refused Tracer's receipt (check tracer_receipt_key); {} waits at gate: spec-approval instead\n",
+        "the Worker refused Tracer's receipt (check tracer_receipt_key); {} waits at gate: spec-approval instead\n",
         sent.last().unwrap()
     ));
     Ok(result)
@@ -1275,7 +1275,7 @@ fn after_board_to(home: &Path, job: &Value, err: &mut dyn Write) {
     };
     let reason = match py_kind(&e) {
         Some(kind) => kind.to_string(),
-        None => squash(&(log + &e.stderr)).replacen("factory.py: ", "", 1),
+        None => squash(&(log + &e.stderr)),
     };
     let reason = if reason.is_empty() {
         "unknown error"
@@ -1290,7 +1290,7 @@ fn after_board_to(home: &Path, job: &Value, err: &mut dyn Write) {
     };
     let _ = writeln!(
         err,
-        "factory.py: warning: Tracer {step} of {slug}/{job_id} failed: {}. The board change was saved; {retry}.",
+        "warning: Tracer {step} of {slug}/{job_id} failed: {}. The board change was saved; {retry}.",
         reason.trim_end_matches('.')
     );
 }
@@ -1407,7 +1407,7 @@ fn build_pass_to(home: &Path, jobs: Option<&[Value]>, err: &mut dyn Write) -> Re
     let configured = lexists(&home.join("tracer.json"));
     let mut found: Vec<BuildMark> = Vec::new();
     if let Err(e) = build_check(home, jobs, configured, &mut found) {
-        let reason = squash(&e.stderr).replacen("factory.py: ", "", 1);
+        let reason = squash(&e.stderr);
         let reason = if reason.is_empty() {
             "unknown error"
         } else {
@@ -1415,7 +1415,7 @@ fn build_pass_to(home: &Path, jobs: Option<&[Value]>, err: &mut dyn Write) -> Re
         };
         let _ = writeln!(
             err,
-            "factory.py: warning: Tracer build check failed: {}. Unchecked jobs keep their Building in Tracer mark.",
+            "warning: Tracer build check failed: {}. Unchecked jobs keep their Building in Tracer mark.",
             reason.trim_end_matches('.')
         );
     }
@@ -2195,15 +2195,12 @@ mod tests {
         let fake = Fake::on();
         fake.state().answer = Some((500, json!({"detail": [1, 2]})));
         let e = tracer_call(&fake.url(), TOKEN, "GET", "api/x", None, &[200]).unwrap_err();
-        assert_eq!(
-            e.stderr,
-            "factory.py: Tracer GET api/x returned 500: [1, 2]\n"
-        );
+        assert_eq!(e.stderr, "Tracer GET api/x returned 500: [1, 2]\n");
         fake.state().answer = Some((401, json!(["no"])));
         let e = tracer_call(&fake.url(), TOKEN, "GET", "api/x", None, &[200]).unwrap_err();
         assert_eq!(
             e.stderr,
-            "factory.py: Tracer GET api/x returned 401: [\"no\"] (check token_file)\n"
+            "Tracer GET api/x returned 401: [\"no\"] (check token_file)\n"
         );
     }
 
@@ -3016,7 +3013,7 @@ Nothing.
         assert_eq!(fake.job()["stage"], "build");
         assert_eq!(err.lines().count(), 1, "{err}");
         assert!(err.starts_with(
-            "factory.py: warning: Tracer mirror of sample/001-sample failed: can't reach Tracer at "
+            "warning: Tracer mirror of sample/001-sample failed: can't reach Tracer at "
         ));
         assert!(err.contains("run factory.py tracer sync sample/001-sample to retry."));
     }
@@ -3433,7 +3430,10 @@ Nothing.
         let e = board_write(&t, patch).unwrap_err();
         assert_eq!(
             (e.code, e.stderr.as_str()),
-            (2, "factory.py: only factory.py and the dashboard set spec_approval. Nothing was written.\n")
+            (
+                2,
+                "only factory.py and the dashboard set spec_approval. Nothing was written.\n"
+            )
         );
         assert_eq!(fake.state().board, before);
     }
@@ -3457,7 +3457,7 @@ Nothing.
         assert_eq!(signed_tries, [true, false]);
         assert_eq!(
             log,
-            format!("factory.py: PUT {}/api/board returned 400: {REFUSAL_TEXT}\nfactory.py: the Worker refused Tracer's receipt (check tracer_receipt_key); 001-sample waits at gate: spec-approval instead\n", fake.origin)
+            format!("PUT {}/api/board returned 400: {REFUSAL_TEXT}\nthe Worker refused Tracer's receipt (check tracer_receipt_key); 001-sample waits at gate: spec-approval instead\n", fake.origin)
         );
         assert_eq!(writes(&fake), 1);
     }
@@ -3663,7 +3663,7 @@ Nothing.
         );
         assert_eq!(err.lines().count(), 1, "{err}");
         assert!(err.starts_with(
-            "factory.py: warning: Tracer gather of sample/001-sample failed: can't reach Tracer at "
+            "warning: Tracer gather of sample/001-sample failed: can't reach Tracer at "
         ));
         assert!(err.contains(PICKUP_TAIL));
         assert!(!err.contains("tracer sync"));

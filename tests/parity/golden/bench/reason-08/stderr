@@ -1,1 +1,1 @@
-factory.py: bench: {home}/bench/reasons/08.json: case 1: defects must be a non-empty list
+bench: {home}/bench/reasons/08.json: case 1: defects must be a non-empty list

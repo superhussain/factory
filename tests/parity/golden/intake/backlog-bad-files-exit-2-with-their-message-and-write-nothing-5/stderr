@@ -1,4 +1,4 @@
-factory.py: context file {home}/backlog-bad4.md: write the reasons first, then only ## Question: sections
+context file {home}/backlog-bad4.md: write the reasons first, then only ## Question: sections
 a context file looks like this:
 Recommend: approve
 

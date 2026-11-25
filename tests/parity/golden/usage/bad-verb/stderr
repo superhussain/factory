@@ -1,1 +1,1 @@
-factory.py: usage: factory.py usage [record] <project-slug>/<job-id>
+usage: factory.py usage [record] <project-slug>/<job-id>

@@ -1,1 +1,1 @@
-factory.py: --agents requires one value and may occur only once
+--agents requires one value and may occur only once

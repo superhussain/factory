@@ -1,4 +1,4 @@
-factory.py: context file {home}/backlog-bad2.md: holds a control or invisible character
+context file {home}/backlog-bad2.md: holds a control or invisible character
 a context file looks like this:
 Recommend: approve
 

@@ -1,1 +1,1 @@
-factory.py: usage: triage replay <project-slug> [--threshold N] [--rules-file PATH]
+usage: triage replay <project-slug> [--threshold N] [--rules-file PATH]

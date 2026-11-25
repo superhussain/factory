@@ -69,10 +69,7 @@ pub(super) fn session_stop_pass(
         return Ok(());
     }
     let Some(statuses) = paseo_statuses() else {
-        errln!(
-            io,
-            "factory.py: pickup skips session stops: paseo did not answer"
-        );
+        errln!(io, "pickup skips session stops: paseo did not answer");
         return Ok(());
     };
     for i in due_ids {
@@ -97,7 +94,7 @@ pub(super) fn session_stop_pass(
         if paseo_run(&["stop", &agent]).0 != 0 {
             errln!(
                 io,
-                "factory.py: pickup could not stop agent {agent} of {job_id}: paseo stop failed"
+                "pickup could not stop agent {agent} of {job_id}: paseo stop failed"
             );
             continue;
         }
@@ -301,7 +298,7 @@ pub(super) fn close_pass(
             continue;
         }
         let Some(reason) = close_reason(&j) else {
-            errln!(io, "factory.py: pickup skips the close of {job_id}: its reason must be 1 to 200 characters, with no line breaks or control characters");
+            errln!(io, "pickup skips the close of {job_id}: its reason must be 1 to 200 characters, with no line breaks or control characters");
             continue;
         };
         if let Some(c) = claims::blocking(Some(&j), device, "", minutes)? {
@@ -331,11 +328,9 @@ pub(super) fn close_pass(
         };
         match &outcome {
             Some(("closed", _)) => outln!(io, "closed pull request {} for {job_id}", pr.unwrap()),
-            Some(("open", why)) => errln!(
-                io,
-                "factory.py: pickup leaves pull request {} open: {why}",
-                pr.unwrap()
-            ),
+            Some(("open", why)) => {
+                errln!(io, "pickup leaves pull request {} open: {why}", pr.unwrap())
+            }
             _ => {}
         }
         if !configs.contains_key(project) {

@@ -1,1 +1,1 @@
-factory.py: a job cannot depend on itself: drop the depends-on ref to 001-test. Nothing was written.
+a job cannot depend on itself: drop the depends-on ref to 001-test. Nothing was written.

@@ -679,7 +679,7 @@ fn doctor(home: &Path) -> Value {
     let mut origin = String::new();
     let mut config_error = match validate_home(&home, true) {
         Ok(()) => String::new(),
-        Err(e) => strip(e.stderr.get("factory.py: ".len()..).unwrap_or("")).to_string(),
+        Err(e) => strip(&e.stderr).to_string(),
     };
     if config_error.is_empty() {
         let config = home.join("config.md");
@@ -1167,7 +1167,7 @@ fn load_autonomy(board: &Value) -> Value {
         || !strings("self")
         || record["projects"].as_array().map_or(0, Vec::len) > MAX_EXPLORER_PROJECTS
     {
-        eprintln!("factory.py: the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it");
+        eprintln!("the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it");
         return default;
     }
     record
@@ -1608,7 +1608,7 @@ mod tests {
         for e in results {
             assert_eq!(
                 (e.code, e.stderr.as_str()),
-                (4, "factory.py: no explorer checkout sample/run-1\n")
+                (4, "no explorer checkout sample/run-1\n")
             );
         }
         assert!(elsewhere.join("sample/run-1").is_dir());
@@ -1655,10 +1655,7 @@ mod tests {
             assert_eq!(e.code, 2);
             assert_eq!(
                 e.stderr,
-                format!(
-                    "factory.py: {}: invalid connection descriptor\n",
-                    path.display()
-                )
+                format!("{}: invalid connection descriptor\n", path.display())
             );
         }
         fs::write(
@@ -1854,7 +1851,7 @@ mod tests {
         assert_eq!(
             e.stderr,
             format!(
-                "factory.py: {}: a different factory home is selected\n",
+                "{}: a different factory home is selected\n",
                 pointer.display()
             )
         );
@@ -2244,7 +2241,7 @@ mod tests {
         let env = dir.join(".env");
         let refused = |message: String| {
             let e = cloudflare_env(&env).unwrap_err();
-            assert_eq!((e.code, e.stderr), (5, format!("factory.py: {message}\n")));
+            assert_eq!((e.code, e.stderr), (5, format!("{message}\n")));
         };
         let shown = env.display();
         refused(format!("no {shown}. docs/cloudflare.md, Device token, shows how to store CLOUDFLARE_API_TOKEN there."));
@@ -2289,7 +2286,7 @@ mod tests {
                 (
                     5,
                     format!(
-                        "factory.py: cannot read {}: check its permissions and that it is UTF-8 text.\n",
+                        "cannot read {}: check its permissions and that it is UTF-8 text.\n",
                         env.display()
                     )
                 )
@@ -2311,7 +2308,7 @@ mod tests {
         );
         assert_eq!(
             code(&["/no/such/command"]),
-            Err((127, "factory.py: cannot run /no/such/command\n".to_string()))
+            Err((127, "cannot run /no/such/command\n".to_string()))
         );
         let dir = temp_dir("setup-child");
         let env_file = dir.join(".env");

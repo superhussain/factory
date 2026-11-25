@@ -1047,16 +1047,13 @@ pub(crate) fn usage_totals(home: &Path, slug: &str, job_id: &str) -> io::Result<
     let mut read = 0;
     for (path, main) in usage_transcripts(home, slug, job_id)? {
         let Ok((models, bad)) = usage_scan(&path, main, None) else {
-            eprintln!("factory.py: usage: cannot read {}", file_name(&path));
+            eprintln!("usage: cannot read {}", file_name(&path));
             continue;
         };
         read += 1;
         if bad > 0 {
             let s = if bad == 1 { "" } else { "s" };
-            eprintln!(
-                "factory.py: usage: {bad} unreadable line{s} in {}",
-                file_name(&path)
-            );
+            eprintln!("usage: {bad} unreadable line{s} in {}", file_name(&path));
         }
         for (model, counts) in &models {
             add_counts(&mut totals, model, counts);
@@ -1167,7 +1164,7 @@ pub fn usage_cmd(call: &Call) -> Res<()> {
         Ok(totals) => totals,
         Err(e) => {
             eprintln!(
-                "factory.py: usage: scan failed ({}: {}); nothing recorded",
+                "usage: scan failed ({}: {}); nothing recorded",
                 exc_name(&e),
                 os_error(&e, Some(&retro_transcripts()))
             );
@@ -2437,7 +2434,7 @@ fn bench_replay_case(
     .map_or(1, |r| r.code);
     if removed != 0 {
         bench_warn(&format!(
-            "factory.py: bench: left {}; remove it with git -C {dir} worktree remove {wt_text}",
+            "bench: left {}; remove it with git -C {dir} worktree remove {wt_text}",
             tmp.display()
         ));
     } else {
@@ -2565,7 +2562,7 @@ fn bench_draft(args: &[String]) -> Res<()> {
                 } else {
                     repo
                 };
-                eprintln!("factory.py: bench cases skips {id}: PR is not in {repo}");
+                eprintln!("bench cases skips {id}: PR is not in {repo}");
             }
         }
     }
@@ -2590,7 +2587,7 @@ fn bench_draft(args: &[String]) -> Res<()> {
         {
             Some(head) => cases.push(json!({"id": j["id"], "pr": j["pr"], "head": head,
                                             "source": j["outcome"]["result"], "defects": []})),
-            None => eprintln!("factory.py: bench cases skips {id}: no head commit from GitHub"),
+            None => eprintln!("bench cases skips {id}: no head commit from GitHub"),
         }
     }
     if cases.is_empty() {
@@ -4077,7 +4074,7 @@ mod bench_replay_test {
         assert_eq!(
             err,
             format!(
-                "factory.py: bench: left {}; remove it with git -C {} worktree remove {}\n",
+                "bench: left {}; remove it with git -C {} worktree remove {}\n",
                 tmp.display(),
                 b.repo.display(),
                 wt.display()
@@ -4098,7 +4095,7 @@ mod bench_replay_error_test {
     fn assert_fails(b: &Bench, arm: Option<&Path>, flags: &[&str], code: i32, message: &str) {
         assert_eq!(
             b.replay_to(arm.unwrap_or(&b.arm), flags),
-            (code, String::new(), format!("factory.py: {message}\n")),
+            (code, String::new(), format!("{message}\n")),
             "{flags:?}"
         );
         assert!(b.call().is_none());
@@ -4132,7 +4129,7 @@ mod bench_replay_error_test {
         }
         assert_eq!(
             b.run(&[b.cases.display().to_string()]),
-            (2, String::new(), format!("factory.py: {BENCH_USAGE}\n"))
+            (2, String::new(), format!("{BENCH_USAGE}\n"))
         );
     }
 

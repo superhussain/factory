@@ -1,1 +1,1 @@
-factory.py: usage: explore <slug> | explore <slug> done <run>
+usage: explore <slug> | explore <slug> done <run>

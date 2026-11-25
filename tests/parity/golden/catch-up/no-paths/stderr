@@ -1,1 +1,1 @@
-factory.py: no factory checkout in paths.md; run factory.py init <factory checkout>
+no factory checkout in paths.md; run factory.py init <factory checkout>

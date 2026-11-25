@@ -1,1 +1,1 @@
-factory.py: --answers {home}/needs-blank-a.txt: write one line per question, as - <header>: <answer>, for: Export format
+--answers {home}/needs-blank-a.txt: write one line per question, as - <header>: <answer>, for: Export format

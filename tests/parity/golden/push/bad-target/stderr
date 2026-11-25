@@ -1,1 +1,1 @@
-factory.py: bad target 'sample/../001-test': use <project-slug>/<job-id> or <project-slug>
+bad target 'sample/../001-test': use <project-slug>/<job-id> or <project-slug>

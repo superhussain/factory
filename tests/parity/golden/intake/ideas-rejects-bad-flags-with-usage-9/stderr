@@ -1,1 +1,1 @@
-factory.py: usage: ideas [--limit N] [--max-inflight N] [--project <slug>] [--session <tag>]
+usage: ideas [--limit N] [--max-inflight N] [--project <slug>] [--session <tag>]

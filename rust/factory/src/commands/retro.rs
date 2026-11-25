@@ -1480,7 +1480,7 @@ fn load_autonomy(data: &Value) -> Value {
         || record["projects"].as_array().unwrap().len() > MAX_EXPLORER_PROJECTS
     {
         eprintln!(
-            "factory.py: the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it"
+            "the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it"
         );
         return default;
     }
@@ -5502,7 +5502,7 @@ mod tests {
             let e = admit(&home, RUN_A).unwrap_err();
             assert_eq!(e.code, 2);
             let prefix = format!(
-                "factory.py: {} is not UTF-8 JSON: ",
+                "{} is not UTF-8 JSON: ",
                 folder.join("reply.json").display()
             );
             assert!(
@@ -5612,10 +5612,7 @@ mod tests {
         admit(&home, RUN_A).unwrap();
         std::os::unix::fs::symlink(&folder, home.join("retro/linked")).unwrap();
         let e = admit(&home, "linked").unwrap_err();
-        assert_eq!(
-            (e.code, e.stderr),
-            (4, "factory.py: no retro run linked\n".to_string())
-        );
+        assert_eq!((e.code, e.stderr), (4, "no retro run linked\n".to_string()));
     }
 
     #[cfg(unix)]
@@ -5643,10 +5640,7 @@ mod tests {
             assert_eq!(e.code, 2, "{name}");
             assert_eq!(
                 e.stderr,
-                format!(
-                    "factory.py: {} is a link; nothing written\n",
-                    path.display()
-                )
+                format!("{} is a link; nothing written\n", path.display())
             );
             assert_eq!(fs::read(&target).unwrap(), body);
             let mut want = vec![
@@ -5693,10 +5687,7 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(e.code, 2);
-        assert_eq!(
-            e.stderr,
-            format!("factory.py: {RETRO_WRITE_ONLY}. {PAIR_HINT}\n")
-        );
+        assert_eq!(e.stderr, format!("{RETRO_WRITE_ONLY}. {PAIR_HINT}\n"));
     }
 
     #[test]

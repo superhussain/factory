@@ -620,7 +620,7 @@ fn checks_loop(
             Some(p) => {
                 writeln!(
                     err,
-                    "factory.py: warning: gh api graphql gave no usable check list ({p})"
+                    "warning: gh api graphql gave no usable check list ({p})"
                 )
                 .ok();
             }
@@ -675,7 +675,7 @@ fn checks_loop(
                 let s = if behind == 1 { "" } else { "s" };
                 writeln!(
                     err,
-                    "factory.py: PR #{n} was {behind} commit{s} behind {base}; gh pr update-branch merged {base} into it, so checks run again on the new head."
+                    "PR #{n} was {behind} commit{s} behind {base}; gh pr update-branch merged {base} into it, so checks run again on the new head."
                 )
                 .ok();
                 updated_from = Some(sha.clone());
@@ -2144,11 +2144,11 @@ pub(crate) fn close_stacked_prs(
             .replace("{id}", &job_id);
         let (state, why) = close_pull_request(home, &rider, device, Some(&comment))?;
         if state == "open" {
-            eprintln!("factory.py: leaves stacked pull request {pr} of {job_id} open: {why}");
+            eprintln!("leaves stacked pull request {pr} of {job_id} open: {why}");
             continue;
         }
         eprintln!(
-            "factory.py: stacked pull request {pr} of {job_id} {}",
+            "stacked pull request {pr} of {job_id} {}",
             stacked_close_note(state)
         );
         done.push((
@@ -2410,10 +2410,12 @@ mod tests {
     }
 
     const PR: &str = "https://github.com/example/sample/pull/42";
-    const WARN: &str = "factory.py: warning: gh api graphql gave no usable check list (exited 1 with no check list)\n";
-    const NEVER: &str = "factory.py: gh api graphql never gave a usable check list\n";
-    const DEADLINE: &str = "factory.py: gh api graphql gave no usable check list by the deadline (exited 1 with no check list)\n";
-    const UPDATED: &str = "factory.py: PR #42 was 1 commit behind main; gh pr update-branch merged main into it, so checks run again on the new head.\n";
+    const WARN: &str =
+        "warning: gh api graphql gave no usable check list (exited 1 with no check list)\n";
+    const NEVER: &str = "gh api graphql never gave a usable check list\n";
+    const DEADLINE: &str =
+        "gh api graphql gave no usable check list by the deadline (exited 1 with no check list)\n";
+    const UPDATED: &str = "PR #42 was 1 commit behind main; gh pr update-branch merged main into it, so checks run again on the new head.\n";
 
     fn old() -> String {
         "a1".repeat(20)
@@ -2722,9 +2724,7 @@ mod tests {
             (None, "gh is not installed"),
         ] {
             let (result, fake) = checks(vec![poll], 540, &up_to_date());
-            let warn = format!(
-                "factory.py: warning: gh api graphql gave no usable check list ({problem})\n"
-            );
+            let warn = format!("warning: gh api graphql gave no usable check list ({problem})\n");
             assert_eq!(
                 result,
                 (5, String::new(), warn.repeat(13) + NEVER),
@@ -2774,7 +2774,7 @@ mod tests {
     #[test]
     fn last_sleep_stops_at_deadline() {
         let (result, fake) = checks(vec![listed(&[("pending", "test")])], 25, &up_to_date());
-        assert_eq!(result, got(3, "", "factory.py: still pending: test\n"));
+        assert_eq!(result, got(3, "", "still pending: test\n"));
         assert_eq!(fake.now, 25.0);
     }
 
@@ -2782,7 +2782,7 @@ mod tests {
     #[test]
     fn none_listed_at_30_seconds() {
         let (result, fake) = checks(vec![listed(&[])], 30, &up_to_date());
-        assert_eq!(result, got(3, "", "factory.py: no checks listed yet\n"));
+        assert_eq!(result, got(3, "", "no checks listed yet\n"));
         assert_eq!(fake.now, 30.0);
         let (result, _) = checks(vec![miss()], 30, &up_to_date());
         assert_eq!(result, (5, String::new(), WARN.repeat(4) + NEVER));
@@ -2798,7 +2798,7 @@ mod tests {
             let mut fake = behind_fake(&[(2, &old())], vec![listed(&[("pass", "ci")])], update);
             assert_eq!(
                 run_loop(&mut fake, 300),
-                (5, String::new(), format!("factory.py: {why}\n"))
+                (5, String::new(), format!("{why}\n"))
             );
         }
     }
@@ -2814,7 +2814,7 @@ mod tests {
             let e = gh_pr_view(&mut fake, PR, &["--json", "state", "--jq", ".state"])
                 .err()
                 .unwrap();
-            assert_eq!((e.code, e.stderr), (5, format!("factory.py: {why}\n")));
+            assert_eq!((e.code, e.stderr), (5, format!("{why}\n")));
             assert_eq!(
                 fake.calls,
                 [["pr", "view", PR, "--json", "state", "--jq", ".state"]]
@@ -3413,7 +3413,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(e.code, 1);
         assert!(
-            e.stderr.starts_with("factory.py: ") && e.stderr.contains(".env"),
+            e.stderr.starts_with("") && e.stderr.contains(".env"),
             "{}",
             e.stderr
         );
@@ -3565,10 +3565,7 @@ mod tests {
             (timeout(), "gh api merge-async timed out after 60 seconds"),
         ] {
             let mut fake = queue_fake(miss(), put, vec![queue_status("enqueued")]);
-            assert_eq!(
-                run_queue(&mut fake),
-                got(5, "", &format!("factory.py: {why}\n"))
-            );
+            assert_eq!(run_queue(&mut fake), got(5, "", &format!("{why}\n")));
         }
     }
 
@@ -3865,7 +3862,7 @@ mod tests {
     fn merge_not_open_exits_4() {
         let read = with(mergeability("UNKNOWN", "UNKNOWN"), "state", "MERGED".into());
         let mut fake = merge_fake(vec![read], ok(""));
-        let err = format!("factory.py: {PR} is MERGED, not OPEN\n");
+        let err = format!("{PR} is MERGED, not OPEN\n");
         assert_eq!(run_merge(&mut fake), got(4, "", &err));
         assert_eq!(
             (fake.count("graphql"), fake.now, merges(&fake)),
@@ -3881,8 +3878,7 @@ mod tests {
             "factory/041-parent".into(),
         );
         let mut fake = merge_fake(vec![read], ok(""));
-        let err =
-            "factory.py: PR #42 targets factory/041-parent, not main: it waits for its parent\n";
+        let err = "PR #42 targets factory/041-parent, not main: it waits for its parent\n";
         assert_eq!(run_merge(&mut fake), got(4, "", err));
         assert_eq!(merges(&fake), 0);
     }
@@ -3907,10 +3903,7 @@ mod tests {
             let mut fake = Fake::default()
                 .on(&["api", "graphql"], vec![read])
                 .on(&["pr", "merge"], vec![merge]);
-            assert_eq!(
-                run_merge(&mut fake),
-                got(5, "", &format!("factory.py: {why}\n"))
-            );
+            assert_eq!(run_merge(&mut fake), got(5, "", &format!("{why}\n")));
         }
     }
 }

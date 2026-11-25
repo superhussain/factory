@@ -1,1 +1,1 @@
-factory.py: review escalation check failed (503: review escalation needs the Workers AI binding; deploy the current Worker); the review loop continues
+review escalation check failed (503: review escalation needs the Workers AI binding; deploy the current Worker); the review loop continues

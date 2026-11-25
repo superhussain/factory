@@ -1,1 +1,1 @@
-factory.py: host id host-b does not match this device's name parity. Board claims use parity, so add the host in Settings as parity.
+host id host-b does not match this device's name parity. Board claims use parity, so add the host in Settings as parity.

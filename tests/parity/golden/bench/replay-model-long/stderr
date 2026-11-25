@@ -1,1 +1,1 @@
-factory.py: bench: --model must be 1 to 200 letters, digits or _ . / : @ [ ] -
+bench: --model must be 1 to 200 letters, digits or _ . / : @ [ ] -

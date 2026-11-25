@@ -1,1 +1,1 @@
-factory.py: only factory.py batch and the lead's mirror add or remove a batched-into ref. A refs patch for 001-test must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.
+only factory.py batch and the lead's mirror add or remove a batched-into ref. A refs patch for 001-test must keep exactly the batched-into refs it has now, none for a new row. Nothing was written.

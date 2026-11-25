@@ -1,1 +1,1 @@
-factory.py: push factory/001-test to origin before handoff; its remote head must match aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+push factory/001-test to origin before handoff; its remote head must match aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

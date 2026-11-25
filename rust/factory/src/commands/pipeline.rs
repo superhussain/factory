@@ -1489,7 +1489,7 @@ fn load_autonomy(data: &Value, o: &mut Out) -> Value {
         || !lists_ok
         || record["projects"].as_array().unwrap().len() > 1
     {
-        o.err.push_str("factory.py: the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it\n");
+        o.err.push_str("the board's autonomy record is malformed, so autonomy counts as paused; run autonomy pause to rewrite it\n");
         return default;
     }
     record
@@ -1846,7 +1846,7 @@ fn escalation(home: &Path, slug: &str, job_id: &str, round_text: &str, o: &mut O
             String::from_utf8_lossy(&r.body).into_owned(),
         ),
         Err(e) => {
-            let captured = printable_line(&e.stderr.replacen("factory.py: ", "", 1), 300);
+            let captured = printable_line(&e.stderr, 300);
             let why = if captured.is_empty() {
                 "unknown error".to_string()
             } else {
@@ -1854,7 +1854,7 @@ fn escalation(home: &Path, slug: &str, job_id: &str, round_text: &str, o: &mut O
             };
             writeln!(
                 o.err,
-                "factory.py: review escalation check failed ({why}); the review loop continues"
+                "review escalation check failed ({why}); the review loop continues"
             )
             .unwrap();
             let failed = json!({"decision": "continue", "confidence": null, "threshold": null,
@@ -1884,7 +1884,7 @@ fn escalation(home: &Path, slug: &str, job_id: &str, round_text: &str, o: &mut O
             };
             writeln!(
                 o.err,
-                "factory.py: review escalation check failed ({why}); the review loop continues"
+                "review escalation check failed ({why}); the review loop continues"
             )
             .unwrap();
             let mut failed = unchanged;
@@ -2000,7 +2000,7 @@ fn record_repeats(
         o.err.push_str(&e.stderr);
         writeln!(
             o.err,
-            "factory.py: {job_id} repeats were not recorded on the board; the review loop goes on"
+            "{job_id} repeats were not recorded on the board; the review loop goes on"
         )
         .unwrap();
     }
@@ -4710,11 +4710,11 @@ fn batch(home: &Path, slug: &str, lead_id: &str, ids: &[String], o: &mut Out) ->
                 match drop(made.iter().map(|(_, id)| id.clone()).collect()) {
                     Err(e2) => {
                         o.err.push_str(&e2.stderr);
-                        writeln!(o.err, "factory.py: batch could not remove {riders}; they stay on the board at spec, batched into {lead_id}, and their backlog lines stay unchecked").unwrap();
+                        writeln!(o.err, "batch could not remove {riders}; they stay on the board at spec, batched into {lead_id}, and their backlog lines stay unchecked").unwrap();
                     }
                     Ok(()) => writeln!(
                         o.err,
-                        "factory.py: batch removed {riders}; their backlog lines stay unchecked"
+                        "batch removed {riders}; their backlog lines stay unchecked"
                     )
                     .unwrap(),
                 }
@@ -4725,7 +4725,7 @@ fn batch(home: &Path, slug: &str, lead_id: &str, ids: &[String], o: &mut Out) ->
             drop(vec![rider_id.clone()])?;
             writeln!(
                 o.err,
-                "factory.py: {pick} changed before batch could check it off; removed {rider_id}"
+                "{pick} changed before batch could check it off; removed {rider_id}"
             )
             .unwrap();
             let riders: Vec<Value> = result["riders"]
@@ -5682,7 +5682,7 @@ mod tests {
             assert_eq!(
                 err,
                 format!(
-                    "factory.py: bad experiment in {}: use experiment: <name> <provider> <model> [<effort>] <percent>\n",
+                    "bad experiment in {}: use experiment: <name> <provider> <model> [<effort>] <percent>\n",
                     home.join("routes.md").display()
                 )
             );
@@ -6609,7 +6609,7 @@ mod tests {
                 assert_eq!(code, 2);
                 assert_eq!(
                     err,
-                    format!("factory.py: round must be a positive integer. {REVIEW_PLAN_USAGE}\n")
+                    format!("round must be a positive integer. {REVIEW_PLAN_USAGE}\n")
                 );
                 for name in ["ux", "ui"] {
                     assert!(!f.review(round, name).exists());
@@ -8641,7 +8641,7 @@ mod tests {
             let e = batch(&home, "sample", LEAD, &ids, &mut o).unwrap_err();
             assert_eq!(
                 (e.code, e.stderr.as_str()),
-                (2, "factory.py: a batch holds at most 20 riders\n")
+                (2, "a batch holds at most 20 riders\n")
             );
             std::thread::sleep(std::time::Duration::from_millis(50));
             assert!(seen.lock().unwrap().iter().all(|r| r.method == "GET"));
@@ -8678,7 +8678,7 @@ mod tests {
                 assert_eq!(e.code, 2, "{claim}");
                 assert!(
                     e.stderr
-                        .starts_with("factory.py: cannot batch 091-sample-typo: held by "),
+                        .starts_with("cannot batch 091-sample-typo: held by "),
                     "{}",
                     e.stderr
                 );

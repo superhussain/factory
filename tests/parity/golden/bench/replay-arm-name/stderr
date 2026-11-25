@@ -1,1 +1,1 @@
-factory.py: bench: arm name odd name must be unique letters, digits, ., _ or -
+bench: arm name odd name must be unique letters, digits, ., _ or -

@@ -1,1 +1,1 @@
-factory.py: project document sample/notes.md: contains control, invisible or bidirectional characters; fix it in Project settings
+project document sample/notes.md: contains control, invisible or bidirectional characters; fix it in Project settings

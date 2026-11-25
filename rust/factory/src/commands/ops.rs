@@ -976,7 +976,7 @@ mod tests {
         assert_eq!(
             e.stderr,
             format!(
-                "factory.py: {} is a symlink or junction; nothing was removed\n",
+                "{} is a symlink or junction; nothing was removed\n",
                 text(&link)
             )
         );
@@ -1126,10 +1126,7 @@ mod tests {
         ] {
             let e = board_jobs(&board).unwrap_err();
             assert_eq!(e.code, 1, "{board}");
-            assert_eq!(
-                e.stderr,
-                "factory.py: the board's jobs is not a list of objects\n"
-            );
+            assert_eq!(e.stderr, "the board's jobs is not a list of objects\n");
         }
         let board = json!({"jobs": [merged]});
         assert_eq!(board_jobs(&board).unwrap(), &[merged]);

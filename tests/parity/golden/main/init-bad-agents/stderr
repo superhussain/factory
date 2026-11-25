@@ -1,1 +1,1 @@
-factory.py: --agents must be none, claude, opencode or both
+--agents must be none, claude, opencode or both

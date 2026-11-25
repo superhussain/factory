@@ -35,7 +35,7 @@ pub(super) fn doctor(home: &Path) -> Res<Value> {
     check("location", true, "Location resolved.".into());
     let mut config_error = match validate_home(&home, true) {
         Ok(()) => String::new(),
-        Err(e) => strip(e.stderr.get("factory.py: ".len()..).unwrap_or("")).to_string(),
+        Err(e) => strip(&e.stderr).to_string(),
     };
     if config_error.is_empty() {
         let config = home.join("config.md");
@@ -486,7 +486,7 @@ pub(super) fn orphan_pickup_scan(io: &mut Io, home: &Path) -> Res<()> {
             let _ = io.err.write_all(e.stderr.as_bytes());
             errln!(
                 io,
-                "factory.py: orphan scan stopped (exit {}); it runs again tomorrow",
+                "orphan scan stopped (exit {}); it runs again tomorrow",
                 e.code
             );
         }
@@ -523,7 +523,7 @@ pub(super) fn outcomes_pickup_record(io: &mut Io, home: &Path) -> Res<()> {
             let _ = io.err.write_all(e.stderr.as_bytes());
             errln!(
                 io,
-                "factory.py: outcomes record {slug} stopped (exit {}); it runs again tomorrow",
+                "outcomes record {slug} stopped (exit {}); it runs again tomorrow",
                 e.code
             );
             continue;
@@ -536,7 +536,7 @@ pub(super) fn outcomes_pickup_record(io: &mut Io, home: &Path) -> Res<()> {
         }) {
             errln!(
                 io,
-                "factory.py: outcomes record {slug}: {} is unknown: {}",
+                "outcomes record {slug}: {} is unknown: {}",
                 &m[1],
                 &m[2]
             );
@@ -572,7 +572,7 @@ pub(super) fn retro_pickup_push(io: &mut Io, home: &Path) -> Res<()> {
         let _ = io.err.write_all(e.stderr.as_bytes());
         errln!(
             io,
-            "factory.py: retro push stopped (exit {}); the next pickup run retries it",
+            "retro push stopped (exit {}); the next pickup run retries it",
             e.code
         );
     }
@@ -633,7 +633,7 @@ pub(super) fn audit_push_stopped(io: &mut Io, e: Exit) -> Res<()> {
     let _ = io.err.write_all(e.stderr.as_bytes());
     errln!(
         io,
-        "factory.py: audit push stopped (exit {}); the next pickup run retries it",
+        "audit push stopped (exit {}); the next pickup run retries it",
         e.code
     );
     Ok(())
@@ -682,11 +682,11 @@ pub(super) fn audit_pickup_push(io: &mut Io, home: &Path, data: Option<&Value>) 
                     // only changed transcripts retry it, so one oversized call cannot stop pickup.
                     Err(e) if e.stderr.contains(crate::shared::pyre::LIMIT_HIT) => {
                         // Pickup goes on and cannot shorten a transcript, so drop the stop advice.
-                        let why = e.stderr.trim_end().trim_start_matches("factory.py: ");
+                        let why = e.stderr.trim_end();
                         let why = why.split("; stopping").next().unwrap_or(why);
                         errln!(
                             io,
-                            "factory.py: audit push skipped {job_id} until its transcripts change: {why}"
+                            "audit push skipped {job_id} until its transcripts change: {why}"
                         );
                     }
                     pushed => {
@@ -733,7 +733,7 @@ pub(super) fn usage_pickup_record(io: &mut Io, home: &Path, job: &Value) -> Res<
         Err(why) => {
             errln!(
                 io,
-                "factory.py: usage: scan failed on {job_id} ({why}); nothing recorded"
+                "usage: scan failed on {job_id} ({why}); nothing recorded"
             );
             return Ok(());
         }
@@ -789,13 +789,13 @@ pub(super) fn tracer_build_pass(io: &mut Io, home: &Path, jobs: Option<&Value>) 
                     &read
                 }
                 Err(e) => {
-                    let reason = words(&e.stderr).join(" ").replacen("factory.py: ", "", 1);
+                    let reason = words(&e.stderr).join(" ");
                     let reason = if reason.is_empty() {
                         "unknown error"
                     } else {
                         &reason
                     };
-                    errln!(io, "factory.py: warning: Tracer build check failed: {}. Unchecked jobs keep their Building in Tracer mark.", reason.trim_end_matches('.'));
+                    errln!(io, "warning: Tracer build check failed: {}. Unchecked jobs keep their Building in Tracer mark.", reason.trim_end_matches('.'));
                     return Ok(false);
                 }
             },

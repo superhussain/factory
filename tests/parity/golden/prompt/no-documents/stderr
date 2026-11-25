@@ -1,1 +1,1 @@
-factory.py: no {home}/projects/nodocs.documents.md: run factory.py documents nodocs first
+no {home}/projects/nodocs.documents.md: run factory.py documents nodocs first

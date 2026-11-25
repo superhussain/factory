@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-untrusted-27.json: suggestions[0].options[0].label: links are not allowed; nothing admitted
+{home}/suggest-untrusted-27.json: suggestions[0].options[0].label: links are not allowed; nothing admitted

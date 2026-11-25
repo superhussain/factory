@@ -1097,7 +1097,7 @@ mod tests {
         assert_eq!(e.code, 6);
         assert_eq!(
             e.stderr,
-            "factory.py: cannot push local project: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte\n"
+            "cannot push local project: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte\n"
         );
         fs::remove_dir_all(home).unwrap();
     }
@@ -1141,7 +1141,7 @@ mod tests {
         assert_eq!(e.code, 6);
         assert_eq!(
             e.stderr,
-            "factory.py: Project changed locally during pull. Local edits were kept.\n"
+            "Project changed locally during pull. Local edits were kept.\n"
         );
         let draft = b"---\nrepo: octo/sample\n---\nTyping";
         assert_eq!(fs::read(&*doc.lock().unwrap()).unwrap(), draft);
@@ -1490,7 +1490,7 @@ mod tests {
         let e = push_job(&home, "alpha", "042-sample-export", &mut Vec::new()).unwrap_err();
         assert_eq!(
             e.stderr,
-            "factory.py: refused spec.md: it looks like it holds a secret and was not uploaded. Remove the secret, then push again\n"
+            "refused spec.md: it looks like it holds a secret and was not uploaded. Remove the secret, then push again\n"
         );
         assert!(folder.join(".goal-pending").exists());
         let seen = seen.lock().unwrap();

@@ -134,7 +134,7 @@ fn remove_retro(scheduler: &str, home: &Path) -> Result<(), String> {
     #[cfg_attr(test, allow(unreachable_code))]
     pickup::uninstall_timer(home, scheduler, &pickup::RETRO_PUSH)
         .map(|_| ())
-        .map_err(|e| strip(e.stderr.trim_start_matches("factory.py: ")).to_string())
+        .map_err(|e| strip(&e.stderr).to_string())
 }
 
 /// Removes the pickup timer, through the same code `daemon setup --install` uses.
@@ -145,7 +145,7 @@ fn remove_timer(scheduler: &str, home: &Path) -> Result<(), String> {
     }
     pickup::uninstall_timer(home, scheduler, &pickup::PICKUP)
         .map(|_| ())
-        .map_err(|e| strip(e.stderr.trim_start_matches("factory.py: ")).to_string())
+        .map_err(|e| strip(&e.stderr).to_string())
 }
 
 /// (code, output) of a launchctl step, through the faked child runner in tests.
@@ -559,11 +559,7 @@ fn catch_up_backup(home: &Path, skill: &Path) -> Result<PathBuf, String> {
             fs::write(&path, out).map_err(|e| os_error(&e, Some(&path)))?;
         }
     }
-    let user = user_home().map_err(|e| {
-        strip(&e.stderr)
-            .trim_start_matches("factory.py: ")
-            .to_string()
-    })?;
+    let user = user_home().map_err(|e| strip(&e.stderr).to_string())?;
     let sources = [
         (
             user.join("Library").join("LaunchAgents"),
@@ -1767,8 +1763,7 @@ mod tests {
             (
                 1,
                 String::new(),
-                "factory.py: no factory checkout in paths.md; run factory.py init <factory checkout>\n"
-                    .into()
+                "no factory checkout in paths.md; run factory.py init <factory checkout>\n".into()
             )
         );
         fs::write(
@@ -1782,7 +1777,7 @@ mod tests {
                 2,
                 String::new(),
                 format!(
-                    "factory.py: catch-up runs from the installed skill, not from the checkout {}\n",
+                    "catch-up runs from the installed skill, not from the checkout {}\n",
                     t.checkout.display()
                 )
             )

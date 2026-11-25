@@ -1,1 +1,1 @@
-factory.py: pipeline must be {"global": <version>, "project": <version>}
+pipeline must be {"global": <version>, "project": <version>}

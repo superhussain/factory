@@ -1,1 +1,1 @@
-factory.py: usage: factory.py bench cases <project-slug>
+usage: factory.py bench cases <project-slug>

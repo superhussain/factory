@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-options-3.json: suggestions[0].options[0].key: must be A; nothing admitted
+{home}/suggest-options-3.json: suggestions[0].options[0].key: must be A; nothing admitted

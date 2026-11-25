@@ -1,1 +1,1 @@
-factory.py: bench: no cases file at {home}/bench/absent.json
+bench: no cases file at {home}/bench/absent.json

@@ -1,1 +1,1 @@
-factory.py: 047-retired cannot be rerun: gamma is not an active host, so nothing would restart it; move it to another host instead. Nothing was written.
+047-retired cannot be rerun: gamma is not an active host, so nothing would restart it; move it to another host instead. Nothing was written.

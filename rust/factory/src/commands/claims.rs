@@ -745,7 +745,7 @@ fn receipt_cas<T>(
         change(text, false, &mut Vec::new())
     })?;
     eprintln!(
-        "factory.py: the Worker refused Tracer's receipt (check tracer_receipt_key); {} waits at gate: spec-approval instead",
+        "the Worker refused Tracer's receipt (check tracer_receipt_key); {} waits at gate: spec-approval instead",
         sent.last().unwrap()
     );
     Ok(result)
@@ -1767,10 +1767,7 @@ mod tests {
         let e = board_write(&home, "042-sample-export", patch, &opts).unwrap_err();
         assert_eq!(
             (e.code, e.stderr.as_str()),
-            (
-                2,
-                "factory.py: only factory.py push and pickup set decision\n"
-            )
+            (2, "only factory.py push and pickup set decision\n")
         );
         fs::remove_dir_all(home).unwrap();
     }
@@ -1792,7 +1789,7 @@ mod tests {
             (e.code, e.stderr.as_str()),
             (
                 2,
-                "factory.py: only factory.py checks sets checked_head. Nothing was written.\n"
+                "only factory.py checks sets checked_head. Nothing was written.\n"
             )
         );
         fs::remove_dir_all(home).unwrap();
@@ -1810,10 +1807,7 @@ mod tests {
         let e = board_write(&home, "042-sample-export", patch, &opts).unwrap_err();
         assert_eq!(
             (e.code, e.stderr.as_str()),
-            (
-                2,
-                "factory.py: only factory.py agent and pickup set agents\n"
-            )
+            (2, "only factory.py agent and pickup set agents\n")
         );
         fs::remove_dir_all(home).unwrap();
     }
@@ -1832,7 +1826,7 @@ mod tests {
             (e.code, e.stderr.as_str()),
             (
                 2,
-                "factory.py: only factory.py repeats sets repeated. Nothing was written.\n"
+                "only factory.py repeats sets repeated. Nothing was written.\n"
             )
         );
         fs::remove_dir_all(home).unwrap();
@@ -1933,7 +1927,7 @@ mod tests {
         });
     }
 
-    const UNRESOLVED: &str = "factory.py: factory home must be absolute. Nothing was written.\n";
+    const UNRESOLVED: &str = "factory home must be absolute. Nothing was written.\n";
 
     #[test]
     fn board_resolves_home_before_the_write() {

@@ -1,1 +1,1 @@
-factory.py: usage: backlog add "<slug>: <feature>" [--context <file>] | backlog rework <job-id> (feature on stdin) | backlog lesson <slug>/<job-id> --fact-file <file> --why-file <file>
+usage: backlog add "<slug>: <feature>" [--context <file>] | backlog rework <job-id> (feature on stdin) | backlog lesson <slug>/<job-id> --fact-file <file> --why-file <file>

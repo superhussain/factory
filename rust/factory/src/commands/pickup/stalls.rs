@@ -509,7 +509,7 @@ pub(super) fn cached_settings(
     if !settings.contains_key(project) {
         let found = pickup_settings(home, project, repo, device)?;
         if let (Some(reason), false) = (&found.reason, dry) {
-            errln!(io, "factory.py: pickup skips {project}: {reason}");
+            errln!(io, "pickup skips {project}: {reason}");
         }
         settings.insert(project.to_string(), found);
     }
@@ -554,7 +554,7 @@ pub(super) fn takeover(
             if dry {
                 outln!(io, "skip takeover: {reason}");
             } else {
-                errln!(io, "factory.py: pickup skips takeover: {reason}");
+                errln!(io, "pickup skips takeover: {reason}");
             }
             return Ok(0);
         }

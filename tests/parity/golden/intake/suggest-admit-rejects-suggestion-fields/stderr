@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-fields-1.json: suggestions[0].kind: must be one of bug-fix, test-gap, docs, cleanup, dependency-upgrade, migration, security, product-idea, tooling; nothing admitted
+{home}/suggest-fields-1.json: suggestions[0].kind: must be one of bug-fix, test-gap, docs, cleanup, dependency-upgrade, migration, security, product-idea, tooling; nothing admitted

@@ -349,7 +349,7 @@ fn prebuild_dirs(home: &Path, slug: &str) -> Vec<String> {
         });
     let Some(dirs) = dirs else {
         eprintln!(
-            "factory.py: cannot read {}: use {{\"version\": 1, \"prebuild\": {{\"<project>\": [\"<dir>\", ...]}}}}",
+            "cannot read {}: use {{\"version\": 1, \"prebuild\": {{\"<project>\": [\"<dir>\", ...]}}}}",
             path.display()
         );
         return Vec::new();
@@ -546,16 +546,13 @@ fn prebuild_with(
             Ok(code) => say(
                 &mut lines,
                 format!(
-                    "factory.py: prebuild of {d} failed (exit {code}); log: {}",
+                    "prebuild of {d} failed (exit {code}); log: {}",
                     log.display()
                 ),
             ),
             Err(why) => say(
                 &mut lines,
-                format!(
-                    "factory.py: prebuild of {d} failed ({why}); log: {}",
-                    log.display()
-                ),
+                format!("prebuild of {d} failed ({why}); log: {}", log.display()),
             ),
         }
     }
@@ -765,7 +762,7 @@ fn stop_pids_with(wt: &Path, proc_root: &Path, lsof: Option<PathBuf>) -> Option<
         Ok(real) if cause.is_empty() => real,
         _ => {
             eprintln!(
-                "factory.py: refusing to stop processes in {}: {cause}; no process was signalled",
+                "refusing to stop processes in {}: {cause}; no process was signalled",
                 repr(&wt.to_string_lossy())
             );
             return None;
@@ -773,7 +770,7 @@ fn stop_pids_with(wt: &Path, proc_root: &Path, lsof: Option<PathBuf>) -> Option<
     };
     if !cfg!(windows) && !proc_root.is_dir() && lsof.is_none() {
         eprintln!(
-            "factory.py: lsof not found, so processes in {} were not checked",
+            "lsof not found, so processes in {} were not checked",
             real.display()
         );
         return None;
@@ -1107,7 +1104,7 @@ fn pr_merged_head(home: &Path, pr: &str) -> Option<String> {
     match pr_state(&format!("{}/{}", &m[1], &m[2]), number, &device_name(home)) {
         Err(why) => {
             eprintln!(
-                "factory.py: cleanup could not read pull request {pr} ({why}), so it keeps a branch HEAD does not contain"
+                "cleanup could not read pull request {pr} ({why}), so it keeps a branch HEAD does not contain"
             );
             None
         }
@@ -1125,11 +1122,7 @@ fn board_jobs(home: &Path) -> Result<Vec<Value>, String> {
     let r = match board_client::read(home) {
         Ok(r) => r,
         Err(e) => {
-            let reason =
-                words(&e.stderr)
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .replacen("factory.py: ", "", 1);
+            let reason = words(&e.stderr).collect::<Vec<_>>().join(" ");
             return Err(if reason.is_empty() {
                 "unknown error".to_string()
             } else {
@@ -1159,7 +1152,7 @@ fn board_merged_head(home: &Path, slug: &str, job_id: &str) -> Res<Option<String
         Ok(jobs) => jobs,
         Err(reason) => {
             eprintln!(
-                "factory.py: cleanup could not read the board ({reason}), so it keeps a branch HEAD does not contain"
+                "cleanup could not read the board ({reason}), so it keeps a branch HEAD does not contain"
             );
             return Ok(None);
         }
@@ -1206,7 +1199,7 @@ fn board_merged_head(home: &Path, slug: &str, job_id: &str) -> Res<Option<String
     } else {
         format!("it is in {pr_repo}, not the project file's repo: {repo}")
     };
-    eprintln!("factory.py: cleanup skipped the GitHub lookup for {pr}: {why}");
+    eprintln!("cleanup skipped the GitHub lookup for {pr}: {why}");
     Ok(None)
 }
 
@@ -1489,7 +1482,7 @@ mod tests {
             (e.code, e.stderr.as_str()),
             (
                 6,
-                "factory.py: unsafe checkout: factory base -x is not a safe branch name\n"
+                "unsafe checkout: factory base -x is not a safe branch name\n"
             )
         );
         assert!(!t.home.join("worktrees").exists());
@@ -1600,10 +1593,7 @@ mod tests {
         let e = worktree_in(&t.home, "factory", JOB).unwrap_err();
         assert_eq!(
             (e.code, e.stderr),
-            (
-                4,
-                format!("factory.py: no factory/{JOB} branch here or on origin\n")
-            )
+            (4, format!("no factory/{JOB} branch here or on origin\n"))
         );
         let first = push_job(&t, "job work");
         let wt = worktree_in(&t.home, "factory", JOB).unwrap();
@@ -1628,7 +1618,13 @@ mod tests {
         let tail = format!("behind origin/factory/{JOB}");
         assert_eq!(
             (e.code, e.stderr),
-            (6, format!("factory.py: {} is 0 ahead and 1 {tail} with uncommitted changes. Nothing was changed\n", wt.display()))
+            (
+                6,
+                format!(
+                    "{} is 0 ahead and 1 {tail} with uncommitted changes. Nothing was changed\n",
+                    wt.display()
+                )
+            )
         );
         sh_git(&wt, &["add", "untracked.txt"]);
         commit(&wt, "local work");
@@ -1638,7 +1634,7 @@ mod tests {
             (
                 6,
                 format!(
-                    "factory.py: {} is 1 ahead and 1 {tail}. Nothing was changed\n",
+                    "{} is 1 ahead and 1 {tail}. Nothing was changed\n",
                     wt.display()
                 )
             )
@@ -1735,7 +1731,7 @@ mod tests {
 
         fn failed(&self, why: &str) -> String {
             format!(
-                "factory.py: prebuild of sample failed ({why}); log: {}",
+                "prebuild of sample failed ({why}); log: {}",
                 self.log.display()
             )
         }
@@ -1877,8 +1873,7 @@ mod tests {
         let out = t.run(None, Some(&t.pnpm));
         assert_eq!(out.len(), 1);
         assert!(
-            out[0]
-                .starts_with("factory.py: prebuild of sample failed ([Errno 13] Permission denied"),
+            out[0].starts_with("prebuild of sample failed ([Errno 13] Permission denied"),
             "{}",
             out[0]
         );

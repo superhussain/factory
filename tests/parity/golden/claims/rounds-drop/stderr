@@ -1,1 +1,1 @@
-factory.py: 001-test cannot drop review rounds: the board has 2 and the patch sends 1. Nothing was written.
+001-test cannot drop review rounds: the board has 2 and the patch sends 1. Nothing was written.

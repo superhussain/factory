@@ -836,7 +836,7 @@ Promote on the example:
 
 Refusals change nothing:
 
-| Case | Exit | stderr after `factory.py: ` |
+| Case | Exit | stderr |
 | --- | --- | --- |
 | 12 scanned | 3 | `alpha visible cannot be promoted yet: needs 8 more scanned jobs; nothing was changed` |
 | 3 days at hold | 3 | `alpha visible cannot be promoted yet: 3 days held, needs 7; nothing was changed` |

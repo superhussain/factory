@@ -1,1 +1,1 @@
-factory.py: bench: 1031-no-folder: no job folder with spec.md under {home}/jobs; pull it with factory.py pull <project>/1031-no-folder
+bench: 1031-no-folder: no job folder with spec.md under {home}/jobs; pull it with factory.py pull <project>/1031-no-folder

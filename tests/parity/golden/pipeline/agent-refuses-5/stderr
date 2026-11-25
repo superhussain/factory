@@ -1,1 +1,1 @@
-factory.py: usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]: effort "huge" is not one of low, medium, high, xhigh, max
+usage: agent record <project>/<id> <role> <harness> <via> <model> [<effort>] [--paseo-agent <agent-id>]: effort "huge" is not one of low, medium, high, xhigh, max

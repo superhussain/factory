@@ -1,1 +1,1 @@
-factory.py: Access rejected the service token; check FACTORY_ACCESS_CLIENT_ID/SECRET in {home}/.env
+Access rejected the service token; check FACTORY_ACCESS_CLIENT_ID/SECRET in {home}/.env

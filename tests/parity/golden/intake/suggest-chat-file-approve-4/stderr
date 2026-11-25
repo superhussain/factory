@@ -1,1 +1,1 @@
-factory.py: --chat-file {home}/suggest-cf-empty.txt is empty; nothing was changed
+--chat-file {home}/suggest-cf-empty.txt is empty; nothing was changed

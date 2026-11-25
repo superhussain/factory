@@ -1,1 +1,1 @@
-factory.py: the Worker has no /api/backlog/triage/rate; deploy the current Worker
+the Worker has no /api/backlog/triage/rate; deploy the current Worker

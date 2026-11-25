@@ -1,1 +1,1 @@
-factory.py: {home}/tracer.json: not a readable regular JSON file
+{home}/tracer.json: not a readable regular JSON file

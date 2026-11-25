@@ -137,7 +137,7 @@ pub(super) fn stopped(io: &mut Io, e: Exit, what: &str) -> Res<()> {
         return Err(e);
     }
     let _ = io.err.write_all(e.stderr.as_bytes());
-    errln!(io, "factory.py: {what}");
+    errln!(io, "{what}");
     Ok(())
 }
 
@@ -154,11 +154,7 @@ pub(super) fn run_passes(
         if flags.dry {
             outln!(io, "skip all: {}", halt_line(&halt));
         } else {
-            errln!(
-                io,
-                "factory.py: pickup launches nothing; {}",
-                halt_line(&halt)
-            );
+            errln!(io, "pickup launches nothing; {}", halt_line(&halt));
         }
         return Ok(());
     }

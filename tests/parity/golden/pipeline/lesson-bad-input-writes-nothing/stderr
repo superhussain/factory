@@ -1,4 +1,4 @@
-factory.py: usage:
+usage:
   factory.py where [<project-slug>]         print this project's factory paths as JSON
   factory.py init [<repo-path>]             set up the factory home and register a repo
   factory.py claim <factory-dir> <feature-slug> <project-slug>
