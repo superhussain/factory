@@ -16,3 +16,9 @@ inherits = "release"
 lto = "off"
 codegen-units = 256
 incremental = true
+
+# The dev profile, which builds the tests and also plain `cargo build` and `cargo run`. The regex tests run the
+# regex engines over megabytes of text, so the dependencies are optimized. The factory crate itself stays
+# unoptimized, so a source change still rebuilds in seconds.
+[profile.dev.package."*"]
+opt-level = 2

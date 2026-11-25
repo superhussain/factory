@@ -199,6 +199,17 @@ fn proxy_url(origin: &str, var: impl Fn(&str) -> Option<String>) -> Option<Strin
     Some(proxy)
 }
 
+/// Each connect, send, read and write wait of every agent, a stalled response body included.
+const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn http_timeout() -> Duration {
+    #[cfg(test)]
+    if let Some(limit) = TEST_HTTP_TIMEOUT.with(std::cell::Cell::get) {
+        return limit;
+    }
+    HTTP_TIMEOUT
+}
+
 fn new_agent(roots: RootCerts, origin: &str) -> Agent {
     let tls = TlsConfig::builder()
         .provider(TlsProvider::NativeTls)
@@ -206,7 +217,7 @@ fn new_agent(roots: RootCerts, origin: &str) -> Agent {
         .build();
     let proxy = proxy_url(origin, |name| std::env::var(name).ok())
         .and_then(|url| ureq::Proxy::new(&url).ok());
-    let limit = Some(Duration::from_secs(30));
+    let limit = Some(http_timeout());
     Agent::config_builder()
         .max_redirects(0)
         .max_redirects_will_error(false)
@@ -229,6 +240,11 @@ pub const MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
 
 /// One agent per origin, so each origin gets its own proxy choice.
 pub(crate) fn platform_agent(origin: &str) -> &'static Agent {
+    // A shorter timeout gets its own agent, so the cached agents other tests share keep the real one.
+    #[cfg(test)]
+    if TEST_HTTP_TIMEOUT.with(std::cell::Cell::get).is_some() {
+        return Box::leak(Box::new(new_agent(RootCerts::PlatformVerifier, origin)));
+    }
     static AGENTS: OnceLock<Mutex<HashMap<String, &'static Agent>>> = OnceLock::new();
     let mut agents = AGENTS.get_or_init(Default::default).lock().unwrap();
     agents
@@ -240,6 +256,8 @@ pub(crate) fn platform_agent(origin: &str) -> &'static Agent {
 thread_local! {
     /// A test's stand-in for FALLBACK_CA_FILE, so a test can trust its own certificate.
     static FALLBACK_CA_OVERRIDE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// A shorter HTTP_TIMEOUT for this test thread, so a stall test need not wait 30 s.
+    pub(crate) static TEST_HTTP_TIMEOUT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
 }
 
 fn fallback_ca_file() -> String {
@@ -633,6 +651,12 @@ pub(crate) mod tests {
         let b = platform_agent("https://b.example");
         assert!(!std::ptr::eq(a, b));
         assert!(std::ptr::eq(a, platform_agent("https://a.example")));
+    }
+
+    #[test]
+    fn http_timeout_is_30s() {
+        assert_eq!(HTTP_TIMEOUT, Duration::from_secs(30));
+        assert_eq!(http_timeout(), HTTP_TIMEOUT);
     }
 
     #[test]

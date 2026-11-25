@@ -18,6 +18,7 @@ jobs:
       all-key: ${{ steps.keys.outputs.all }}
       rust: ${{ steps.rust.outputs.cache-hit }}
       rust-key: ${{ steps.keys.outputs.rust }}
+      browser: ${{ steps.browser.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,6 +30,16 @@ jobs:
           echo "all=ci-pass-all-$(git rev-parse 'HEAD^{tree}')-$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
           rust="$(git rev-parse HEAD:rust HEAD:tests/parity HEAD:skills HEAD:tools HEAD:worker/admission.js HEAD:tests/fixtures HEAD:.github/workflows/ci.yml | sha256sum | cut -c1-40)"
           echo "rust=ci-pass-rust-$rust" >> "$GITHUB_OUTPUT"
+      # The browser target's Nx inputs in nx.json and tools/project.json, plus nx.json, paseo-plugin, this workflow
+      # and its setup action. A PR that changes none of them, such as a Rust-only one, skips the eight browser shards.
+      - name: Browser inputs
+        id: browser
+        run: |
+          if git diff --quiet "$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)" HEAD -- web worker tools ':!tools/deploy.mjs' tests/browser tests/support tests/fixtures/browser-cases.json tests/fixtures/inbox-count.json tests/fixtures/project-documents.md tests/fixtures/project-document-notes.md tests/fixtures/project-settings-board.json tests/fixtures/hosts-list.json tests/fixtures/walkthrough-map.html tests/fixtures/walkthrough-rich.html tests/fixtures/retro-backlog-context.txt skills/factory/references/pickup.md tsconfig.json package.json pnpm-lock.yaml .node-version THIRD_PARTY_NOTICES.md nx.json paseo-plugin .github/workflows/ci.yml .github/actions; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Look up a passing run of this tree
         if: github.event.pull_request.head.repo.full_name == github.repository
         id: all
@@ -92,7 +103,7 @@ jobs:
       - if: steps.factory-bin.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
           save-if: false
       # rust-build runs beside this job, so a PR that changes Rust always misses the binary above. rust-build's
@@ -117,7 +128,7 @@ jobs:
       - run: git diff --check
   browser:
     needs: plan
-    if: needs.plan.outputs.all != 'true'
+    if: needs.plan.outputs.all != 'true' && needs.plan.outputs.browser == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 8
     strategy:
@@ -172,6 +183,7 @@ jobs:
   # The host binary keeps panic = "abort"; cargo test needs unwinding, so build and test are separate jobs.
   # rust-cache keys on Cargo.lock, Cargo.toml and rustc, so a source-only change reuses the compiled dependencies.
   # warm.yml saves the same keys, and the incremental artifacts, from main, so a PR's first run starts warm too.
+  # The key leaves out Cargo.toml's [profile] tables, so a profile change must bump prefix-key here and in warm.yml.
   rust-build:
     needs: plan
     if: needs.plan.outputs.all != 'true' && needs.plan.outputs.rust != 'true'
@@ -188,7 +200,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
       # rust-cache keeps only dependencies and sets CARGO_INCREMENTAL=0, so each source change compiled the factory
       # crate from scratch. This PR's previous build's incremental artifacts let rustc reuse the unchanged codegen
@@ -237,7 +249,8 @@ jobs:
     timeout-minutes: 6
     # nextest runs each test in its own process, so tests that hold TEST_ENV_LOCK no longer wait on each other,
     # and hash partitions split the tests over the shards by name, so a test keeps its shard as others come and
-    # go. hung_fetch_times_out waits 60 s by design, so more shards would not shorten the slowest one.
+    # go. Each shard's test step takes about 16 s, and parity, not rust-test, ends last, so more shards would not
+    # shorten a run.
     strategy:
       fail-fast: false
       matrix:
@@ -253,7 +266,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
       # As in rust-build, the newest incremental artifacts let rustc reuse the unchanged codegen units of the test
       # build. Only warm.yml saves them, from main: at about 200 MB a copy, a save per PR run would crowd main's
@@ -297,7 +310,7 @@ jobs:
         run: cargo fmt --check
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          prefix-key: v1-rust
+          prefix-key: v2-rust
           workspaces: rust
       - name: Check darwin-arm64
         run: cargo check --locked --target aarch64-apple-darwin
@@ -337,6 +350,7 @@ jobs:
           RESULTS: plan=${{ needs.plan.result }} targets=${{ needs.targets.result }} browser=${{ needs.browser.result }} paseo-plugin=${{ needs.paseo-plugin.result }} rust-build=${{ needs.rust-build.result }} rust-test=${{ needs.rust-test.result }} rust-check=${{ needs.rust-check.result }} parity=${{ needs.parity.result }}
           ALL_HIT: ${{ needs.plan.outputs.all }}
           RUST_HIT: ${{ needs.plan.outputs.rust }}
+          BROWSER_RUN: ${{ needs.plan.outputs.browser }}
         run: |
           status=0
           for pair in $RESULTS; do
@@ -345,6 +359,8 @@ jobs:
             echo "$name: $result"
             if [ "$result" = skipped ] && [ "$name" != plan ] && { [ "$ALL_HIT" = true ] || { [ "$RUST_HIT" = true ] && case "$name" in rust-*|parity) true ;; *) false ;; esac; }; }; then
               echo "$name: inputs unchanged since a passing run"
+            elif [ "$result" = skipped ] && [ "$name" = browser ] && [ "$BROWSER_RUN" = false ]; then
+              echo "browser: no browser input changed"
             elif [ "$result" != "success" ]; then
               echo "CI job $name finished as $result; see its log above." >&2
               status=1

@@ -54,6 +54,29 @@ const GH_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_WAIT: Duration = Duration::from_secs(5);
 const STOP_POLL: Duration = Duration::from_millis(500);
 
+#[cfg(test)]
+thread_local! {
+    /// Shorter FETCH_TIMEOUT and GIT_TIMEOUT for this test thread, so a timeout test need not wait them out.
+    static TEST_FETCH_TIMEOUT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+    static TEST_GIT_TIMEOUT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+fn fetch_timeout() -> Duration {
+    #[cfg(test)]
+    if let Some(limit) = TEST_FETCH_TIMEOUT.with(std::cell::Cell::get) {
+        return limit;
+    }
+    FETCH_TIMEOUT
+}
+
+fn git_timeout() -> Duration {
+    #[cfg(test)]
+    if let Some(limit) = TEST_GIT_TIMEOUT.with(std::cell::Cell::get) {
+        return limit;
+    }
+    GIT_TIMEOUT
+}
+
 fn words(s: &str) -> impl Iterator<Item = &str> {
     s.split(is_space).filter(|w| !w.is_empty())
 }
@@ -97,10 +120,10 @@ pub(crate) fn checkout_problem(
         &argv,
         None,
         &[("GIT_TERMINAL_PROMPT", "0")],
-        Some(FETCH_TIMEOUT),
+        Some(fetch_timeout()),
     ) {
         Err(e) if e.kind() == io::ErrorKind::TimedOut => {
-            let secs = FETCH_TIMEOUT.as_secs();
+            let secs = fetch_timeout().as_secs();
             return Ok(Some(format!(
                 "unsafe checkout: git fetch origin {base} timed out after {secs} s in {repo}"
             )));
@@ -841,7 +864,7 @@ fn not_merged(repo: &str, detail: Option<&str>) -> String {
     let head = run_git(
         repo,
         &["rev-parse", "--abbrev-ref", "HEAD"],
-        Some(GIT_TIMEOUT),
+        Some(git_timeout()),
     )
     .1;
     let head = if head.is_empty() { "HEAD" } else { &head };
@@ -854,11 +877,11 @@ fn not_merged(repo: &str, detail: Option<&str>) -> String {
 /// None after deleting a branch whose tip origin holds, else the reason it stays.
 fn pushed_tip_error(repo: &str, branch: &str) -> Option<String> {
     let r = format!("refs/heads/{branch}");
-    let tip = run_git(repo, &["rev-parse", &r], Some(GIT_TIMEOUT)).1;
+    let tip = run_git(repo, &["rev-parse", &r], Some(git_timeout())).1;
     if tip.is_empty() {
         return Some(not_merged(repo, None));
     }
-    let (code, out, _) = run_git(repo, &["ls-remote", "origin", &r], Some(GIT_TIMEOUT));
+    let (code, out, _) = run_git(repo, &["ls-remote", "origin", &r], Some(git_timeout()));
     if code != Some(0) {
         return Some(not_merged(repo, Some("origin could not be reached")));
     }
@@ -876,7 +899,7 @@ fn delete_unless_checked_out(repo: &str, branch: &str, tip: &str) -> Option<Stri
     let listed = run_git(
         repo,
         &["worktree", "list", "--porcelain"],
-        Some(GIT_TIMEOUT),
+        Some(git_timeout()),
     )
     .1;
     let checked_out = format!("branch refs/heads/{branch}");
@@ -891,7 +914,7 @@ fn delete_unless_checked_out(repo: &str, branch: &str, tip: &str) -> Option<Stri
     first_error(
         repo,
         &["update-ref", "-d", &format!("refs/heads/{branch}"), tip],
-        Some(GIT_TIMEOUT),
+        Some(git_timeout()),
     )
 }
 
@@ -905,14 +928,14 @@ fn merged_head_error(
     let tip = run_git(
         repo,
         &["rev-parse", &format!("refs/heads/{branch}")],
-        Some(GIT_TIMEOUT),
+        Some(git_timeout()),
     )
     .1;
     if !tip.is_empty()
         && run_git(
             repo,
             &["merge-base", "--is-ancestor", &tip, merged_head],
-            Some(GIT_TIMEOUT),
+            Some(git_timeout()),
         )
         .0 == Some(0)
     {
@@ -954,37 +977,39 @@ fn cleanup_after_stop(
             None => removed.push(format!("worktree {wt_text}")),
         }
     } else {
-        first_error(repo, &["worktree", "prune"], Some(GIT_TIMEOUT));
+        first_error(repo, &["worktree", "prune"], Some(git_timeout()));
     }
     if left.is_empty() {
         let r = format!("refs/heads/{branch}");
         let (code, _, err) = run_git(
             repo,
             &["rev-parse", "--verify", "-q", &r],
-            Some(GIT_TIMEOUT),
+            Some(git_timeout()),
         );
         let mut error = if code.is_none() { Some(err) } else { None };
         if code == Some(0) {
             error = match run_git(
                 repo,
                 &["merge-base", "--is-ancestor", &r, "HEAD"],
-                Some(GIT_TIMEOUT),
+                Some(git_timeout()),
             ) {
                 (None, _, err) => Some(err),
                 (Some(0), _, _) => {
                     let upstream = format!("branch.{branch}.merge");
-                    if !run_git(repo, &["config", "--get", &upstream], Some(GIT_TIMEOUT))
+                    if !run_git(repo, &["config", "--get", &upstream], Some(git_timeout()))
                         .1
                         .is_empty()
                     {
                         first_error(
                             repo,
                             &["branch", "--unset-upstream", branch],
-                            Some(GIT_TIMEOUT),
+                            Some(git_timeout()),
                         )
-                        .or_else(|| first_error(repo, &["branch", "-d", branch], Some(GIT_TIMEOUT)))
+                        .or_else(|| {
+                            first_error(repo, &["branch", "-d", branch], Some(git_timeout()))
+                        })
                     } else {
-                        first_error(repo, &["branch", "-d", branch], Some(GIT_TIMEOUT))
+                        first_error(repo, &["branch", "-d", branch], Some(git_timeout()))
                     }
                 }
                 (Some(_), _, _) => match merged_head.filter(|h| !h.is_empty()) {
@@ -1481,6 +1506,7 @@ mod tests {
     #[test]
     fn fetch_timeout_is_60s() {
         assert_eq!(FETCH_TIMEOUT, Duration::from_secs(60));
+        assert_eq!(fetch_timeout(), FETCH_TIMEOUT);
     }
 
     const FAKE_GIT_CHILD: &str = "FACTORY_FAKE_GIT_CHILD";
@@ -1546,16 +1572,17 @@ mod tests {
             in_fake_git_child(name, "fetch", "    exec sleep 300");
             return;
         }
+        TEST_FETCH_TIMEOUT.with(|t| t.set(Some(Duration::from_secs(1))));
         let t = Lineage::new("wt-hung-fetch");
         let started = std::time::Instant::now();
         assert_eq!(
             t.problem(None),
             Some(format!(
-                "unsafe checkout: git fetch origin main timed out after 60 s in {}",
+                "unsafe checkout: git fetch origin main timed out after 1 s in {}",
                 t.repo.display()
             ))
         );
-        assert!(started.elapsed() >= Duration::from_secs(60));
+        assert!(started.elapsed() >= Duration::from_secs(1));
     }
 
     /// Push one more commit to origin's job branch from the seed.
@@ -2076,7 +2103,7 @@ mod tests {
             "/nonexistent/git",
             ".",
             &["rev-parse", "HEAD"],
-            Some(GIT_TIMEOUT),
+            Some(git_timeout()),
         );
         assert_eq!(out.2, "could not run git rev-parse");
     }
@@ -2085,6 +2112,7 @@ mod tests {
     #[test]
     fn git_timeout_is_reported() {
         assert_eq!(GIT_TIMEOUT, Duration::from_secs(20));
+        assert_eq!(git_timeout(), GIT_TIMEOUT);
         let dir = temp_dir("wt-slow-git");
         let slow = dir.join("git");
         crate::shared::build::tests::script(&slow, "sleep 5\n");
@@ -2105,16 +2133,17 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
-    /// Only `git worktree remove` runs without the 20 s cap: a wrapper that stalls it for 21 s still
-    /// lets the removal finish, where a capped call would leave the worktree.
+    /// Only `git worktree remove` runs without the git cap, here cut to 2 s: a wrapper that stalls it for 3 s
+    /// still lets the removal finish, where a capped call would leave the worktree.
     #[cfg(unix)]
     #[test]
     fn only_worktree_remove_waits_without_a_cap() {
         let name = "commands::worktree::tests::only_worktree_remove_waits_without_a_cap";
         if std::env::var(FAKE_GIT_CHILD).is_err() {
-            in_fake_git_child(name, "remove", "    sleep 21");
+            in_fake_git_child(name, "remove", "    sleep 3");
             return;
         }
+        TEST_GIT_TIMEOUT.with(|t| t.set(Some(Duration::from_secs(2))));
         let t = Checkout::new("wt-no-cap");
         t.merge();
         let started = std::time::Instant::now();
@@ -2122,7 +2151,7 @@ mod tests {
             t.clean(false, None),
             (vec![t.shown_wt(), format!("branch {BRANCH}")], vec![])
         );
-        assert!(started.elapsed() >= Duration::from_secs(21));
+        assert!(started.elapsed() >= Duration::from_secs(3));
     }
 
     #[test]
