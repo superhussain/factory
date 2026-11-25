@@ -495,7 +495,9 @@ async function workerSlim(text) {
 // Made-up boards of random shape: emoji, U+2028, duplicate, missing and object ids, rows that
 // are not objects, projects named __proto__ and 123, unparseable done stamps, a top-level slim
 // key, and rows big enough to fill several pages. Every write is a room commit, so rows the
-// Worker would refuse are written too.
+// Worker would refuse are written too. Some updates grow a row to 100 to 300 KB, so pages pass
+// MAX_PAGE and split; after every write each index row names its row's page, the state's last
+// page is at least the highest, and ids() is the board's ids.
 test("the room's slim body is byte for byte the Worker's slimBoard, across random boards and writes", async () => {
   let seed = 2284;
   const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
@@ -523,7 +525,31 @@ test("the room's slim body is byte for byte the Worker's slimBoard, across rando
     assert.equal(slim.headers.get("ETag"), (await s.send("/board.json")).headers.get("ETag"));
     assert.ok(slim.headers.get("X-Factory-Version"));
     assert.equal(await slim.text(), await workerSlim(full), what);
+    const store = s.room.object.board();
+    const sql = (query, ...b) => store.sql.exec(query, ...b).toArray();
+    // The index stores a non-string id as NULL.
+    const key = (id) => (typeof id === "string" ? id : "\0null");
+    const pages = sql("SELECT page, json FROM board_pages ORDER BY page");
+    for (const p of pages) {
+      assert.ok(Buffer.byteLength(p.json) <= 3 << 19, `${what} page ${p.page} size`);
+      assert.deepEqual(
+        sql("SELECT id FROM board_index WHERE page = ?", p.page)
+          .map((r) => key(r.id))
+          .sort(),
+        JSON.parse(p.json)
+          .map((j) => key(j?.id))
+          .sort(),
+        `${what} index of page ${p.page}`,
+      );
+    }
+    if (pages.length) assert.ok(store.state().lastPage >= pages.at(-1).page, `${what} lastPage`);
+    assert.deepEqual(
+      new Set(await store.ids()),
+      new Set(JSON.parse(full).jobs?.map?.((j) => j?.id) ?? []),
+      `${what} ids`,
+    );
   };
+  let splits = 0;
   for (let b = 0; b < 40; b++) {
     const jobs = Array.from({ length: Math.floor(rand() * 70) }, () => row());
     // Some rows repeat an earlier id, as an unclean board can.
@@ -535,13 +561,19 @@ test("the room's slim body is byte for byte the Worker's slimBoard, across rando
     if (rand() < 0.2) board.note = pick(texts);
     const s = setup(board, JSON.stringify(board, null, rand() < 0.5 ? 2 : 0));
     await check(s, `board ${b}`);
-    for (let w = 0; w < 4; w++) {
+    for (let w = 0; w < 8; w++) {
       const store = s.room.object.board();
+      const split = store.split;
+      store.split = (...args) => (splits++, split.apply(store, args));
       const ids = jobs.map((j) => j?.id).filter((id) => typeof id === "string");
       const changes = [];
-      if (ids.length && rand() < 0.8) {
+      for (let k = Math.floor(rand() * 3); ids.length && k >= 0; k--) {
         const id = pick(ids);
-        changes.push({ id, row: rand() < 0.2 ? null : { ...row(id), id }, add: false });
+        if (changes.some((c) => c.id === id)) continue;
+        const next = rand() < 0.2 ? null : { ...row(id), id };
+        if (next?.constructor === Object && rand() < 0.5)
+          next.idea = "é".repeat(50_000 + Math.floor(rand() * 100_000));
+        changes.push({ id, row: next, add: false });
       }
       if (rand() < 0.6) {
         const added = row();
@@ -562,6 +594,7 @@ test("the room's slim body is byte for byte the Worker's slimBoard, across rando
     const left = s.room.object.board().sql.exec("SELECT page FROM board_pages WHERE meta IS NULL");
     assert.equal(left.toArray().length, 0);
   }
+  assert.ok(splits >= 20, `${splits} splits`);
 });
 
 // Ids 12 and "12", or null and "null", are different ids to slimBoard's per-stage count, and

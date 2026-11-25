@@ -560,7 +560,7 @@ export class BoardRows {
       );
       for (const row of rows.slice(start, end)) this.insertIndex(row, page + k);
     }
-    if (state.lastPage >= page) state.lastPage += extra;
+    state.lastPage += extra;
   }
 
   // Marks each id dirty, keeping the hash of the row R2's copy holds from its first change.
