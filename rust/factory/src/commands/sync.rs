@@ -45,29 +45,6 @@ static ACCESS_SECRET: Pattern = Pattern::new(
         ..Flags::NONE
     },
 );
-/// NOTE_SECRETS' private key header, only when key material follows it: after any `Proc-Type:`
-/// style lines, one base64 run of 40 or more characters, or runs of 16 or more on two lines or
-/// more. Between them it skips what quoting adds to each line (`key_sep!`): whitespace, real or
-/// escaped line breaks, blockquote, table, comment, diff, list, emphasis and quote marks, string
-/// concatenation, `grep`, `rg` and `cat -n` line numbers and paths, `<br>` and `&gt;`. The bare
-/// header line, which specs quote in redaction rules, is no key.
-macro_rules! key_sep {
-    () => {
-        r#"(?:[\s>|#*`'\x22,;/_-]|\+\s|\\[rn]|\d+[:\t .-]|(?:[\w.-]+/)*[\w.-]+[:-]\d+[:-]|<br\s*/?>|&gt;)"#
-    };
-}
-static PRIVATE_KEY: Pattern = Pattern::new(
-    concat!(
-        "-----BEGIN [A-Z ]*PRIVATE KEY-----",
-        key_sep!(),
-        r"*(?:[A-Za-z-]+:[^\n]*",
-        key_sep!(),
-        "+)*(?:[A-Za-z0-9+/]{40,}|[A-Za-z0-9+/]{16,}=*",
-        key_sep!(),
-        "+[A-Za-z0-9+/]{16,})"
-    ),
-    Flags::ASCII,
-);
 
 /// Where Python would raise an `OSError`: fail 1 with its text.
 fn os_fail(e: io::Error, p: &Path) -> Exit {
@@ -577,15 +554,16 @@ fn secret_refusal(rel: &str, data: &[u8]) -> Option<String> {
         return None;
     }
     let text = String::from_utf8_lossy(data);
-    // NOTE_SECRETS' patterns, with three swapped for job files, which quote names and headers in
-    // specs and reviews. AWS_KEY lets through the documentation's example keys. PRIVATE_KEY and
-    // ACCESS_SECRET need a value after the header or name, which alone is no credential.
+    // NOTE_SECRETS' patterns, with two swapped for job files, which quote them in specs and
+    // reviews. AWS_KEY lets through the documentation's example keys. NOTE_SECRETS' last pattern
+    // matches the Access secret's bare name; ACCESS_SECRET needs a value after it. A private key
+    // header alone is still refused.
     [
         &NOTE_SECRETS[0],
         &NOTE_SECRETS[1],
         &NOTE_SECRETS[2],
         &AWS_KEY,
-        &PRIVATE_KEY,
+        &NOTE_SECRETS[4],
         &NOTE_SECRETS[5],
         &NOTE_SECRETS[6],
         &ACCESS_SECRET,
@@ -1611,50 +1589,13 @@ mod tests {
     }
 
     #[test]
-    fn a_private_key_header_alone_uploads_but_key_material_is_refused() {
-        // Built at runtime, so no key-shaped block sits in the source.
+    fn a_private_key_header_is_refused_even_alone() {
+        // Built at runtime, so no key-shaped line sits in the source.
         let header = format!("-----BEGIN {}PRIVATE KEY-----", "OPENSSH ");
-        let line = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtz";
         for text in [
-            format!("| `{header}` | `[redacted]` |\n"),
-            format!("Redact any line like {header}.\n"),
             format!("{header}\n"),
-            format!("> {header}\n> then the key, which we never paste here.\n"),
-            format!("12:{header}\n13:[redacted]\n"),
-            format!("{header}<br>(redacted)"),
-        ] {
-            assert_eq!(secret_refusal("spec.md", text.as_bytes()), None, "{text}");
-        }
-        let short = &line[..32];
-        for text in [
-            format!("> {header}\n> {line}\n"),
-            format!("# {header}\n# {line}\n"),
-            format!("| {header} |\n| {line} |\n"),
-            format!("12:{header}\n13:{line}\n"),
-            format!("    12\t{header}\n    13\t{line}\n"),
-            format!("-{header}\n-{line}\n"),
-            format!("\"k\": \"{header}\\r\\n{line}\\r\\n\""),
-            format!("{header}<br>{line}"),
-            format!("{header}\n{short}\n{short}\n{short}\n"),
-            format!("> {header}\n> {short}\n> {short}\n"),
-            format!("12:{header}\n13-{line}\n"),
-            format!("src/a.pem:12:{header}\nsrc/a.pem-13-{line}\n"),
-            format!("a.pem:12:{header}\na.pem:13:{line}\n"),
-            format!("     12 {header}\n     13 {line}\n"),
-            format!("1. {header}\n2. {line}\n"),
-            format!("\"{header}\"\n\"{line}\"\n"),
-            format!("(\"{header}\\n\"\n \"{line}\\n\")"),
-            format!("// {header}\n// {line}\n"),
-            format!("; {header}\n; {line}\n"),
-            format!("_{header}_\n_{line}_\n"),
-            format!("&gt; {header}\n&gt; {line}\n"),
-            format!("{header}\n{line}\n{line}\n-----END OPENSSH PRIVATE KEY-----\n"),
-            format!("```\n{header}\r\n  {line}\n```\n"),
-            format!("\"key\": \"{header}\\n{line}\\n\"\n"),
-            format!(
-                "{}\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00FF\n\n{line}\n",
-                header.replace("OPENSSH", "RSA")
-            ),
+            format!("| `{header}` | `[redacted]` |\n"),
+            format!("{header}\n{}\n", "A".repeat(64)),
         ] {
             assert!(
                 secret_refusal("spec.md", text.as_bytes()).is_some(),
