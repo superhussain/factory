@@ -47,11 +47,25 @@ static ACCESS_SECRET: Pattern = Pattern::new(
 );
 /// NOTE_SECRETS' private key header, only when key material follows it: after any `Proc-Type:`
 /// style lines, one base64 run of 40 or more characters, or runs of 16 or more on two lines or
-/// more. Between them it skips what quoting adds to each line: whitespace, real or escaped line
-/// breaks, blockquote, table, comment, diff and quote marks, `grep -n` and `cat -n` line numbers,
-/// and `<br>`. The bare header line, which specs quote in redaction rules, is no key.
+/// more. Between them it skips what quoting adds to each line (`key_sep!`): whitespace, real or
+/// escaped line breaks, blockquote, table, comment, diff, list, emphasis and quote marks, string
+/// concatenation, `grep`, `rg` and `cat -n` line numbers and paths, `<br>` and `&gt;`. The bare
+/// header line, which specs quote in redaction rules, is no key.
+macro_rules! key_sep {
+    () => {
+        r#"(?:[\s>|#*`'\x22,;/_-]|\+\s|\\[rn]|\d+[:\t .-]|(?:[\w.-]+/)*[\w.-]+[:-]\d+[:-]|<br\s*/?>|&gt;)"#
+    };
+}
 static PRIVATE_KEY: Pattern = Pattern::new(
-    r#"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\s>|#*`'-]|\\[rn]|\d+[:\t]|<br\s*/?>)*(?:[A-Za-z-]+:[^\n]*(?:[\s>|#*`'-]|\\[rn]|\d+[:\t]|<br\s*/?>)+)*(?:[A-Za-z0-9+/]{40,}|[A-Za-z0-9+/]{16,}=*(?:[\s>|#*`'-]|\\[rn]|\d+[:\t]|<br\s*/?>)+[A-Za-z0-9+/]{16,})"#,
+    concat!(
+        "-----BEGIN [A-Z ]*PRIVATE KEY-----",
+        key_sep!(),
+        r"*(?:[A-Za-z-]+:[^\n]*",
+        key_sep!(),
+        "+)*(?:[A-Za-z0-9+/]{40,}|[A-Za-z0-9+/]{16,}=*",
+        key_sep!(),
+        "+[A-Za-z0-9+/]{16,})"
+    ),
     Flags::ASCII,
 );
 
@@ -1623,6 +1637,17 @@ mod tests {
             format!("{header}<br>{line}"),
             format!("{header}\n{short}\n{short}\n{short}\n"),
             format!("> {header}\n> {short}\n> {short}\n"),
+            format!("12:{header}\n13-{line}\n"),
+            format!("src/a.pem:12:{header}\nsrc/a.pem-13-{line}\n"),
+            format!("a.pem:12:{header}\na.pem:13:{line}\n"),
+            format!("     12 {header}\n     13 {line}\n"),
+            format!("1. {header}\n2. {line}\n"),
+            format!("\"{header}\"\n\"{line}\"\n"),
+            format!("(\"{header}\\n\"\n \"{line}\\n\")"),
+            format!("// {header}\n// {line}\n"),
+            format!("; {header}\n; {line}\n"),
+            format!("_{header}_\n_{line}_\n"),
+            format!("&gt; {header}\n&gt; {line}\n"),
             format!("{header}\n{line}\n{line}\n-----END OPENSSH PRIVATE KEY-----\n"),
             format!("```\n{header}\r\n  {line}\n```\n"),
             format!("\"key\": \"{header}\\n{line}\\n\"\n"),
