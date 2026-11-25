@@ -71,7 +71,10 @@ timer runs pickup. The daemon logs to `<home>/logs/daemon.log` and trims it past
 On Windows its restart loop writes startup errors to `<home>\logs\daemon-boot.log`
 instead. Catch-up rewrites a loop file that differs from what `--install` writes: it ends
 the running loop and daemon first, then starts the task again on the new file. It also
-starts the task when no daemon is running, so a loop that died comes back. See
+starts the task when no daemon is running, so a loop that died comes back, and fails with
+the boot log's path when no daemon takes the lock within 15 s. The task has a logon
+trigger for the installing user and no execution time limit; catch-up replaces an older
+task that kept the default 72-hour limit. See
 [the pickup reference](../skills/factory/references/pickup.md#the-daemon-as-scheduler).
 
 ## Offline initialization and credentials

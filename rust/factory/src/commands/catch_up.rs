@@ -195,7 +195,9 @@ fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String
         .iter()
         .filter(|a| a[0] == "kill" || a[0] == "taskkill")
         .find_map(|a| a.iter().find_map(|w| w.parse().ok()));
-    let pid = pickup::daemon_pid(home, killed, &mut || locked_pid(home))?;
+    let pid = pickup::daemon_pid(home, killed, pickup::RUNNING_POLLS, &mut || {
+        locked_pid(home)
+    })?;
     Ok(Some(format!("restarted (pid {pid})")))
 }
 
@@ -1031,19 +1033,23 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             outln!(out, "daemon service: current");
         }
     } else {
-        let backup = match catch_up_backup(home, skill) {
-            Ok(folder) => {
+        // Reinstalling only the daemon service changes no skill or timer this backup keeps;
+        // `daemon setup --install` backs up what it replaces.
+        let service_only = current && !stale && !retro && legacy.is_empty();
+        let backup = match (!service_only).then(|| catch_up_backup(home, skill)) {
+            None => None,
+            Some(Ok(folder)) => {
                 wrote = true;
                 outln!(out, "backup: {}", folder.display());
                 Some(folder)
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 failed += 1;
                 outln!(out, "backup: {e}");
                 None
             }
         };
-        let mut ok = backup.is_some();
+        let mut ok = service_only || backup.is_some();
         if ok && !current {
             // The installer refuses a source path with a symlinked parent, and macOS's temp
             // root is under /var -> private/var, so build the path from the canonical root.
@@ -2694,9 +2700,11 @@ mod tests {
         t.daemon(Some("launchd"), true);
         let (code, lines) = t.lines();
         assert_eq!(code, 0);
-        assert_eq!(t.backups().len(), backups + 1);
+        // The skill is current, so reinstalling only the service takes no skill backup.
+        assert_eq!(t.backups().len(), backups);
+        assert!(!lines.iter().any(|l| l.starts_with("backup:")), "{lines:?}");
         assert_eq!(
-            lines[4..6],
+            lines[3..5],
             [
                 "pickup timer: none on this host, left alone",
                 "daemon service: installed launchd service: /synthetic/factory.daemon.plist"
@@ -2751,7 +2759,7 @@ mod tests {
         let (reply, reply_code) = default_timer_reply();
         t.timer_calls(reply, reply_code);
         let calls = t.daemon_calls(
-            "service current: /synthetic/factory-daemon.cmd; the daemon was not running, so /Run started it\n",
+            "started the stopped daemon with schtasks /Run: /synthetic/factory-daemon.cmd\n",
             0,
         );
         // The first run installs the skill; a new skill's restart already runs /Run.
@@ -2761,10 +2769,11 @@ mod tests {
         let (code, lines) = t.lines();
         assert_eq!(code, 0, "{lines:?}");
         assert!(
-            lines.contains(&"daemon service: service current: /synthetic/factory-daemon.cmd; the daemon was not running, so /Run started it".to_string()),
+            lines.contains(&"daemon service: started the stopped daemon with schtasks /Run: /synthetic/factory-daemon.cmd".to_string()),
             "{lines:?}"
         );
         assert_eq!(calls.borrow().len(), 1);
+        assert!(!lines.iter().any(|l| l.starts_with("backup:")), "{lines:?}");
 
         daemon_runs(&t.home);
         let (code, lines) = t.lines();
