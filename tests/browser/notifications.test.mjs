@@ -589,6 +589,9 @@ test("notifications", { timeout: 180000 }, async (t) => {
 
       fail = true;
       const menu = await openPage("", failBoard);
+      // The failure shows the connection banner above the header, which moves the button, so a
+      // click aimed before it lands can miss the button.
+      await menu.page.waitForSelector("#conn-banner:not([hidden])", wait);
       await menu.page.click("#notifications-button");
       await status(menu.page, "notifications-menu-status", copy);
       fail = false;
