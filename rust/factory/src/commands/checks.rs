@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Value};
 
 use crate::cli::Call;
+use crate::commands::ghpoll::Cached;
 use crate::shared::board::{dump_board, escalated, load_board, patch_job, read_board};
 use crate::shared::conf::{fm_get, frontmatter, read_conf};
 use crate::shared::consts::SLUG;
@@ -26,13 +27,13 @@ use crate::shared::time::{parse_stamp, unix_now};
 const CHECKS_USAGE: &str = "usage: checks <project-slug>/<job-id> [--timeout S]";
 const CHECKS_INTERVAL: f64 = 10.0;
 const CHECKS_REGISTER: u64 = 120;
-const HEAD_CHECKS_QUERY: &str = "query=query($o:String!,$r:String!,$sha:GitObjectID!){repository(owner:$o,name:$r){object(oid:$sha){...on Commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion startedAt} ...on StatusContext{context state createdAt}}}}}}}}";
+pub(crate) const HEAD_CHECKS_QUERY: &str = "query=query($o:String!,$r:String!,$sha:GitObjectID!){repository(owner:$o,name:$r){object(oid:$sha){...on Commit{statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion startedAt} ...on StatusContext{context state createdAt}}}}}}}}";
 const PR_STATE_USAGE: &str = "usage: pr-state <project-slug>/<job-id> [--wait S]";
 const PR_STATE_FIELDS: &str =
     "state,reviewDecision,latestReviews,mergeStateStatus,autoMergeRequest,commits,author,statusCheckRollup,baseRefName,headRefOid";
 const PR_REVIEWERS: &[&str] = &["OWNER", "MEMBER", "COLLABORATOR"];
 // gh pr view --json has neither isInMergeQueue nor review threads, so both come from GraphQL.
-const PR_GRAPHQL_QUERY: &str = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved path comments(first:100){nodes{authorAssociation body author{__typename login}}}}} latestReviews(first:100){nodes{author{__typename login}}}}}}";
+pub(crate) const PR_GRAPHQL_QUERY: &str = "query=query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){isInMergeQueue isMergeQueueEnabled mergeQueueEntry{state} reviewThreads(last:100){nodes{isResolved path comments(first:100){nodes{authorAssociation body author{__typename login}}}}} latestReviews(first:100){nodes{author{__typename login}}}}}}";
 const PR_STATE_INTERVAL: f64 = 30.0;
 const HANDLED_CAP: u64 = 3;
 const BUILDKITE_API: &str = "https://api.buildkite.com/v2";
@@ -747,7 +748,7 @@ pub fn checks_cmd(call: &Call) -> Res<()> {
     };
     let pr = board_pr(&home, &slug, &job_id, false)?;
     merge_hold(&home, &slug, &job_id, &pr)?;
-    let mut host = System::new();
+    let mut host = Cached::new(&home, CHECKS_INTERVAL);
     let state = gh_pr_view(&mut host, &pr, &["--json", "state", "--jq", ".state"])?;
     let state = strip(&state);
     if state != "OPEN" {
@@ -1427,7 +1428,7 @@ pub fn pr_state_cmd(call: &Call) -> Res<()> {
     };
     let pr = board_pr(&home, &slug, &job_id, true)?;
     let meta = project_meta(&home, &slug)?;
-    let mut host = System::new();
+    let mut host = Cached::new(&home, PR_STATE_INTERVAL);
     let base = pr_base(&mut host, &meta, &pr)?;
     let handled = job_handled(&home, &job_id)?;
     let org = fm_get(&meta, "buildkite_org").unwrap_or("");

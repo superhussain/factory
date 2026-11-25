@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Map, Value};
 
 use crate::cli::Call;
-use crate::commands::{checks, claims};
+use crate::commands::{checks, claims, ghpoll};
 use crate::shared::board::read_board;
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{fail, Res};
@@ -278,7 +278,7 @@ fn watch_run(
     }
     let folder = home.join("jobs").join(slug).join(job_id);
     let mut pr_leg = if watch_pr {
-        let mut host = checks::System::new();
+        let mut host = ghpoll::Cached::new(home, PR_STATE_INTERVAL);
         let pr = checks::board_pr(home, slug, job_id, true)?;
         let md = project_files(home, slug)?.0;
         let meta = frontmatter(&md)
