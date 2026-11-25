@@ -543,7 +543,8 @@ enum Wrote {
 
 /// Sends a row PATCH through the daemon when `daemon` holds, which forwards it and puts a
 /// committed one in its mirror at once. Else, or with no daemon, or one that refuses the request,
-/// it goes straight to the Worker. Either way the Worker's answer comes back unchanged.
+/// it goes straight to the Worker. Either way the Worker's answer comes back unchanged. Without
+/// `daemon`, a direct write doesn't wait for the daemon's mirror either.
 fn send_patch(home: &Path, body: &str, daemon: bool, api: Api) -> Res<Wrote> {
     let mut request = Map::new();
     request.insert("op".into(), "patch".into());
@@ -581,7 +582,8 @@ fn send_patch(home: &Path, body: &str, daemon: bool, api: Api) -> Res<Wrote> {
     if r.status != 200 {
         return Ok(Wrote::Conflict);
     }
-    if let Some(etag) = r.header("ETag") {
+    // A daemon that lost a write's reply would leave this wait hanging too.
+    if let Some(etag) = r.header("ETag").filter(|_| daemon) {
         await_etag(home, etag.strip_prefix("W/").unwrap_or(etag));
     }
     Ok(Wrote::Committed)
@@ -685,7 +687,7 @@ pub fn cas_via<T>(
                     if r.status != 200 {
                         return Wrote::Conflict;
                     }
-                    if let Some(etag) = r.header("ETag") {
+                    if let Some(etag) = r.header("ETag").filter(|_| !lost) {
                         await_etag(home, etag.strip_prefix("W/").unwrap_or(etag));
                     }
                     Wrote::Committed
@@ -1156,8 +1158,9 @@ mod tests {
     }
 
     /// Runs `cas` adding row 2001-new through a fake daemon that serves the board read and then
-    /// takes every write without a reply, with the Worker sending `replies`. Returns how many
-    /// times the change ran, how many writes the daemon took, and the Worker's request methods.
+    /// takes every write or await without a reply, with the Worker sending `replies`. Returns how
+    /// many times the change ran, how many writes and awaits the daemon took, and the Worker's
+    /// request methods.
     #[cfg(unix)]
     fn lost_daemon(
         name: &str,
@@ -1200,7 +1203,7 @@ mod tests {
                     Some("board") => stream
                         .write_all(b"{\"v\":1,\"ok\":true,\"etag\":\"\\\"e1\\\"\",\"patch\":true}\n{\"updated\":\"\",\"jobs\":[{\"id\":\"1999-a\"}]}\n")
                         .unwrap(),
-                    Some("patch") => {
+                    Some("patch" | "await") => {
                         count.fetch_add(1, Ordering::SeqCst);
                     }
                     _ => {}
@@ -1243,7 +1246,7 @@ mod tests {
     }
 
     /// A lost write the Worker's board does not show runs again straight on the Worker, never
-    /// through the daemon that lost the first one.
+    /// through the daemon that lost the first one, and doesn't wait on that daemon's mirror.
     #[cfg(unix)]
     #[test]
     fn a_lost_daemon_reply_that_did_not_land_falls_back_to_the_worker() {

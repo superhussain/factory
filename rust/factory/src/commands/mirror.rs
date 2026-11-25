@@ -157,6 +157,11 @@ impl Mirror {
             return false;
         };
         let mut s = self.state.lock().unwrap();
+        self.apply_locked(&mut s, frame, etag, prev)
+    }
+
+    /// `apply` with the state already locked.
+    fn apply_locked(&self, s: &mut State, frame: &Value, etag: &str, prev: &str) -> bool {
         if s.seen.iter().any(|e| e == etag) {
             return true;
         }
@@ -193,7 +198,7 @@ impl Mirror {
             doc["updated"] = updated.clone();
         }
         s.text = Arc::new(dumps(s.doc.as_ref().unwrap(), COMPACT));
-        self.moved_to(&mut s, etag.to_string());
+        self.moved_to(s, etag.to_string());
         true
     }
 
@@ -285,18 +290,20 @@ impl Mirror {
 
     /// Applies a committed row PATCH as the rows frame the Worker announces for it: its written
     /// rows, its removed ids, and `updated` moved forward only when the PATCH's is later. False
-    /// when the mirror does not hold `prev`, the version the Worker applied it to.
+    /// when the mirror is not live or does not hold `prev`, the version the Worker applied it to.
     fn apply_own(&self, body: &Value, etag: &str, prev: &str) -> bool {
-        let updated = {
-            let s = self.state.lock().unwrap();
-            let Some(doc) = s.doc.as_ref().filter(|_| s.etag == prev) else {
-                return false;
-            };
-            let was = doc["updated"].as_str().unwrap_or("");
-            match body["updated"].as_str() {
-                Some(at) if at > was => Value::from(at),
-                _ => doc.get("updated").cloned().unwrap_or(Value::Null),
-            }
+        let mut s = self.state.lock().unwrap();
+        // A mirror that is not live has stopped hearing frames, so a write must not revive it.
+        if !s.live || s.etag != prev {
+            return false;
+        }
+        let Some(doc) = s.doc.as_ref() else {
+            return false;
+        };
+        let was = doc["updated"].as_str().unwrap_or("");
+        let updated = match body["updated"].as_str() {
+            Some(at) if at > was => Value::from(at),
+            _ => doc.get("updated").cloned().unwrap_or(Value::Null),
         };
         let entries = body["rows"].as_array().into_iter().flatten();
         let (rows, removed): (Vec<&Value>, Vec<&Value>) =
@@ -308,7 +315,7 @@ impl Mirror {
             "rows": rows.iter().map(|e| e["row"].clone()).collect::<Vec<_>>(),
             "removed": removed.iter().map(|e| e["id"].clone()).collect::<Vec<_>>(),
         });
-        self.apply(&frame)
+        self.apply_locked(&mut s, &frame, etag, prev)
     }
 
     /// Answers one request on stream. With a token, as on the loopback endpoint, the first line
@@ -919,5 +926,26 @@ mod tests {
             r#"{{"rows":[{{"id":"2001-x","expect":null,"row":{row}}}],"reads":[{{"id":"1999-synthetic-build","stage":"build"}}],"updated":"2026-11-23T10:00:05Z"}}"#
         );
         assert!(row_patch_body(&good).is_some());
+    }
+
+    /// A write sent while the Worker socket is down doesn't revive the mirror: a mirror that is
+    /// not live hears no frames, so it must keep answering nothing until the next connect.
+    #[test]
+    fn a_write_does_not_revive_a_closed_mirror() {
+        let (m, _) = fetched(
+            "closed-write",
+            vec![(200, "ok", vec![("ETag", "\"e2\""), ("X-Board-Prev", E1)])],
+        );
+        m.closed();
+        let text = r#"{"rows":[{"id":"2000-synthetic-spec","expect":{"id":"2000-synthetic-spec","stage":"spec"},"row":{"id":"2000-synthetic-spec","stage":"build"}}]}"#;
+        let (body, text) = row_patch_body(text).unwrap();
+        let started = Instant::now();
+        assert_eq!(m.patch(&body, text)["status"], 200);
+        assert!(
+            started.elapsed() < OWN_FRAME,
+            "no wait on a mirror that is not live"
+        );
+        assert!(m.board(&json!({})).is_none());
+        assert_eq!(m.state.lock().unwrap().etag, E1);
     }
 }
