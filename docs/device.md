@@ -34,8 +34,10 @@ An identical install is a no-content-change success. `tools/install.sh` always p
 ```
 
 Replacement moves the old bundle to `factory.backup-<uuid>` beside the installed
-directory, switches in the new one, then deletes that backup and any
-`factory.backup-*` an earlier install left, printing `removed <path>` for each.
+directory, switches in the new one, then deletes that backup and any folder an
+earlier install left whose name is `factory.backup-` followed by hex digits and
+dashes, printing `removed <path>` for each. It leaves links, files and other
+names alone.
 On Windows it clears read-only marks first, and it tries each delete three times.
 A failed switch restores the old bundle. If a delete still fails, for example
 because that bundle's `factory.exe` is running, the install still succeeds and warns
