@@ -16,7 +16,7 @@ pub fn unix_now() -> i64 {
         return secs;
     }
     // The parity harness pins the clock, in seconds since the epoch, so a golden never depends on the date.
-    if let Some(secs) = std::env::var("FACTORY_NOW")
+    if let Some(secs) = std::env::var("FACTORY_PARITY_NOW")
         .ok()
         .and_then(|v| v.parse().ok())
     {
