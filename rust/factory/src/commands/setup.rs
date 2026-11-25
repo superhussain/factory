@@ -779,6 +779,13 @@ pub fn doctor_cmd(_call: &Call) -> Res<()> {
     daemon_line(&mut stderr.lock(), stderr.is_terminal(), || {
         pickup::daemon_state(&home)
     });
+    clock_line(
+        &mut stderr.lock(),
+        stderr.is_terminal(),
+        std::env::var("FACTORY_PARITY_NOW")
+            .ok()
+            .filter(|v| v.parse::<i64>().is_ok()),
+    );
     if failed(&checks[..3]) {
         return Err(exit(2));
     }
@@ -795,6 +802,17 @@ pub fn doctor_cmd(_call: &Call) -> Res<()> {
 fn daemon_line(err: &mut dyn Write, terminal: bool, state: impl FnOnce() -> String) {
     if terminal {
         let _ = writeln!(err, "daemon: {}", state());
+    }
+}
+
+/// A note, for a person at a terminal, that an exported FACTORY_PARITY_NOW pins this host's
+/// clock. Like the daemon line it stays off pipes, so the parity runs, which set it, see nothing.
+fn clock_line(err: &mut dyn Write, terminal: bool, pinned: Option<String>) {
+    if let (true, Some(secs)) = (terminal, pinned) {
+        let _ = writeln!(
+            err,
+            "clock: FACTORY_PARITY_NOW={secs} pins the time factory reads; unset it outside the parity harness"
+        );
     }
 }
 
@@ -1526,6 +1544,20 @@ mod tests {
         assert!(err.is_empty());
         daemon_line(&mut err, true, || "running".into());
         assert_eq!(String::from_utf8(err).unwrap(), "daemon: running\n");
+    }
+
+    /// An exported FACTORY_PARITY_NOW gets a line at a terminal, and nothing on a pipe.
+    #[test]
+    fn doctor_names_a_pinned_clock_only_on_a_terminal() {
+        let mut err = Vec::new();
+        clock_line(&mut err, false, Some("1700000000".into()));
+        clock_line(&mut err, true, None);
+        assert!(err.is_empty());
+        clock_line(&mut err, true, Some("1700000000".into()));
+        assert_eq!(
+            String::from_utf8(err).unwrap(),
+            "clock: FACTORY_PARITY_NOW=1700000000 pins the time factory reads; unset it outside the parity harness\n"
+        );
     }
 
     #[cfg(unix)]

@@ -34,7 +34,7 @@ jobs:
         with:
           prefix-key: v2-rust
           workspaces: rust
-      # A PR's first rust-build restores these by prefix, as it restores its own previous run's.
+      # CI's rust-build and targets jobs restore these by prefix and never save them.
       - name: Restore incremental artifacts
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

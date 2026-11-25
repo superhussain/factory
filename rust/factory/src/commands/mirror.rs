@@ -48,6 +48,9 @@ struct State {
     seen: VecDeque<String>,
     /// When the mirror last matched the Worker: a fetch, an applied frame, or the snapshot's save.
     synced: Option<Instant>,
+    /// How many times the socket has closed, so a fetch that began before a close can't make the
+    /// mirror live again.
+    closes: u64,
 }
 
 pub struct Mirror {
@@ -99,7 +102,9 @@ impl Mirror {
 
     /// The socket closed: answer nothing until the next connect.
     pub fn closed(&self) {
-        self.state.lock().unwrap().live = false;
+        let mut s = self.state.lock().unwrap();
+        s.live = false;
+        s.closes += 1;
     }
 
     /// True when the mirror has gone REFRESH without a fetch or applied frame.
@@ -123,6 +128,13 @@ impl Mirror {
 
     /// Fetches the whole board. Returns how many jobs it holds, or the failure.
     pub fn fetch(&self) -> Result<usize, String> {
+        let closes = self.state.lock().unwrap().closes;
+        self.fetch_since(closes)
+    }
+
+    /// `fetch` for a caller that read `closes` before it decided to fetch. A close since then
+    /// leaves the mirror answering nothing, though the fetched board is kept.
+    fn fetch_since(&self, closes: u64) -> Result<usize, String> {
         let _turn = self.fetching.lock().unwrap();
         let r = api(&self.home, "GET", "/api/board", None, &[200, 404], &[])
             .map_err(|e| e.stderr.trim_end().to_string())?;
@@ -136,16 +148,19 @@ impl Mirror {
         let doc = loads(&text).map_err(|e| format!("the board is not valid JSON: {e}"))?;
         let jobs = doc["jobs"].as_array().map_or(0, Vec::len);
         let mut s = self.state.lock().unwrap();
+        // After a close since this fetch began, whatever the socket's own close and connect set
+        // stands: not live, or live again on a new socket.
+        let was_live = s.live;
         // A frame applied while this fetch ran already moved past the version it read.
         if s.etag != etag && s.seen.contains(&etag) {
-            s.live = true;
             s.synced = Some(Instant::now());
-            return Ok(jobs);
+        } else {
+            s.patch = r.header("Accept-Patch").is_some();
+            s.text = Arc::new(dumps(&doc, COMPACT));
+            s.doc = Some(doc);
+            self.moved_to(&mut s, etag);
         }
-        s.patch = r.header("Accept-Patch").is_some();
-        s.text = Arc::new(dumps(&doc, COMPACT));
-        s.doc = Some(doc);
-        self.moved_to(&mut s, etag);
+        s.live = s.closes == closes || was_live;
         Ok(jobs)
     }
 
@@ -231,8 +246,9 @@ impl Mirror {
         while s.live && !s.seen.iter().any(|e| e == etag) {
             let left = end.saturating_duration_since(Instant::now());
             if left.is_zero() {
+                let closes = s.closes;
                 drop(s);
-                let _ = self.fetch();
+                let _ = self.fetch_since(closes);
                 return;
             }
             s = self.moved.wait_timeout(s, left).unwrap().0;
@@ -446,16 +462,27 @@ pub fn listen_tcp(mirror: Arc<Mirror>) -> io::Result<()> {
 }
 
 /// Serves `<home>/daemon.sock`, 0600. The daemon holds its lock, so any socket file there is stale.
+/// The socket is bound inside a new 0700 folder and made 0600 before it moves into place, so no
+/// other user can connect to it at any moment.
 #[cfg(unix)]
 pub fn listen(mirror: Arc<Mirror>) -> io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     let path = socket_path(&mirror.home);
     match std::fs::remove_file(&path) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
         _ => {}
     }
-    let listener = std::os::unix::net::UnixListener::bind(&path)?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    let private = mirror.home.join(format!(".sock-{}", random_hex(3)));
+    std::fs::DirBuilder::new().mode(0o700).create(&private)?;
+    let bound = private.join("s");
+    let listener = std::os::unix::net::UnixListener::bind(&bound).and_then(|listener| {
+        std::fs::set_permissions(&bound, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::rename(&bound, &path)?;
+        Ok(listener)
+    });
+    let _ = std::fs::remove_file(&bound);
+    let _ = std::fs::remove_dir(&private);
+    let listener = listener?;
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let mirror = mirror.clone();
@@ -647,6 +674,12 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600);
+        // The private folder the socket was bound in is gone.
+        let names: Vec<String> = std::fs::read_dir(&home)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(!names.iter().any(|n| n.starts_with(".sock-")), "{names:?}");
         round_trip(m.clone(), seen);
         // Down socket: the mirror answers nothing and the command reads the Worker.
         m.closed();
@@ -926,6 +959,51 @@ mod tests {
             r#"{{"rows":[{{"id":"2001-x","expect":null,"row":{row}}}],"reads":[{{"id":"1999-synthetic-build","stage":"build"}}],"updated":"2026-11-23T10:00:05Z"}}"#
         );
         assert!(row_patch_body(&good).is_some());
+    }
+
+    /// A close that lands while a fetch is running, as when a write's refetch races the socket
+    /// going down, leaves the mirror answering nothing: the fetch that began before it can't make
+    /// the mirror live again.
+    #[test]
+    fn a_close_during_a_fetch_keeps_the_mirror_closed() {
+        use crate::shared::http::tests::serve_hooked;
+        let (m, _) = fetched("close-mid-fetch", vec![]);
+        let closer = m.clone();
+        let (origin, _) = serve_hooked(
+            vec![(200, board_json(), vec![("ETag", "\"e2\"")])],
+            move |_| closer.closed(),
+        );
+        std::fs::write(
+            m.home.join("config.md"),
+            format!("---\napi_url: {origin}\n---\n"),
+        )
+        .unwrap();
+        assert_eq!(m.fetch(), Ok(2));
+        assert!(m.board(&json!({})).is_none());
+        assert_eq!(m.state.lock().unwrap().etag, "\"e2\"");
+    }
+
+    /// A fetch that spans a close and a reconnect leaves the reconnected mirror live: the new
+    /// socket's connect, not the old fetch, decides.
+    #[test]
+    fn a_fetch_across_a_reconnect_keeps_the_mirror_live() {
+        use crate::shared::http::tests::serve_hooked;
+        let (m, _) = fetched("reconnect-mid-fetch", vec![]);
+        let socket = m.clone();
+        let (origin, _) = serve_hooked(
+            vec![(200, board_json(), vec![("ETag", "\"e2\"")])],
+            move |_| {
+                socket.closed();
+                socket.connected();
+            },
+        );
+        std::fs::write(
+            m.home.join("config.md"),
+            format!("---\napi_url: {origin}\n---\n"),
+        )
+        .unwrap();
+        assert_eq!(m.fetch(), Ok(2));
+        assert!(m.board(&json!({})).is_some());
     }
 
     /// A write sent while the Worker socket is down doesn't revive the mirror: a mirror that is

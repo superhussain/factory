@@ -811,3 +811,23 @@ fn review_code_new_tests_and_spec_checks() {
         "Copy `Check` from the spec criterion's check",
     );
 }
+
+#[test]
+fn session_tag_is_exported_once_known() {
+    let skill_md = flat("SKILL.md");
+    has(
+        &skill_md,
+        "start every shell call that runs the runtime with `export FACTORY_SESSION=<tag>`",
+    );
+    lacks(&skill_md, "Pass `--session <tag>` to every later");
+    lacks(&skill_md, "[<effort>] --session <tag>");
+    lacks(
+        &flat("references/execution.md"),
+        "[<effort>] --session <tag>",
+    );
+    lacks(
+        &flat("references/commands/babysit.md"),
+        "pr-handled \"$SLUG/<id>\" --session",
+    );
+    lacks(&flat("references/commands/deny-notes.md"), "done --session");
+}

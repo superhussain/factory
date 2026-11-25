@@ -187,6 +187,23 @@ fn run(home: &Path) -> Res<()> {
     catch_stop_signals();
     let exe = std::env::current_exe().map_err(|e| fail(os_error(&e, None), 1))?;
     let url = host_url(&origin);
+    let terminal = io::stderr().is_terminal();
+    let service_log = home.join("logs").join("daemon.log");
+    // launchd, systemd and cron open the service log for append; on Windows the daemon does.
+    #[cfg(windows)]
+    let capped = !terminal && own_log(&service_log);
+    #[cfg(not(windows))]
+    let capped = true;
+    // Only a value unix_now reads pins the clock, and only that one is logged.
+    if let Some(pinned) = std::env::var("FACTORY_PARITY_NOW")
+        .ok()
+        .filter(|v| v.parse::<i64>().is_ok())
+    {
+        log_line(
+            &home,
+            &format!("clock pinned: FACTORY_PARITY_NOW={pinned} is set, so this daemon reads that time, not the real one"),
+        );
+    }
     let board = Mirror::new(&home);
     // Without the endpoint, commands read the Worker as before.
     if let Err(e) = mirror::listen(board.clone()) {
@@ -214,7 +231,6 @@ fn run(home: &Path) -> Res<()> {
             Arc::new(move |msg: &str| log_line(&sync_home, msg)),
         )
     });
-    let terminal = io::stderr().is_terminal();
     let poller_home = home.clone();
     let gh_poller = crate::commands::ghpoll::start(
         signal_stop,
@@ -240,7 +256,9 @@ fn run(home: &Path) -> Res<()> {
         },
         &running_agents,
         &mut |_| {
-            cap_log(&home.join("logs").join("daemon.log"));
+            if capped {
+                cap_log(&service_log);
+            }
             let _ = std::fs::write(lock_dir(&home).join(LAST_PASS_FILE), now() + "\n");
             heart.before_pass(&home, &|msg| log_line(&home, msg));
             let (code, stopped, launched) = run_pickup(&exe, &home, signal_stop);
@@ -333,11 +351,10 @@ const LOG_CAP: u64 = 5 << 20;
 const LOG_KEEP: u64 = 1 << 20;
 
 /// Trims the service log at path to its last LOG_KEEP bytes, from a line start, once it passes
-/// LOG_CAP. launchd, systemd and cron open it for append, so the daemon's writes go on at the new
-/// end. Windows' `>>` keeps its own offset, so the log there stays as it is. A link there is left
-/// alone, so the trim never truncates another file.
+/// LOG_CAP. Every writer has it open for append, so the daemon's writes go on at the new end. A
+/// link there is left alone, so the trim never truncates another file.
 fn cap_log(path: &Path) {
-    if cfg!(windows) || is_link(path).unwrap_or(true) {
+    if is_link(path).unwrap_or(true) {
         return;
     }
     let mut options = OpenOptions::new();
@@ -362,6 +379,27 @@ fn cap_log(path: &Path) {
         .set_len(0)
         .and_then(|_| io::Seek::seek(&mut file, io::SeekFrom::Start(0)))
         .and_then(|_| io::Write::write_all(&mut file, &tail[start..]));
+}
+
+/// Points this process's stdout and stderr at its own append-mode handle on the service log. The
+/// `.cmd` loop starts the daemon with both on the log through `>>`, whose handle keeps its own
+/// offset, so a trim would leave it writing past the new end. False when the log can't be opened.
+#[cfg(windows)]
+fn own_log(path: &Path) -> bool {
+    use std::os::windows::io::IntoRawHandle;
+    extern "system" {
+        fn SetStdHandle(which: u32, handle: *mut std::ffi::c_void) -> i32;
+    }
+    const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
+    const STD_ERROR_HANDLE: u32 = -12i32 as u32;
+    let Ok(file) = OpenOptions::new().create(true).append(true).open(path) else {
+        return false;
+    };
+    let handle = file.into_raw_handle();
+    // SAFETY: the handle stays open for the life of the process, as the standard handles need.
+    unsafe {
+        SetStdHandle(STD_OUTPUT_HANDLE, handle) != 0 && SetStdHandle(STD_ERROR_HANDLE, handle) != 0
+    }
 }
 
 /// The file beside the lock that holds when the daemon's last pass began.
@@ -1315,22 +1353,22 @@ mod tests {
     /// starts, and a failed read do not.
     #[test]
     fn agent_finish_runs_a_pass() {
-        let origin = quiet();
+        let (origin, _, sockets) = held();
         let home = home("agent", &origin);
-        let reads = std::cell::Cell::new(0);
-        let agents = || {
-            reads.set(reads.get() + 1);
-            match reads.get() {
-                1 => Some(vec!["a1".to_string(), "a2".to_string()]),
-                2 => None,
-                3..=6 => Some(vec!["a1".into(), "a2".into(), "a3".into()]),
-                _ => Some(vec!["a2".into(), "a3".into()]),
-            }
+        let reads = AtomicUsize::new(0);
+        let agents = move || match reads.fetch_add(1, Ordering::SeqCst) + 1 {
+            1 => Some(vec!["a1".to_string(), "a2".to_string()]),
+            2 => None,
+            3..=6 => Some(vec!["a1".into(), "a2".into(), "a3".into()]),
+            _ => Some(vec!["a2".into(), "a3".into()]),
         };
-        let start = Instant::now();
-        let seen = run_with(&home, &origin, 2, &TEST, &agents, &[]);
-        assert_eq!(seen, ["connect", "agent finished a1"]);
-        assert!(start.elapsed() >= TEST.min_gap);
+        let (d, serving) = drive(&home, &origin, 2, DRIVEN, None, agents, &[]);
+        let start = *d.clock.lock().unwrap();
+        let _socket = sockets.recv().unwrap();
+        d.advance_until("pickup pass (connect)");
+        d.advance_until("pickup pass (agent finished a1)");
+        assert!(d.clock.lock().unwrap().duration_since(start) >= DRIVEN.min_gap);
+        assert_eq!(serving.join().unwrap(), ["connect", "agent finished a1"]);
         assert!(log_text(&home).contains(" agent finished a1\n"));
     }
 
@@ -1410,20 +1448,19 @@ mod tests {
     /// With no socket, a fallback pass runs at start and then every fallback.
     #[test]
     fn fallback_runs_while_the_socket_is_down() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-        drop(listener);
-        let home = home("down", &origin);
+        // Nothing listens on port 0, whereas a freed port can go to another test's server.
+        let origin = "http://127.0.0.1:0";
+        let home = home("down", origin);
         let t = Timing {
             fallback: Duration::from_millis(300),
-            ..TEST
+            ..DRIVEN
         };
-        let start = Instant::now();
-        assert_eq!(
-            run_with(&home, &origin, 2, &t, &|| None, &[]),
-            ["fallback", "fallback"]
-        );
-        assert!(start.elapsed() >= t.fallback);
+        let (d, serving) = drive(&home, origin, 2, t, None, || None, &[]);
+        let start = *d.clock.lock().unwrap();
+        d.advance_until("pickup pass (fallback)");
+        d.advance_until("pickup pass (fallback)");
+        assert!(d.clock.lock().unwrap().duration_since(start) >= t.fallback);
+        assert_eq!(serving.join().unwrap(), ["fallback", "fallback"]);
         assert!(log_text(&home).contains(" pickup pass (fallback)\n"));
     }
 
@@ -1463,18 +1500,25 @@ mod tests {
     /// that launched nothing queues none.
     #[test]
     fn launch_runs_a_room_left_pass() {
-        let origin = quiet();
+        let (origin, _, sockets) = held();
         let home = home("room", &origin);
         let t = Timing {
             fallback: Duration::from_millis(1500),
-            ..TEST
+            ..DRIVEN
         };
-        let start = Instant::now();
-        let seen = run_with(&home, &origin, 3, &t, &|| None, &[1]);
-        assert_eq!(seen, ["connect", "room left", "fallback"]);
+        let (d, serving) = drive(&home, &origin, 3, t, None, || None, &[1]);
+        let start = *d.clock.lock().unwrap();
+        let _socket = sockets.recv().unwrap();
+        d.advance_until("pickup pass (connect)");
+        d.advance_until("pickup pass (room left)");
+        d.advance_until("pickup pass (fallback)");
         assert!(
-            start.elapsed() >= t.fallback,
+            d.clock.lock().unwrap().duration_since(start) >= t.fallback,
             "the second pass queued no third"
+        );
+        assert_eq!(
+            serving.join().unwrap(),
+            ["connect", "room left", "fallback"]
         );
     }
 
@@ -1587,15 +1631,17 @@ mod tests {
     /// is logged by length only.
     #[test]
     fn rows_frame_runs_a_pass() {
-        let (origin, _) = fake(None, |mut socket| {
-            sleep(Duration::from_millis(100));
-            send(&mut socket, OTHER);
-            answer_pings(&mut socket, Duration::from_millis(400));
-            send(&mut socket, ROWS);
-            sleep(Duration::from_secs(1));
-        });
+        let (origin, _, sockets) = held();
         let home = home("rows", &origin);
-        assert_eq!(run(&home, &origin, 2), ["connect", "changed board.json"]);
+        let (d, serving) = drive(&home, &origin, 2, DRIVEN, None, || None, &[]);
+        let mut socket = sockets.recv().unwrap();
+        send(&mut socket, OTHER);
+        d.wait_for(&format!("frame ignored ({} bytes)", OTHER.len()));
+        d.advance_until("pickup pass (connect)");
+        send(&mut socket, ROWS);
+        d.wait_for("changed board.json");
+        d.advance_until("pickup pass (changed board.json)");
+        assert_eq!(serving.join().unwrap(), ["connect", "changed board.json"]);
         let log = log_text(&home);
         let ignored = format!(" frame ignored ({} bytes)\n", OTHER.len());
         assert!(log.contains(&ignored), "{log}");
@@ -1684,15 +1730,55 @@ mod tests {
         assert!(log_text(&home).contains("closed: no frame for 0.3s; retry in "));
     }
 
+    /// Pongs keep a socket open past many silence spells on the clock. The test answers each
+    /// ping before it moves the clock again, so the socket never goes a silence without a frame.
     #[test]
     fn pong_keeps_socket_open() {
-        let (origin, seen) = fake(None, |mut socket| {
-            answer_pings(&mut socket, Duration::from_secs(1));
-            send(&mut socket, BOARD);
-            sleep(Duration::from_secs(1));
-        });
+        let (origin, seen, sockets) = held();
         let home = home("pong", &origin);
-        assert_eq!(run(&home, &origin, 2), ["connect", "changed board.json"]);
+        let t = Timing {
+            silence: TEST.silence,
+            ..DRIVEN
+        };
+        let (d, serving) = drive(&home, &origin, 2, t, None, || None, &[]);
+        let mut socket = sockets.recv().unwrap();
+        socket
+            .get_ref()
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        // Moves the clock a ping_every at a time until the reader pings, then answers. The reader
+        // stamps a pong when it reads it, which may be after the clock moved, so a ping can take
+        // a second move. Only three moves with no ping could reach silence.
+        let step = |socket: &mut WebSocket<TcpStream>| {
+            sleep(Duration::from_millis(50));
+            loop {
+                d.advance(t.ping_every);
+                match socket.read() {
+                    Ok(Message::Text(text)) if text.as_str() == "ping" => {
+                        return send(socket, "pong")
+                    }
+                    Ok(_) => {}
+                    Err(tungstenite::Error::Io(e))
+                        if matches!(
+                            e.kind(),
+                            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                        ) => {}
+                    Err(e) => panic!("{e}"),
+                }
+            }
+        };
+        // The reader runs once it has logged a frame, so every ping below is one it sends.
+        send(&mut socket, OTHER);
+        d.wait_for("frame ignored");
+        for _ in 0..10 {
+            step(&mut socket);
+        }
+        d.wait_for("pickup pass (connect)");
+        send(&mut socket, BOARD);
+        d.wait_for("changed board.json");
+        step(&mut socket);
+        d.wait_for("pickup pass (changed board.json)");
+        assert_eq!(serving.join().unwrap(), ["connect", "changed board.json"]);
         assert_eq!(seen.lock().unwrap().len(), 1);
         assert!(!log_text(&home).contains("closed:"));
     }
@@ -1725,7 +1811,6 @@ mod tests {
 
     /// Past LOG_CAP the log keeps its last LOG_KEEP bytes from a line start, and a writer that
     /// opened it for append, as the service did, goes on at the new end.
-    #[cfg(unix)]
     #[test]
     fn service_log_is_capped() {
         let path = temp_dir("daemon-log-cap").join("daemon.log");
@@ -1965,6 +2050,7 @@ mod tests {
             hb::get(&after),
         ]);
         let home = home("heartbeat", &api_origin);
+        hb::mark(&home, &hb::board_of(jobs(&old)));
         let origin = quiet();
         let fake = hb::Fake::new(
             serde_json::json!([

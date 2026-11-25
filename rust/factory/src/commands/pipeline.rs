@@ -8534,6 +8534,19 @@ mod tests {
             j
         }
 
+        /// Runs f with FACTORY_SESSION unset, so a lead claimed by session "" is this session's
+        /// even when the shell running the tests exports a tag.
+        fn untagged<T>(f: impl FnOnce() -> T) -> T {
+            let _lock = crate::shared::test_env_lock();
+            let saved = std::env::var_os("FACTORY_SESSION");
+            std::env::remove_var("FACTORY_SESSION");
+            let out = f();
+            if let Some(v) = saved {
+                std::env::set_var("FACTORY_SESSION", v);
+            }
+            out
+        }
+
         #[test]
         fn problem_reasons() {
             let data = json!({"jobs": [idea("050-sample-lead", json!({}))]});
@@ -8638,7 +8651,7 @@ mod tests {
             )
             .unwrap();
             let mut o = Out::default();
-            let e = batch(&home, "sample", LEAD, &ids, &mut o).unwrap_err();
+            let e = untagged(|| batch(&home, "sample", LEAD, &ids, &mut o)).unwrap_err();
             assert_eq!(
                 (e.code, e.stderr.as_str()),
                 (2, "a batch holds at most 20 riders\n")
@@ -8674,7 +8687,8 @@ mod tests {
                 .unwrap();
                 let mut o = Out::default();
                 let e =
-                    batch(&home, "sample", LEAD, &["091-sample-typo".into()], &mut o).unwrap_err();
+                    untagged(|| batch(&home, "sample", LEAD, &["091-sample-typo".into()], &mut o))
+                        .unwrap_err();
                 assert_eq!(e.code, 2, "{claim}");
                 assert!(
                     e.stderr
