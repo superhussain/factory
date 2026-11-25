@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::cli::Call;
 use crate::commands::pickup;
-use crate::shared::build::{rust_binary, Host};
+use crate::shared::build::{rust_binary, Host, BINARY};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{read_text, resolve, temp_root};
@@ -63,7 +63,7 @@ struct Fakes {
     backup: Option<Rc<dyn Fn() -> Result<PathBuf, String>>>,
     user_home: Option<PathBuf>,
     run: Option<Rc<dyn Fn(&[String], Option<Duration>) -> Option<io::Result<Out>>>>,
-    build: Option<Rc<dyn Fn(&Path, &mut dyn Write) -> Result<PathBuf, String>>>,
+    build: Option<Rc<dyn Fn(&Path, &mut dyn Write) -> Result<Vec<u8>, String>>>,
     install: Option<Rc<dyn Fn(&[String]) -> Out>>,
     spawn: Option<Rc<dyn Fn() -> Result<(), String>>>,
     locked_pid: Option<Rc<dyn Fn() -> Result<Option<u32>, String>>>,
@@ -319,13 +319,27 @@ fn user_home() -> Res<PathBuf> {
         .ok_or_else(|| fail("Could not determine home directory.", 1))
 }
 
-/// The cached binary built from checkout, through the same cache and build folder `install` uses.
-fn build(checkout: &Path, err: &mut dyn Write) -> Result<PathBuf, String> {
+/// The bytes of the cached binary built from checkout, through the same cache and build folder
+/// `install` uses: the ones its sha check passed, or the ones just built.
+fn build(checkout: &Path, err: &mut dyn Write) -> Result<Vec<u8>, String> {
     #[cfg(test)]
     if let Some(f) = fake!(build) {
         return f(checkout, err);
     }
-    rust_binary(checkout, &Host::current()?, err).map(|(path, _)| path)
+    rust_binary(checkout, &Host::current()?, err).map(|(_, bytes)| bytes)
+}
+
+/// bytes as a new owner-only executable at path, so what runs is what was verified, not whatever
+/// the shared cache path holds by exec time.
+fn private_binary(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o700);
+    options
+        .open(path)
+        .and_then(|mut f| f.write_all(bytes))
+        .map_err(|e| os_error(&e, Some(path)))
 }
 
 /// The new binary's `install` run: argv is the binary, then its operands.
@@ -1009,6 +1023,7 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                 .map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
             let src = tmp.join("src");
             let src_text = src.to_string_lossy().into_owned();
+            let binary = tmp.join(Path::new(BINARY).file_name().unwrap_or_default());
             let mut r = run(
                 &git_argv(
                     &repo,
@@ -1019,7 +1034,8 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             if r.code == 0 {
                 // The installer comes from the fetched commit: build its binary, then run its install.
                 let mut said = Vec::new();
-                let built = build(&src, &mut said);
+                let built = build(&src, &mut said)
+                    .and_then(|bytes| private_binary(&binary, &bytes).map(|_| &binary));
                 for line in String::from_utf8_lossy(&said).lines() {
                     outln!(out, "skill: {}", line.trim_start_matches("install: "));
                 }
@@ -1043,6 +1059,9 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                         stderr: format!("install: {e}"),
                     },
                 };
+            }
+            if binary.exists() {
+                fs::remove_file(&binary).map_err(|e| fail(os_error(&e, Some(&binary)), 1))?;
             }
             if src.exists() {
                 run(&git_argv(&repo, &["worktree", "remove", &src_text]), None);
@@ -1461,15 +1480,21 @@ mod tests {
             let user = root.clone();
             let (builds, installs): (Calls, Calls) = (Rc::default(), Rc::default());
             let (built, ran) = (builds.clone(), installs.clone());
-            let binary = root.join("built/factory");
             FAKES.with(|f| {
                 *f.borrow_mut() = Fakes {
                     build: Some(Rc::new(move |checkout, err| {
                         built.borrow_mut().push(vec![text(checkout).to_string()]);
                         let _ = writeln!(err, "install: Rust binary from cache 0123abcd");
-                        Ok(binary.clone())
+                        Ok(b"verified bytes".to_vec())
                     })),
                     install: Some(Rc::new(move |argv| {
+                        // What runs is a private copy of the bytes the build verified.
+                        let binary = Path::new(&argv[0]);
+                        assert_eq!(fs::read(binary).unwrap(), b"verified bytes");
+                        assert_eq!(
+                            fs::metadata(binary).unwrap().permissions().mode() & 0o777,
+                            0o700
+                        );
                         ran.borrow_mut().push(argv.to_vec());
                         let (mut out, mut err) = (Vec::new(), Vec::new());
                         let (source, destination) = (Path::new(&argv[3]), Path::new(&argv[5]));
@@ -1958,7 +1983,7 @@ mod tests {
         assert_eq!(
             *t.installs.borrow(),
             [[
-                text(&t.root.join("built/factory")),
+                text(&tmp.join("factory")),
                 "install",
                 "--source",
                 text(&src),
