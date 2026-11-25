@@ -286,7 +286,7 @@ fn decode_error(data: &[u8], e: &std::str::Utf8Error) -> String {
 pub(crate) fn conflict_exit(conflicts: &[String]) -> Exit {
     fail(
         format!(
-            "conflict in {}: changed both here and in R2. Local copies were kept and nothing was overwritten. R2's copy of each is saved beside it as <file>.remote. Merge it into the local file and delete the .remote, then push. For an image, keep one copy: delete the .remote, or move it over the image",
+            "conflict in {}: changed both here and in R2. Local copies were kept and nothing was overwritten. R2's copy of each is saved beside it as <file>.remote. Merge it into the local file and delete the .remote, then push. For an image, keep one copy: delete the .remote, or move it over the image. If the .remote is the copy you edited from, your file already holds its changes: delete the .remote and push",
             conflicts.join(", ")
         ),
         6,
