@@ -199,18 +199,21 @@ export const reply = (body, status = 200, type = "text/plain") =>
     },
   });
 
-// The archive's rows as last parsed in this isolate, with the bucket and R2 version they came
-// from, so each archive version is parsed once while the isolate lives. The rows are only read.
-let archiveMemo = { bucket: null, etag: null, jobs: [] };
+// The archive's rows as last parsed in this isolate, by the R2 etag of BUCKET's archive, so each
+// archive version is parsed once while the isolate lives. The etag names the bytes, so the key
+// holds even if each request gets a new BUCKET object. An archive past ARCHIVE_MEMO_MAX bytes is
+// parsed per request instead of held. The rows are only read.
+const ARCHIVE_MEMO_MAX = 8 << 20;
+let archiveMemo = { etag: null, jobs: [] };
 
 async function archiveRows(env) {
   const head = await env.BUCKET.head(ARCHIVE_KEY);
   if (!head) return [];
-  if (archiveMemo.bucket !== env.BUCKET || archiveMemo.etag !== head.httpEtag) {
-    const doc = await readJson(env, ARCHIVE_KEY);
-    archiveMemo = { bucket: env.BUCKET, etag: doc?.etag ?? null, jobs: jobsOf(doc) ?? [] };
-  }
-  return archiveMemo.jobs;
+  if (archiveMemo.etag === head.httpEtag) return archiveMemo.jobs;
+  const doc = await readJson(env, ARCHIVE_KEY);
+  const jobs = jobsOf(doc) ?? [];
+  if (doc && head.size <= ARCHIVE_MEMO_MAX) archiveMemo = { etag: doc.etag, jobs };
+  return jobs;
 }
 
 /** GET /api/board/archive with exactly one of ?id=, ?page= or ?q=. */

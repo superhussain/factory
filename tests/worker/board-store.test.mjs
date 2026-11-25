@@ -902,3 +902,40 @@ test("the archive read answers byte for byte as before, across random boards and
     await check(`board ${b} after an archive write`);
   }
 });
+
+// The isolate parses each archive version once, whichever BUCKET object a request brings, and
+// holds no archive past 8 MiB, which it parses on every read instead.
+test("the archive read parses each archive version once, and one past 8 MiB on every read", async () => {
+  const s = setup(BOARD);
+  const archive = (jobs, httpEtag) =>
+    s.bucket.objects.set("board-archive.json", {
+      key: "board-archive.json",
+      bytes: Buffer.from(JSON.stringify({ jobs })),
+      httpEtag,
+    });
+  const gets = () =>
+    s.bucket.calls.filter(([op, key]) => op === "get" && key === "board-archive.json").length;
+  // Each request's BUCKET is a new object over the same store.
+  const read = async () => {
+    const bucket = { head: (k) => s.bucket.head(k), get: (k, o) => s.bucket.get(k, o) };
+    const response = await serveFactory(
+      new Request("http://local/api/board/archive?page=1"),
+      { BUCKET: bucket },
+      person,
+    );
+    return response.text();
+  };
+  const small = { ...IDEA, id: "2002-archived-small", stage: "merged" };
+  archive([small], '"archive-small"');
+  const first = gets();
+  assert.equal(await read(), JSON.stringify({ jobs: [small], page: 1, pages: 1, total: 1 }));
+  assert.equal(await read(), JSON.stringify({ jobs: [small], page: 1, pages: 1, total: 1 }));
+  assert.equal(gets() - first, 1);
+  const big = { ...small, id: "2003-archived-big", idea: "x".repeat(9 << 20) };
+  archive([big], '"archive-big"');
+  const before = gets();
+  const want = JSON.stringify({ jobs: [big], page: 1, pages: 1, total: 1 });
+  assert.equal(await read(), want);
+  assert.equal(await read(), want);
+  assert.equal(gets() - before, 2);
+});
