@@ -399,7 +399,7 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
     "rustup toolchain install\nrustup target add aarch64-apple-darwin x86_64-pc-windows-gnu",
     "cargo fmt --check",
     "cargo check --locked --target aarch64-apple-darwin",
-    "cargo check --locked --target x86_64-pc-windows-gnu",
+    "cargo check --locked --tests --target x86_64-pc-windows-gnu",
   ]);
   assert.equal(parity.needs, "rust-build");
   assert.deepEqual(parity.strategy.matrix.shard, [1, 2, 3, 4, 5, 6]);
@@ -408,4 +408,10 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
     runs(parity)[0],
     /node tests\/parity\/run\.mjs --bin rust\/target\/host\/factory --ids rust\/parity --shard \$\{\{ matrix\.shard \}\}\/6$/,
   );
+  // The harness self-tests run once, on shard 1, against the same binary.
+  const selfTest = parity.steps.find((step) => step.name === "Harness self-tests");
+  assert.equal(selfTest.if, "matrix.shard == 1");
+  assert.deepEqual(selfTest.env, { FACTORY_BIN: "rust/target/host/factory" });
+  assert.equal(selfTest.run, "node --test tests/parity/run.test.mjs");
+  assert.deepEqual(runs(parity).slice(1), ["node --test tests/parity/run.test.mjs"]);
 });
