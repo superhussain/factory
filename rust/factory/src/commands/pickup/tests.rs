@@ -11228,6 +11228,8 @@ mod daemon_setup_test {
              <Triggers>\r\n    <LogonTrigger>\r\n      <Enabled>true</Enabled>\r\n      \
              <UserId>HOST\\someone</UserId>\r\n    </LogonTrigger>\r\n  </Triggers>\r\n  \
              <Settings>\r\n    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\r\n    \
+             <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\r\n    \
+             <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\r\n    \
              <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\r\n  </Settings>\r\n  <Actions>\r\n    \
              <Exec>\r\n      <Command>\"C:\\Users\\a&amp;b\\.config\\factory-daemon.cmd\"</Command>\r\n    \
              </Exec>\r\n  </Actions>\r\n</Task>\r\n"
@@ -11240,11 +11242,15 @@ mod daemon_setup_test {
     fn schtasks_task_with_a_time_limit_is_replaced() {
         let ds = Ds::new("schtasks");
         assert_eq!(ds.run(Install).0, 0);
+        // A task with no time limit that still stops on battery drifts too.
+        ds.sched.borrow_mut().task_xml =
+            "<Settings><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings>".into();
+        assert!(timer_drift("schtasks", &timer_values(&ds.fx.home, &DAEMON)).is_some());
         ds.sched.borrow_mut().task_xml = "<Task><Settings /></Task>".into();
         let drift = timer_drift("schtasks", &timer_values(&ds.fx.home, &DAEMON));
         assert_eq!(
             drift.as_deref(),
-            Some("the factory-daemon task ends its loop after 72 hours; --install removes that limit")
+            Some("the factory-daemon task ends its loop after 72 hours or on battery; --install removes those limits")
         );
         ds.sched.borrow_mut().runs.clear();
         let (code, out, err) = ds.run(Install);

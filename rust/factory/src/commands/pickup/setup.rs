@@ -330,8 +330,8 @@ pub(super) fn schtasks_run(cmd: &Path) -> String {
 }
 
 /// The daemon task's definition. Its logon trigger names this user, which needs no elevation
-/// where `/SC ONLOGON`'s any-user trigger does, and it sets no execution time limit, where
-/// schtasks' default of 72 hours would end the loop.
+/// where `/SC ONLOGON`'s any-user trigger does, and its KEEP_ALIVE settings replace schtasks'
+/// defaults that would end the loop after 72 hours or on battery.
 pub(super) fn task_xml(cmd: &Path, user: &str) -> String {
     let (user, command) = (plist_escape(user), plist_escape(&schtasks_run(cmd)));
     format!(
@@ -345,7 +345,7 @@ pub(super) fn task_xml(cmd: &Path, user: &str) -> String {
   </Triggers>
   <Settings>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    {UNLIMITED}
+    {}
   </Settings>
   <Actions>
     <Exec>
@@ -353,18 +353,23 @@ pub(super) fn task_xml(cmd: &Path, user: &str) -> String {
     </Exec>
   </Actions>
 </Task>
-"#
+"#,
+        KEEP_ALIVE.join("\n    ")
     )
     .replace('\n', "\r\n")
 }
 
-/// The setting that keeps the daemon task's loop running past 72 hours.
-const UNLIMITED: &str = "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>";
+/// The settings that keep the daemon task's loop running past 72 hours and on battery.
+const KEEP_ALIVE: [&str; 3] = [
+    "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>",
+    "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>",
+    "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>",
+];
 
-/// True when the unit's scheduled task has no execution time limit.
+/// True when the unit's scheduled task has every KEEP_ALIVE setting.
 fn task_unlimited(unit: &Unit) -> bool {
     let (code, xml) = setup_run(&["schtasks", "/Query", "/TN", unit.task, "/XML"], None);
-    code == 0 && xml.contains(UNLIMITED)
+    code == 0 && KEEP_ALIVE.iter().all(|s| xml.contains(s))
 }
 
 /// Creates or replaces the daemon task from task_xml, through a UTF-16 file beside cmd, the only
@@ -587,7 +592,7 @@ pub(crate) fn timer_drift(scheduler: &str, values: &TimerValues) -> Option<Strin
         if fs::read(&file).ok().as_deref() == Some(timer_text(scheduler, values).as_bytes()) {
             if scheduler == "schtasks" && unit.keep_alive && !task_unlimited(unit) {
                 return Some(format!(
-                    "the {} task ends its loop after 72 hours; --install removes that limit",
+                    "the {} task ends its loop after 72 hours or on battery; --install removes those limits",
                     unit.task
                 ));
             }
