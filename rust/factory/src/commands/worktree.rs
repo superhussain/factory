@@ -959,7 +959,7 @@ fn cleanup_after_stop(
     if wt.exists() {
         let error = match alive {
             None => Some(
-                "processes were not checked; fix the cause printed above (remove the link or install lsof), or stop them and run git worktree remove yourself"
+                "processes were not checked; fix the cause factory stop printed (remove the link or install lsof), or stop them and run git worktree remove yourself"
                     .to_string(),
             ),
             Some(alive) if alive.is_empty() => {
@@ -2093,7 +2093,7 @@ mod tests {
         let out = cleanup_after_stop(&text(&t.repo), &t.wt, BRANCH, false, None, None);
         let left = vec![
             format!(
-                "{}: processes were not checked; fix the cause printed above (remove the link or install lsof), or stop them and run git worktree remove yourself",
+                "{}: processes were not checked; fix the cause factory stop printed (remove the link or install lsof), or stop them and run git worktree remove yourself",
                 t.shown_wt()
             ),
             format!("branch {BRANCH}: kept because its worktree remains"),

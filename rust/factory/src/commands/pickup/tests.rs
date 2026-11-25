@@ -5018,6 +5018,12 @@ mod audit_pickup_test {
                 "PUT /api/audit/1017-add-x/host-a.jsonl"
             ]
         );
+        // The retried push carries the skip marker.
+        let put = std::str::from_utf8(&seen[4].body).unwrap();
+        assert!(
+            put.contains("audit push skipped: a flag pattern hit its backtrack limit"),
+            "{put}"
+        );
     }
 
     #[test]

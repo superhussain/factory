@@ -727,7 +727,7 @@ and `defect <m>: severity must be high, medium or low`.
 `factory stop <worktree>` exits 6 when it refuses to check processes: the path is
 empty, cannot be resolved, is a link or sits under one, or, where there is no
 `/proc`, lsof is missing. It prints why and signals nothing. `cleanup` then
-keeps that worktree and its branch, lists `<worktree>: processes were not checked; fix the cause printed above (remove the link or install lsof), or stop them and run git worktree remove yourself` under `left`, and exits 1.
+keeps that worktree and its branch, lists `<worktree>: processes were not checked; fix the cause factory stop printed (remove the link or install lsof), or stop them and run git worktree remove yourself` under `left`, and exits 1.
 
 For `.remote`, compare retained local and remote copies, explicitly merge/select,
 then delete only the reconciled conflict copy and push. Never upload `.remote`,
