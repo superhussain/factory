@@ -161,7 +161,7 @@ on its own where it is installed:
 - When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
   the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
   each file. `push` refuses a file while its `.remote` waits. Diff the `.remote`
-  against your file. If every change in it is already in yours, delete it and
+  against your file. If every difference is text you wrote, delete it and
   push. If you never edited the file, move the `.remote` over it. Otherwise set
   `needs-human`. For an image, delete the `.remote` to keep yours, or move it
   over the file to keep R2's.
