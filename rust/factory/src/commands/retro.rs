@@ -5338,6 +5338,15 @@ mod tests {
                        "first_turn_attachments": attachments}),
             )
         };
+        let ad_hoc = |session: &str| {
+            digest_row(
+                "host-a",
+                session,
+                "ad-hoc",
+                json!({"context": {"first_turn": 58568, "mean_per_turn": 9000},
+                       "first_turn_attachments": {"skill_listing": 38754, "mcp_instructions_delta": 16601}}),
+            )
+        };
         let rows = [
             job(S1, "1017", json!({"skill_listing": 19022})),
             job(
@@ -5346,13 +5355,9 @@ mod tests {
                 json!({"skill_listing": 19022, "mcp_instructions_delta": 11946}),
             ),
             job(S3, "1019", json!({"skill_listing": 19022})),
-            digest_row(
-                "host-a",
-                "3ae1fc86-0000-4000-8000-000000000004",
-                "ad-hoc",
-                json!({"context": {"first_turn": 58568, "mean_per_turn": 2000},
-                       "first_turn_attachments": {"skill_listing": 38754, "mcp_instructions_delta": 16601}}),
-            ),
+            ad_hoc("3ae1fc86-0000-4000-8000-000000000004"),
+            ad_hoc("3ae1fc86-0000-4000-8000-000000000005"),
+            ad_hoc("3ae1fc86-0000-4000-8000-000000000006"),
         ];
         let (_, agg) = aggregate_of(
             "job-only",
@@ -5360,10 +5365,13 @@ mod tests {
             7,
         );
         assert_eq!(
+            agg["context"],
+            json!({"first_turn_median": 50230, "mean_per_turn_median": 2000})
+        );
+        assert_eq!(
             agg["attachments_median"],
             json!({"skill_listing": 19022, "mcp_instructions_delta": 0})
         );
-        assert_eq!(agg["context"]["first_turn_median"], 50230);
     }
 
     #[test]
