@@ -122,7 +122,7 @@ jobs:
       - name: Check darwin-arm64
         run: cargo check --locked --target aarch64-apple-darwin
       - name: Check windows-x64
-        run: cargo check --locked --target x86_64-pc-windows-gnu
+        run: cargo check --locked --tests --target x86_64-pc-windows-gnu
   # CI's targets and browser jobs restore the provisioned Chrome for Testing and never save it.
   browser:
     if: github.ref == 'refs/heads/main'
