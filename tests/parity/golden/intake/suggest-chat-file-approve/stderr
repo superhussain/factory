@@ -1,1 +1,1 @@
-factory.py: --chat-file /dev/stdin is a symlink or junction; nothing was changed
+--chat-file /dev/stdin is a symlink or junction; nothing was changed

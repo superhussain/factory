@@ -1,1 +1,1 @@
-factory.py: {home}/retro/bad-project/reply.json: findings[0].project: must be a project in aggregate.json; nothing written
+{home}/retro/bad-project/reply.json: findings[0].project: must be a project in aggregate.json; nothing written

@@ -1,1 +1,1 @@
-factory.py: usage: board <factory-home> <job-id> with a JSON object on stdin. stdin was empty, so nothing was written.
+usage: board <factory-home> <job-id> with a JSON object on stdin. stdin was empty, so nothing was written.

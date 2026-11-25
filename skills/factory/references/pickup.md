@@ -514,7 +514,7 @@ changes nothing. Then install one timer per host.
 - The old session is fenced: its next `board` or `hold` exits 6 with `<id> was moved to <host>`. `hold <project>/<id> take` still claims the job.
 - The old host's `pickup` stops the job's worktree processes first on every run, then sets `move.stopped`.
   - It stops them only when the project's pickup is on and lists that host. Otherwise the stop stays queued.
-  - Each run prints `factory.py: pickup skips the stop of <id> <project>: <reason>` on stderr, and a dry run prints `skip stop <id> <project>: <reason>` on stdout instead.
+  - Each run prints `pickup skips the stop of <id> <project>: <reason>` on stderr, and a dry run prints `skip stop <id> <project>: <reason>` on stdout instead.
   - No command or dashboard item clears a queued stop: `board` refuses a `move` patch with exit 2, and moving the job again keeps the stop queued.
   - To clear it, fix the printed reason on that host:
     - `pickup off` or `pickup does not list host <host>`: turn the project's pickup on or add that host in Settings: Pipeline or Projects.
@@ -524,7 +524,7 @@ changes nothing. Then install one timer per host.
   - Only a string `move.stopped` counts as done. Pickup and the dashboard treat `null` or any other value as a stop still queued.
   - While that host is offline the stop waits on the board. Survivors are printed on stderr and retried next run.
 - Under the same gate, when `stalls.json` is set and the job's Paseo session ran on this host's server, the old host's `pickup` archives it with the adapter's `archive <session> --force` first. While the gate skips the stop, the session stays unarchived too. A failed archive is printed on stderr and retried next run. It archives only a session whose `<home>/paseo-claims/<job-id>/<agent>` file shows this host recorded it claiming that job; otherwise it only stops the worktree and prints a "kept session" hint on stderr. Pickup never archives an agent id the adapter would refuse. It stops the worktree and prints a "skipped archive" hint on stderr instead.
-- The "kept session" hint reads `factory.py: pickup kept session <agent> of <id>: no claim recorded on this host, archive it by hand if it still runs: paseo archive --force <agent>`. The "skipped archive" hint ends with the same command. Both put `--home <PASEO_HOME>` after `paseo` when `PASEO_HOME` is set. When `PASEO_HOME` holds an unprintable character, both leave `--home` out and put `(left out --home because PASEO_HOME has unprintable characters)` before the colon that starts the command, so the command still ends the line. Both leave the command off when the id starts with `-` or holds a character outside `A-Z`, `a-z`, `0-9`, `_` and `-`.
+- The "kept session" hint reads `pickup kept session <agent> of <id>: no claim recorded on this host, archive it by hand if it still runs: paseo archive --force <agent>`. The "skipped archive" hint ends with the same command. Both put `--home <PASEO_HOME>` after `paseo` when `PASEO_HOME` is set. When `PASEO_HOME` holds an unprintable character, both leave `--home` out and put `(left out --home because PASEO_HOME has unprintable characters)` before the colon that starts the command, so the command still ends the line. Both leave the command off when the id starts with `-` or holds a character outside `A-Z`, `a-z`, `0-9`, `_` and `-`.
 - To archive a kept session, run the `adapter` argv from `stalls.json` followed by `archive <agent> --force` on the host that printed the hint. With the Paseo adapter that is `<installed-skill>/runtime/factory stalls archive <agent> --force`. It accepts only ids that match `[0-9a-fA-F][0-9a-fA-F-]{7,63}`, checks the session with `paseo inspect` first, and does nothing if it is already archived. If `paseo inspect` fails or prints bad JSON, it archives anyway.
 - The adapter argv only archives kept sessions. A "skipped archive" id fails the adapter's id check, so run the printed `paseo archive --force <agent>` command instead. That command calls Paseo directly, with no id check and no already-archived check. `--force` archives the session even while it is working, so check first that its work is saved or no longer needed.
 - The target host's `pickup` claims the job once, sets `move.claimed` and launches `/factory recover`. The usual gates apply: pickup on, host listed, not gated, the cap and a route.
@@ -552,7 +552,7 @@ changes nothing. Then install one timer per host.
 
 - The dashboard's Stop factory form in Settings > Hosts sets the global stop flag, and the banner's Resume factory clears it. Only a signed-in person can clear it.
 - An agent that sees an incident needing every host stopped runs `factory halt set --reason <text>`. `factory halt status` prints the record.
-- While the flag is set, `pickup` prints `factory.py: pickup launches nothing; factory stopped by ...` on stderr and runs no pass: no launch, takeover, triage or Tracer pass. Its dry run prints `skip all: ...`.
+- While the flag is set, `pickup` prints `pickup launches nothing; factory stopped by ...` on stderr and runs no pass: no launch, takeover, triage or Tracer pass. Its dry run prints `skip all: ...`.
 - `stuck` exits 3, so the resume schedule resumes nothing.
 - Sessions already running keep running. A stop blocks new starts only.
 - A Worker without the `/api/halt` route answers 404, which means not stopped.
@@ -563,13 +563,13 @@ changes nothing. Then install one timer per host.
 - The quiet signature is the agent, the worktree's `HEAD`, a hash of `git status --porcelain` and the job's `updated`. It lives in `<home>/idle-watch.json`, never on the board. Any commit, file edit or board write starts the window again.
 - Only an `idle` agent counts. A `running` agent keeps its entry and is skipped that run.
 - A claim the daemon's heartbeat refreshed counts as not idle. That means the claim's `seen` is under 20 minutes old and newer than the job's `updated`, which only the heartbeat leaves behind. The heartbeat refreshes an idle agent only while a Paseo subagent it launched runs, so the job keeps its entry and is skipped that run, as a `running` agent is.
-- After 20 quiet minutes, `pickup` sends the agent one fixed nudge with `paseo send --no-wait` and prints `nudged idle <id> <project>: agent <agent>`. `--dry-run` prints `would nudge idle ...` and writes nothing. A failed send prints `factory.py: pickup could not nudge idle <id>: paseo send failed` on stderr and retries next run.
+- After 20 quiet minutes, `pickup` sends the agent one fixed nudge with `paseo send --no-wait` and prints `nudged idle <id> <project>: agent <agent>`. `--dry-run` prints `would nudge idle ...` and writes nothing. A failed send prints `pickup could not nudge idle <id>: paseo send failed` on stderr and retries next run.
 - The idle nudge skips an agent waiting at a permission dialog, as the priority nudge does, and prints `skip idle nudge <id> <project>: agent <agent> waits at a permission dialog` or `... permission state unknown`. The entry gets no `nudged`, so the job never moves to `needs-human` while it waits.
 - When the agent waits at a permission dialog, `pickup` sets the job's note once per wait to `permission: agent <agent> has waited at a permission dialog for 20 minutes; answer it in Paseo` and prints `surfaced <id> <project>: <note>`. The write needs the same stage and a claim by this host. It sets no `needs`, moves no stage and sends nothing. The entry records `surfaced`, so later runs write nothing until the quiet signature changes. `--dry-run` prints `would surface <id> <project>: <note>`. A `permission state unknown` answer writes no note.
 - The nudge reads: "Factory job <id> shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory hold for the job with your --session tag, then keep waiting."
 - After 20 more quiet minutes, `pickup` moves the job to `needs-human`, releases the claim and prints `needs-human <id> <project>: idle: no progress 20 minutes after a nudge to agent <agent>`. A board change since the read wins, so a fresh `hold` keeps the job.
 - `--dry-run` prints `would move needs-human <id> <project>: <note>` for that move and writes neither the board nor `idle-watch.json`.
-- When paseo does not answer, `pickup` prints `factory.py: pickup skips idle checks: paseo did not answer` on stderr.
+- When paseo does not answer, `pickup` prints `pickup skips idle checks: paseo did not answer` on stderr.
 
 ## Token cap
 
@@ -588,9 +588,9 @@ changes nothing. Then install one timer per host.
 | park print | `needs-human {id} {project}: {note}` |
 | dry warn | `would warn tokens {id} {project}: {note}` |
 | dry park | `would move needs-human {id} {project}: {note}` |
-| bad config | `factory.py: pickup ignores job_token_cap in {config}: must be a whole number of at least 1` |
-| scan error | `factory.py: pickup skips the token cap of {id}: scan failed ({Type})` |
-| stop failed | `factory.py: pickup could not stop agent {agent} of {id}: paseo stop failed` |
+| bad config | `pickup ignores job_token_cap in {config}: must be a whole number of at least 1` |
+| scan error | `pickup skips the token cap of {id}: scan failed ({Type})` |
+| stop failed | `pickup could not stop agent {agent} of {id}: paseo stop failed` |
 
 Numbers use `,` thousands separators, and `pct` is `used * 100 // cap`. The last three lines go to stderr. `--dry-run` writes nothing and never stops an agent.
 
@@ -612,9 +612,9 @@ Numbers use `,` thousands separators, and `pct` is `used * 100 // cap`. The last
 | Case | Line |
 | --- | --- |
 | dry skip | `skip {id} {project}: host {device} daily token cap reached ({used}/{cap} since local midnight)` |
-| stop | `factory.py: pickup launches no new job on {device}: daily token cap reached ({used}/{cap} since local midnight)` |
-| bad config | `factory.py: pickup ignores daily_token_cap in {config}: must be a whole number of at least 1` |
-| scan error | `factory.py: pickup skips the daily token cap: scan failed ({Type})` |
+| stop | `pickup launches no new job on {device}: daily token cap reached ({used}/{cap} since local midnight)` |
+| bad config | `pickup ignores daily_token_cap in {config}: must be a whole number of at least 1` |
+| scan error | `pickup skips the daily token cap: scan failed ({Type})` |
 
 Numbers use `,` thousands separators. The last three lines go to stderr. A real run prints the stop line in place of the skip lines; `--dry-run` prints the skip lines only.
 
@@ -628,7 +628,7 @@ Numbers use `,` thousands separators. The last three lines go to stderr. A real 
 - `pickup` does not claim, take over or nudge a paused job, and its dry run prints `skip <id> <project>: paused` or `skip stall <agent> <id>: paused`. `stuck` does not resume it.
 - Right after the move stops, `pickup` runs `paseo stop` on a paused job's linked agent when it runs on this host's server, the claim is absent or this host's, and the agent is not `closed` or missing. It records `paused.session_stop.<host> = {agent, at}`, prints `stopped session <agent> of <id> <project>: the job is paused` and keeps the claim, so Resume lets `stuck` or the idle nudge restart the work. A pause after a Resume stops the session again.
 - The job panel shows each recorded stop, paused or closing, as `Pickup stopped session <agent> on <host> <time> because the job was paused.` or `... closed.`
-- `pickup` never stops the agent running it, a batched rider's agent or another harness's session. A failed stop prints `factory.py: pickup could not stop agent <agent> of <id>: paseo stop failed` on stderr and records nothing, so the next run retries. `--dry-run` prints `would stop session <agent> of <id> <project>: <why>` and writes nothing. When paseo does not answer, it prints `factory.py: pickup skips session stops: paseo did not answer` on stderr.
+- `pickup` never stops the agent running it, a batched rider's agent or another harness's session. A failed stop prints `pickup could not stop agent <agent> of <id>: paseo stop failed` on stderr and records nothing, so the next run retries. `--dry-run` prints `would stop session <agent> of <id> <project>: <why>` and writes nothing. When paseo does not answer, it prints `pickup skips session stops: paseo did not answer` on stderr.
 - Only the dashboard and `factory control` write `paused`. `board` refuses a `paused` patch with exit 2.
 
 ## Closing a job
@@ -646,8 +646,8 @@ Numbers use `,` thousands separators. The last three lines go to stderr. A real 
 
 - `pickup` runs its PR sync pass right after the move stops and before the close pass. It never starts a launcher or calls a model.
 - A job is a candidate when its stage is `pr-open` or `needs-human`, its `pr` is a `https://github.com/<owner>/<name>/pull/<n>` URL with `<n>` at most 9 digits, no close is queued, it is not a batched rider (riders follow their lead), no other session holds a live claim, the project file's `repo` equals the URL's owner and name (case-insensitive), and the project's pickup is on and lists this host.
-- Candidates are grouped by repo. Each repo gets one `gh api graphql` call that reads `state` for up to 100 pull requests in board order. With more, it prints `factory.py: pickup syncs the first 100 of <n> pull requests in <repo>` on stderr.
-- When the call fails, it prints `factory.py: pickup skips the PR sync for <repo>: <why>` on stderr and the run goes on: gh is not installed, timed out after 60 seconds, exited non-zero (check `gh auth status`), or returned no repository (check the project file's `repo` and `gh auth status`). A non-zero exit whose answer still holds `data.repository` syncs the pull requests that resolved.
+- Candidates are grouped by repo. Each repo gets one `gh api graphql` call that reads `state` for up to 100 pull requests in board order. With more, it prints `pickup syncs the first 100 of <n> pull requests in <repo>` on stderr.
+- When the call fails, it prints `pickup skips the PR sync for <repo>: <why>` on stderr and the run goes on: gh is not installed, timed out after 60 seconds, exited non-zero (check `gh auth status`), or returned no repository (check the project file's `repo` and `gh auth status`). A non-zero exit whose answer still holds `data.repository` syncs the pull requests that resolved.
 - `MERGED`: the pass's board write moves the job to `merged`, sets the note to `merged on GitHub` and `github = {merged, head}`, with `github.head` the PR's `headRefOid`, and removes `needs`, `automerge`, `babysit` and `claim`. It prints `synced <id> <project>: merged on GitHub`. The close cleanup then runs `cleanup` on each host that holds the worktree or branch, as for a closed job.
 - `CLOSED`: the pass's board write queues `close = {reason: "PR closed on GitHub", at, via: "github"}` and removes `babysit`. It prints `synced <id> <project>: PR closed on GitHub`. The close pass in the same run closes the job without calling `gh pr`, and `decision.md` starts `CLOSED: PR closed on GitHub` and says GitHub reported the close.
 - The pass puts every row it syncs in one run into a single board write. That write re-checks every candidate condition and the same `pr` for each row, so a second host that read the same state writes nothing for it.
@@ -678,10 +678,10 @@ only the worktree path. Every outcome keeps exit 0, and each folder reports on s
 | no `pnpm-lock.yaml`, or the path leaves the worktree | `prebuild skips <dir>: no pnpm-lock.yaml` / `prebuild skips <dir>: not inside the worktree` |
 | the working tree, untracked and gitignored files included, differs from `origin/<base>` in the folder's `pnpm-lock.yaml`, `package.json`, `.pnpmfile.cjs` or `.pnpmfile.mjs`, or, at the worktree root, in every folder between it and the folder, or in the folder itself, any name with `mise` in it or under such a folder, at that level or in `.config/` (so `mise.toml`, `mise.local.toml`, `.miserc.toml`, `.config/miserc.toml`, `mise.lock`, `.mise/` and `.config/mise/conf.d/` all count), `.tool-versions`, `.npmrc` or `pnpm-workspace.yaml` | `prebuild skips <dir>: its dependency files differ from origin/<base>` |
 | neither `mise` nor `pnpm` on `PATH` | `prebuild skips <dir>: pnpm is not on PATH` |
-| install exits non-zero, cannot start, or runs past 600 s | `factory.py: prebuild of <dir> failed (<why>); log: <log>` |
+| install exits non-zero, cannot start, or runs past 600 s | `prebuild of <dir> failed (<why>); log: <log>` |
 | success | `prebuilt <dir> with pnpm install --frozen-lockfile` |
 
-A bad file prints `factory.py: cannot read <path>: use {"version": 1, "prebuild":
+A bad file prints `cannot read <path>: use {"version": 1, "prebuild":
 {"<project>": ["<dir>", ...]}}`. pnpm writes `.modules.yaml` last, so a killed
 install retries on the next `worktree` call. A cold install can take minutes, so give
 the `worktree` call a 600000 ms timeout.

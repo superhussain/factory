@@ -1,1 +1,1 @@
-factory.py: usage: lesson <slug>/<job-id> --fact-file <file> [--why-file <file>]
+usage: lesson <slug>/<job-id> --fact-file <file> [--why-file <file>]

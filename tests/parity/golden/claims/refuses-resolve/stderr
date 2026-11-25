@@ -1,1 +1,1 @@
-factory.py: only the dashboard sets resolve; a session clears it with null. Nothing was written.
+only the dashboard sets resolve; a session clears it with null. Nothing was written.

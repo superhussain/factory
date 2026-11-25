@@ -169,9 +169,9 @@ feature.
     It archives this session's Paseo workspace when it is the job's own worktree workspace,
     whatever its git state, and can end the session. When the workspace archive leaves
     this session's agent running, it archives the agent too. On exit 1, a stderr line holding
-    `agent archive failed` is patched as `{"note": "<stderr line minus its factory.py: prefix>"}`.
+    `agent archive failed` is patched as `{"note": "<stderr line>"}`.
     Any other stderr line is patched as
-    `{"note": "workspace archive failed: <stderr line minus its factory.py: prefix>"}`.
+    `{"note": "workspace archive failed: <stderr line>"}`.
 
 **Reworking an existing PR.** When the feature is "rework PR #N", the spec writer
 reads that PR's description and diff (`gh pr view N`, `gh pr diff N`) as the statement

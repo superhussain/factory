@@ -1,1 +1,1 @@
-factory.py: {home}/tracer.json: must be {"version": 1, "projects": {...}}
+{home}/tracer.json: must be {"version": 1, "projects": {...}}

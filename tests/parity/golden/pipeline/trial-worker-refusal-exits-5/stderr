@@ -1,1 +1,1 @@
-factory.py: POST {api}/api/trials/resume/factory returned 400: instruction: links are not allowed
+POST {api}/api/trials/resume/factory returned 400: instruction: links are not allowed

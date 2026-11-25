@@ -1,1 +1,1 @@
-factory.py: bench: arm name opus-medium must be unique letters, digits, ., _ or -
+bench: arm name opus-medium must be unique letters, digits, ., _ or -

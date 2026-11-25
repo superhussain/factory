@@ -26,9 +26,8 @@ use crate::shared::pyre::{Flags, Pattern};
 
 const USAGE: &str = "factory install: usage: factory install --source <checkout> --destination <skills root> [--replace]\n";
 const LEGACY: &str = "huss-factory";
-const FILES: [&str; 18] = [
+const FILES: [&str; 17] = [
     "SKILL.md",
-    "runtime/factory.py",
     "templates/config.md",
     "templates/project.md",
     "references/execution.md",
@@ -87,13 +86,6 @@ pub(crate) fn required() -> BTreeSet<String> {
                 .map(|c| format!("references/commands/{c}.md")),
         )
         .chain(AGENTS.iter().map(|a| format!("agents/factory-{a}.md")))
-        .collect()
-}
-
-fn required_dirs() -> BTreeSet<String> {
-    required()
-        .iter()
-        .filter_map(|f| f.rsplit_once('/').map(|(d, _)| d.to_string()))
         .collect()
 }
 
@@ -188,7 +180,6 @@ fn tree(root: &Path, source: bool) -> Result<Tree, Why> {
         files: BTreeMap::new(),
         ids: BTreeMap::new(),
     };
-    let mut directories = BTreeSet::new();
     let mut stack = vec![(root.to_path_buf(), String::new())];
     while let Some((folder, prefix)) = stack.pop() {
         for entry in fs::read_dir(&folder)? {
@@ -205,7 +196,6 @@ fn tree(root: &Path, source: bool) -> Result<Tree, Why> {
             let rel = format!("{prefix}{name}");
             out.ids.insert(rel.clone(), ident(&info));
             if info.is_dir() {
-                directories.insert(rel.clone());
                 if !(source && (name.starts_with('.') || name == "__pycache__")) {
                     stack.push((path, format!("{rel}/")));
                 }
@@ -221,19 +211,10 @@ fn tree(root: &Path, source: bool) -> Result<Tree, Why> {
             out.files.insert(rel, fs::read(&path)?);
         }
     }
-    if source {
-        let dirs: BTreeSet<String> = directories
-            .into_iter()
-            .filter(|d| {
-                !d.split('/')
-                    .any(|p| p.starts_with('.') || p == "__pycache__")
-            })
-            .collect();
-        if out.files.keys().cloned().collect::<BTreeSet<_>>() != required()
-            || dirs != required_dirs()
-        {
-            return Err(Why::Unsafe);
-        }
+    // Folders are not compared: a checkout that once ran the Python runtime keeps a
+    // runtime/__pycache__ folder after runtime/factory.py is gone.
+    if source && out.files.keys().cloned().collect::<BTreeSet<_>>() != required() {
+        return Err(Why::Unsafe);
     }
     Ok(out)
 }
@@ -418,7 +399,11 @@ fn attempt_install(
     hook("prior")?;
     if let Some(prior) = &prior {
         let mut expected: BTreeSet<String> = content.keys().cloned().collect();
-        expected.extend(required_dirs());
+        expected.extend(
+            content
+                .keys()
+                .filter_map(|f| f.rsplit_once('/').map(|(d, _)| d.to_string())),
+        );
         if prior.files == content && prior.ids.keys().cloned().collect::<BTreeSet<_>>() == expected
         {
             let _ = writeln!(out, "{}", target.display());
@@ -492,15 +477,31 @@ fn attempt_install(
     }
     attempt.stage = None;
     let _ = writeln!(out, "{}", target.display());
-    if let Some(backup) = backup {
-        match hook("rmtree-backup").and_then(|_| fs::remove_dir_all(&backup)) {
+    // This install's backup and any an earlier install could not remove, such as one whose
+    // factory.exe was still running on Windows.
+    let mut backups: Vec<PathBuf> = fs::read_dir(&destination)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            let name = p.file_name().unwrap_or_default().to_string_lossy();
+            name.strip_prefix("factory.backup-").is_some_and(|rest| {
+                !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+            }) && !is_link(p).unwrap_or(true)
+                && fs::symlink_metadata(p).is_ok_and(|m| m.is_dir())
+        })
+        .collect();
+    backups.sort();
+    for backup in backups {
+        match hook("rmtree-backup").and_then(|_| remove_tree(&backup)) {
             Ok(()) => {
                 let _ = writeln!(out, "removed {}", backup.display());
             }
             Err(_) => {
                 let _ = writeln!(
                     err,
-                    "install: could not remove {}; remove it by hand",
+                    "install: could not remove {}; the next install tries again",
                     backup.display()
                 );
             }
@@ -509,6 +510,43 @@ fn attempt_install(
     attempt.current = destination.join(LEGACY);
     drop_legacy(&destination, out, err)?;
     Ok(target)
+}
+
+/// Removes a backup tree, trying three times. Windows refuses to delete a read-only file or
+/// one another process holds open, so each try first clears read-only marks there.
+fn remove_tree(path: &Path) -> io::Result<()> {
+    let mut tries = 1;
+    loop {
+        #[cfg(windows)]
+        clear_readonly(path);
+        match fs::remove_dir_all(path) {
+            Err(_) if tries < 3 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            done => return done,
+        }
+    }
+}
+
+/// Clears the read-only mark on every file under path, never following a link or junction.
+#[cfg(windows)]
+fn clear_readonly(path: &Path) {
+    if is_link(path).unwrap_or(true) {
+        return;
+    }
+    let Ok(meta) = fs::metadata(path) else {
+        return;
+    };
+    if meta.is_dir() {
+        for entry in fs::read_dir(path).into_iter().flatten().flatten() {
+            clear_readonly(&entry.path());
+        }
+    } else if meta.permissions().readonly() {
+        let mut permissions = meta.permissions();
+        permissions.set_readonly(false);
+        let _ = fs::set_permissions(path, permissions);
+    }
 }
 
 /// (source checkout, skills root, replace) from the operands, or None when they do not fit.
@@ -731,12 +769,23 @@ mod tests {
     }
 
     #[test]
-    fn refusal_keeps_install_and_replacement_removes_its_backup() {
+    fn refusal_keeps_install_and_replacement_removes_every_backup() {
         let t = T::new("refusal");
-        let older = t.destination.join("factory.backup-older");
-        fs::create_dir_all(&older).unwrap();
-        fs::write(older.join("keep"), "keep").unwrap();
         t.install(false);
+        let older = t.destination.join("factory.backup-0123abcd-ef45");
+        fs::create_dir_all(&older).unwrap();
+        fs::write(older.join("left"), "left").unwrap();
+        // Not names install writes, or not real folders: each is kept.
+        let kept = [
+            t.destination.join("factory.backup-notes"),
+            t.destination.join("factory.backup-"),
+            t.destination.join("factory.backup-feed"),
+            t.destination.join("factory.backup-beef"),
+        ];
+        fs::create_dir_all(&kept[0]).unwrap();
+        fs::create_dir_all(&kept[1]).unwrap();
+        fs::write(&kept[2], "a file").unwrap();
+        std::os::unix::fs::symlink(&older, &kept[3]).unwrap();
         fs::write(t.target().join("SKILL.md"), "locally edited").unwrap();
         let old = snapshot(&t.target());
         assert_eq!(
@@ -747,19 +796,24 @@ mod tests {
             )
         );
         assert_eq!(snapshot(&t.target()), old);
+        assert!(lexists(&older));
         let (lines, _) = t.install(true);
-        let backup = PathBuf::from(lines[1].strip_prefix("removed ").unwrap());
         assert_eq!(lines[0], t.target().display().to_string());
-        assert!(backup
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with("factory.backup-"));
-        assert!(!lexists(&backup));
-        fs::write(t.target().join("SKILL.md"), "second edit").unwrap();
-        t.install(true);
-        assert_eq!(t.backups(), [older.clone()]);
-        assert_eq!(fs::read_to_string(older.join("keep")).unwrap(), "keep");
+        let removed: Vec<PathBuf> = lines[1..]
+            .iter()
+            .map(|l| PathBuf::from(l.strip_prefix("removed ").unwrap()))
+            .collect();
+        assert_eq!(removed.len(), 2, "{lines:?}");
+        assert!(removed.contains(&older));
+        for backup in &removed {
+            assert!(backup
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("factory.backup-"));
+            assert!(!lexists(backup));
+        }
+        assert!(kept.iter().all(|k| lexists(k)));
     }
 
     #[test]
@@ -778,7 +832,7 @@ mod tests {
         assert_eq!(
             err,
             format!(
-                "install: could not remove {}; remove it by hand\n",
+                "install: could not remove {}; the next install tries again\n",
                 backups[0].display()
             )
         );
@@ -791,6 +845,13 @@ mod tests {
             "old contents"
         );
         assert!(!t.destination.join(".factory-install.lock").exists());
+        // The next replacement removes the leftover along with its own backup.
+        t.hook(|_| Ok(()));
+        fs::write(t.target().join("SKILL.md"), "edited again").unwrap();
+        let (lines, err) = t.install(true);
+        assert_eq!((lines.len(), err.as_str()), (3, ""));
+        assert!(lines.contains(&format!("removed {}", backups[0].display())));
+        assert!(t.backups().is_empty());
     }
 
     #[test]
@@ -1085,91 +1146,6 @@ mod tests {
         }
     }
 
-    /// The deprecated runtime/factory.py stub runs the binary beside it under sh and under Python,
-    /// and picks factory.exe when Python reports Windows: argv, stdin and the exit code pass through.
-    #[test]
-    fn factory_py_stub_runs_the_binary_beside_it() {
-        let root = temp_dir("factory-py-stub");
-        let runtime = root.join("runtime");
-        fs::create_dir_all(&runtime).unwrap();
-        let stub = runtime.join("factory.py");
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        fs::copy(repo.join("skills/factory/runtime/factory.py"), &stub).unwrap();
-        for name in ["factory", "factory.exe"] {
-            script(
-                &runtime.join(name),
-                &format!("printf '{name}:%s|' \"$@\"; cat; exit 7\n"),
-            );
-        }
-        let text = stub.to_string_lossy().into_owned();
-        let windows = format!(
-            "import os, runpy, sys; os.name = 'nt'; sys.argv = [{text:?}, 'a', 'b c']; runpy.run_path({text:?}, run_name='__main__')"
-        );
-        for (argv, binary) in [
-            (vec!["sh", &text, "a", "b c"], "factory"),
-            (vec!["python3", &text, "a", "b c"], "factory"),
-            (vec!["python3", "-c", &windows], "factory.exe"),
-        ] {
-            let mut child = std::process::Command::new(argv[0])
-                .args(&argv[1..])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .unwrap();
-            child.stdin.take().unwrap().write_all(b"piped").unwrap();
-            let p = child.wait_with_output().unwrap();
-            let err = String::from_utf8(p.stderr).unwrap();
-            assert_eq!(p.status.code(), Some(7), "{argv:?}");
-            assert_eq!(
-                String::from_utf8(p.stdout).unwrap(),
-                format!("{binary}:a|{binary}:b c|piped"),
-                "{argv:?}"
-            );
-            assert!(
-                err.starts_with("factory.py is deprecated and runs "),
-                "{argv:?}"
-            );
-            assert!(err.contains("FACTORY_RUNTIME=python is gone"), "{argv:?}");
-        }
-        // With a binary that is not executable, then with none, one line names the installer and
-        // nothing runs.
-        for missing in [false, true] {
-            for name in ["factory", "factory.exe"] {
-                if missing {
-                    fs::remove_file(runtime.join(name)).unwrap();
-                } else {
-                    fs::set_permissions(runtime.join(name), fs::Permissions::from_mode(0o644))
-                        .unwrap();
-                }
-            }
-            for argv in [
-                vec!["sh", &text, "a"],
-                vec!["python3", &text, "a"],
-                vec!["python3", "-c", &windows],
-            ] {
-                let p = std::process::Command::new(argv[0])
-                    .args(&argv[1..])
-                    .stdin(std::process::Stdio::null())
-                    .output()
-                    .unwrap();
-                let err = String::from_utf8(p.stderr).unwrap();
-                assert_eq!(
-                    (p.status.code(), p.stdout.len()),
-                    (Some(127), 0),
-                    "{argv:?}"
-                );
-                assert_eq!(err.lines().count(), 1, "{argv:?}: {err}");
-                assert!(
-                    err.starts_with("factory.py: no factory binary at ")
-                        && err.contains("sh tools/install.sh <skills folder>"),
-                    "{argv:?}: {err}"
-                );
-            }
-        }
-        let _ = fs::remove_dir_all(&root);
-    }
-
     /// Ported from tests/cli/test_roles.py: security-relevant rules the shipped prompts must keep.
     /// Whitespace is collapsed where the files wrap lines freely.
     #[test]
@@ -1197,5 +1173,25 @@ mod tests {
         ] {
             assert!(feature.contains(rule), "{rule}");
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use crate::shared::fs::temp_dir;
+
+    /// Windows refuses to delete a read-only file, so the removal clears the mark first.
+    #[test]
+    fn read_only_backup_is_removed() {
+        let backup = temp_dir("read-only-backup").join("factory.backup-0");
+        fs::create_dir_all(backup.join("runtime")).unwrap();
+        let file = backup.join("runtime/factory.exe");
+        fs::write(&file, "old").unwrap();
+        let mut permissions = fs::metadata(&file).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&file, permissions).unwrap();
+        remove_tree(&backup).unwrap();
+        assert!(!lexists(&backup));
     }
 }

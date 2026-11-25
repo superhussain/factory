@@ -1,2 +1,2 @@
-factory.py: usage: 2 unreadable lines in s1.jsonl
-factory.py: usage: cannot read agent-z.jsonl
+usage: 2 unreadable lines in s1.jsonl
+usage: cannot read agent-z.jsonl

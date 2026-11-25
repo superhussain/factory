@@ -1,1 +1,1 @@
-factory.py: only the dashboard and factory.py control set paused. To relay a person's chat, run factory.py control <job-id> pause|resume --chat-file <file>
+only the dashboard and factory control set paused. To relay a person's chat, run factory control <job-id> pause|resume --chat-file <file>

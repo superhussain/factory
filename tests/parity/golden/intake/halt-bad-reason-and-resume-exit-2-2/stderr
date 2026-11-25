@@ -1,1 +1,1 @@
-factory.py: usage: halt status | halt set --reason <text>; only a signed-in person resumes the factory, from the dashboard
+usage: halt status | halt set --reason <text>; only a signed-in person resumes the factory, from the dashboard

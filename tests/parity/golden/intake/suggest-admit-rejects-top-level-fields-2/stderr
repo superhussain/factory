@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-top-2.json: project: must be a project slug; nothing admitted
+{home}/suggest-top-2.json: project: must be a project slug; nothing admitted

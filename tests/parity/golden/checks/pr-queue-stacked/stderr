@@ -1,1 +1,1 @@
-factory.py: PR #44 targets factory/041-sample-api, not main: it waits for its parent
+PR #44 targets factory/041-sample-api, not main: it waits for its parent

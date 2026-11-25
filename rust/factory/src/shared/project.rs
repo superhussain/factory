@@ -449,7 +449,7 @@ mod tests {
             .contains("round-1/escape is a symlink or junction inside the job folder"));
         assert_eq!(
             project_files(&home, "bad slug").unwrap_err().stderr,
-            "factory.py: invalid project slug\n"
+            "invalid project slug\n"
         );
         fs::remove_dir_all(home).unwrap();
     }

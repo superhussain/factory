@@ -1,1 +1,1 @@
-factory.py: usage: routes pick|list|limit <name> [--minutes N]|clear <name>
+usage: routes pick|list|limit <name> [--minutes N]|clear <name>

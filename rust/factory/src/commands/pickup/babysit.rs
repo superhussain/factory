@@ -212,7 +212,7 @@ pub(super) fn babysit_pass(
         let Some(route) = route else {
             errln!(
                 io,
-                "factory.py: pickup could not launch babysit {id}: no available route"
+                "pickup could not launch babysit {id}: no available route"
             );
             release_pickup_claim(home, id, device, tag)?;
             return Ok(());
@@ -343,11 +343,11 @@ pub(super) fn babysit_pass(
                         return Ok(());
                     }
                     if state.as_deref() == Some("idle") {
-                        errln!(io, "factory.py: pickup could not send babysit {id} to agent {agent}: paseo send failed; the next run retries");
+                        errln!(io, "pickup could not send babysit {id} to agent {agent}: paseo send failed; the next run retries");
                         release_pickup_claim(home, id, device, &tag)?;
                         return Ok(());
                     }
-                    errln!(io, "factory.py: pickup could not send babysit {id} to agent {agent}: paseo send failed; launching a new session");
+                    errln!(io, "pickup could not send babysit {id} to agent {agent}: paseo send failed; launching a new session");
                     return launch(io, j, &tag, &route);
                 }
             } else if route.is_none() && !dry {
@@ -429,10 +429,7 @@ pub(super) fn move_stop_pass(
             if dry {
                 outln!(io, "skip stop {job_id} {project}: {reason}");
             } else {
-                errln!(
-                    io,
-                    "factory.py: pickup skips the stop of {job_id} {project}: {reason}"
-                );
+                errln!(io, "pickup skips the stop of {job_id} {project}: {reason}");
             }
             continue;
         }
@@ -496,7 +493,7 @@ pub(super) fn move_stop_pass(
         if let Some((agent, why)) = failure {
             errln!(
                 io,
-                "factory.py: pickup could not archive session {agent} of {job_id}: {why}"
+                "pickup could not archive session {agent} of {job_id}: {why}"
             );
             continue;
         }
@@ -505,7 +502,7 @@ pub(super) fn move_stop_pass(
                 let pids: Vec<String> = pids.iter().map(u32::to_string).collect();
                 errln!(
                     io,
-                    "factory.py: pickup could not stop {job_id}: processes still running: {}",
+                    "pickup could not stop {job_id}: processes still running: {}",
                     pids.join(" ")
                 );
                 continue;
@@ -513,7 +510,7 @@ pub(super) fn move_stop_pass(
             None => {
                 errln!(
                     io,
-                    "factory.py: pickup could not stop {job_id}: processes were not checked"
+                    "pickup could not stop {job_id}: processes were not checked"
                 );
                 continue;
             }
@@ -582,7 +579,7 @@ pub(super) fn move_stop_pass(
                 outln!(io, "archived {noun} {names} and stopped {line}");
             }
             for a in &kept {
-                errln!(io, "factory.py: pickup kept session {a} of {job_id}: no claim recorded on this host, archive it by hand if it still runs{}", paseo_archive_tail(a));
+                errln!(io, "pickup kept session {a} of {job_id}: no claim recorded on this host, archive it by hand if it still runs{}", paseo_archive_tail(a));
             }
             for a in &refused {
                 let shown = if PASEO_ID.is_full(a) {
@@ -590,7 +587,7 @@ pub(super) fn move_stop_pass(
                 } else {
                     ascii(&a.chars().take(64).collect::<String>())
                 };
-                errln!(io, "factory.py: pickup skipped archive of session {shown} of {job_id}: not an id the stall adapter accepts, archive it by hand if it still runs{}", paseo_archive_tail(a));
+                errln!(io, "pickup skipped archive of session {shown} of {job_id}: not an id the stall adapter accepts, archive it by hand if it still runs{}", paseo_archive_tail(a));
             }
         }
     }

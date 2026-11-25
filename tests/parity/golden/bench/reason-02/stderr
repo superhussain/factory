@@ -1,1 +1,1 @@
-factory.py: bench: {home}/bench/reasons/02.json: case 1: id must look like 1018-add-y
+bench: {home}/bench/reasons/02.json: case 1: id must look like 1018-add-y

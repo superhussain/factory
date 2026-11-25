@@ -498,7 +498,7 @@ mod tests {
         std::os::unix::fs::symlink(&real, &path).unwrap();
         let e = make_job_temp("prompt-test", &job).unwrap_err();
         let want = format!(
-            "factory.py: {} is a link or a file; remove it, then run prompt again\n",
+            "{} is a link or a file; remove it, then run prompt again\n",
             path.display()
         );
         assert_eq!((e.code, e.stderr), (6, want));
@@ -551,7 +551,7 @@ mod tests {
         let uid = unsafe { getuid() };
         let e = create_and_secure(&path, Some(uid + 1)).unwrap_err();
         let want = format!(
-            "factory.py: {} belongs to another account; remove it, then run prompt again\n",
+            "{} belongs to another account; remove it, then run prompt again\n",
             path.display()
         );
         assert_eq!((e.code, e.stderr), (6, want));

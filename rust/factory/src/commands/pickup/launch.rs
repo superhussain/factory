@@ -830,6 +830,9 @@ pub(super) fn clear_launch_failure(io: &mut Io, home: &Path, job_id: &str) {
     });
     if let Err(e) = cleared {
         let _ = io.err.write_all(e.stderr.as_bytes());
-        errln!(io, "factory.py: {job_id} launched, but its launch failure was not cleared; the pass goes on");
+        errln!(
+            io,
+            "{job_id} launched, but its launch failure was not cleared; the pass goes on"
+        );
     }
 }

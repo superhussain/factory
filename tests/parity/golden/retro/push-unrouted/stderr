@@ -1,1 +1,1 @@
-factory.py: PUT {api}/api/retro/parity/{today}.jsonl returned 404: 
+PUT {api}/api/retro/parity/{today}.jsonl returned 404: 

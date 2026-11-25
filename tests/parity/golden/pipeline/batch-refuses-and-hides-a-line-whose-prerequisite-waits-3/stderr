@@ -1,1 +1,1 @@
-factory.py: cannot batch backlog:d490eda97f9a: it depends on 052-parse-recipe-urls, which is still open. Nothing was written.
+cannot batch backlog:d490eda97f9a: it depends on 052-parse-recipe-urls, which is still open. Nothing was written.

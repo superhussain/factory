@@ -1,1 +1,1 @@
-factory.py: --out must be an absolute path under {home}/prompts
+--out must be an absolute path under {home}/prompts

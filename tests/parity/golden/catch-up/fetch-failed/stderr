@@ -1,1 +1,1 @@
-factory.py: git fetch origin failed in {home}/checkout (exit 127). Check the network, then run git -C {home}/checkout fetch origin to see git's error
+git fetch origin failed in {home}/checkout (exit 127). Check the network, then run git -C {home}/checkout fetch origin to see git's error

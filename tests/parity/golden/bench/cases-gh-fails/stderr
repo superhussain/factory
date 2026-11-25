@@ -1,2 +1,2 @@
-factory.py: bench cases skips 1020-add-w: PR is not in example/alpha
-factory.py: bench: gh api graphql exited 1 (check gh auth status on parity)
+bench cases skips 1020-add-w: PR is not in example/alpha
+bench: gh api graphql exited 1 (check gh auth status on parity)

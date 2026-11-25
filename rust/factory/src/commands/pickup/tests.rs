@@ -524,8 +524,7 @@ mod pickup_test {
     #[test]
     fn test_usage() {
         let fx = Fx::new();
-        let usage =
-            "factory.py: usage: pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]";
+        let usage = "usage: pickup [--dry-run] [--triage-now] [--limit N] [--max-inflight N]";
         for args in [
             &["--limit", "0"][..],
             &["--limit", "6"],
@@ -601,7 +600,7 @@ mod pickup_test {
         );
         let (code, out, err) = fx.pickup(&[]);
         assert_eq!(code, 0);
-        assert_eq!(err, format!("factory.py: {cause}\nfactory.py: backlog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now\n"));
+        assert_eq!(err, format!("{cause}\nbacklog triage stopped; unsent lines wait for the next sweep, or run pickup --triage-now\n"));
         assert!(
             matches(&launched_re("001-alpha", "alpha", "primary"), &out),
             "{out}"
@@ -640,7 +639,7 @@ mod pickup_test {
         );
         let (code, out, err) = fx.pickup(&[]);
         assert_eq!(code, 0);
-        assert_eq!(err, format!("factory.py: {cause}\nfactory.py: Tracer build pass stopped; Building in Tracer marks wait for the next pickup run\n"));
+        assert_eq!(err, format!("{cause}\nTracer build pass stopped; Building in Tracer marks wait for the next pickup run\n"));
         assert!(matches(&launched_re("001-alpha", "alpha", "primary"), &out));
         assert_eq!(fx.launched().len(), 1);
         assert_eq!(*fx.sweeps.borrow(), 1);
@@ -668,7 +667,12 @@ mod pickup_test {
         );
         let (code, _, err) = fx.pickup(&[]);
         assert_eq!(code, 0);
-        assert_eq!(err, format!("factory.py: {cause}\nfactory.py: Tracer follow pass stopped; followed jobs wait for the next pickup run\n"));
+        assert_eq!(
+            err,
+            format!(
+                "{cause}\nTracer follow pass stopped; followed jobs wait for the next pickup run\n"
+            )
+        );
         assert_eq!(*built.borrow(), vec![(fx.home.clone(), Some(jobs))]);
         assert_eq!(*fx.sweeps.borrow(), 1);
         assert_eq!(fx.launched().len(), 1);
@@ -994,9 +998,15 @@ mod pickup_test {
         assert_eq!(firsts, ["launched 001-alpha", "launched 002-alpha"]);
         assert_eq!(fx.launched().len(), 2);
         for id in ["001-alpha", "002-alpha"] {
-            assert_eq!(err.matches(&format!("factory.py: {id} launched, but its agent row was not recorded; the pass goes on\n")).count(), 1);
+            assert_eq!(
+                err.matches(&format!(
+                    "{id} launched, but its agent row was not recorded; the pass goes on\n"
+                ))
+                .count(),
+                1
+            );
         }
-        assert!(err.contains(&format!("factory.py: {give_up}\n")));
+        assert!(err.contains(&format!("{give_up}\n")));
     }
 
     #[test]
@@ -1046,7 +1056,7 @@ mod pickup_test {
             for args in [&[][..], &["--dry-run"]] {
                 assert_eq!(
                     fx.pickup(args),
-                    out_err(2, "", &format!("factory.py: {message}\n")),
+                    out_err(2, "", &format!("{message}\n")),
                     "{text:?}"
                 );
             }
@@ -1059,7 +1069,7 @@ mod pickup_test {
             out_err(
                 2,
                 "",
-                "factory.py: route primary sets no effort, but its launcher uses {effort}\n"
+                "route primary sets no effort, but its launcher uses {effort}\n"
             )
         );
         assert!(fx.puts().is_empty());
@@ -1162,7 +1172,7 @@ mod pickup_test {
         assert_eq!(
             err,
             format!(
-                "factory.py: launch of 001-alpha on primary failed: exit 3; see {}\n",
+                "launch of 001-alpha on primary failed: exit 3; see {}\n",
                 logs[0].display()
             )
         );
@@ -1188,7 +1198,7 @@ mod pickup_test {
         );
         assert!(
             matches(
-                r"factory\.py: launch of 001-alpha on primary failed: .*no-such-program.*; see (?s:.*)",
+                r"launch of 001-alpha on primary failed: .*no-such-program.*; see (?s:.*)",
                 &err
             ),
             "{err}"
@@ -1659,7 +1669,7 @@ mod takeover_test {
         assert_eq!(code, 1);
         assert_eq!(
             err,
-            "factory.py: takeover of 010-run undone: archive of agent-1 failed: exit 1\n"
+            "takeover of 010-run undone: archive of agent-1 failed: exit 1\n"
         );
         let job = tk.job("010-run");
         assert_eq!(
@@ -1706,7 +1716,7 @@ mod takeover_test {
             for args in [&[][..], &["--dry-run"]] {
                 assert_eq!(
                     tk.pickup(args),
-                    out_err(2, "", &format!("factory.py: {message}\n")),
+                    out_err(2, "", &format!("{message}\n")),
                     "{text}"
                 );
             }
@@ -1873,11 +1883,11 @@ impl Mv {
     }
 
     pub fn hint(&self, agent: &str) -> String {
-        format!("factory.py: pickup kept session {agent} of 042-sample-export: no claim recorded on this host, archive it by hand if it still runs: paseo archive --force {agent}\n")
+        format!("pickup kept session {agent} of 042-sample-export: no claim recorded on this host, archive it by hand if it still runs: paseo archive --force {agent}\n")
     }
 
     pub fn skipped(&self, shown: &str, agent: Option<&str>) -> String {
-        format!("factory.py: pickup skipped archive of session {shown} of 042-sample-export: not an id the stall adapter accepts, archive it by hand if it still runs{}\n", agent.map_or(String::new(), |a| format!(": paseo archive --force {a}")))
+        format!("pickup skipped archive of session {shown} of 042-sample-export: not an id the stall adapter accepts, archive it by hand if it still runs{}\n", agent.map_or(String::new(), |a| format!(": paseo archive --force {a}")))
     }
 }
 
@@ -1915,9 +1925,7 @@ mod move_host_test {
             out_err(
                 0,
                 "",
-                &format!(
-                    "factory.py: pickup skips the stop of 042-sample-export {project}: {reason}\n"
-                )
+                &format!("pickup skips the stop of 042-sample-export {project}: {reason}\n")
             )
         );
         assert!(mv.puts().is_empty());
@@ -1981,7 +1989,7 @@ mod move_host_test {
             f.checkout_problem = Some(Rc::new(move |_, _, _| Ok(Some(shown.clone()))))
         });
         mv.moved(json!({}));
-        assert_eq!(mv.pickup(&[]), out_err(0, "", &format!("factory.py: pickup skips alpha: {line}\nfactory.py: pickup skips the stop of 042-sample-export alpha: {line}\n")));
+        assert_eq!(mv.pickup(&[]), out_err(0, "", &format!("pickup skips alpha: {line}\npickup skips the stop of 042-sample-export alpha: {line}\n")));
         assert!(mv.puts().is_empty());
         assert!(mv.mv().get("stopped").is_none());
         assert_eq!(
@@ -2060,7 +2068,7 @@ mod move_host_test {
             out_err(
                 0,
                 "",
-                "factory.py: pickup could not stop 042-sample-export: processes still running: 123 456\n"
+                "pickup could not stop 042-sample-export: processes still running: 123 456\n"
             )
         );
         assert!(mv.puts().is_empty());
@@ -2083,7 +2091,7 @@ mod move_host_test {
             out_err(
                 0,
                 "",
-                "factory.py: pickup could not stop 042-sample-export: processes were not checked\n"
+                "pickup could not stop 042-sample-export: processes were not checked\n"
             )
         );
         assert!(mv.puts().is_empty());
@@ -2294,7 +2302,7 @@ mod rerun_test {
             out_err(
                 0,
                 "",
-                "factory.py: pickup could not stop 042-sample-export: processes still running: 123\n"
+                "pickup could not stop 042-sample-export: processes still running: 123\n"
             )
         );
         assert!(mv.puts().is_empty());
@@ -2580,7 +2588,10 @@ mod move_archive_test {
         mv.set_adapter(Vec::new(), 0, 1);
         let (code, out, err) = mv.pickup(&[]);
         assert_eq!((code, out.as_str()), (0, ""));
-        assert_eq!(err, format!("factory.py: pickup could not archive session {AGENT} of 042-sample-export: exit 1\n"));
+        assert_eq!(
+            err,
+            format!("pickup could not archive session {AGENT} of 042-sample-export: exit 1\n")
+        );
         assert!(mv.puts().is_empty());
         assert!(mv.mv().get("stopped").is_none());
         mv.set_adapter(Vec::new(), 0, 0);
@@ -2652,7 +2663,7 @@ mod move_archive_test {
             out_err(
                 0,
                 "",
-                "factory.py: pickup skips the stop of 042-sample-export alpha: pickup off\n"
+                "pickup skips the stop of 042-sample-export alpha: pickup off\n"
             )
         );
         assert!(mv.archives().is_empty());
@@ -2858,7 +2869,7 @@ mod priority_test {
         let (fx, p) = setup();
         *p.statuses.borrow_mut() = None;
         export(&fx, json!({}));
-        assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: pickup skips priority nudges: paseo did not answer\nfactory.py: pickup skips idle checks: paseo did not answer\n"));
+        assert_eq!(fx.pickup(&[]), out_err(0, "", "pickup skips priority nudges: paseo did not answer\npickup skips idle checks: paseo did not answer\n"));
         assert!(p.sent().is_empty() && fx.puts().is_empty());
         assert!(!fx.home.join("idle-watch.json").exists());
     }
@@ -2873,7 +2884,7 @@ mod priority_test {
             out_err(
                 0,
                 "",
-                "factory.py: pickup could not nudge 042-sample-export: paseo send failed\n"
+                "pickup could not nudge 042-sample-export: paseo send failed\n"
             )
         );
         assert!(fx.puts().is_empty());
@@ -2917,7 +2928,7 @@ pub(super) fn export_job(fx: &Fx, extra: Value) {
 mod idle_watch_test {
     use super::*;
 
-    const NUDGE: &str = "Factory job 042-sample-export shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory.py hold for the job with your --session tag, then keep waiting.";
+    const NUDGE: &str = "Factory job 042-sample-export shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory hold for the job with your --session tag, then keep waiting.";
     const NOTE: &str = "idle: no progress 20 minutes after a nudge to agent synthetic-agent";
     const LINE: &str = "042-sample-export alpha: agent synthetic-agent";
 
@@ -3185,7 +3196,7 @@ mod idle_watch_test {
             out_err(
                 0,
                 "",
-                "factory.py: pickup could not nudge idle 042-sample-export: paseo send failed\n"
+                "pickup could not nudge idle 042-sample-export: paseo send failed\n"
             )
         );
         assert!(watch(&fx)["042-sample-export"].get("nudged").is_none());
@@ -3410,7 +3421,7 @@ mod token_cap_test {
             board_patch(&tc.fx, "042-sample-export", json!({"token_cap": {}})),
             (
                 2,
-                "factory.py: only factory.py pickup sets token_cap. Nothing was written.\n".into()
+                "only factory pickup sets token_cap. Nothing was written.\n".into()
             )
         );
         assert!(tc.fx.puts().is_empty());
@@ -3421,7 +3432,10 @@ mod token_cap_test {
         let tc = setup();
         export_job(&tc.fx, json!({"tokens": {"host-b": host_b()}}));
         output(&tc, 1010000);
-        let line = format!("factory.py: pickup ignores job_token_cap in {}: must be a whole number of at least 1\n", tc.fx.home.join("config.md").display());
+        let line = format!(
+            "pickup ignores job_token_cap in {}: must be a whole number of at least 1\n",
+            tc.fx.home.join("config.md").display()
+        );
         for value in ["0", "abc", "1.5", "-3", "2e6"] {
             set_cap(&tc.fx, value);
             assert_eq!(tc.fx.pickup(&[]), out_err(0, "", &line), "{value}");
@@ -3456,7 +3470,14 @@ mod token_cap_test {
         export_job(&tc.fx, json!({"tokens": {"host-b": host_b()}}));
         tc.fx
             .set_fakes(|f| f.usage_totals = Some(Rc::new(|_, _, _| Err("ValueError".into()))));
-        assert_eq!(tc.fx.pickup(&[]), out_err(0, "", "factory.py: pickup skips the token cap of 042-sample-export: scan failed (ValueError)\n"));
+        assert_eq!(
+            tc.fx.pickup(&[]),
+            out_err(
+                0,
+                "",
+                "pickup skips the token cap of 042-sample-export: scan failed (ValueError)\n"
+            )
+        );
         assert!(tc.fx.puts().is_empty());
     }
 
@@ -3467,7 +3488,7 @@ mod token_cap_test {
         export_job(&tc.fx, json!({"tokens": {"host-b": host_b()}}));
         output(&tc, 1010000);
         *tc.stop_code.borrow_mut() = 1;
-        assert_eq!(tc.fx.pickup(&[]), out_err(0, &format!("needs-human 042-sample-export alpha: {PARK}\n"), "factory.py: pickup could not stop agent synthetic-agent of 042-sample-export: paseo stop failed\n"));
+        assert_eq!(tc.fx.pickup(&[]), out_err(0, &format!("needs-human 042-sample-export alpha: {PARK}\n"), "pickup could not stop agent synthetic-agent of 042-sample-export: paseo stop failed\n"));
         assert_eq!(tc.fx.job("042-sample-export")["stage"], "needs-human");
     }
 }
@@ -3545,7 +3566,7 @@ mod daily_token_cap_test {
             out_err(
                 0,
                 "",
-                &format!("factory.py: pickup launches no new job on {DEVICE}: {REACHED}\n")
+                &format!("pickup launches no new job on {DEVICE}: {REACHED}\n")
             )
         );
         assert!(fx.launched().is_empty());
@@ -3557,7 +3578,10 @@ mod daily_token_cap_test {
         let (fx, _) = setup(Ok(5120000));
         set_cap(&fx, "lots");
         let (_, out, err) = fx.pickup(&[]);
-        assert!(err.contains(&format!("factory.py: pickup ignores daily_token_cap in {}/config.md: must be a whole number of at least 1", fx.home.display())));
+        assert!(err.contains(&format!(
+            "pickup ignores daily_token_cap in {}/config.md: must be a whole number of at least 1",
+            fx.home.display()
+        )));
         assert!(matches(LAUNCHED, &out));
     }
 
@@ -3566,7 +3590,7 @@ mod daily_token_cap_test {
         let (fx, _) = setup(Err("OSError".into()));
         set_cap(&fx, "5000000");
         let (_, out, err) = fx.pickup(&[]);
-        assert!(err.contains("factory.py: pickup skips the daily token cap: scan failed (OSError)"));
+        assert!(err.contains("pickup skips the daily token cap: scan failed (OSError)"));
         assert!(matches(LAUNCHED, &out));
     }
 }
@@ -3905,9 +3929,7 @@ mod launch_backoff_test {
         let until = j["not_before"].as_str().unwrap().to_string();
         assert_eq!(code, 1);
         assert_eq!(out, format!("released 120-sample-digest\nbacked off 120-sample-digest until {until} (launch failure 1)\n"));
-        assert!(err.starts_with(
-            "factory.py: launch of 120-sample-digest on primary failed: exit 3; see "
-        ));
+        assert!(err.starts_with("launch of 120-sample-digest on primary failed: exit 3; see "));
         assert!(j.get("claim").is_none());
         assert_eq!(parked(&fx, "120-sample-digest"), (1, "exit 3".into(), 300));
         let when = parse_stamp(&until).unwrap();
@@ -3993,9 +4015,7 @@ mod launch_backoff_test {
         let (code, out, err) = fx.pickup(&[]);
         assert_eq!(code, 1);
         assert_eq!(out, "released 120-sample-digest\nneeds-human 120-sample-digest after 5 launch failures in a row\n");
-        assert!(err.starts_with(
-            "factory.py: launch of 120-sample-digest on primary failed: exit 3; see "
-        ));
+        assert!(err.starts_with("launch of 120-sample-digest on primary failed: exit 3; see "));
         let j = fx.job("120-sample-digest");
         assert_eq!(j["stage"], "needs-human");
         assert_eq!(j["needs"], "Pickup launch failed 5 times in a row on host host-a. Last reason: exit 3. Fix the launcher, then clear this ask and move the job back to idea.");
@@ -4261,9 +4281,7 @@ mod retro_pickup_test {
         );
         assert!(err.contains("Access rejected the service token"), "{err}");
         assert!(
-            err.ends_with(
-                "factory.py: retro push stopped (exit 5); the next pickup run retries it\n"
-            ),
+            err.ends_with("retro push stopped (exit 5); the next pickup run retries it\n"),
             "{err}"
         );
         assert!(!fx.home.join(RETRO_PUSH_FILE).exists());
@@ -4286,7 +4304,7 @@ mod retro_pickup_test {
             out_err(
                 0,
                 "",
-                "factory.py: made-up push failure\nfactory.py: retro push stopped (exit 1); the next pickup run retries it\n"
+                "made-up push failure\nretro push stopped (exit 1); the next pickup run retries it\n"
             )
         );
         assert_eq!((*calls.borrow(), *ran.borrow()), (1, 1));
@@ -4537,7 +4555,7 @@ mod retro_catchup_test {
         assert_eq!(
             err,
             format!(
-                "factory.py: retro catch-up {} failed to launch (exit 1); see {}; no retry today\n",
+                "retro catch-up {} failed to launch (exit 1); see {}; no retry today\n",
                 job_id(),
                 log.display()
             )
@@ -4567,11 +4585,7 @@ mod retro_catchup_test {
         no_route(&fx);
         assert_eq!(
             fx.pickup(&[]),
-            out_err(
-                0,
-                "",
-                "factory.py: retro catch-up waits: no available route\n"
-            )
+            out_err(0, "", "retro catch-up waits: no available route\n")
         );
         assert!(!fx.home.join(RETRO_CATCHUP_FILE).exists());
         assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
@@ -4588,11 +4602,7 @@ mod retro_catchup_test {
         fx.set_fakes(|f| f.read_paths = Some(Rc::new(|_| Vec::new())));
         assert_eq!(
             fx.pickup(&[]),
-            out_err(
-                0,
-                "",
-                "factory.py: retro catch-up waits: no checkout in paths.md\n"
-            )
+            out_err(0, "", "retro catch-up waits: no checkout in paths.md\n")
         );
         assert!(!fx.home.join(RETRO_CATCHUP_FILE).exists());
         assert!(fx.launched().is_empty());
@@ -4610,11 +4620,7 @@ mod retro_catchup_test {
         no_route(&fx);
         assert_eq!(
             fx.pickup(&[]),
-            out_err(
-                0,
-                "",
-                "factory.py: retro catch-up waits: no available route\n"
-            )
+            out_err(0, "", "retro catch-up waits: no available route\n")
         );
         fx.set_fakes(|f| {
             f.pick_route = None;
@@ -4622,11 +4628,7 @@ mod retro_catchup_test {
         });
         assert_eq!(
             fx.pickup(&[]),
-            out_err(
-                0,
-                "",
-                "factory.py: retro catch-up waits: no checkout in paths.md\n"
-            )
+            out_err(0, "", "retro catch-up waits: no checkout in paths.md\n")
         );
         assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
     }
@@ -4645,11 +4647,7 @@ mod retro_catchup_test {
         .unwrap();
         assert_eq!(
             fx.pickup(&[]),
-            out_err(
-                0,
-                "",
-                "factory.py: retro catch-up waits: no available route\n"
-            )
+            out_err(0, "", "retro catch-up waits: no available route\n")
         );
         assert_eq!(
             read_json(&fx.home.join(RETRO_WAIT_FILE)).unwrap(),
@@ -4666,7 +4664,7 @@ mod retro_catchup_test {
             let (code, _, err) = fx.pickup(&["--dry-run"]);
             assert_eq!(
                 (code, err.as_str()),
-                (0, "factory.py: retro catch-up waits: no available route\n")
+                (0, "retro catch-up waits: no available route\n")
             );
         }
         assert!(!fx.home.join(RETRO_WAIT_FILE).exists());
@@ -4696,7 +4694,7 @@ mod retro_catchup_test {
         assert!(launched_only(&out, "120-sample-digest"));
         assert_eq!(
             err,
-            "factory.py: retro catch-up stopped (exit 2); the next pickup run retries it\n"
+            "retro catch-up stopped (exit 2); the next pickup run retries it\n"
         );
         assert!(!fx.home.join(RETRO_CATCHUP_FILE).exists());
         assert_eq!(
@@ -4868,9 +4866,7 @@ mod audit_pickup_test {
         );
         assert!(err.contains("Access rejected the service token"), "{err}");
         assert!(
-            err.ends_with(
-                "factory.py: audit push stopped (exit 5); the next pickup run retries it\n"
-            ),
+            err.ends_with("audit push stopped (exit 5); the next pickup run retries it\n"),
             "{err}"
         );
         assert!(!fx.home.join(AUDIT_PUSH_FILE).exists());
@@ -4891,9 +4887,8 @@ mod audit_pickup_test {
         }
         assert_eq!((code, out.as_str()), (0, ""));
         assert!(
-            err.starts_with(
-                "factory.py: audit push skipped 1017-add-x until its transcripts change: "
-            ) && err.ends_with(&format!("{}\n", crate::shared::pyre::LIMIT_HIT))
+            err.starts_with("audit push skipped 1017-add-x until its transcripts change: ")
+                && err.ends_with(&format!("{}\n", crate::shared::pyre::LIMIT_HIT))
                 && err.lines().count() == 1,
             "{err}"
         );
@@ -4921,7 +4916,7 @@ mod audit_pickup_test {
             out_err(
                 0,
                 "",
-                "factory.py: made-up push failure\nfactory.py: audit push stopped (exit 1); the next pickup run retries it\n"
+                "made-up push failure\naudit push stopped (exit 1); the next pickup run retries it\n"
             )
         );
         assert_eq!(*log.borrow(), ["push 1017-add-x"]);
@@ -4971,7 +4966,7 @@ mod audit_pickup_test {
             out_err(
                 0,
                 "",
-                "factory.py: usage: scan failed on 1017-add-x (ValueError: boom); nothing recorded\n"
+                "usage: scan failed on 1017-add-x (ValueError: boom); nothing recorded\n"
             )
         );
         assert_eq!(*log.borrow(), ["push 1017-add-x"]);
@@ -5032,7 +5027,7 @@ mod orphan_summary_test {
     fn example_line() {
         assert_eq!(
             orphan_summary(&rows(&["branch", "pr", "worktree", "workspace"]), &[]),
-            "orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory.py orphans to list them"
+            "orphan scan: 4 orphaned (1 branch, 1 open PR, 1 worktree, 1 Paseo workspace); run factory orphans to list them"
         );
     }
 
@@ -5041,12 +5036,12 @@ mod orphan_summary_test {
         let four = rows(&["branch", "branch", "workspace", "workspace"]);
         assert_eq!(
             orphan_summary(&four, &["prs: gh is not on PATH".to_string()]),
-            "orphan scan: 4 orphaned (2 branches, 2 Paseo workspaces), 1 source skipped; run factory.py orphans to list them"
+            "orphan scan: 4 orphaned (2 branches, 2 Paseo workspaces), 1 source skipped; run factory orphans to list them"
         );
         let two = ["prs: gh is not on PATH", "workspaces: paseo is not on PATH"].map(String::from);
         assert_eq!(
             orphan_summary(&[], &two),
-            "orphan scan: nothing orphaned, 2 sources skipped; run factory.py orphans to list them"
+            "orphan scan: nothing orphaned, 2 sources skipped; run factory orphans to list them"
         );
     }
 }
@@ -5102,7 +5097,7 @@ mod orphan_pickup_scan_test {
         assert_eq!(
             run_scan(&home),
             (
-                "orphan scan: 1 orphaned (1 open PR); run factory.py orphans to list them\n"
+                "orphan scan: 1 orphaned (1 open PR); run factory orphans to list them\n"
                     .to_string(),
                 String::new()
             )
@@ -5138,7 +5133,7 @@ mod orphan_pickup_scan_test {
             run_scan(&home),
             (
                 String::new(),
-                "factory.py: orphan scan stopped (exit 5); it runs again tomorrow\n".to_string()
+                "orphan scan stopped (exit 5); it runs again tomorrow\n".to_string()
             )
         );
         assert_eq!(run_scan(&home), (String::new(), String::new()));
@@ -5233,7 +5228,7 @@ mod outcomes_pickup_hook_test {
             out_err(
                 0,
                 "outcomes record alpha: outcomes unchanged; nothing written\n",
-                "factory.py: outcomes record alpha: 1017-add-x is unknown: no merge commit from GitHub\n"
+                "outcomes record alpha: 1017-add-x is unknown: no merge commit from GitHub\n"
             )
         );
     }
@@ -5262,7 +5257,7 @@ mod outcomes_pickup_hook_test {
             out_err(
                 0,
                 "outcomes record beta: no jobs merged in the last 90 days\n",
-                "factory.py: outcomes record alpha stopped (exit 5); it runs again tomorrow\n"
+                "outcomes record alpha stopped (exit 5); it runs again tomorrow\n"
             )
         );
         assert!(fx.home.join(OUTCOMES_RECORD_FILE).exists());
@@ -5273,7 +5268,7 @@ mod outcomes_pickup_hook_test {
         let fx = record_fx(|_, _| Ok(()));
         assert_eq!(
             fx.pickup(&[]),
-            out_err(1, "", "factory.py: outcomes record alpha printed nothing\n")
+            out_err(1, "", "outcomes record alpha printed nothing\n")
         );
     }
 
@@ -5768,7 +5763,7 @@ mod close_test {
     const REASON: &str = "Duplicate of 041-sample-report";
     const PR: &str = "https://github.com/sample/alpha/pull/7";
     const RIDER_PR: &str = "https://github.com/sample/alpha/pull/8";
-    const TEXT: &str = "CLOSED: Duplicate of 041-sample-report\n\n**Summary.** Closed from the dashboard at 2026-01-02T12:00:00Z while at stage `build`. The owner's reason: Duplicate of 041-sample-report. Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- Close requested from the dashboard at 2026-01-02T12:00:00Z.\n- Stage when closed: `build`, round 1.\n- Branch: `factory/042-sample-export`.\n- Pull request: none.\n- Written by factory.py pickup on host-a.\n\n## Left out\n\n- No agent reviewed this close. The reason is the owner's own words.\n- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup alpha/042-sample-export` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup alpha/042-sample-export` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n";
+    const TEXT: &str = "CLOSED: Duplicate of 041-sample-report\n\n**Summary.** Closed from the dashboard at 2026-01-02T12:00:00Z while at stage `build`. The owner's reason: Duplicate of 041-sample-report. Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- Close requested from the dashboard at 2026-01-02T12:00:00Z.\n- Stage when closed: `build`, round 1.\n- Branch: `factory/042-sample-export`.\n- Pull request: none.\n- Written by factory pickup on host-a.\n\n## Left out\n\n- No agent reviewed this close. The reason is the owner's own words.\n- The next pickup run on each host that holds the worktree or branch runs `factory cleanup alpha/042-sample-export` there when the project's pickup is on and lists that host. On any other host, run `factory cleanup alpha/042-sample-export` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n";
 
     fn setup() -> (Fx, Files) {
         let fx = Fx::new();
@@ -5960,7 +5955,7 @@ mod close_test {
             fx.jobs(json!([closing(
                 json!({"close": {"reason": reason, "at": "2026-01-02T12:00:00Z"}})
             )]));
-            assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: pickup skips the close of 042-sample-export: its reason must be 1 to 200 characters, with no line breaks or control characters\n"), "{reason}");
+            assert_eq!(fx.pickup(&[]), out_err(0, "", "pickup skips the close of 042-sample-export: its reason must be 1 to 200 characters, with no line breaks or control characters\n"), "{reason}");
             assert!(fx.puts().is_empty() && files.is_empty());
         }
     }
@@ -6015,7 +6010,7 @@ mod close_test {
             fx.pickup(&[]),
             out_err(0, "closed 042-sample-export alpha\n", "")
         );
-        assert!(files.get(DECISION).unwrap().contains("Hosts that need `factory.py cleanup alpha/042-sample-export` run by hand: `host-b`, `host-c`. The board records them as holding this job, and the project's pickup does not list them.\n"));
+        assert!(files.get(DECISION).unwrap().contains("Hosts that need `factory cleanup alpha/042-sample-export` run by hand: `host-b`, `host-c`. The board records them as holding this job, and the project's pickup does not list them.\n"));
     }
 
     #[test]
@@ -6035,7 +6030,7 @@ mod close_test {
             fx.pickup(&[]),
             out_err(0, "closed 042-sample-export alpha\n", "")
         );
-        assert!(files.get(DECISION).unwrap().contains("- Host that needs `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup is off.\n"));
+        assert!(files.get(DECISION).unwrap().contains("- Host that needs `factory cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup is off.\n"));
     }
 
     #[test]
@@ -6046,7 +6041,7 @@ mod close_test {
             reason: None,
         };
         let text = close_decision(&closing(json!({})), REASON, DEVICE, None, None, &only);
-        assert!(text.contains("- Host that needs `factory.py cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup does not list it.\n"));
+        assert!(text.contains("- Host that needs `factory cleanup alpha/042-sample-export` run by hand: `other-host`. The board records it as holding this job, and the project's pickup does not list it.\n"));
     }
 
     #[test]
@@ -6058,7 +6053,7 @@ mod close_test {
             fx.pickup(&[]),
             out_err(0, "closed 042-sample-export alpha\n", "")
         );
-        assert!(files.get(DECISION).unwrap().contains("- The board records `other-host` as holding this job, but host-a could not read the project's pickup hosts: no pipeline view; register the project or deploy the current Worker. Run `factory.py cleanup alpha/042-sample-export` by hand on each of those hosts that pickup does not cover.\n"));
+        assert!(files.get(DECISION).unwrap().contains("- The board records `other-host` as holding this job, but host-a could not read the project's pickup hosts: no pipeline view; register the project or deploy the current Worker. Run `factory cleanup alpha/042-sample-export` by hand on each of those hosts that pickup does not cover.\n"));
     }
 
     #[test]
@@ -6149,7 +6144,7 @@ mod close_test {
                 out_err(
                     0,
                     "closed 042-sample-export alpha\n",
-                    &format!("factory.py: pickup leaves pull request {pr} open: {why}\n")
+                    &format!("pickup leaves pull request {pr} open: {why}\n")
                 )
             );
             let text = files.get(DECISION).unwrap();
@@ -6426,7 +6421,7 @@ mod session_stop_test {
         let ss = setup();
         export(&ss.fx, json!({}));
         *ss.code.borrow_mut() = 1;
-        assert_eq!(ss.fx.pickup(&[]), out_err(0, "", "factory.py: pickup could not stop agent synthetic-agent of 042-sample-export: paseo stop failed\n"));
+        assert_eq!(ss.fx.pickup(&[]), out_err(0, "", "pickup could not stop agent synthetic-agent of 042-sample-export: paseo stop failed\n"));
         assert!(ss.fx.puts().is_empty());
         assert!(ss.fx.job("042-sample-export")["paused"]
             .get("session_stop")
@@ -7148,7 +7143,7 @@ mod pr_sync_test {
         let job = ps.job("043-sample-import");
         let at = job["close"]["at"].as_str().unwrap().to_string();
         assert_eq!(ps.files.get(DECISION).unwrap(), format!(
-            "CLOSED: PR closed on GitHub\n\n**Summary.** GitHub reported pull request {PR8} closed without merging, so factory.py pickup closed the job at {at} while at stage `pr-open`. Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- GitHub reported the pull request closed. Pickup queued the close at {at}.\n- Stage when closed: `pr-open`, round 0.\n- Branch: `factory/043-sample-import`.\n- Pull request: {PR8}, already closed.\n- Written by factory.py pickup on host-a.\n\n## Left out\n\n- No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` ref if the work is still wanted.\n- The next pickup run on each host that holds the worktree or branch runs `factory.py cleanup alpha/043-sample-import` there when the project's pickup is on and lists that host. On any other host, run `factory.py cleanup alpha/043-sample-import` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n"));
+            "CLOSED: PR closed on GitHub\n\n**Summary.** GitHub reported pull request {PR8} closed without merging, so factory pickup closed the job at {at} while at stage `pr-open`. Nothing else is owed unless Left out says so.\n\n## Evidence\n\n- GitHub reported the pull request closed. Pickup queued the close at {at}.\n- Stage when closed: `pr-open`, round 0.\n- Branch: `factory/043-sample-import`.\n- Pull request: {PR8}, already closed.\n- Written by factory pickup on host-a.\n\n## Left out\n\n- No agent reviewed this close, and nobody gave a reason. Start a new job with a `rework-of` ref if the work is still wanted.\n- The next pickup run on each host that holds the worktree or branch runs `factory cleanup alpha/043-sample-import` there when the project's pickup is on and lists that host. On any other host, run `factory cleanup alpha/043-sample-import` by hand. It keeps a dirty worktree, and a branch that is not merged unless origin holds the same commit.\n"));
         assert_eq!(
             (&job["stage"], &job["note"]),
             (&json!("closed"), &json!("PR closed on GitHub"))
@@ -7294,7 +7289,7 @@ mod pr_sync_test {
             ),
             (
                 2,
-                "factory.py: only factory.py pickup sets github. Nothing was written.\n".into()
+                "only factory pickup sets github. Nothing was written.\n".into()
             )
         );
         assert!(ps.puts().is_empty());
@@ -7373,7 +7368,7 @@ mod pr_sync_test {
                 out_err(
                     0,
                     "closed 044-sample-close alpha\n",
-                    &format!("factory.py: pickup skips the PR sync for sample/alpha: {why}\n")
+                    &format!("pickup skips the PR sync for sample/alpha: {why}\n")
                 )
             );
             assert_eq!(
@@ -7397,7 +7392,7 @@ mod pr_sync_test {
             out_err(
                 0,
                 "",
-                "factory.py: pickup syncs the first 100 of 101 pull requests in sample/alpha\n"
+                "pickup syncs the first 100 of 101 pull requests in sample/alpha\n"
             )
         );
         assert_eq!(
@@ -7678,7 +7673,7 @@ mod deny_notes_test {
         assert_eq!(
             err,
             format!(
-                "factory.py: launch of 007-csv-export on primary failed: exit 1; see {}\n",
+                "launch of 007-csv-export on primary failed: exit 1; see {}\n",
                 log.display()
             )
         );
@@ -7732,7 +7727,7 @@ mod deny_notes_test {
             ),
             (
                 2,
-                "factory.py: only factory.py deny-notes sets backlog.notes_read\n".into()
+                "only factory deny-notes sets backlog.notes_read\n".into()
             )
         );
         assert!(fx.calls().is_empty());
@@ -7913,7 +7908,7 @@ mod resolve_test {
         assert_eq!(
             err,
             format!(
-                "factory.py: launch of 064-sample-human on primary failed: exit 1; see {}\n",
+                "launch of 064-sample-human on primary failed: exit 1; see {}\n",
                 log.display()
             )
         );
@@ -8097,7 +8092,7 @@ mod babysit_test {
         assert_eq!(
             err,
             format!(
-                "factory.py: launch of 042-sample-export on primary failed: exit 1; see {}\n",
+                "launch of 042-sample-export on primary failed: exit 1; see {}\n",
                 log.display()
             )
         );
@@ -8270,7 +8265,7 @@ mod babysit_test {
             false,
             "synthetic-server",
         );
-        assert_eq!(fx.pickup(&[]), out_err(0, "", "factory.py: pickup could not send babysit 042-sample-export to agent synthetic-agent: paseo send failed; the next run retries\n"));
+        assert_eq!(fx.pickup(&[]), out_err(0, "", "pickup could not send babysit 042-sample-export to agent synthetic-agent: paseo send failed; the next run retries\n"));
         let job = fx.job("042-sample-export");
         assert!(job.get("claim").is_none() && job.get("agents").is_none());
         assert_eq!(p.sent().len(), 1);
@@ -8296,7 +8291,7 @@ mod babysit_test {
             out,
             format!("launched babysit 042-sample-export alpha on primary session {tag}\n")
         );
-        assert_eq!(err, "factory.py: pickup could not send babysit 042-sample-export to agent synthetic-agent: paseo send failed; launching a new session\n");
+        assert_eq!(err, "pickup could not send babysit 042-sample-export to agent synthetic-agent: paseo send failed; launching a new session\n");
         assert_eq!(p.sent().len(), 1);
         assert_eq!(
             fx.launched()[0].argv[7],
@@ -8316,7 +8311,12 @@ mod babysit_test {
         fx.set_fakes(|f| f.pick_route = Some(Rc::new(|_| Ok(None))));
         let (code, out, err) = fx.pickup(&[]);
         assert_eq!((code, out.as_str()), (0, ""));
-        assert!(err.ends_with("factory.py: pickup could not launch babysit 042-sample-export: no available route\n"), "{err}");
+        assert!(
+            err.ends_with(
+                "pickup could not launch babysit 042-sample-export: no available route\n"
+            ),
+            "{err}"
+        );
         assert!(fx.job("042-sample-export").get("claim").is_none());
     }
 
@@ -8861,7 +8861,7 @@ mod auto_babysit_test {
             out_err(
                 0,
                 "",
-                "factory.py: pickup skips auto-babysit for sample/alpha: gh is not installed on host-a\n"
+                "pickup skips auto-babysit for sample/alpha: gh is not installed on host-a\n"
             )
         );
         assert_eq!(sig.reads.borrow().len(), 1);
@@ -8885,7 +8885,7 @@ mod auto_babysit_test {
                 BTreeMap::from([(8, Map::new())])
             )]
         );
-        assert_eq!(err, "factory.py: pickup checks 1 of 2 auto-babysit candidates for sample/alpha this run, oldest automatic babysit first\n");
+        assert_eq!(err, "pickup checks 1 of 2 auto-babysit candidates for sample/alpha this run, oldest automatic babysit first\n");
     }
 
     #[test]
@@ -8959,8 +8959,7 @@ mod auto_babysit_test {
             ),
             (
                 2,
-                "factory.py: only factory.py pickup sets auto_babysit. Nothing was written.\n"
-                    .into()
+                "only factory pickup sets auto_babysit. Nothing was written.\n".into()
             )
         );
         assert!(fx.puts().is_empty());
@@ -11455,7 +11454,7 @@ mod autonomy_hold_test {
             (&job["automerge"], &job["needs"], &job["note"]),
             (
                 &json!(false),
-                &json!("review and merge PR #631: earned autonomy holds alpha visible PRs after reverted 1019-add-z; a person lifts it with factory.py autonomy restore alpha visible"),
+                &json!("review and merge PR #631: earned autonomy holds alpha visible PRs after reverted 1019-add-z; a person lifts it with factory autonomy restore alpha visible"),
                 &json!("earned autonomy hold: a person reviews and merges")
             )
         );
@@ -11570,7 +11569,7 @@ mod board_jobs_test {
     fn test_board_jobs_fails_closed() {
         let fx = Fx::new();
         fs::create_dir_all(fx.root.join("claude/projects")).unwrap();
-        let stderr = "factory.py: the board's jobs is not a list of objects\n";
+        let stderr = "the board's jobs is not a list of objects\n";
         for board in [json!({"jobs": [1]}), json!({"jobs": {}})] {
             for (name, code, err) in run_passes(&fx, &board) {
                 assert_eq!((code, err.as_str()), (1, stderr), "{name} on {board}");
@@ -11612,7 +11611,7 @@ mod board_jobs_test {
             out_err(
                 1,
                 "",
-                "factory.py: auto-babysit 042-sample-export: PR head is not a string\n"
+                "auto-babysit 042-sample-export: PR head is not a string\n"
             )
         );
     }

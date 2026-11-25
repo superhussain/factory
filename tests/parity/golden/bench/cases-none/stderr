@@ -1,2 +1,2 @@
-factory.py: bench cases skips 1020-add-w: PR is not in example/alpha
-factory.py: bench: no reverted or reworked jobs to draft in alpha
+bench cases skips 1020-add-w: PR is not in example/alpha
+bench: no reverted or reworked jobs to draft in alpha

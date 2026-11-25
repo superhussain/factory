@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-paths-2.json: suggestions[0].evidence[0].path: must be a relative repo path of [A-Za-z0-9_./-] with no .. segment; nothing admitted
+{home}/suggest-paths-2.json: suggestions[0].evidence[0].path: must be a relative repo path of [A-Za-z0-9_./-] with no .. segment; nothing admitted

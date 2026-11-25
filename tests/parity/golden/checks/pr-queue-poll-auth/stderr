@@ -1,1 +1,1 @@
-factory.py: gh api merge-async exited 1 (check gh auth status)
+gh api merge-async exited 1 (check gh auth status)

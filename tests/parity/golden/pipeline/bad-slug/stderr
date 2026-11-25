@@ -1,1 +1,1 @@
-factory.py: usage: pipeline <project-slug> [--board]
+usage: pipeline <project-slug> [--board]

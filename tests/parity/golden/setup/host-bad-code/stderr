@@ -1,1 +1,1 @@
-factory.py: usage: host pair <id> <code>: the code looks like XXXXX-XXXXX
+usage: host pair <id> <code>: the code looks like XXXXX-XXXXX

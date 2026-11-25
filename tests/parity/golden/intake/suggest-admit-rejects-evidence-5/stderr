@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-evidence-5.json: suggestions[0].evidence[0].note: must be a string of 1-200 characters; nothing admitted
+{home}/suggest-evidence-5.json: suggestions[0].evidence[0].note: must be a string of 1-200 characters; nothing admitted

@@ -1,1 +1,1 @@
-factory.py: {home}/suggest-untrusted-49.json: suggestions[0].options[0].pros: reads like an instruction to override factory rules (override); nothing admitted
+{home}/suggest-untrusted-49.json: suggestions[0].options[0].pros: reads like an instruction to override factory rules (override); nothing admitted

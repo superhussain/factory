@@ -245,8 +245,8 @@ mod tests {
     }
 
     #[test]
-    fn usage_has_python_prefix() {
-        assert!(USAGE.starts_with("factory.py: usage:\n"));
+    fn usage_starts_with_usage() {
+        assert!(USAGE.starts_with("usage:\n"));
     }
 
     #[test]
@@ -287,35 +287,32 @@ mod tests {
         let msg = |list: &[&str]| run(args(list)).unwrap_err().stderr;
         assert_eq!(
             msg(&["--home", "/x", "--home", "/x", "where"]),
-            "factory.py: --home requires one nonempty value and may occur only once\n"
+            "--home requires one nonempty value and may occur only once\n"
         );
         assert_eq!(
             msg(&["--home", "relative", "where"]),
-            "factory.py: --home must be absolute\n"
+            "--home must be absolute\n"
         );
         assert_eq!(
             msg(&["--session", "bad tag", "where"]),
-            "factory.py: bad session tag in --session or FACTORY_SESSION: use letters, digits, - and _\n"
+            "bad session tag in --session or FACTORY_SESSION: use letters, digits, - and _\n"
         );
         assert_eq!(
             msg(&["init", "--agents", "emacs"]),
-            "factory.py: --agents must be none, claude, opencode or both\n"
+            "--agents must be none, claude, opencode or both\n"
         );
         assert_eq!(
             msg(&["init", "--agents", "--x"]),
-            "factory.py: --agents requires one value and may occur only once\n"
+            "--agents requires one value and may occur only once\n"
         );
-        assert_eq!(
-            msg(&["init", "--bogus"]),
-            "factory.py: unknown init option --bogus\n"
-        );
+        assert_eq!(msg(&["init", "--bogus"]), "unknown init option --bogus\n");
         assert_eq!(
             msg(&["--home", "/x", "adopt-home", "/y"]),
-            "factory.py: adopt-home does not accept --home\n"
+            "adopt-home does not accept --home\n"
         );
         assert_eq!(
             msg(&["--home", "/x", "board", "/y", "1-a"]),
-            "factory.py: --home disagrees with positional factory directory\n"
+            "--home disagrees with positional factory directory\n"
         );
         assert!(handler_for("ideas", 7).is_some() && handler_for("claim", 3).is_some());
         assert!(handler_for("claim", 2).is_none() && handler_for("", 0).is_none());
