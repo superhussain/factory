@@ -475,26 +475,12 @@ export class BoardRows {
     }
     if (byteLength(boardText(state.head, "")) + bytes + Math.max(count - 1, 0) > max) return false;
     const texts = new Map([...touched].map((page) => [page, JSON.stringify(pages.get(page))]));
-    // A page grown past MAX_PAGE by rows updated in place splits: every page is packed anew, as
-    // a seed packs them, which writes each page and index row once.
-    if (
-      [...texts.values()].some((json) => json.length > MAX_PAGE / 3 && byteLength(json) > MAX_PAGE)
-    ) {
-      const jobs = [];
-      const stored = new Map(
-        this.sql
-          .exec("SELECT page, json FROM board_pages")
-          .toArray()
-          .map((p) => [p.page, p.json]),
-      );
-      for (const page of [...new Set([...stored.keys(), ...pages.keys()])].sort((a, b) => a - b))
-        for (const row of pages.get(page) ?? JSON.parse(stored.get(page)))
-          jobs.push(JSON.stringify(row));
-      const packed = this.seed(boardText(state.head, jobs.join(",")), state.r2etag, state.etag);
-      for (const key of ["bytes", "count", "maxNum", "lastPage", "clean"]) state[key] = packed[key];
-      return true;
-    }
+    // Pages grown past MAX_PAGE by rows updated in place, which split after the other writes.
+    const grown = [...texts]
+      .filter(([, json]) => json.length > MAX_PAGE / 3 && byteLength(json) > MAX_PAGE)
+      .map(([page]) => page);
     for (const page of touched) {
+      if (grown.includes(page)) continue;
       const rows = pages.get(page);
       const meta = pages.meta.get(page);
       if (rows.length)
@@ -528,6 +514,9 @@ export class BoardRows {
         else stages.set(id, stage);
       this.save([...stages], "stages");
     }
+    // The highest first, so each split's page number is still the one it read.
+    for (const page of grown.sort((a, b) => b - a))
+      this.split(state, page, pages.get(page), pages.meta.get(page));
     // Only deleting the row with the highest id number scans the index.
     if (recount)
       maxNum = this.sql.exec("SELECT MAX(num) AS m FROM board_index").toArray()[0].m ?? null;
@@ -535,6 +524,40 @@ export class BoardRows {
     this.memo = { etag: null, blob: null };
     this.slimMemo = { etag: null, blob: null };
     return true;
+  }
+
+  // Writes the rows of a page grown past MAX_PAGE as pages packed as seed packs them, from page
+  // on, with their index rows. The later pages and their index rows move up to make room. SQLite
+  // checks the page key row by row, so the pages pass through negative numbers on the way.
+  split(state, page, rows, meta) {
+    const jsons = rows.map((row) => JSON.stringify(row));
+    const starts = [0];
+    let size = 0;
+    for (const [i, json] of jsons.entries()) {
+      const bytes = byteLength(json);
+      if (i > starts.at(-1) && size + bytes > PAGE_BYTES) {
+        starts.push(i);
+        size = 0;
+      }
+      size += bytes + 1;
+    }
+    const extra = starts.length - 1;
+    this.sql.exec("UPDATE board_pages SET page = -page - ? WHERE page > ?", extra, page);
+    this.sql.exec("UPDATE board_pages SET page = -page WHERE page < 0");
+    this.sql.exec("UPDATE board_index SET page = page + ? WHERE page > ?", extra, page);
+    this.sql.exec("DELETE FROM board_index WHERE page = ?", page);
+    for (const [k, start] of starts.entries()) {
+      const end = starts[k + 1] ?? rows.length;
+      this.sql.exec(
+        `INSERT INTO board_pages (page, json, meta) VALUES (?, ?, ?)
+          ON CONFLICT (page) DO UPDATE SET json = excluded.json, meta = excluded.meta`,
+        page + k,
+        "[" + jsons.slice(start, end).join(",") + "]",
+        meta == null ? null : JSON.stringify(meta.slice(start, end)),
+      );
+      for (const row of rows.slice(start, end)) this.insertIndex(row, page + k);
+    }
+    if (state.lastPage >= page) state.lastPage += extra;
   }
 
   // Marks each id dirty, keeping the hash of the row R2's copy holds from its first change.

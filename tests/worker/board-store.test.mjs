@@ -673,34 +673,80 @@ test("a pages table from before meta, or with meta after json, is rebuilt meta f
   }
 });
 
-// Rows a PATCH grows in place grow their page. Past MAX_PAGE (1.5 MiB) the pages are packed
-// anew, so none nears SQLite's 2 MB row limit, which setup's room enforces as workerd does.
+// Rows a PATCH grows in place grow their page. Past MAX_PAGE (1.5 MiB) that page alone is packed
+// anew into pages, and the pages after it move up, so none nears SQLite's 2 MB row limit, which
+// setup's room enforces as workerd does.
 test("a PATCH that grows a page past its limit splits it, and the board reads back the same", async () => {
   const jobs = Array.from({ length: 6 }, (_, n) => ({
     id: `${3000 + n}-grows`,
     project: "sample",
     stage: "build",
   }));
+  // Rows of 20 KB after them fill two more pages, which the split moves.
+  for (let n = 0; n < 30; n++)
+    jobs.push({
+      id: `${3100 + n}-after`,
+      project: "sample",
+      stage: "merged",
+      done: "2026-11-01T00:00:00Z",
+      idea: "x".repeat(20_000),
+    });
   const s = setup({ ...BOARD, jobs });
   await s.send("/board.json");
+  const store = () => s.room.object.board();
+  const sql = (query) => store().sql.exec(query).toArray();
   const sizes = () =>
-    s.room.object
-      .board()
-      .sql.exec("SELECT length(CAST(json AS BLOB)) AS n FROM board_pages ORDER BY page")
-      .toArray()
-      .map((p) => p.n);
-  assert.equal(sizes().length, 1);
-  for (const [n, row] of [...jobs].entries()) {
-    // 450,000 bytes in UTF-8, so four such rows pass MAX_PAGE and five pass 2 MB.
-    jobs[n] = { ...row, idea: "é".repeat(225_000) };
-    const ok = await s.patch({ rows: [{ id: row.id, expect: row, row: jobs[n] }] });
-    assert.equal(ok.status, 200, await ok.text());
+    sql("SELECT length(CAST(json AS BLOB)) AS n FROM board_pages ORDER BY page").map((p) => p.n);
+  // Pages are numbered from 0 with no gap, each index row names the page its row is on, and the
+  // state's last page is the highest.
+  const indexed = () => {
+    const pages = sql("SELECT page, json FROM board_pages ORDER BY page");
+    assert.deepEqual(
+      pages.map((p) => p.page),
+      pages.map((_, i) => i),
+    );
+    for (const p of pages)
+      assert.deepEqual(
+        sql(`SELECT id FROM board_index WHERE page = ${p.page} ORDER BY id`).map((r) => r.id),
+        JSON.parse(p.json)
+          .map((j) => j.id)
+          .sort(),
+        `page ${p.page}`,
+      );
+    assert.equal(store().state().lastPage, pages.length - 1);
+  };
+  const check = async () => {
     const full = await (await s.send("/board.json")).text();
     assert.deepEqual(JSON.parse(full).jobs, jobs);
     assert.equal(await (await s.send("/board.json?view=slim")).text(), await workerSlim(full));
     assert.ok(Math.max(...sizes()) <= 3 << 19, JSON.stringify(sizes()));
+    indexed();
+  };
+  assert.equal(sizes().length, 3);
+  const pageOf = (id) => sql(`SELECT page FROM board_index WHERE id = '${id}'`)[0].page;
+  const last = jobs.at(-1).id;
+  assert.equal(pageOf(last), 2);
+  for (const [n, row] of jobs.slice(0, 6).entries()) {
+    // 450,000 bytes in UTF-8, so four such rows pass MAX_PAGE and five pass 2 MB.
+    jobs[n] = { ...row, idea: "é".repeat(225_000) };
+    const ok = await s.patch({ rows: [{ id: row.id, expect: row, row: jobs[n] }] });
+    assert.equal(ok.status, 200, await ok.text());
+    await check();
   }
-  assert.ok(sizes().length > 1, JSON.stringify(sizes()));
+  assert.ok(sizes().length > 3 && pageOf(last) > 2, JSON.stringify(sizes()));
+  // A row on a moved page, and a new row, write through the index and the last page.
+  const moved = jobs.at(-1);
+  jobs[jobs.length - 1] = { ...moved, title: "Moved" };
+  const added = { id: "3200-added", project: "sample", stage: "idea" };
+  jobs.push(added);
+  const ok = await s.patch({
+    rows: [
+      { id: moved.id, expect: moved, row: jobs.at(-2) },
+      { id: added.id, expect: null, row: added },
+    ],
+  });
+  assert.equal(ok.status, 200, await ok.text());
+  await check();
 });
 
 // GET /api/board/archive as it answered before the room kept the board's ids: the whole board
