@@ -19,7 +19,7 @@ use crate::shared::project::{
     local_bytes, project_files, pull_project, r2_target, read_project_state, safe_job_folder,
     save_project_state, sha, strong,
 };
-use crate::shared::py::{os_error, printable_line, splitlines, strip};
+use crate::shared::py::{os_error, printable_line, repr, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, INDENT2_SORTED};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::pyval::{py_str, truthy};
@@ -950,7 +950,7 @@ fn conflict_rel(rel: &str, n: usize) -> String {
 /// be settled without losing it. Never overwrites.
 fn keep_remote_in(home: &Path, slug: &str, job_id: &str, rel: &str) -> Res<String> {
     if !JOB_REL.is_full(rel) {
-        return Err(fail(format!("{rel} is not a job file"), 2));
+        return Err(fail(format!("{} is not a job file", repr(rel)), 2));
     }
     let folder = safe_job_folder(home, slug, job_id)?;
     let remote = dot_remote(&folder.join(rel));
@@ -962,9 +962,7 @@ fn keep_remote_in(home: &Path, slug: &str, job_id: &str, rel: &str) -> Res<Strin
     };
     for n in 1.. {
         let copy = conflict_rel(rel, n);
-        if !JOB_REL.is_full(&copy) {
-            return Err(fail(format!("{copy} would not sync"), 1));
-        }
+        debug_assert!(JOB_REL.is_full(&copy), "{copy} would not sync");
         let path = folder.join(&copy);
         match fs::OpenOptions::new()
             .write(true)
@@ -986,10 +984,8 @@ fn keep_remote_in(home: &Path, slug: &str, job_id: &str, rel: &str) -> Res<Strin
 pub fn keep_remote(call: &Call) -> Res<()> {
     let (home, slug, job_id) = r2_target(&call.args[0], true)?;
     let copy = keep_remote_in(&home, &slug, &job_id, &call.args[1])?;
-    println!(
-        "{}",
-        safe_job_folder(&home, &slug, &job_id)?.join(copy).display()
-    );
+    let folder = home.join("jobs").join(&slug).join(&job_id);
+    println!("{}", folder.join(copy).display());
     Ok(())
 }
 
