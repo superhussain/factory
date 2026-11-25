@@ -722,12 +722,12 @@ and `defect <m>: severity must be high, medium or low`.
 | 4 | Object/project/branch missing. Confirm the ID/checkout and use init in the intended repo when registration is needed. |
 | 5 | Check connectivity, HTTPS endpoint, Access policy and token renewal; origin failures also stop. Do not expose credentials while diagnosing. |
 | 6 | Stop on another owner, drift, conflict or unsafe link/junction/unlistable path. Never retry/take over automatically. |
-| 8 | `audit` and `audit push`: a flag pattern hit its regex backtrack limit, so the transcript could not be fully scanned (`audit push` uploads a skip marker instead of its rows, or uploads nothing after the error when it cannot read the rows already pushed); pickup retries once the transcript changes. `checks`: an earned-autonomy hold, so a person merges. |
+| 8 | `audit` and `audit push`: a flag pattern hit its regex backtrack limit, so the transcript could not be fully scanned (`audit push` uploads a skip marker instead of its rows, or uploads nothing after the error when it cannot read the rows already pushed); pickup retries once the transcript changes, or on its next run when the read failed. `checks`: an earned-autonomy hold, so a person merges. |
 
 `factory stop <worktree>` exits 6 when it refuses to check processes: the path is
 empty, cannot be resolved, is a link or sits under one, or, where there is no
 `/proc`, lsof is missing. It prints why and signals nothing. `cleanup` then
-keeps that worktree and its branch, lists `<worktree>: processes were not checked; stop them or remove the link, then rerun factory cleanup` under `left`, and exits 1.
+keeps that worktree and its branch, lists `<worktree>: processes were not checked; fix the cause printed above (remove the link or install lsof), or stop them and run git worktree remove yourself` under `left`, and exits 1.
 
 For `.remote`, compare retained local and remote copies, explicitly merge/select,
 then delete only the reconciled conflict copy and push. Never upload `.remote`,

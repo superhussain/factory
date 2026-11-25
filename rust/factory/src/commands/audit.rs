@@ -729,9 +729,10 @@ fn audit_pushed_rows(home: &Path, job_id: &str, device: &str) -> Res<Vec<Map<Str
 
 /// PUT this host's audit rows for the job to the Worker under its device name, oldest rows dropped
 /// past 1 MiB. A scan past the backtrack limit keeps the rows pushed before, adds an AUDIT_SKIPPED
-/// row, and still exits LIMIT. When it cannot read those rows, it pushes nothing and exits LIMIT
-/// after the read's error.
-pub(crate) fn audit_push(job_id: &str) -> Res<()> {
+/// row, and still exits LIMIT. When it cannot read those rows, it pushes nothing and fails with the
+/// read's error, then the limit's: with the read's exit, so pickup retries, or with LIMIT when
+/// `limit_on_failed_read`, as `audit push` exits.
+pub(crate) fn audit_push(job_id: &str, limit_on_failed_read: bool) -> Res<()> {
     let home = factory_home()?;
     let config = home.join("config.md");
     let meta = config_meta(&config)?;
@@ -750,6 +751,9 @@ pub(crate) fn audit_push(job_id: &str) -> Res<()> {
                 Ok(rows) => rows,
                 Err(read) => {
                     e.stderr = read.stderr + &e.stderr;
+                    if !limit_on_failed_read {
+                        (e.code, e.status) = (read.code, read.status);
+                    }
                     return Err(e);
                 }
             };
@@ -840,7 +844,7 @@ pub fn audit_cmd(call: &Call) -> Res<()> {
                 2,
             ));
         }
-        return audit_push(&args[1]);
+        return audit_push(&args[1], true);
     }
     let job_id = &args[0];
     if !NEW_JOB_ID.is_full(job_id) {

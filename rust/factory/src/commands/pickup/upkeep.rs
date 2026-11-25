@@ -592,7 +592,7 @@ pub(super) fn audit_push(job_id: &str) -> Res<()> {
     if let Some(f) = fake!(audit_push) {
         return f(job_id);
     }
-    crate::commands::audit::audit_push(job_id)
+    crate::commands::audit::audit_push(job_id, false)
 }
 
 pub(super) fn usage_record(
