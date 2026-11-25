@@ -957,12 +957,15 @@ fn cleanup_after_stop(
     let (mut removed, mut left) = (Vec::new(), Vec::new());
     let wt_text = wt.to_string_lossy();
     if wt.exists() {
-        let alive = alive.unwrap_or_default();
-        let error = if alive.is_empty() {
-            first_error(repo, &["worktree", "remove", &wt_text], None)
-        } else {
-            let pids: Vec<String> = alive.iter().map(u32::to_string).collect();
-            Some(format!("processes still running: {}", pids.join(" ")))
+        let error = match alive {
+            None => Some("processes were not checked".to_string()),
+            Some(alive) if alive.is_empty() => {
+                first_error(repo, &["worktree", "remove", &wt_text], None)
+            }
+            Some(alive) => {
+                let pids: Vec<String> = alive.iter().map(u32::to_string).collect();
+                Some(format!("processes still running: {}", pids.join(" ")))
+            }
         };
         match error {
             Some(error) => {
@@ -1642,7 +1645,7 @@ mod tests {
         assert_ne!(sh_git(&wt, &["rev-parse", "HEAD"]), before);
     }
 
-    const FAKE_PNPM: &str = "#!/bin/sh\necho \"$* $(pwd)\" >> \"{record}\"\nmkdir -p node_modules && echo done > node_modules/.modules.yaml\n";
+    const FAKE_PNPM: &str = "echo \"$* $(pwd)\" >> \"{record}\"\nmkdir -p node_modules && echo done > node_modules/.modules.yaml\n";
 
     /// A home whose factory project lists prebuild folders, and a clone of an origin holding sample/.
     struct Prebuild {
@@ -1690,8 +1693,11 @@ mod tests {
             sh_git(&root, &["clone", "-q", &text(&origin), &text(&wt)]);
             let record = root.join("calls.txt");
             let pnpm = root.join("pnpm");
-            fs::write(&pnpm, FAKE_PNPM.replace("{record}", &text(&record))).unwrap();
-            chmod(&pnpm, 0o755);
+            #[cfg(unix)]
+            crate::shared::build::tests::script(
+                &pnpm,
+                &FAKE_PNPM.replace("{record}", &text(&record)),
+            );
             let log = home.join("logs").join(format!("prebuild-{JOB}.log"));
             Prebuild {
                 root,
@@ -1906,15 +1912,10 @@ mod tests {
         t.config(r#"["sample"]"#);
         let marker = t.root.join("driver-ran");
         let driver = t.root.join("driver.sh");
-        fs::write(
+        crate::shared::build::tests::script(
             &driver,
-            format!(
-                "#!/bin/sh\necho ran >> '{}'\necho FORGED\n",
-                marker.display()
-            ),
-        )
-        .unwrap();
-        chmod(&driver, 0o755);
+            &format!("echo ran >> '{}'\necho FORGED\n", marker.display()),
+        );
         sh_git(&t.wt, &["config", "diff.external", &text(&driver)]);
         sh_git(&t.wt, &["config", "diff.forge.textconv", &text(&driver)]);
         fs::write(t.wt.join(".git/info/attributes"), "* diff=forge\n").unwrap();
@@ -2077,6 +2078,19 @@ mod tests {
         let out = cleanup_after_stop(&text(&t.repo), &t.wt, BRANCH, false, None, Some(vec![4242]));
         let left = vec![
             format!("{}: processes still running: 4242", t.shown_wt()),
+            format!("branch {BRANCH}: kept because its worktree remains"),
+        ];
+        assert_eq!(out, (vec![], left));
+        assert!(t.wt.exists() && t.branch_exists());
+    }
+
+    #[test]
+    fn refused_stop_keeps_everything() {
+        let t = Checkout::new("wt-clean-refused");
+        t.merge();
+        let out = cleanup_after_stop(&text(&t.repo), &t.wt, BRANCH, false, None, None);
+        let left = vec![
+            format!("{}: processes were not checked", t.shown_wt()),
             format!("branch {BRANCH}: kept because its worktree remains"),
         ];
         assert_eq!(out, (vec![], left));
@@ -2311,8 +2325,7 @@ mod tests {
     fn lsof_falls_back() {
         let dir = temp_dir("wt-lsof");
         let lsof = dir.join("lsof");
-        fs::write(&lsof, "#!/bin/sh\n").unwrap();
-        chmod(&lsof, 0o755);
+        crate::shared::build::tests::script(&lsof, "");
         let plain = dir.join("plain");
         fs::write(&plain, "").unwrap();
         let fallbacks = [dir.join("missing"), plain, lsof.clone()];
