@@ -162,7 +162,7 @@ fn build(
             return Ok((binary, bytes));
         }
     }
-    if let Some((own, bytes)) = own_build(checkout, host) {
+    if let Some((own, bytes)) = own_build(checkout, host, &files) {
         store(&bins, &stored, &binary, &sum, &bytes)?;
         let _ = writeln!(err, "install: Rust binary from {}", own.display());
         return Ok((binary, bytes));
@@ -229,8 +229,19 @@ fn build(
 /// stamp still holds: the inputs hash and the binary's sha256 both match now. install.sh and
 /// install.ps1 build there and write the stamp, then run its install, so the cache takes that
 /// build rather than compiling the same inputs again at the build-src path. A build without a
-/// stamp, such as a plain cargo build, is rebuilt.
-fn own_build(checkout: &Path, host: &Host) -> Option<(PathBuf, Vec<u8>)> {
+/// stamp, such as a plain cargo build, is rebuilt, and so is one with an input of files the stamp
+/// does not cover.
+fn own_build(
+    checkout: &Path,
+    host: &Host,
+    files: &BTreeMap<String, Vec<u8>>,
+) -> Option<(PathBuf, Vec<u8>)> {
+    if !files
+        .keys()
+        .all(|rel| rel.starts_with("rust/") || rel.starts_with("skills/factory/"))
+    {
+        return None;
+    }
     let name = Path::new(BINARY).file_name()?;
     let own = checkout
         .join("rust")
@@ -844,17 +855,22 @@ pub(crate) mod tests {
         assert!(!files.keys().any(|r| r.starts_with("rust/target/")));
     }
 
-    /// Runs install.sh's stamp lines on checkout, so the stamp is the one the installer writes.
-    fn install_sh_stamp(checkout: &Path) {
+    /// Runs install.sh's lines from the stamp's inputs hash to its write on checkout, with cargo as
+    /// the build command, so the stamp is the one the installer writes.
+    fn install_sh_stamp(checkout: &Path, cargo: &str) {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let script = fs::read_to_string(repo.join("tools/install.sh")).unwrap();
         let start = script.find("if command -v sha256sum").unwrap();
         let end = start + script[start..].find("\n)\n").unwrap() + 3;
         let run = Command::new("/bin/sh")
             .args(["-eu", "-c"])
-            .arg(format!("checkout=\"$1\"\n{}", &script[start..end]))
+            .arg(format!(
+                "checkout=\"$1\"\ncargo=\"$2\"\n{}",
+                &script[start..end]
+            ))
             .arg("sh")
             .arg(checkout)
+            .arg(cargo)
             .output()
             .unwrap();
         assert!(
@@ -896,7 +912,7 @@ pub(crate) mod tests {
                 == format!("install: Rust binary from {}\n", own.display())
         };
         edit("// one\n");
-        install_sh_stamp(&checkout);
+        install_sh_stamp(&checkout, "true");
         assert_eq!(mode(&stamp), 0o600);
         assert_eq!(
             fs::read_to_string(&stamp).unwrap(),
@@ -908,27 +924,41 @@ pub(crate) mod tests {
         );
         assert!(accepted(&machine));
         assert_eq!(runs(), 0);
+        // An input outside what the stamp covers means a real build, though the stamp matches.
+        let mut files = build_inputs(&checkout).unwrap();
+        assert!(own_build(&checkout, &machine, &files).is_some());
+        files.insert("docs/embedded.md".into(), Vec::new());
+        assert!(own_build(&checkout, &machine, &files).is_none());
         // An input edited after the stamp is rebuilt, however old its mtime.
         edit("// two\n");
         assert!(!accepted(&machine));
         assert_eq!(runs(), 1);
+        // An edit made while cargo builds is not stamped as built.
+        let editor = root.join("bin/editing-cargo");
+        script(
+            &editor,
+            &format!("printf '// during\\n' > '{}'\n", lib.display()),
+        );
+        install_sh_stamp(&checkout, editor.to_str().unwrap());
+        assert!(!accepted(&machine));
+        assert_eq!(runs(), 2);
         // A fresh stamp is trusted again.
         edit("// three\n");
-        install_sh_stamp(&checkout);
+        install_sh_stamp(&checkout, "true");
         assert!(accepted(&machine));
         // A binary changed after its stamp, a missing stamp, or another running binary means a real build.
         edit("// four\n");
-        install_sh_stamp(&checkout);
+        install_sh_stamp(&checkout, "true");
         fs::write(&own, "changed build").unwrap();
         assert!(!accepted(&machine));
         edit("// five\n");
         fs::remove_file(&stamp).unwrap();
         assert!(!accepted(&machine));
         edit("// six\n");
-        install_sh_stamp(&checkout);
+        install_sh_stamp(&checkout, "true");
         machine.exe = Some(root.join("elsewhere/factory"));
         assert!(!accepted(&machine));
-        assert_eq!(runs(), 4);
+        assert_eq!(runs(), 5);
         fs::remove_dir_all(root).unwrap();
     }
 

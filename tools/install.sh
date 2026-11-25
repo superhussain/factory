@@ -16,16 +16,17 @@ if [ -z "$cargo" ]; then
   echo "install: cargo not found; install rustup with curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh (see https://rustup.rs), then run the install again" >&2
   exit 2
 fi
+# The stamp factory install checks before it trusts this build: a hash of every file under rust/ but
+# rust/target and under skills/factory, then the binary's sha256. The inputs are hashed before the build, so
+# an edit made during it does not match. A changed input or binary means a rebuild.
+if command -v sha256sum >/dev/null 2>&1; then sum=sha256sum; else sum="shasum -a 256"; fi
+inputs=$(cd "$checkout" && find rust skills/factory -path rust/target -prune -o -type f -print0 | LC_ALL=C sort -z | xargs -0 $sum | $sum | cut -c1-64)
 # cwd is the workspace so rustup reads its rust-toolchain.toml. The build stays in rust/target, where
 # factory install recognizes its own fresh build and caches it instead of compiling the crate again.
 (unset CARGO_TARGET_DIR && cd "$checkout/rust" && "$cargo" build --profile host --locked)
-# The stamp factory install checks before it trusts this build: a hash of every file under rust/ but
-# rust/target and under skills/factory, then the binary's sha256. A changed input or binary means a rebuild.
-if command -v sha256sum >/dev/null 2>&1; then sum=sha256sum; else sum="shasum -a 256"; fi
 (
   cd "$checkout"
   umask 077
-  inputs=$(find rust skills/factory -path rust/target -prune -o -type f -print0 | LC_ALL=C sort -z | xargs -0 $sum | $sum | cut -c1-64)
   binary=$($sum < rust/target/host/factory | cut -c1-64)
   rm -f rust/target/host/factory.stamp
   printf '%s\n%s\n' "$inputs" "$binary" > rust/target/host/factory.stamp

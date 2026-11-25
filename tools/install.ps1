@@ -15,14 +15,9 @@ if (-not $cargo) {
   [Console]::Error.WriteLine('install: cargo not found; install rustup with rustup-init.exe from https://win.rustup.rs/x86_64 (see https://rustup.rs), then run the install again')
   exit 2
 }
-# cwd is the workspace so rustup reads its rust-toolchain.toml. The build stays in rust\target, where
-# factory install recognizes its own fresh build and caches it instead of compiling the crate again.
-Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
-Push-Location (Join-Path $checkout 'rust')
-try { & $cargo build --profile host --locked } finally { Pop-Location }
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # The stamp factory install checks before it trusts this build, computed as install.sh does: a hash of every
-# file under rust\ but rust\target and under skills\factory, then the binary's sha256.
+# file under rust\ but rust\target and under skills\factory, then the binary's sha256. The inputs are hashed
+# before the build, so an edit made during it does not match.
 $files = @(Get-ChildItem -LiteralPath (Join-Path $checkout 'rust') -Force | Where-Object Name -ne 'target' |
     ForEach-Object { if ($_.PSIsContainer) { Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Force } else { $_ } }) +
   @(Get-ChildItem -LiteralPath (Join-Path $checkout 'skills\factory') -Recurse -File -Force)
@@ -34,6 +29,12 @@ $lines = foreach ($rel in $rels) {
 }
 $digest = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes(-join $lines))
 $inputs = -join ($digest | ForEach-Object { $_.ToString('x2') })
+# cwd is the workspace so rustup reads its rust-toolchain.toml. The build stays in rust\target, where
+# factory install recognizes its own fresh build and caches it instead of compiling the crate again.
+Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
+Push-Location (Join-Path $checkout 'rust')
+try { & $cargo build --profile host --locked } finally { Pop-Location }
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $exe = Join-Path $checkout 'rust\target\host\factory.exe'
 $binary = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText("$exe.stamp", "$inputs`n$binary`n")
