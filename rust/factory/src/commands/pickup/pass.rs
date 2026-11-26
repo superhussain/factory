@@ -106,19 +106,25 @@ pub(super) fn waiting_until(j: &Value) -> Option<String> {
         .map(String::from)
 }
 
-/// The first depends-on id of an idea whose job is still open on the board, else None.
+/// The first depends-on id of an idea whose job is still open on the board and is not a draft
+/// PR, else None.
 pub(super) fn waiting_on(j: &Value, jobs: &[Value]) -> Option<String> {
     if get_str(j, "stage") != Some(IDEA) {
         return None;
     }
     let open = open_job_ids(jobs);
+    let drafts: Vec<&Value> = jobs
+        .iter()
+        .filter(|x| draft_pr(x))
+        .filter_map(|x| x.get("id"))
+        .collect();
     j.get("refs")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter(|r| get_str(r, "kind") == Some("depends-on"))
         .filter_map(|r| r.get("id"))
-        .find(|id| open.contains(id))
+        .find(|id| open.contains(id) && !drafts.contains(id))
         .map(|id| text_of(Some(id)))
 }
 

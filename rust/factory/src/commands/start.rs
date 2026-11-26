@@ -7,6 +7,7 @@ use crate::commands::claims::{board_write, hold_target, WriteOpts};
 use crate::commands::pipeline::{batch_cmd, documents_cmd, fetch_pipeline};
 use crate::commands::worktree::new_job_worktree;
 use crate::commands::{intake, lookup, sync};
+use crate::shared::board::{draft_pr, read_board};
 use crate::shared::exit::{fail, Res};
 use crate::shared::home::factory_home;
 use crate::shared::pyjson::{dumps, DEFAULT, INDENT2};
@@ -72,15 +73,29 @@ pub fn start(call_in: &Call) -> Res<()> {
     view.as_object_mut().unwrap().remove("prompts");
     println!("{}", dumps(&view, DEFAULT));
     header("board");
+    // Only an idea with a depends-on ref reads the whole board to find a draft parent.
+    let depends = row["refs"]
+        .as_array()
+        .is_some_and(|refs| refs.iter().any(|r| r["kind"] == "depends-on"));
+    let stack_base = if depends {
+        let board = read_board(&home)?;
+        let jobs = board["jobs"].as_array().map_or(&[][..], Vec::as_slice);
+        stack_parent(&row, jobs).map(|p| format!("factory/{p}"))
+    } else {
+        None
+    };
     let branch = format!("factory/{id}");
     let versions = view["versions"].clone();
-    let patch = Map::from_iter([
+    let mut patch = Map::from_iter([
         ("stage".to_string(), Value::from("spec")),
         ("round".to_string(), Value::from(0)),
         ("rounds".to_string(), Value::Array(Vec::new())),
         ("branch".to_string(), Value::from(branch.as_str())),
         ("pipeline".to_string(), versions.clone()),
     ]);
+    if let Some(base) = &stack_base {
+        patch.insert("stack_base".to_string(), Value::from(base.as_str()));
+    }
     board_write(
         &home,
         id,
@@ -91,17 +106,62 @@ pub fn start(call_in: &Call) -> Res<()> {
             rewrite_round: None,
         },
     )?;
+    let stacked = stack_base
+        .as_ref()
+        .map(|b| format!(", stacked on {b}"))
+        .unwrap_or_default();
     println!(
-        "stage spec, branch {branch}, pipeline {}",
+        "stage spec, branch {branch}{stacked}, pipeline {}",
         dumps(&versions, DEFAULT)
     );
     header("worktree");
-    println!("{}", new_job_worktree(&home, &project, id)?.display());
+    let wt = new_job_worktree(&home, &project, id, stack_base.as_deref())?;
+    println!("{}", wt.display());
     header("documents");
     documents_cmd(&call(&project))?;
     header("batch");
     batch_cmd(&call(&target))?;
     header("next");
     println!("pick batch riders, then run prompt {target} spec --out and agent record");
+    if let Some(base) = &stack_base {
+        println!("stacked: ship as a draft PR against {base} with automerge false and draft true");
+    }
     Ok(())
+}
+
+/// The first depends-on id of row whose job is a draft PR, which the new job stacks on.
+fn stack_parent(row: &Value, jobs: &[Value]) -> Option<String> {
+    row.get("refs")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter(|r| r.get("kind").and_then(Value::as_str) == Some("depends-on"))
+        .filter_map(|r| r.get("id").and_then(Value::as_str))
+        .find(|id| {
+            jobs.iter()
+                .any(|j| j.get("id").and_then(Value::as_str) == Some(id) && draft_pr(j))
+        })
+        .map(String::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn stack_parent_picks_draft_dependency() {
+        let row = json!({"id": "301-proto-pacing-chart", "stage": "idea", "refs": [
+            {"id": "299-other", "kind": "rework-of"},
+            {"id": "250-ready", "kind": "depends-on"},
+            {"id": "300-proto-pacing", "kind": "depends-on"},
+        ]});
+        let jobs = [
+            json!({"id": "299-other", "stage": "pr-open", "draft": true}),
+            json!({"id": "250-ready", "stage": "pr-open", "draft": false}),
+            json!({"id": "300-proto-pacing", "stage": "pr-open", "draft": true}),
+        ];
+        assert_eq!(stack_parent(&row, &jobs), Some("300-proto-pacing".into()));
+        assert_eq!(stack_parent(&row, &jobs[..2]), None);
+        assert_eq!(stack_parent(&json!({"id": "302-x"}), &jobs), None);
+    }
 }

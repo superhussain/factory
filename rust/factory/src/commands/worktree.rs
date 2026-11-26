@@ -311,8 +311,14 @@ fn worktree_in(home: &Path, slug: &str, job_id: &str) -> Res<PathBuf> {
     Ok(wt)
 }
 
-/// Create a new job's worktree on a new factory/<id> branch from the freshly fetched origin/<base>.
-pub(crate) fn new_job_worktree(home: &Path, slug: &str, job_id: &str) -> Res<PathBuf> {
+/// Create a new job's worktree on a new factory/<id> branch from the freshly fetched origin/<base>,
+/// or from the freshly fetched origin/<stack_on> when it stacks on another job's branch.
+pub(crate) fn new_job_worktree(
+    home: &Path,
+    slug: &str,
+    job_id: &str,
+    stack_on: Option<&str>,
+) -> Res<PathBuf> {
     let repo = checkout_of(home, slug)?;
     let branch = format!("factory/{job_id}");
     if let Some(problem) = checkout_problem(home, slug, &repo, Some(&branch))? {
@@ -326,7 +332,20 @@ pub(crate) fn new_job_worktree(home: &Path, slug: &str, job_id: &str) -> Res<Pat
             6,
         ));
     }
-    let base = format!("origin/{}", project_base(home, slug)?);
+    let base = match stack_on {
+        Some(b) => {
+            origin_git(
+                Path::new(&repo),
+                &[
+                    "fetch",
+                    "origin",
+                    &format!("+refs/heads/{b}:refs/remotes/origin/{b}"),
+                ],
+            )?;
+            format!("origin/{b}")
+        }
+        None => format!("origin/{}", project_base(home, slug)?),
+    };
     git_ok(
         Path::new(&repo),
         &["worktree", "add", "-b", &branch, &wt_text, &base],
@@ -1625,7 +1644,7 @@ mod tests {
         let t = Lineage::new("wt-new-job");
         let origin_head = commit(&t.seed, "origin moves");
         sh_git(&t.seed, &["push", "-q", "origin", "main"]);
-        let wt = new_job_worktree(&t.home, "factory", JOB).unwrap();
+        let wt = new_job_worktree(&t.home, "factory", JOB, None).unwrap();
         assert_eq!(wt, t.home.join("worktrees/factory").join(JOB));
         assert_eq!(sh_git(&wt, &["rev-parse", "HEAD"]), origin_head);
         assert_eq!(
@@ -1634,13 +1653,27 @@ mod tests {
         );
         sh_git(&t.repo, &["worktree", "remove", &text(&wt)]);
         fs::create_dir_all(&wt).unwrap();
-        let e = new_job_worktree(&t.home, "factory", JOB).unwrap_err();
+        let e = new_job_worktree(&t.home, "factory", JOB, None).unwrap_err();
         assert_eq!(
             (e.code, e.stderr),
             (
                 6,
                 format!("{} already exists. Nothing was changed\n", wt.display())
             )
+        );
+    }
+
+    #[test]
+    fn new_job_worktree_stack_on_a_job_branch() {
+        let t = Lineage::new("wt-new-stacked");
+        let parent = format!("factory/{JOB}");
+        let parent_head = push_job(&t, "draft prototype");
+        let child = "301-proto-pacing-chart";
+        let wt = new_job_worktree(&t.home, "factory", child, Some(&parent)).unwrap();
+        assert_eq!(sh_git(&wt, &["rev-parse", "HEAD"]), parent_head);
+        assert_eq!(
+            sh_git(&wt, &["rev-parse", "--abbrev-ref", "HEAD"]),
+            format!("factory/{child}")
         );
     }
 

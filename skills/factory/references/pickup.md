@@ -84,7 +84,8 @@ Each run, in order:
   `/factory idea <id>`. They follow the same skips, claim and caps as ideas.
 - Skips ideas that are gated, held by a live claim, waiting on a human, or whose
   `not_before` is still in the future (`skip <id> <project>: not before <time>`), or
-  that depend on a job still open on the board (`skip <id> <project>: waits on <dep-id>`), and
+  that depend on a job still open on the board (`skip <id> <project>: waits on <dep-id>`),
+  except a `pr-open` job with `draft` true, and
   projects whose effective pipeline has pickup off, does not list this host, or
   cannot be read. Each skip reason is printed once and the run goes on.
 - Holds back batchable ideas: an idea with a `follow-up-of` ref, or one backlog
@@ -104,7 +105,8 @@ Each run, in order:
   <id>", or "Batch ready" on the one pickup launches next.
 - Holds back plain ideas while review falls behind. Pickup counts, per project,
   the jobs that wait on you, as the dashboard's Needs you column does:
-  `needs-human`, a set `needs`, or an escalated `pr-open` PR. Only the idea's own
+  `needs-human`, a set `needs`, or an escalated `pr-open` PR, except a `pr-open`
+  job with `draft` true. Only the idea's own
   project counts, so one project's review queue never pauses another. At or
   above that project's effective pipeline `backpressure.needs_you` (a whole number from 1 to 50,
   default 5), it skips each idea with

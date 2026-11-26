@@ -2288,10 +2288,12 @@ function ideaBody(j) {
 
 const asks = (s) => typeof s === 'string' && s.trim() !== '';
 
-// A job waiting on you. Terminal jobs never wait. The note prefix matches the runtime's escalated(),
-// which covers jobs from before the escalated field.
+// A job waiting on you. Terminal jobs and draft PRs never wait. The note prefix matches the runtime's
+// escalated(), which covers jobs from before the escalated field. Change both together with
+// worker/push.js waitsOnYou.
 function waitsOnYou(j) {
   if (TERMINAL.includes(j.stage)) return false;
+  if (j.stage === 'pr-open' && j.draft === true) return false;
   return j.stage === 'needs-human' || asks(j.needs) ||
     (j.stage === 'pr-open' && (j.escalated === true || /^escalated:/i.test(String(j.note ?? ''))));
 }

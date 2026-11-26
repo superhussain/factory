@@ -10,7 +10,9 @@ use serde_json::{json, Value};
 use crate::cli::Call;
 use crate::commands::claims::{self, held_by, mine};
 use crate::commands::sync::{push_target, sync_problems, sync_state};
-use crate::shared::board::{dump_board, escalated, lead_of, load_board, patch_job, read_board};
+use crate::shared::board::{
+    draft_pr, dump_board, escalated, lead_of, load_board, patch_job, read_board,
+};
 use crate::shared::board_client;
 use crate::shared::conf::{fm_get, read_env_ordered};
 use crate::shared::consts::{
@@ -622,6 +624,9 @@ fn halt_cmd_in(home: &Path, args: &[String]) -> Res<()> {
 /// A job waiting on a person, as the dashboard's waitsOnYou reads it.
 fn waits_on_you(j: &Value) -> bool {
     if has_str(TERMINAL, j.get("stage")) {
+        return false;
+    }
+    if draft_pr(j) {
         return false;
     }
     get_str(j, "stage") == Some("needs-human")
@@ -2580,19 +2585,25 @@ fn babysitting(j: &Value) -> bool {
     dated(j, "babysit")
 }
 
-/// The first depends-on id of an idea whose job is still open on the board, else None.
+/// The first depends-on id of an idea whose job is still open on the board and is not a draft
+/// PR, else None.
 fn waiting_on(j: &Value, jobs: &[Value]) -> Option<String> {
     if get_str(j, "stage") != Some(IDEA) {
         return None;
     }
     let open = open_job_ids(jobs);
+    let drafts: BTreeSet<&str> = jobs
+        .iter()
+        .filter(|x| draft_pr(x))
+        .filter_map(|x| get_str(x, "id"))
+        .collect();
     j.get("refs")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter(|r| r.is_object() && get_str(r, "kind") == Some("depends-on"))
         .filter_map(|r| get_str(r, "id"))
-        .find(|id| open.contains(*id))
+        .find(|id| open.contains(*id) && !drafts.contains(id))
         .map(String::from)
 }
 
@@ -6432,6 +6443,33 @@ mod tests {
     #[test]
     fn empty_board() {
         assert_eq!(inbox_count(&[], ""), 0);
+    }
+
+    fn proto(stage: &str, draft: bool) -> Value {
+        json!({"id": "300-proto-pacing", "stage": stage, "escalated": true, "draft": draft,
+               "needs": "review the prototype PR #70"})
+    }
+
+    #[test]
+    fn draft_pr_leaves_inbox() {
+        assert_eq!(inbox_count(&[proto("pr-open", true)], ""), 0);
+        assert_eq!(inbox_count(&[proto("pr-open", false)], ""), 1);
+    }
+
+    #[test]
+    fn draft_needs_human_stays_in_inbox() {
+        assert_eq!(inbox_count(&[proto("needs-human", true)], ""), 1);
+    }
+
+    #[test]
+    fn draft_dependency_runs() {
+        let chart = json!({"id": "301-proto-pacing-chart", "stage": "idea",
+                           "refs": [{"id": "300-proto-pacing", "kind": "depends-on"}]});
+        assert_eq!(waiting_on(&chart, &[proto("pr-open", true)]), None);
+        assert_eq!(
+            waiting_on(&chart, &[proto("pr-open", false)]),
+            Some("300-proto-pacing".into())
+        );
     }
 
     #[test]

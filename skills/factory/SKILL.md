@@ -345,6 +345,10 @@ patch exits non-zero, or when you need a field's meaning.
   every PR for a person`. The orchestrator never merges it. Pickup, or an agent
   seeing it first, moves it to `merged` or `closed` ([sync](references/pickup.md#syncing-pr-state)).
   An agent that moves it runs `cleanup`.
+  When the job has `stack_base`, run `gh pr create -R "$REPO" --draft --head factory/<id> --base <stack_base>`
+  and patch `draft` true and `automerge` false with stage `pr-open`, with no `needs` or
+  `escalated`. Any draft PR ships with `draft` true, and whoever marks it ready patches
+  `{"draft": null}`.
   When `batch <project>/<id>` prints any `riders`, the description also has a
   `Batched ideas` list with one `- <id>: <title>` line per rider.
 - Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
