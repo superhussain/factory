@@ -488,14 +488,7 @@ fn catch_up_repo(home: &Path) -> Res<(String, PathBuf)> {
     paths.sort();
     for (slug, repo) in paths {
         let repo = PathBuf::from(repo);
-        if CHECKOUT_SLUG.is_full(&slug)
-            && repo.join("rust").join("Cargo.toml").is_file()
-            && repo
-                .join("skills")
-                .join("factory")
-                .join("SKILL.md")
-                .is_file()
-        {
+        if CHECKOUT_SLUG.is_full(&slug) && factory_checkout(&repo) {
             return Ok((slug, repo));
         }
     }
@@ -503,6 +496,16 @@ fn catch_up_repo(home: &Path) -> Res<(String, PathBuf)> {
         "no factory checkout in paths.md; run factory init <factory checkout>",
         1,
     ))
+}
+
+/// Whether repo holds the factory crate and skill.
+pub(crate) fn factory_checkout(repo: &Path) -> bool {
+    repo.join("rust").join("Cargo.toml").is_file()
+        && repo
+            .join("skills")
+            .join("factory")
+            .join("SKILL.md")
+            .is_file()
 }
 
 /// The argv prefix that runs an installed bundle: its bundle.json entry when valid, else its binary.
