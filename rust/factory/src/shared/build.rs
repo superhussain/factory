@@ -925,7 +925,7 @@ pub(crate) mod tests {
         assert!(accepted(&machine));
         assert_eq!(runs(), 0);
         // An input outside what the stamp covers means a real build, though the stamp matches.
-        let mut files = build_inputs(&checkout).unwrap();
+        let files = build_inputs(&checkout).unwrap();
         assert!(own_build(&checkout, &machine, &files).is_some());
         for outside in ["docs/embedded.md", "rust/target/embedded.md"] {
             let mut files = files.clone();
