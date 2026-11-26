@@ -153,17 +153,7 @@ on its own where it is installed:
 - `pull "$SLUG/<id>"` downloads what changed in R2 and keeps local edits, and
   `sync "$SLUG"` does that for every job of the project that is not `merged` or
   `closed`. Pull a finished job by id.
-- Where the daemon runs, it pushes a changed job folder about 3 s after its
-  last write. It pulls a job when its board row changes, unless a live
-  session here holds it. `pull` before editing, or the edit conflicts. Still
-  run `push` after writing.
-- When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
-  the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
-  each file; `push` refuses it while the `.remote` waits. Diff the two. If every
-  difference is text you wrote, or you never edited the file, run `"$RUNTIME"
-  keep-remote "$SLUG/<id>" <file>` to save R2's copy, then delete the
-  `.remote` or move it over the file you never edited, then push.
-  Otherwise set `needs-human`. For an image, run it and keep either.
+- On a daemon host, or when `push`, `pull`, `sync` or `hold` exits 6 with a `<file>.remote` copy, follow [job folder sync](references/pickup.md#job-folder-sync).
 
 - In a UI job, the builder saves screenshots in `$JOBS/<id>/` and embeds them in
   build.md as a `| Before | After |` table. The builder never uploads to the public image host.
