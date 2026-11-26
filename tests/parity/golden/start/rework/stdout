@@ -1,0 +1,39 @@
+== where
+{
+  "factory": "{home}",
+  "runtime": "{runtime}",
+  "project_file": "{home}/projects/sample.md",
+  "repo_path": "checkout",
+  "repo": "octo/sample",
+  "base": "main",
+  "slug": "sample",
+  "jobs": "{home}/jobs/sample",
+  "worktrees": "{home}/worktrees/sample",
+  "dashboard": "{api}/"
+}
+== hold
+held sample/001-test as parity session s1
+elapsed 0s
+pulled 0 files
+== job
+{
+  "id": "001-test",
+  "project": "sample",
+  "stage": "idea",
+  "title": "Add a dark mode",
+  "idea": "Add a dark mode toggle",
+  "updated": "2026-11-01T00:00:00Z",
+  "claim": {
+    "device": "parity",
+    "session": "s1",
+    "since": "2026-10-01T00:00:00Z",
+    "seen": "2999-01-01T00:00:00Z"
+  },
+  "backlog": {
+    "decision": "rework",
+    "notes": "Make it a setting"
+  },
+  "started": "2999-01-01T00:00:00Z"
+}
+== next
+rework: 001-test has backlog decision rework; run backlog rework as idea.md step 2 says. Nothing was promoted.
