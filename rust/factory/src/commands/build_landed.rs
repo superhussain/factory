@@ -1,6 +1,76 @@
 //! The build-landed command: hold the job, read the latest build.md run line, push the branch
 //! and the job folder.
 
+use crate::cli::Call;
+use crate::commands::claims::hold_target;
+use crate::commands::sync::push_target;
+use crate::shared::exit::{fail, Res};
+use crate::shared::fs::{is_link, read_text};
+use crate::shared::proc::{git, origin_git};
+use crate::shared::project::{r2_target, safe_job_folder};
+
+pub fn build_landed(call: &Call) -> Res<()> {
+    let target = call.args[0].as_str();
+    let (home, slug, id) = r2_target(target, true)?;
+    println!("== hold");
+    hold_target(target, None)?;
+    println!("== build.md");
+    let path = safe_job_folder(&home, &slug, &id)?.join("build.md");
+    let no_run = || {
+        fail(
+            format!(
+                "no run section with a first line in {}; nothing was pushed",
+                path.display()
+            ),
+            4,
+        )
+    };
+    if is_link(&path).unwrap_or(true) {
+        return Err(no_run());
+    }
+    let text = read_text(&path).map_err(|_| no_run())?;
+    let (run, line) = latest_run_line(&text).ok_or_else(no_run)?;
+    println!("{run}: {line}");
+    println!("== git push");
+    let wt = home.join("worktrees").join(&slug).join(&id);
+    if !wt.is_dir() {
+        return Err(fail(
+            format!("no worktree at {}; nothing was pushed", wt.display()),
+            4,
+        ));
+    }
+    let branch = format!("factory/{id}");
+    let head = git(
+        &wt,
+        &["rev-parse", "--short", &format!("refs/heads/{branch}")],
+    );
+    if head.is_empty() {
+        return Err(fail(
+            format!("no branch {branch} in {}; nothing was pushed", wt.display()),
+            4,
+        ));
+    }
+    origin_git(
+        &wt,
+        &[
+            "push",
+            "-q",
+            "origin",
+            &format!("refs/heads/{branch}:refs/heads/{branch}"),
+        ],
+    )?;
+    println!("pushed {branch} {head}");
+    println!("== push");
+    push_target(target)?;
+    println!("== next");
+    if line.starts_with("BLOCKED:") || line.starts_with("BLOCKED-ENV:") {
+        println!("blocked: act on the {run} line as feature.md step 3 says; start no pre-review");
+    } else {
+        println!("run pre-review {target} in the background");
+    }
+    Ok(())
+}
+
 /// ("Run N", the first non-empty line after the last `## Run N` heading).
 pub(crate) fn latest_run_line(text: &str) -> Option<(String, String)> {
     let lines: Vec<&str> = text.lines().collect();
