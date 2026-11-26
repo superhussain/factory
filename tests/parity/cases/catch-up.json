@@ -124,6 +124,14 @@
             "stderr": "",
             "code": 0
           }
+        ],
+        "paseo": [
+          {
+            "argv": ["schedule", "ls", "--json"],
+            "stdout": "[]",
+            "stderr": "",
+            "code": 0
+          }
         ]
       },
       "skill": "{tmp}/skill/factory",
@@ -211,6 +219,14 @@
               "example/factory"
             ],
             "stdout": "[{\"databaseId\":7,\"status\":\"in_progress\",\"conclusion\":\"\",\"attempt\":1,\"url\":\"https://github.com/example/factory/actions/runs/7\"}]",
+            "stderr": "",
+            "code": 0
+          }
+        ],
+        "paseo": [
+          {
+            "argv": ["schedule", "ls", "--json"],
+            "stdout": "[]",
             "stderr": "",
             "code": 0
           }
