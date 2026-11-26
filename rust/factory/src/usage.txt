@@ -164,6 +164,8 @@ usage:
                                             publish a checkpoint and release this session's claim
   factory worktree <project-slug>/<job-id>
                                             create or fast-forward the job's worktree from origin
+  factory start <job-id>                    promote an idea: job, where, hold, sync, spec board patch,
+                                            worktree, documents and batch candidates in one call
   factory job <job-id>                      print one job's board entry as JSON
   factory inbox                             print the dashboard Inbox count across all projects and
                                             the jobs waiting on a person as JSON

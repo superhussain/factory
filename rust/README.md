@@ -57,6 +57,7 @@ Each port slice owns one command file. `cli.rs` and `commands/mod.rs` already po
 | `wait.rs` | wait, watch, round-wait |
 | `checks.rs` | checks, pr-state, pr-queue |
 | `worktree.rs` | worktree, cleanup |
+| `start.rs` | start |
 | `pickup.rs` | pickup |
 | `tracer.rs` | tracer |
 | `retro.rs` | retro |
