@@ -4339,7 +4339,16 @@ mod retro_catchup_test {
     fn setup() -> Fx {
         let fx = Fx::new();
         fs::write(fx.home.join(RETRO_PROMPT_FILE), PROMPT).unwrap();
+        factory_repo(&fx.repo_a);
         fx
+    }
+
+    /// Makes repo hold the factory crate and skill, as a factory checkout does.
+    fn factory_repo(repo: &Path) {
+        fs::create_dir_all(repo.join("rust")).unwrap();
+        fs::write(repo.join("rust/Cargo.toml"), "").unwrap();
+        fs::create_dir_all(repo.join("skills/factory")).unwrap();
+        fs::write(repo.join("skills/factory/SKILL.md"), "").unwrap();
     }
 
     fn due_at(fx: &Fx, day: i64, hour: i64, minute: i64) -> bool {
@@ -4494,6 +4503,51 @@ mod retro_catchup_test {
     }
 
     #[test]
+    fn test_a_checkout_listed_before_factory_is_passed_over() {
+        let fx = setup();
+        force_due(&fx);
+        let other = fx.root.join("repo-b");
+        fs::write(
+            fx.home.join("paths.md"),
+            format!(
+                "---\nexample-app: {}\nfactory: {}\n---\n",
+                other.display(),
+                fx.repo_a.display()
+            ),
+        )
+        .unwrap();
+        let (code, _, err) = fx.pickup(&[]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        let records = fx.launched();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].cwd, fx.repo_a.display().to_string());
+        assert_eq!(records[0].argv[1], "factory");
+    }
+
+    #[test]
+    fn test_no_factory_checkout_waits_instead_of_another_repo() {
+        let fx = setup();
+        force_due(&fx);
+        fs::write(
+            fx.home.join("paths.md"),
+            format!(
+                "---\nexample-app: {}\n---\n",
+                fx.root.join("repo-b").display()
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            fx.pickup(&[]),
+            out_err(
+                0,
+                "",
+                "retro catch-up waits: no factory checkout in paths.md\n"
+            )
+        );
+        assert!(fx.launched().is_empty());
+    }
+
+    #[test]
     fn test_a_second_run_the_same_day_launches_nothing() {
         let fx = setup();
         fs::write(
@@ -4602,14 +4656,18 @@ mod retro_catchup_test {
         fx.set_fakes(|f| f.read_paths = Some(Rc::new(|_| Vec::new())));
         assert_eq!(
             fx.pickup(&[]),
-            out_err(0, "", "retro catch-up waits: no checkout in paths.md\n")
+            out_err(
+                0,
+                "",
+                "retro catch-up waits: no factory checkout in paths.md\n"
+            )
         );
         assert!(!fx.home.join(RETRO_CATCHUP_FILE).exists());
         assert!(fx.launched().is_empty());
         assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
         assert_eq!(
             read_json(&fx.home.join(RETRO_WAIT_FILE)).unwrap(),
-            wait_record("no checkout in paths.md")
+            wait_record("no factory checkout in paths.md")
         );
     }
 
@@ -4628,7 +4686,11 @@ mod retro_catchup_test {
         });
         assert_eq!(
             fx.pickup(&[]),
-            out_err(0, "", "retro catch-up waits: no checkout in paths.md\n")
+            out_err(
+                0,
+                "",
+                "retro catch-up waits: no factory checkout in paths.md\n"
+            )
         );
         assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
     }

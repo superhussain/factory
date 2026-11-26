@@ -53,7 +53,20 @@ rewrites the pickup timer if the host has one, and catch-up checks the Worker's
 `runtime/factory.py` (the crontab, `~/Library/LaunchAgents/factory.*.plist`,
 `~/.config/systemd/user/factory-*.service` and `~/.config/factory-*.cmd`) and a
 `stalls.json` adapter that runs `runtime/paseo_stalls.py`, so they run the binary
-beside it, and reloads launchd and systemd. It prints one `timers:` line for each. A host with nothing new prints `catch-up: nothing new` and
+beside it, and reloads launchd and systemd. It prints one `timers:` line for each.
+When `<home>/retro-schedule-prompt.md` differs from the installed `schedules/retro.md`
+with `<installed-skill>` and `<home>` filled in, catch-up and `install` copy the old
+file to `<home>/backups/retro-prompt-<stamp>` and rewrite it. `install` does so only
+when it installs this host's own skill: the one the prompt already runs, or
+`~/.agents/skills/factory` or `~/.claude/skills/factory`. Catch-up then reads
+this host's Paseo schedules, skipping completed ones. It replaces the prompt of factory's own retro schedule
+(its prompt starts with the template's heading, or its name starts with
+`Factory retro`) when the prompt names `factory.py`, after saving the old one to
+`<home>/backups/paseo-schedules-<stamp>`. Any other schedule that names `factory.py`
+gets one `paseo schedules:` line naming its id and how to fix it; catch-up never edits
+it. Without Paseo it prints one `paseo schedules: skipped` line and fails nothing.
+`doctor` prints a `doctor:` line on stderr for each stored prompt or schedule that
+still names `factory.py`. A host with nothing new prints `catch-up: nothing new` and
 writes nothing else. Every run, even one with nothing new, first deletes `catch-up-*` copies
 over a day old under `<home>/tmp` and prints `skill: removed <n> leftover binary copies over a
 day old from <home>/tmp` when it removed any.

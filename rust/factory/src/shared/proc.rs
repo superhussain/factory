@@ -138,8 +138,13 @@ pub fn origin_git(repo: &Path, args: &[&str]) -> Res<String> {
 
 /// (exit code, stdout) of one paseo command, or (1, "") when it cannot run.
 pub fn paseo_run(args: &[&str]) -> (i32, String) {
+    paseo_run_with("paseo", args)
+}
+
+/// `paseo_run` with the paseo binary at bin.
+pub fn paseo_run_with(bin: &str, args: &[&str]) -> (i32, String) {
     let home = std::env::var("PASEO_HOME").unwrap_or_default();
-    let mut argv = vec!["paseo"];
+    let mut argv = vec![bin];
     if !home.is_empty() {
         argv.extend(["--home", home.as_str()]);
     }

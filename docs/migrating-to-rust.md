@@ -262,7 +262,10 @@ Fix them:
   with `<installed-skill>\runtime\factory.exe`. Keep the arguments. On macOS, load
   a changed plist again with `launchctl bootout` and `launchctl bootstrap`.
 - **Prompts.** Agents resolve the binary with `where`, which prints it as
-  `runtime`. Replace a hard-coded `factory.py` path with that value.
+  `runtime`. Replace a hard-coded `factory.py` path with that value. Catch-up
+  rewrites `<home>/retro-schedule-prompt.md` and factory's own Paseo retro
+  schedule for you, and names each other Paseo schedule that still runs
+  `factory.py`. `doctor` lists what is left.
 
 ## Roll back
 

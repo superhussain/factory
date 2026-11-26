@@ -5,7 +5,10 @@ installed automation. Materialize `<installed-skill>` and an
 available user-configured dispatch route before creating or refreshing one.
 Stop before claiming if any value is unresolved. See
 [integrations](integrations.md) for setup and explicit refresh by the
-existing schedule ID. Reinstalling the skill never refreshes stored prompts.
+existing schedule ID. Reinstalling the skill never refreshes stored prompts, except the retro prompt:
+`install` and `catch-up` rewrite `<home>/retro-schedule-prompt.md` from
+`schedules/retro.md` after a backup, and `catch-up` also replaces the prompt of
+factory's own Paseo retro schedule when it still names `factory.py`.
 A host acts only on projects with local checkouts in `paths.md`. `no ideas`
 means no runnable ideas here, not an empty board. Unassigned ideas stay put.
 Ideas are picked up by `factory pickup`, a model-free host timer; see [references/pickup.md](pickup.md). `schedules/resume.md`, `schedules/explore.md` and `schedules/retro.md` are the shipped prompt templates.
@@ -25,8 +28,9 @@ Pickup also pushes this host's retro digest on its first run of each local date 
 run goes on. On the host that keeps `<home>/retro-schedule-prompt.md`, pickup
 catches up a missed weekday retro: from 09:30 local, when no retro run folder
 carries today's date and `<home>/retro-catchup.json` does not record today, it
-launches that prompt once through the first route's launcher as `retro-<YYYYMMDD>`.
-While no route or checkout is available, it prints why it waits once per local date
+launches that prompt once through the first route's launcher as `retro-<YYYYMMDD>`,
+in the first paths.md checkout that holds the factory crate and skill, never another
+repo. While no route or factory checkout is available, it prints why it waits once per local date
 and reason, recorded in `<home>/retro-catchup-wait.json`. `pickup --dry-run` prints
 it every time and records nothing.
 

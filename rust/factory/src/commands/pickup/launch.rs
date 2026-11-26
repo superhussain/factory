@@ -10,7 +10,7 @@ pub(super) const AGENT_ROWS_MAX: usize = 32;
 pub(super) const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
-pub(super) const RETRO_PROMPT_FILE: &str = "retro-schedule-prompt.md";
+pub(crate) const RETRO_PROMPT_FILE: &str = "retro-schedule-prompt.md";
 pub(super) const RETRO_CATCHUP_FILE: &str = "retro-catchup.json";
 pub(super) const RETRO_WAIT_FILE: &str = "retro-catchup-wait.json";
 pub(super) const RETRO_CATCHUP_AFTER: (i64, i64) = (9, 30);

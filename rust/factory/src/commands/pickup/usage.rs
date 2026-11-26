@@ -1,4 +1,5 @@
 use super::*;
+use crate::commands::catch_up::factory_checkout;
 
 /// A message or tool_result content as text: a string, or its joined text blocks.
 pub(super) fn retro_text(content: Option<&Value>) -> String {
@@ -121,8 +122,12 @@ pub(super) fn retro_pickup_catchup(io: &mut Io, home: &Path, dry: bool) {
         let Some(route) = pick_route(home)? else {
             return retro_catchup_wait(io, home, &local, "no available route", dry);
         };
-        let Some((slug, path)) = paths_of(home)?.into_iter().find(|(_, p)| is_dir(p)) else {
-            return retro_catchup_wait(io, home, &local, "no checkout in paths.md", dry);
+        // The retro runs in the factory repo, never in whichever checkout paths.md lists first.
+        let Some((slug, path)) = paths_of(home)?
+            .into_iter()
+            .find(|(_, p)| factory_checkout(Path::new(p)))
+        else {
+            return retro_catchup_wait(io, home, &local, "no factory checkout in paths.md", dry);
         };
         let template = route_launcher(home, &route)?;
         if dry {

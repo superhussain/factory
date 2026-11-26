@@ -15,10 +15,12 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::cli::Call;
-use crate::commands::catch_up::random_hex;
+use crate::commands::catch_up::{random_hex, refresh_retro_prompt};
+use crate::commands::pickup::RETRO_PROMPT_FILE;
 use crate::shared::build::{rust_binary, Host, BINARY};
 use crate::shared::exit::{Exit, Res};
-use crate::shared::fs::{is_link, readable, resolve};
+use crate::shared::fs::{is_link, read_text, readable, resolve};
+use crate::shared::home::factory_home;
 use crate::shared::proc::capture;
 use crate::shared::project::sha;
 use crate::shared::pyjson::{dumps, SORTED};
@@ -572,15 +574,50 @@ pub fn install(call: &Call) -> Res<()> {
     let build = |checkout: &Path, err: &mut dyn Write| {
         rust_binary(checkout, &host, err).map(|(_, bytes)| bytes)
     };
-    install_skill(
+    let target = install_skill(
         &checkout,
         &destination,
         replace,
         &build,
         &mut io::stdout().lock(),
         &mut io::stderr().lock(),
-    )
-    .map(|_| ())
+    )?;
+    // The skill is installed either way, so a prompt that cannot be rewritten only warns.
+    let Ok(home) = factory_home() else {
+        return Ok(());
+    };
+    if host_skill(
+        &home.join(RETRO_PROMPT_FILE),
+        &target,
+        std::env::home_dir().as_deref(),
+    ) {
+        match refresh_retro_prompt(&home, &target) {
+            Ok(Some(folder)) => println!(
+                "install: retro prompt rewritten; the old one is in {}",
+                folder.display()
+            ),
+            Ok(None) => {}
+            Err(e) => eprintln!("install: retro prompt left as is: {e}"),
+        }
+    }
+    Ok(())
+}
+
+/// Whether target is this host's own installed skill: the one the stored retro prompt already
+/// runs, or the documented default under `~/.agents/skills` or `~/.claude/skills`. An install
+/// anywhere else, such as a scratch folder, leaves the prompt alone.
+fn host_skill(prompt: &Path, target: &Path, user_home: Option<&Path>) -> bool {
+    let target = resolve(target).unwrap_or_else(|_| target.to_path_buf());
+    let runs = format!("{}/runtime/", target.display());
+    if read_text(prompt).is_ok_and(|t| t.contains(&runs)) {
+        return true;
+    }
+    user_home.is_some_and(|user| {
+        [".agents", ".claude"].iter().any(|d| {
+            let default = user.join(d).join("skills").join("factory");
+            resolve(&default).unwrap_or(default) == target
+        })
+    })
 }
 
 #[cfg(all(test, unix))]
@@ -1173,6 +1210,28 @@ mod tests {
         ] {
             assert!(feature.contains(rule), "{rule}");
         }
+    }
+    #[test]
+    fn only_the_host_skill_refreshes_the_retro_prompt() {
+        let root = temp_dir("install-host-skill");
+        let (real, scratch) = (root.join("real/factory"), root.join("scratch/factory"));
+        let prompt = root.join("retro-schedule-prompt.md");
+        fs::write(
+            &prompt,
+            format!(
+                "python3 {}/runtime/factory.py routes pick\n",
+                real.display()
+            ),
+        )
+        .unwrap();
+        assert!(host_skill(&prompt, &real, None));
+        assert!(!host_skill(&prompt, &scratch, None));
+        let user = root.join("user");
+        let default = user.join(".agents/skills/factory");
+        fs::create_dir_all(&default).unwrap();
+        assert!(host_skill(&prompt, &default, Some(&user)));
+        assert!(!host_skill(&prompt, &scratch, Some(&user)));
+        let _ = fs::remove_dir_all(&root);
     }
 }
 

@@ -329,4 +329,4 @@ use self::{
     babysit::*, close::*, launch::*, nudge::*, pass::*, passes::*, sync::*, upkeep::*, usage::*,
     zone::*,
 };
-pub(crate) use self::{frame::*, helpers::*, setup::*, stalls::*};
+pub(crate) use self::{frame::*, helpers::*, launch::RETRO_PROMPT_FILE, setup::*, stalls::*};
