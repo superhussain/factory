@@ -736,7 +736,7 @@ fn checks_are_sized_to_the_change() {
         ],
     );
     has(
-        &flat("SKILL.md"),
+        &flat("references/claims.md"),
         "A session already running babysit.md is the babysitter: it ignores the line and goes on with its loop.",
     );
 }

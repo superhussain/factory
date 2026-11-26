@@ -11,7 +11,7 @@ works from any directory.
    and stop. Read its `project` and `idea`.
 2. Run `where <project>`, then `hold <project>/<id> --session <tag>`. Pickup
    already claimed the job under that tag, so `hold` keeps the claim and pulls the
-   job folder, creating it if missing. Exit 6 follows the Claims table. Run by hand
+   job folder, creating it if missing. Exit 6 follows the [claims](../claims.md) table. Run by hand
    without a tag, `hold` claims the idea itself. Never run `claim`, since the id exists.
    After `hold` succeeds, rerun `job <id>` and read its latest claimed `idea`.
    Use that text for the spec writer, not the pre-claim snapshot, since an edit
