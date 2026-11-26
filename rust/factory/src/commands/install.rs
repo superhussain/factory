@@ -15,10 +15,11 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::cli::Call;
-use crate::commands::catch_up::random_hex;
+use crate::commands::catch_up::{random_hex, refresh_retro_prompt};
 use crate::shared::build::{rust_binary, Host, BINARY};
 use crate::shared::exit::{Exit, Res};
 use crate::shared::fs::{is_link, readable, resolve};
+use crate::shared::home::factory_home;
 use crate::shared::proc::capture;
 use crate::shared::project::sha;
 use crate::shared::pyjson::{dumps, SORTED};
@@ -572,15 +573,26 @@ pub fn install(call: &Call) -> Res<()> {
     let build = |checkout: &Path, err: &mut dyn Write| {
         rust_binary(checkout, &host, err).map(|(_, bytes)| bytes)
     };
-    install_skill(
+    let target = install_skill(
         &checkout,
         &destination,
         replace,
         &build,
         &mut io::stdout().lock(),
         &mut io::stderr().lock(),
-    )
-    .map(|_| ())
+    )?;
+    // The skill is installed either way, so a prompt that cannot be rewritten only warns.
+    if let Ok(home) = factory_home() {
+        match refresh_retro_prompt(&home, &target) {
+            Ok(Some(folder)) => println!(
+                "install: retro prompt rewritten; the old one is in {}",
+                folder.display()
+            ),
+            Ok(None) => {}
+            Err(e) => eprintln!("install: retro prompt left as is: {e}"),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(all(test, unix))]

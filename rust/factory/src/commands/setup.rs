@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 use crate::cli::Call;
 use crate::commands::lookup::{main_checkout, remotes};
-use crate::commands::pickup;
+use crate::commands::{catch_up, pickup};
 use crate::shared::board::read_board;
 use crate::shared::conf::{
     closed_frontmatter, fm_get, frontmatter, read_conf, read_env_ordered, unquote,
@@ -776,6 +776,9 @@ pub fn doctor_cmd(_call: &Call) -> Res<()> {
     }
     println!("{}", dumps(&report, DEFAULT));
     let stderr = io::stderr();
+    for line in catch_up::stale_prompts(&home) {
+        let _ = writeln!(stderr.lock(), "doctor: {line}");
+    }
     daemon_line(&mut stderr.lock(), stderr.is_terminal(), || {
         pickup::daemon_state(&home)
     });

@@ -17,9 +17,9 @@ use crate::commands::pickup;
 use crate::shared::build::{private_dir, rust_binary, Host, BINARY};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{exit, fail, Res};
-use crate::shared::fs::{is_link, read_text, resolve, temp_root};
+use crate::shared::fs::{is_link, read_text, resolve, temp_root, write_atomic};
 use crate::shared::home::factory_home;
-use crate::shared::proc::{capture, git, origin_git, Out};
+use crate::shared::proc::{capture, git, origin_git, paseo_run_with, Out};
 use crate::shared::project::{project_files, read_paths};
 use crate::shared::py::{os_error, repr, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, DEFAULT};
@@ -67,6 +67,7 @@ struct Fakes {
     install: Option<Rc<dyn Fn(&[String]) -> Out>>,
     spawn: Option<Rc<dyn Fn() -> Result<(), String>>>,
     locked_pid: Option<Rc<dyn Fn() -> Result<Option<u32>, String>>>,
+    paseo: Option<PathBuf>,
 }
 
 #[cfg(test)]
@@ -864,6 +865,181 @@ fn setup_run_input(argv: &[&str], input: &str) -> (i32, String) {
     pickup::setup_run(argv, Some(input))
 }
 
+// ---- stored schedule prompts that still run the Python runtime
+
+/// The first line of schedules/retro.md, which every prompt materialized from it keeps.
+const RETRO_HEADING: &str = "# Optional weekday retro schedule prompt";
+
+/// The installed skill's schedules/retro.md with `<installed-skill>` and `<home>` filled in.
+fn retro_prompt(home: &Path, skill: &Path) -> Result<String, String> {
+    let template = skill.join("schedules").join("retro.md");
+    let text = read_text(&template).map_err(|e| os_error(&e, Some(&template)))?;
+    let fill = |p: &Path| {
+        resolve(p)
+            .unwrap_or_else(|_| p.to_path_buf())
+            .to_string_lossy()
+            .into_owned()
+    };
+    Ok(text
+        .replace("<installed-skill>", &fill(skill))
+        .replace("<home>", &fill(home)))
+}
+
+/// Rewrites `<home>/retro-schedule-prompt.md` from the installed skill when the two differ, after
+/// copying the old file to a new backup folder. The backup folder, or None when this host keeps no
+/// prompt there or it already matches.
+pub(crate) fn refresh_retro_prompt(home: &Path, skill: &Path) -> Result<Option<PathBuf>, String> {
+    let path = home.join(pickup::RETRO_PROMPT_FILE);
+    if is_link(&path).unwrap_or(true) || !path.is_file() {
+        return Ok(None);
+    }
+    let new = retro_prompt(home, skill)?;
+    if read_text(&path).ok().as_deref() == Some(new.as_str()) {
+        return Ok(None);
+    }
+    let folder = backup_folder(home, "retro-prompt")?;
+    copy2(&path, &folder)?;
+    write_atomic(&path, new.as_bytes()).map_err(|e| os_error(&e, Some(&path)))?;
+    Ok(Some(folder))
+}
+
+/// One Paseo schedule whose stored prompt still names factory.py.
+pub(crate) struct PaseoLegacy {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) prompt: String,
+}
+
+/// This host's Paseo schedules whose prompt names factory.py, or why they could not be listed.
+pub(crate) fn paseo_legacy(paseo: &str) -> Result<Vec<PaseoLegacy>, String> {
+    let read = |args: &[&str]| {
+        let (code, out) = paseo_run_with(paseo, args);
+        let what = format!("paseo {} {}", args[0], args[1]);
+        match code {
+            0 => loads(&out).map_err(|_| format!("{what} printed no JSON")),
+            _ => Err(format!("{what} exited {code}")),
+        }
+    };
+    let list = read(&["schedule", "ls", "--json"])?;
+    let mut found = Vec::new();
+    for id in list
+        .as_array()
+        .ok_or("paseo schedule ls printed no list")?
+        .iter()
+        .filter_map(|s| s.get("id")?.as_str())
+    {
+        let one = read(&["schedule", "inspect", id, "--json"])?;
+        let text = |k: &str| one.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        if text("prompt").contains("factory.py") {
+            found.push(PaseoLegacy {
+                id: id.to_string(),
+                name: text("name"),
+                prompt: text("prompt"),
+            });
+        }
+    }
+    Ok(found)
+}
+
+/// Whether factory's retro template made this schedule: its prompt keeps the template's heading,
+/// or its name says so.
+fn factory_retro(s: &PaseoLegacy) -> bool {
+    s.prompt.starts_with(RETRO_HEADING) || s.name.to_lowercase().starts_with("factory retro")
+}
+
+/// One line for the stored retro prompt and each Paseo schedule on this host that still names
+/// factory.py. A Paseo that cannot list adds nothing.
+pub(crate) fn stale_prompts(home: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let path = home.join(pickup::RETRO_PROMPT_FILE);
+    if read_text(&path).is_ok_and(|t| t.contains("factory.py")) {
+        found.push(format!(
+            "{} still names factory.py; run factory catch-up",
+            path.display()
+        ));
+    }
+    if let Some(Ok(list)) = paseo_bin().map(|p| paseo_legacy(&p)) {
+        for s in list {
+            found.push(format!(
+                "paseo schedule {} ({}) still names factory.py; run factory catch-up",
+                s.id, s.name
+            ));
+        }
+    }
+    found
+}
+
+/// The paseo binary catch-up and doctor run. A test that fakes none never reaches this host's Paseo.
+fn paseo_bin() -> Option<String> {
+    #[cfg(test)]
+    return fake!(paseo).map(|p| p.to_string_lossy().into_owned());
+    #[cfg(not(test))]
+    Some("paseo".to_string())
+}
+
+/// Points factory's own retro schedule at the installed retro prompt, and names every other Paseo
+/// schedule that still runs factory.py. Fails nothing: Paseo is optional.
+fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) {
+    let Some(paseo) = paseo_bin() else { return };
+    let found = match paseo_legacy(&paseo) {
+        Ok(found) => found,
+        Err(why) => {
+            outln!(out, "paseo schedules: skipped, {why}");
+            return;
+        }
+    };
+    let (ours, others): (Vec<_>, Vec<_>) = found.into_iter().partition(factory_retro);
+    let skill_text = skill.to_string_lossy();
+    for s in &others {
+        outln!(
+            out,
+            "paseo schedules: {} ({}) still runs factory.py; in its prompt replace python3 {skill_text}/runtime/factory.py with {skill_text}/runtime/factory",
+            s.id,
+            s.name
+        );
+    }
+    if ours.is_empty() {
+        return;
+    }
+    let ready = retro_prompt(home, skill).and_then(|prompt| {
+        let folder = backup_folder(home, "paseo-schedules")?;
+        let saved: Vec<Value> = ours
+            .iter()
+            .map(|s| serde_json::json!({"id": s.id, "name": s.name, "prompt": s.prompt}))
+            .collect();
+        let path = folder.join("paseo-schedules.json");
+        fs::write(&path, dumps(&Value::Array(saved), DEFAULT) + "\n")
+            .map_err(|e| os_error(&e, Some(&path)))?;
+        Ok((prompt, folder))
+    });
+    let (prompt, folder) = match ready {
+        Ok(ready) => ready,
+        Err(e) => {
+            outln!(out, "paseo schedules: skipped, {e}");
+            return;
+        }
+    };
+    for s in &ours {
+        let (code, _) = paseo_run_with(&paseo, &["schedule", "update", &s.id, "--prompt", &prompt]);
+        if code == 0 {
+            outln!(
+                out,
+                "paseo schedules: {} ({}) now runs the installed retro prompt; its old prompt is in {}",
+                s.id,
+                s.name,
+                folder.display()
+            );
+        } else {
+            outln!(
+                out,
+                "paseo schedules: {} ({}) still runs factory.py; paseo schedule update exited {code}",
+                s.id,
+                s.name
+            );
+        }
+    }
+}
+
 /// (returncode, output) of gh on the GitHub repository owner/name slug.
 fn catch_up_gh(slug: &str, args: &[&str]) -> (i32, String) {
     #[cfg(test)]
@@ -1254,6 +1430,24 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             }
         }
     }
+
+    // Stored prompts are not timers: reinstalling the skill leaves them naming whatever it ran.
+    match refresh_retro_prompt(home, skill) {
+        Ok(Some(folder)) => {
+            wrote = true;
+            outln!(
+                out,
+                "retro prompt: rewritten from the installed skill; the old one is in {}",
+                folder.display()
+            );
+        }
+        Ok(None) => {}
+        Err(e) => {
+            failed += 1;
+            outln!(out, "retro prompt: {e}");
+        }
+    }
+    paseo_sweep(out, home, skill);
 
     let url = git(&repo, &["config", "--get", "remote.origin.url"]);
     let found = GITHUB.search(&url);
@@ -3443,5 +3637,190 @@ mod tests {
             "only the faked crontab still names factory.py"
         );
         FAKES.with(|f| *f.borrow_mut() = Fakes::default());
+    }
+
+    const OLD_RETRO: &str = "# Optional weekday retro schedule prompt\n\npython3 /old/skill/runtime/factory.py routes pick\n";
+
+    /// A fake paseo in t.root/paseo-fake: `schedule ls` and `schedule inspect <id>` print
+    /// ls.json and <id>.json beside it, `schedule update <id> --prompt <text>` saves the text as
+    /// update-<id>.txt, and an `ls.code` file makes ls exit with its code.
+    fn fake_paseo(t: &T, schedules: &[(&str, &str, &str)]) -> PathBuf {
+        let dir = t.root.join("paseo-fake");
+        fs::create_dir(&dir).unwrap();
+        let list: Vec<Value> = schedules
+            .iter()
+            .map(|(id, name, _)| json!({"id": id, "name": name, "status": "active"}))
+            .collect();
+        fs::write(dir.join("ls.json"), Value::Array(list).to_string()).unwrap();
+        for (id, name, prompt) in schedules {
+            let one = json!({"id": id, "name": name, "prompt": prompt});
+            fs::write(dir.join(format!("{id}.json")), one.to_string()).unwrap();
+        }
+        let bin = dir.join("paseo");
+        fs::write(
+            &bin,
+            r#"#!/bin/sh
+here=$(dirname "$0")
+[ "$1" = --home ] && shift 2
+case "$2" in
+  ls) [ -f "$here/ls.code" ] && exit "$(cat "$here/ls.code")"; cat "$here/ls.json" ;;
+  inspect) cat "$here/$3.json" ;;
+  update) printf '%s' "$5" > "$here/update-$3.txt" ;;
+  *) exit 2 ;;
+esac
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let fake = bin.clone();
+        FAKES.with(|f| f.borrow_mut().paseo = Some(fake));
+        bin
+    }
+
+    /// The installed retro template with this fixture's skill and home filled in.
+    fn materialized(t: &T) -> String {
+        fs::read_to_string(t.skill.join("schedules/retro.md"))
+            .unwrap()
+            .replace("<installed-skill>", text(&resolve(&t.skill).unwrap()))
+            .replace("<home>", text(&resolve(&t.home).unwrap()))
+    }
+
+    fn retro_backups(t: &T, kind: &str) -> Vec<PathBuf> {
+        t.backups()
+            .into_iter()
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(&format!("{kind}-"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stale_retro_prompt_is_rewritten_after_a_backup() {
+        let t = T::new("retro-prompt");
+        let path = t.home.join(pickup::RETRO_PROMPT_FILE);
+        fs::write(&path, OLD_RETRO).unwrap();
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0, "{out}");
+        let saved = retro_backups(&t, "retro-prompt");
+        assert_eq!(saved.len(), 1);
+        assert!(out.contains(&format!(
+            "retro prompt: rewritten from the installed skill; the old one is in {}\n",
+            saved[0].display()
+        )));
+        assert_eq!(fs::read_to_string(&path).unwrap(), materialized(&t));
+        assert!(!materialized(&t).contains("factory.py"));
+        assert_eq!(
+            fs::read_to_string(saved[0].join(pickup::RETRO_PROMPT_FILE)).unwrap(),
+            OLD_RETRO
+        );
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0);
+        assert!(!out.contains("retro prompt"), "{out}");
+        assert_eq!(retro_backups(&t, "retro-prompt").len(), 1);
+    }
+
+    #[test]
+    fn a_host_without_the_retro_prompt_gets_none() {
+        let t = T::new("no-retro-prompt");
+        assert_eq!(t.call().0, 0);
+        assert!(!t.home.join(pickup::RETRO_PROMPT_FILE).exists());
+    }
+
+    #[test]
+    fn paseo_retro_schedule_is_replaced_and_others_are_named() {
+        let t = T::new("paseo-sweep");
+        let bin = fake_paseo(
+            &t,
+            &[
+                (
+                    "0a1b2c3d",
+                    "Factory retro weekdays (example-host)",
+                    OLD_RETRO,
+                ),
+                ("1b2c3d4e", "Nightly retro", OLD_RETRO),
+                (
+                    "4e5f6a7b",
+                    "Workspace cleanup",
+                    "Run python3 /old/skill/runtime/factory.py cleanup.",
+                ),
+                ("8c9d0e1f", "Clean one", "Run factory cleanup."),
+            ],
+        );
+        let dir = bin.parent().unwrap();
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0, "{out}");
+        let saved = retro_backups(&t, "paseo-schedules");
+        assert_eq!(saved.len(), 1);
+        let skill = t.skill.display();
+        let lines: Vec<&str> = out.lines().filter(|l| l.starts_with("paseo")).collect();
+        assert_eq!(
+            lines,
+            [
+                format!("paseo schedules: 4e5f6a7b (Workspace cleanup) still runs factory.py; in its prompt replace python3 {skill}/runtime/factory.py with {skill}/runtime/factory"),
+                format!("paseo schedules: 0a1b2c3d (Factory retro weekdays (example-host)) now runs the installed retro prompt; its old prompt is in {}", saved[0].display()),
+                format!("paseo schedules: 1b2c3d4e (Nightly retro) now runs the installed retro prompt; its old prompt is in {}", saved[0].display()),
+            ]
+        );
+        for id in ["0a1b2c3d", "1b2c3d4e"] {
+            let sent = fs::read_to_string(dir.join(format!("update-{id}.txt"))).unwrap();
+            assert_eq!(sent, materialized(&t));
+        }
+        assert!(!dir.join("update-4e5f6a7b.txt").exists());
+        assert!(!dir.join("update-8c9d0e1f.txt").exists());
+        let old: Value = serde_json::from_str(
+            &fs::read_to_string(saved[0].join("paseo-schedules.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(old[0]["prompt"], OLD_RETRO);
+        assert_eq!(old.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn paseo_that_cannot_list_is_one_note() {
+        let t = T::new("paseo-fails");
+        let bin = fake_paseo(&t, &[]);
+        fs::write(bin.parent().unwrap().join("ls.code"), "3").unwrap();
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0, "{out}");
+        let lines: Vec<&str> = out.lines().filter(|l| l.starts_with("paseo")).collect();
+        assert_eq!(
+            lines,
+            ["paseo schedules: skipped, paseo schedule ls exited 3"]
+        );
+        let missing = t.root.join("no-such-paseo");
+        FAKES.with(|f| f.borrow_mut().paseo = Some(missing));
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0, "{out}");
+        let lines: Vec<&str> = out.lines().filter(|l| l.starts_with("paseo")).collect();
+        assert_eq!(
+            lines,
+            ["paseo schedules: skipped, paseo schedule ls exited 1"]
+        );
+    }
+
+    #[test]
+    fn stale_prompts_names_the_retro_file_and_each_schedule() {
+        let t = T::new("stale-prompts");
+        assert!(stale_prompts(&t.home).is_empty());
+        let path = t.home.join(pickup::RETRO_PROMPT_FILE);
+        fs::write(&path, OLD_RETRO).unwrap();
+        fake_paseo(
+            &t,
+            &[
+                ("0a1b2c3d", "Factory retro", OLD_RETRO),
+                ("8c9d0e1f", "Clean one", "Run factory cleanup."),
+            ],
+        );
+        assert_eq!(
+            stale_prompts(&t.home),
+            [
+                format!("{} still names factory.py; run factory catch-up", path.display()),
+                "paseo schedule 0a1b2c3d (Factory retro) still names factory.py; run factory catch-up"
+                    .to_string(),
+            ]
+        );
     }
 }

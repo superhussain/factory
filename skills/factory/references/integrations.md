@@ -102,8 +102,9 @@ only when no matching schedule exists. Refresh using the existing schedule ID,
 not a duplicate. Review the resulting stored prompt and enable only explicitly.
 Each prompt claims once, never retries and dispatches at most two sessions with
 the printed tags. Init, install and adoption never create, update or enable them.
-Reinstalling the skill does not refresh stored scheduler prompts or deploy the
-Worker. Disabled schedules can remain disabled.
+Reinstalling the skill does not deploy the Worker or refresh stored scheduler
+prompts, except the retro prompt, which `install` and `catch-up` rewrite (see
+[schedules](schedules.md)). Disabled schedules can remain disabled.
 Idea pickup is `factory pickup`, a model-free host timer with no stored prompt; see [pickup](pickup.md).
 
 ## Links, images and evidence
