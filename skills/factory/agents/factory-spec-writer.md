@@ -72,6 +72,12 @@ or numbered repro steps when no test can reach the bug, then the expected and th
 actual result. Its first task adds that failing test or records those steps, and its
 Check is the command or step that fails before the fix and passes after it.
 
+**Wait on long commands.** Run a command that takes minutes, such as a test suite or
+a search over many transcripts, with the Bash tool's `run_in_background`, then wait
+for its completion notification before you read its output. Never start a command
+with `sleep`, and never `sleep` then `tail` a log. The harness denies a foreground
+`sleep`.
+
 When the feature text references an earlier job (a rework or follow-up), read that
 job's `spec.md` and PR first and say what this job changes about it.
 

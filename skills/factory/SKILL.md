@@ -285,6 +285,11 @@ patch exits non-zero, or when you need a field's meaning.
   running, wait for it instead of ending the run. The run ends only at a real
   stop: the job is at `needs-human`, `merged` or `closed`, its PR waits at
   `pr-open` for a person, or nothing can move without the user.
+- Never start a command with `sleep`. The harness denies it, and each denial costs a
+  turn. Wait for a job file with `watch`, for a review round with `round-wait`, and
+  for a test run or log with the Bash tool's `run_in_background` and its completion
+  notification. Run `cargo test --locked` in the background, never
+  `sleep 90; tail test.log`.
 - WAIT FOR ALL: a round is done only when all four `review-*.md` files exist in
   the round folder. Record each verdict on the board as it lands, but never resume
   the builder mid-round. Read verdicts from each file's first line: reviewers write

@@ -843,3 +843,10 @@ fn round_wait_is_called_once_per_round() {
         "no `--timeout`, never inside a shell loop",
     );
 }
+
+#[test]
+fn no_leading_sleep() {
+    for rel in ["SKILL.md", "agents/factory-spec-writer.md"] {
+        has(&flat(rel), "Never start a command with `sleep`");
+    }
+}
