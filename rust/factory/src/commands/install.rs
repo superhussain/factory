@@ -28,7 +28,7 @@ use crate::shared::pyre::{Flags, Pattern};
 
 const USAGE: &str = "factory install: usage: factory install --source <checkout> --destination <skills root> [--replace]\n";
 const LEGACY: &str = "huss-factory";
-const FILES: [&str; 17] = [
+const FILES: [&str; 19] = [
     "SKILL.md",
     "templates/config.md",
     "templates/project.md",
@@ -40,6 +40,8 @@ const FILES: [&str; 17] = [
     "references/project-settings.md",
     "references/dashboard.md",
     "references/board.md",
+    "references/claims.md",
+    "references/gates.md",
     "references/needs.md",
     "references/schedules.md",
     "references/walkthrough.html",
