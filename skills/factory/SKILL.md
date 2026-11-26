@@ -376,7 +376,6 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   branch with `git -C "$WT" push -u origin factory/<id>`, so another device can pick
   the job up. A rejected push means another device moved the branch, so move the job
   to `needs-human` with that reason.
-  With a stacked rider, also run `git -C "$WORKTREES/<rider-id>" push -u origin factory/<rider-id>`.
 - Shipping opens a PR, and an APPROVE PR merges without waiting for a human. Push
   once more with `git -C "$REPO_PATH" push -u origin factory/<id>`, then open a PR
   against the job's base (`$BASE` unless the job was stacked) with
@@ -395,13 +394,6 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   An agent that moves it runs `cleanup`.
   When `batch <project>/<id>` prints any `riders`, the description also has a
   `Batched ideas` list with one `- <id>: <title>` line per rider.
-  With a stacked rider, open the job's PR first, then push `factory/<rider-id>` and run
-  `gh pr create -R "$REPO" --head factory/<rider-id> --base factory/<id>`. Its
-  description opens with `Stacked on #<n>.` and covers only the rider's tasks. Patch
-  the rider `{"pr": "<its PR URL>"}`. Write `$JOBS/<rider-id>/decision.md` with the
-  job's `decision.md` first line, then `Approved with <id>: $DASHBOARD#<id>/decision`,
-  and run `push "$SLUG/<rider-id>"`. The job's `Batched ideas` list omits the rider
-  and ends with `Stacked: #<rider PR number>`.
 - Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
   at `pr-open` until its parent merges and it is retargeted to `$BASE`. Wait for
   checks with `"$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0: they
@@ -433,11 +425,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   7 and 8 act as they do for `checks`. A failing check or a merge conflict goes back
   to the builder as a rework with the log. A second failure moves the job to
   `needs-human`.
-  With a stacked rider, `board` moves it out of the batch at `pr-open` with the job's
-  `automerge` and `escalated`. Merge its PR the same way, move it to `merged`, and
-  run `cleanup "$SLUG/<rider-id>"`. When a job with a stacked rider closes, `board`
-  closes the rider's open PR with a disclosed comment, the same guards as a dashboard
-  close, and the rider goes back to `idea`.
+- With a stacked rider, follow **Stacked riders** in [feature](references/commands/feature.md) at each build-stage push, at shipping, at merge and at close.
 - Jobs at `pr-open` from before auto-merge stay as they are and never auto-merge.
   A human merges or closes them.
 - An ESCALATE PR is held. Put a `> [!WARNING]` callout at the top of the description

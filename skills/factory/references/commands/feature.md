@@ -173,6 +173,22 @@ feature.
     Any other stderr line is patched as
     `{"note": "workspace archive failed: <stderr line>"}`.
 
+**Stacked riders.** These steps apply only when the job has a stacked rider.
+
+- After every build stage, also run `git -C "$WORKTREES/<rider-id>" push -u origin factory/<rider-id>`.
+- At shipping: open the job's PR first, then push `factory/<rider-id>` and run
+  `gh pr create -R "$REPO" --head factory/<rider-id> --base factory/<id>`. Its
+  description opens with `Stacked on #<n>.` and covers only the rider's tasks. Patch
+  the rider `{"pr": "<its PR URL>"}`. Write `$JOBS/<rider-id>/decision.md` with the
+  job's `decision.md` first line, then `Approved with <id>: $DASHBOARD#<id>/decision`,
+  and run `push "$SLUG/<rider-id>"`. The job's `Batched ideas` list omits the rider
+  and ends with `Stacked: #<rider PR number>`.
+- At merge and close: `board` moves it out of the batch at `pr-open` with the job's
+  `automerge` and `escalated`. Merge its PR the same way, move it to `merged`, and
+  run `cleanup "$SLUG/<rider-id>"`. When a job with a stacked rider closes, `board`
+  closes the rider's open PR with a disclosed comment, the same guards as a dashboard
+  close, and the rider goes back to `idea`.
+
 **Reworking an existing PR.** When the feature is "rework PR #N", the spec writer
 reads that PR's description and diff (`gh pr view N`, `gh pr diff N`) as the statement
 of intent, and the builder may consult the old diff but builds fresh. Once the new
