@@ -1,4 +1,29 @@
-# Board fields
+# Board
+
+## Patching the board
+
+Several sessions can run at once, so every session edits the board through `factory`,
+which retries on a conflicting write, creates a missing board, and stamps both
+`updated` fields. Pipe a JSON merge patch for one job on stdin. It prints the job,
+and a new id adds it. A new id must be digits, a dash and a lowercase slug, or the
+command exits 2 and writes nothing. The patch cannot carry an `id` key, since the id
+comes from the argument. Update the board at every stage change and as each
+verdict lands.
+
+```bash
+export FACTORY_SESSION=<tag>
+echo '{"stage":"review","round":1,"rounds":[{"security":"pending","ux":"pending","ui":"pending","code":"pending"}]}' \
+  | "$RUNTIME" board "$FACTORY" 003-rate-limiting
+```
+
+`null` clears a key (`{"port": null}`), and `rounds` is always sent whole. To record one
+reviewer's verdict, run `"$RUNTIME" verdict "$SLUG/<id>" <N> <reviewer> <verdict>`
+instead of resending `rounds`. A `board` patch cannot rewrite a recorded round: it may only keep the
+stored rounds and append all-pending ones. The job's first patch also sets `"project": "<slug>"`.
+
+When `<home>/tracer.json` lists the project, a patch that sets `stage` or `rounds` also mirrors the job into Tracer, and a Tracer failure only prints one warning line. While Tracer builds a job, pickup saves its task statuses as `tracer.tasks`. All of this runs only while Settings, Pipeline, Tracer integration is On. See [integrations](integrations.md#tracer-mirror).
+
+## Board fields
 
 ```json
 {
