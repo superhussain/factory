@@ -235,9 +235,8 @@ pub(super) fn stalls_paseo(args: &[&str]) -> Res<(i32, String)> {
     argv.extend(args);
     match paseo_capture(&argv, Duration::from_secs(STALLS_PASEO_SECONDS)) {
         Ok(out) => Ok((out.code, out.stdout)),
-        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
-            Err(stalls_fail(crate::shared::proc::BATCH_REFUSED))
-        }
+        // paseo_capture has already printed why.
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => Err(Exit::raw(1, String::new())),
         Err(_) => Ok((1, String::new())),
     }
 }

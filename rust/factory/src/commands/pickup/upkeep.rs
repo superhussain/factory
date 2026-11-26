@@ -369,7 +369,7 @@ pub(super) fn orphan_scan(home: &Path) -> Res<(Vec<Orphan>, Vec<String>)> {
         skipped.push(format!("worktrees: could not read {}", at.display()));
     }
 
-    if which("paseo").is_none() {
+    if paseo_bin().is_none() {
         skipped.push("workspaces: paseo is not on PATH".into());
     } else {
         let (code, out) = paseo_run(&["workspace", "ls", "--json"]);

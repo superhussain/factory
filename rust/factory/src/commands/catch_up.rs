@@ -960,13 +960,17 @@ pub(crate) fn stale_prompts(home: &Path) -> Vec<String> {
             path.display()
         ));
     }
-    if let Some(Ok(list)) = paseo_bin()
-        .and_then(|p| which(&p))
-        .map(|p| paseo_legacy(&p.to_string_lossy()))
-    {
-        for s in list {
+    if let Some(paseo) = paseo_bin().and_then(|p| which(&p)) {
+        let paseo = paseo.to_string_lossy();
+        for s in paseo_legacy(&paseo).unwrap_or_default() {
+            // Catch-up updates factory's own retro schedule, except through paseo.cmd.
+            let fix = if is_batch(&paseo) && factory_retro(&s) {
+                "edit its prompt in Paseo; factory catch-up prints the replacement"
+            } else {
+                "run factory catch-up"
+            };
             found.push(format!(
-                "paseo schedule {} ({}) still names factory.py; run factory catch-up",
+                "paseo schedule {} ({}) still names factory.py; {fix}",
                 s.id, s.name
             ));
         }
@@ -3871,6 +3875,10 @@ esac
         );
         assert!(!cmd.with_file_name("update-0a1b2c3d.txt").exists());
         assert!(retro_backups(&t, "paseo-schedules").is_empty());
+        assert_eq!(
+            stale_prompts(&t.home),
+            ["paseo schedule 0a1b2c3d (Factory retro weekdays (example-host)) still names factory.py; edit its prompt in Paseo; factory catch-up prints the replacement"]
+        );
     }
 
     #[test]

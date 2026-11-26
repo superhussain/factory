@@ -143,7 +143,11 @@ pub fn paseo_bin() -> Option<String> {
     which("paseo")
         .or_else(|| {
             cfg!(windows)
-                .then(|| app_paseo(&std::env::var_os("LOCALAPPDATA")?))
+                .then(|| {
+                    let local =
+                        std::env::var_os("LOCALAPPDATA").filter(|v| Path::new(v).is_absolute())?;
+                    app_paseo(&local)
+                })
                 .flatten()
         })
         .map(|p| p.to_string_lossy().into_owned())
@@ -221,18 +225,30 @@ pub(crate) fn executable(p: &Path) -> bool {
 
 /// `shutil.which`.
 pub fn which(name: &str) -> Option<PathBuf> {
-    let suffixes: Vec<String> = if cfg!(windows) {
-        let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
-        std::iter::once(String::new())
-            .chain(
-                pathext
-                    .split(';')
-                    .filter(|s| !s.is_empty())
-                    .map(String::from),
-            )
-            .collect()
-    } else {
-        vec![String::new()]
+    let pathext = cfg!(windows)
+        .then(|| std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into()));
+    which_in(
+        name,
+        std::env::var_os("PATH").as_deref(),
+        pathext.as_deref(),
+    )
+}
+
+/// `which` over path, with Windows' PATHEXT rules when pathext is given. As in `shutil.which`, a
+/// name that ends in a PATHEXT extension is tried bare first, and any other name only with each
+/// suffix, so an extensionless npm shim never wins over its `.cmd`.
+fn which_in(name: &str, path: Option<&std::ffi::OsStr>, pathext: Option<&str>) -> Option<PathBuf> {
+    let suffixes: Vec<String> = match pathext {
+        Some(pathext) => {
+            let exts: Vec<&str> = pathext.split(';').filter(|s| !s.is_empty()).collect();
+            let upper = name.to_uppercase();
+            let bare = exts.iter().any(|e| upper.ends_with(&e.to_uppercase()));
+            bare.then(String::new)
+                .into_iter()
+                .chain(exts.iter().map(|e| e.to_string()))
+                .collect()
+        }
+        None => vec![String::new()],
     };
     let candidates = |dir: &Path| {
         suffixes
@@ -248,8 +264,7 @@ pub fn which(name: &str) -> Option<PathBuf> {
             .into_iter()
             .find(|p| executable(p));
     }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
+    std::env::split_paths(path?)
         .flat_map(|dir| candidates(&dir))
         .find(|p| executable(p))
 }
@@ -362,5 +377,35 @@ mod tests {
         std::fs::write(bin.join("paseo.cmd"), "@echo off\r\n").unwrap();
         assert_eq!(app_paseo(local.as_os_str()), Some(bin.join("paseo.cmd")));
         std::fs::remove_dir_all(local).unwrap();
+    }
+
+    /// An npm global install puts an extensionless sh shim beside paseo.cmd. With PATHEXT rules the
+    /// .cmd wins, as in `shutil.which`; a name that already ends in a PATHEXT extension is tried bare.
+    /// Without them, as on POSIX, the bare name is the only candidate.
+    #[test]
+    fn which_skips_a_bare_shim_under_pathext() {
+        let dir = crate::shared::fs::temp_dir("which-pathext");
+        for name in ["paseo", "paseo.cmd"] {
+            std::fs::write(dir.join(name), "synthetic\n").unwrap();
+            #[cfg(unix)]
+            std::fs::set_permissions(
+                dir.join(name),
+                std::os::unix::fs::PermissionsExt::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        let path = Some(dir.as_os_str());
+        // Lower case, since Windows matches names without case and the test may run on POSIX.
+        let pathext = Some(".com;.exe;.bat;.cmd");
+        assert_eq!(
+            which_in("paseo", path, pathext),
+            Some(dir.join("paseo.cmd"))
+        );
+        assert_eq!(
+            which_in("paseo.cmd", path, pathext),
+            Some(dir.join("paseo.cmd"))
+        );
+        assert_eq!(which_in("paseo", path, None), Some(dir.join("paseo")));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
