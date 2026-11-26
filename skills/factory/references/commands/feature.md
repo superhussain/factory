@@ -82,7 +82,8 @@ feature.
    and `factory/<rider-id>` in place of the job's worktree and branch, since that
    branch holds the whole stack.
    Then run `"$RUNTIME" round-wait "$SLUG/<id>" <N>` with the Bash tool timeout
-   at 600000 ms. It records each verdict on the board. On `timeout`, run it again. On
+   at 600000 ms and no `--timeout`, never inside a shell loop. It records each
+   verdict on the board. On `timeout`, run it again. On
    `malformed`, read the review file whose `files` entry is not a valid `VERDICT:`
    line, resume its agent, then run `round-wait` again.
 5. Once `round-wait` prints `round`, run `"$RUNTIME" grounding "$SLUG/<id>" <N>`.

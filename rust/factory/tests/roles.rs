@@ -831,3 +831,15 @@ fn session_tag_is_exported_once_known() {
     );
     lacks(&flat("references/commands/deny-notes.md"), "done --session");
 }
+
+#[test]
+fn round_wait_is_called_once_per_round() {
+    has(
+        &flat("SKILL.md"),
+        "Call `round-wait` once per round with no `--timeout`.",
+    );
+    has(
+        &flat("references/commands/feature.md"),
+        "no `--timeout`, never inside a shell loop",
+    );
+}

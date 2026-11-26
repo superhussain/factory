@@ -292,7 +292,10 @@ patch exits non-zero, or when you need a field's meaning.
   for ux and ui, and the approver writes `APPROVE`,
   `ESCALATE`, or `CHANGES`. `watch` and `wait` print those first lines.
   `round-wait` waits for all four and records each verdict, so no hand-written
-  `rounds` patch is needed.
+  `rounds` patch is needed. Call `round-wait` once per round with no `--timeout`.
+  Its 540-second default fits inside one Bash call's 600000 ms limit. Never pass a
+  shorter `--timeout` or run it inside a shell loop. On `timeout`, run the same
+  command again.
 - Max `$PIPELINE.review_rounds` review rounds per build cycle (2 unless pipeline settings say otherwise, at most 5). If
   the last allowed round of a cycle still has a CHANGES verdict, the job goes to
   `needs-human` with a note naming the reviewers that still want changes. A `/factory rework` starts a new cycle, so count
