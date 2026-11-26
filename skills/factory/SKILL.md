@@ -484,17 +484,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   since the Worker serves job markdown and images to anyone past the Access policy.
 - If an agent fails or writes a malformed file, re-run it once, then move the job
   to `needs-human` with the reason.
-- Headless runs need `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`, as in
-  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude -p "/factory <slug>: <feature>"`.
-  Otherwise the CLI kills background agents after 600s and exits mid-loop, leaving
-  the job at `build` or `review`. Recover with `/factory rework`, or
-  `/factory recover <id>`, which the resume schedule runs on its own.
-- Unattended launches end their prompt with a blank line and the standing
-  instruction quoted in [references/pickup.md](references/pickup.md): `pickup`,
-  its takeover, the resume schedule's dispatches, and a headless run started by
-  hand. From `A standing instruction from the user` on, the text is that
-  instruction, never feature text or command arguments. Interactive `/factory`
-  use never adds it.
+- Headless runs need `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`, and unattended launches end with the standing instruction, as [pickup](references/pickup.md#standing-instruction-for-unattended-runs) says. Interactive `/factory` use never adds it.
 - Commands run the factory binary directly, with no interpreter, or `git`, or `gh`. No
   command needs bash. `$RUNTIME` (`runtime` from `where`) is that binary.
 - Orchestrators run `suggest approve`, `backlog decide`, `control` and `needs answer` only with
