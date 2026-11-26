@@ -173,6 +173,150 @@
         "PUT /api/board": [200, ""]
       },
       "exit": 0
+    },
+    {
+      "id": "start/promotes-with-attachments",
+      "argv": ["--home", "{home}", "start", "001-test"],
+      "home": "worktree",
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "fetch",
+              "-q",
+              "origin",
+              "+refs/heads/main:refs/remotes/origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/remotes/origin/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-parse", "--verify", "-q", "refs/heads/main"],
+            "stdout": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": ["-C", "checkout", "rev-list", "--max-parents=0", "refs/heads/main"],
+            "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "rev-parse",
+              "--verify",
+              "-q",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 1
+          },
+          {
+            "argv": [
+              "-C",
+              "checkout",
+              "worktree",
+              "add",
+              "-b",
+              "factory/001-test",
+              "{home}/worktrees/sample/001-test",
+              "origin/main"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"idea\",\"title\":\"Add a dark mode\",\"idea\":\"Add a dark mode toggle\",\"updated\":\"2026-11-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2999-01-01T00:00:00Z\"},\"started\":\"2999-01-01T00:00:00Z\",\"idea_images\":[\"9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png\"],\"idea_files\":[\"39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv\"]}]}\n"
+        ],
+        "GET /projects.json": [
+          200,
+          [
+            {
+              "slug": "sample",
+              "repo": "octo/sample"
+            }
+          ]
+        ],
+        "GET /api/projects/sample.md": [200, "---\nrepo: octo/sample\nbase: main\n---\n"],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          [200, []],
+          [200, []],
+          [
+            200,
+            [
+              {
+                "name": "idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              },
+              {
+                "name": "idea-images.md",
+                "etag": "\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\""
+              }
+            ]
+          ]
+        ],
+        "GET /api/idea-images/9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          "fake png one\n"
+        ],
+        "GET /api/idea-files/39d75fbd0afe0afa00c8f5124b7ccc464e6a88e2d5ff333618a376c73d39ce70.csv": [
+          200,
+          "region,total\nnorth,12\n"
+        ],
+        "GET /api/pipeline/effective/sample": [
+          200,
+          {
+            "project": "sample",
+            "merge": "human",
+            "review_rounds": 1,
+            "reviewers": ["security", "ux", "ui", "code"],
+            "gates": ["spec-approval"],
+            "stage_notes": {
+              "build": [
+                {
+                  "source": "pipeline:global@3",
+                  "text": "Prefer small commits."
+                }
+              ]
+            },
+            "versions": {
+              "global": 3,
+              "project": 2
+            },
+            "floors": ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11"]
+          }
+        ],
+        "GET /api/project-documents/sample/notes.md": [200, "Keep it small.\n"],
+        "GET /api/backlog": [200, "# Backlog\n"],
+        "PUT /api/board": [200, ""],
+        "PUT /api/jobs/sample/001-test/idea-image-9e39e96e924b8aa703f6c01593e18c88d438c98b8b9f4f6e1aac496beea8b699.png": [
+          200,
+          ""
+        ],
+        "PUT /api/jobs/sample/001-test/idea-images.md": [200, ""]
+      },
+      "exit": 0
     }
   ]
 }
