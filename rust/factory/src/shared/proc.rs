@@ -223,10 +223,15 @@ pub(crate) fn executable(p: &Path) -> bool {
     meta.is_file()
 }
 
+/// PATHEXT, with an unset or empty one read as `.COM;.EXE;.BAT;.CMD`, as `shutil.which` does.
+fn pathext_or_default(raw: Option<String>) -> String {
+    raw.filter(|s| !s.is_empty())
+        .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".into())
+}
+
 /// `shutil.which`.
 pub fn which(name: &str) -> Option<PathBuf> {
-    let pathext = cfg!(windows)
-        .then(|| std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into()));
+    let pathext = cfg!(windows).then(|| pathext_or_default(std::env::var("PATHEXT").ok()));
     which_in(
         name,
         std::env::var_os("PATH").as_deref(),
@@ -407,5 +412,13 @@ mod tests {
         );
         assert_eq!(which_in("paseo", path, None), Some(dir.join("paseo")));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_empty_pathext_is_the_default() {
+        let default = ".COM;.EXE;.BAT;.CMD";
+        assert_eq!(pathext_or_default(None), default);
+        assert_eq!(pathext_or_default(Some(String::new())), default);
+        assert_eq!(pathext_or_default(Some(".EXE".into())), ".EXE");
     }
 }
