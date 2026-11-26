@@ -32,8 +32,11 @@ feature.
    spawn `factory-builder` as `builder-<id>` at the
    tier Rules selects from the spec, with its assigned dev-server port if the job
    needs one. It commits on
-   the branch and writes `build.md`. Push the branch.
-   After every builder run, read the first line of its build.md run section. When it
+   the branch and writes `build.md`.
+   After every builder run, run `"$RUNTIME" build-landed "$SLUG/<id>"` and read the
+   run line under `== build.md`. Exit 4 resumes the builder to write its run section.
+   Exit 5 runs it once more, then puts its stderr line in the board `note` and stops.
+   When the run line
    starts `BLOCKED-ENV:`, start no pre-review or review round and keep the tier.
    Before either patch below, reduce the line. `<kind>` is the builder's kind when it
    is `secret`, `tool`, `network` or `service`, else `unknown`. `<what is missing>` is
@@ -48,7 +51,7 @@ feature.
    `push "$SLUG/<id>"` and patch
    `{"stage": "needs-human", "note": "env block: <kind>: <what is missing> (builder blocked twice)", "needs": "provide the missing <kind>: <what is missing>, then run /factory rework <id> <note>"}`
    from the latest line.
-4. Pre-review: run `"$RUNTIME" hold "$SLUG/<id>"`, then
+4. Pre-review: once `build-landed` exits 0, run
    `"$RUNTIME" pre-review "$SLUG/<id>"` as a background command, and act on its
    completion notification. Exit 1 means a check failed: patch
    `{"stage": "build", "note": "pre-review: <failed check names> failed"}`, resume the
