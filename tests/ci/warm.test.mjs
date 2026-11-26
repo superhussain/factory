@@ -37,7 +37,8 @@ test("each warm job's rust-cache key inputs match its ci.yml job", () => {
     assert.equal(w.env, undefined, id);
     assert.equal(c.env, undefined, id);
     assert.equal(warm.env, undefined);
-    const { "save-if": saveIf, ...inputs } = rustCache(c).with;
+    const inputs = { ...rustCache(c).with };
+    delete inputs["save-if"];
     assert.deepEqual(rustCache(w).with, inputs, id);
     assert.equal(rustCache(w).uses, rustCache(c).uses, id);
     for (const step of w.steps) assert.equal(step.env, undefined, `${id}: ${step.name}`);
