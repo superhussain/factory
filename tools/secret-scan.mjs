@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
+// oxlint-disable-next-line no-control-regex -- Python str.splitlines boundaries include these control characters
 const LINES = /\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]/;
 
 function lines(text) {
