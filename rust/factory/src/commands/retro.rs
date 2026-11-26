@@ -1624,12 +1624,8 @@ fn aggregate_in(home: &Path, today: &str, run: &str, days: i64, get: &mut Get) -
         ));
     }
     let (mut hosts, mut host_jobs) = (Map::new(), HashMap::<String, BTreeSet<String>>::new());
-    let (mut subagents, mut firsts, mut sub, mut attachments) = (
-        Map::new(),
-        HashMap::<String, Vec<i64>>::new(),
-        Map::new(),
-        Map::new(),
-    );
+    let (mut subagents, mut firsts, mut sub) =
+        (Map::new(), HashMap::<String, Vec<i64>>::new(), Map::new());
     for row in &rows {
         let name = py_str(&row["host"]);
         let h = hosts
@@ -1665,16 +1661,6 @@ fn aggregate_in(home: &Path, today: &str, run: &str, days: i64, get: &mut Get) -
                 }
             }
         }
-        for (kind, size) in dict_of(row.get("first_turn_attachments"))
-            .into_iter()
-            .flatten()
-        {
-            let sizes = attachments.entry(kind.clone()).or_insert_with(|| json!([]));
-            sizes
-                .as_array_mut()
-                .unwrap()
-                .push(json!(int_of(Some(size))));
-        }
     }
     for (kind, s) in subagents.iter_mut() {
         s["first_turn_median"] = json!(median(firsts.remove(kind).unwrap_or_default()));
@@ -1709,19 +1695,44 @@ fn aggregate_in(home: &Path, today: &str, run: &str, days: i64, get: &mut Get) -
         }
     }
     let context = |r: &Value, f: &str| int_of(dict_of(r.get("context")).and_then(|c| c.get(f)));
-    let first_turns: Vec<i64> = rows
+    // Context medians cover factory job sessions; ad-hoc sessions run on a person's own profile.
+    let job_rows: Vec<&Value> = rows
+        .iter()
+        .filter(|r| r["job"] != json!("ad-hoc"))
+        .collect();
+    let first_turns: Vec<i64> = job_rows
         .iter()
         .map(|r| context(r, "first_turn"))
         .filter(|v| *v > 0)
         .collect();
-    let attachments_median: Map<String, Value> = attachments
+    let mean_per_turn_median = median(
+        job_rows
+            .iter()
+            .map(|r| context(r, "mean_per_turn"))
+            .collect(),
+    );
+    let started: Vec<&Value> = job_rows
+        .iter()
+        .copied()
+        .filter(|r| context(r, "first_turn") > 0)
+        .collect();
+    let kinds: BTreeSet<String> = started
+        .iter()
+        .flat_map(|r| {
+            dict_of(r.get("first_turn_attachments"))
+                .into_iter()
+                .flatten()
+        })
+        .map(|(kind, _)| kind.clone())
+        .collect();
+    let attachments_median: Map<String, Value> = kinds
         .into_iter()
-        .map(|(kind, sizes)| {
-            let sizes = sizes
-                .as_array()
-                .unwrap()
+        .map(|kind| {
+            let sizes = started
                 .iter()
-                .map(|v| v.as_i64().unwrap())
+                .map(|r| {
+                    int_of(dict_of(r.get("first_turn_attachments")).and_then(|a| a.get(&kind)))
+                })
                 .collect();
             (kind, json!(median(sizes)))
         })
@@ -1732,7 +1743,7 @@ fn aggregate_in(home: &Path, today: &str, run: &str, days: i64, get: &mut Get) -
         "transcripts": transcripts, "projects": projects, "hosts": hosts,
         "tokens": {"main": summed("tokens"), "subagents": sub},
         "context": {"first_turn_median": median(first_turns),
-                    "mean_per_turn_median": median(rows.iter().map(|r| context(r, "mean_per_turn")).collect())},
+                    "mean_per_turn_median": mean_per_turn_median},
         "attachments_median": attachments_median, "env_noise": summed("env_noise"), "polls": summed("polls"),
         "denials": {"count": total("denials", Some("count")), "blocked_sleep": total("denials", Some("blocked_sleep")),
                     "patterns": patterns(&rows, |r| dict_of(r.get("denials")).and_then(|d| d.get("patterns")))},
@@ -5313,6 +5324,53 @@ mod tests {
         assert_eq!(
             agg["subagents"]["factory-builder"]["first_turn_median"],
             500
+        );
+    }
+
+    #[test]
+    fn aggregate_context_counts_job_sessions_only() {
+        let job = |session: &str, job: &str, attachments: Value| {
+            digest_row(
+                "host-a",
+                session,
+                job,
+                json!({"context": {"first_turn": 50230, "mean_per_turn": 2000},
+                       "first_turn_attachments": attachments}),
+            )
+        };
+        let ad_hoc = |session: &str| {
+            digest_row(
+                "host-a",
+                session,
+                "ad-hoc",
+                json!({"context": {"first_turn": 58568, "mean_per_turn": 9000},
+                       "first_turn_attachments": {"skill_listing": 38754, "mcp_instructions_delta": 16601}}),
+            )
+        };
+        let rows = [
+            job(S1, "1017", json!({"skill_listing": 19022})),
+            job(
+                S2,
+                "1018",
+                json!({"skill_listing": 19022, "mcp_instructions_delta": 11946}),
+            ),
+            job(S3, "1019", json!({"skill_listing": 19022})),
+            ad_hoc("3ae1fc86-0000-4000-8000-000000000004"),
+            ad_hoc("3ae1fc86-0000-4000-8000-000000000005"),
+            ad_hoc("3ae1fc86-0000-4000-8000-000000000006"),
+        ];
+        let (_, agg) = aggregate_of(
+            "job-only",
+            &window(7, &[(0, vec![("host-a", lines(&rows))])]),
+            7,
+        );
+        assert_eq!(
+            agg["context"],
+            json!({"first_turn_median": 50230, "mean_per_turn_median": 2000})
+        );
+        assert_eq!(
+            agg["attachments_median"],
+            json!({"skill_listing": 19022, "mcp_instructions_delta": 0})
         );
     }
 

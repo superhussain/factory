@@ -11,7 +11,8 @@ Code projects root.
 **Read.**
 - Read, grep and glob only `aggregate`, `digest` and files under `transcripts`.
 - Start from `aggregate`. Use `digest` rows to find which sessions a pattern came from.
-- `context` and `attachments_median` cover main sessions only.
+- `context` and `attachments_median` cover factory job sessions only, not ad-hoc
+  ones. A kind a session lacks counts as 0.
   `attachments_median` sizes are JSON bytes, not tokens. A role's own first-turn
   tokens are `subagents.<type>.first_turn_median`.
 - Drill into a transcript only for a session ref that starts with `<host>/`. Other
