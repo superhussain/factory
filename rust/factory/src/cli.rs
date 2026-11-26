@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::commands::{
     audit, bootstrap, catch_up, checks, claims, daemon, install, intake, lookup, ops, pickup,
-    pipeline, prompt, retro, screenshots, setup, sync, tracer, wait, worktree,
+    pipeline, prompt, retro, screenshots, setup, start, sync, tracer, wait, worktree,
 };
 use crate::shared::consts::{MAX_RIDERS, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
@@ -37,6 +37,7 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
     ("sync", sync::sync, 0, 1),
     ("hold", claims::hold, 1, 2),
     ("worktree", worktree::worktree, 1, 1),
+    ("start", start::start, 1, 1),
     ("job", lookup::job, 1, 1),
     ("handoff", claims::handoff, 1, 1),
     ("builds", lookup::builds, 1, 1),
@@ -279,6 +280,13 @@ mod tests {
                 "usage: factory bootstrap <up|down|plan --answers <file>>\n"
             );
         }
+    }
+
+    #[test]
+    fn start_takes_one_job_id() {
+        assert!(handler_for("start", 0).is_none());
+        assert!(handler_for("start", 1).is_some());
+        assert!(handler_for("start", 2).is_none());
     }
 
     #[test]

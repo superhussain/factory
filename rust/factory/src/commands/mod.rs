@@ -18,6 +18,7 @@ pub mod prompt;
 pub mod retro;
 pub mod screenshots;
 pub mod setup;
+pub mod start;
 pub mod sync;
 pub mod tracer;
 pub mod wait;

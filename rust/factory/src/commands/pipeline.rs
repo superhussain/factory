@@ -420,7 +420,7 @@ fn pipeline_view(slug: &str, data: &Value) -> Res<Value> {
 }
 
 /// The project's effective pipeline configuration, as `pipeline_view` returns it.
-fn fetch_pipeline(home: &Path, slug: &str) -> Res<Value> {
+pub(crate) fn fetch_pipeline(home: &Path, slug: &str) -> Res<Value> {
     let r = api(
         home,
         "GET",

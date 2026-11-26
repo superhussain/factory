@@ -1,0 +1,50 @@
+== where
+{
+  "factory": "{home}",
+  "runtime": "{runtime}",
+  "project_file": "{home}/projects/sample.md",
+  "repo_path": "checkout",
+  "repo": "octo/sample",
+  "base": "main",
+  "slug": "sample",
+  "jobs": "{home}/jobs/sample",
+  "worktrees": "{home}/worktrees/sample",
+  "dashboard": "{api}/"
+}
+== hold
+held sample/001-test as parity session s1
+elapsed 0s
+pulled 0 files
+== job
+{
+  "id": "001-test",
+  "project": "sample",
+  "stage": "idea",
+  "title": "Add a dark mode",
+  "idea": "Add a dark mode toggle",
+  "updated": "2026-11-01T00:00:00Z",
+  "claim": {
+    "device": "parity",
+    "session": "s1",
+    "since": "2026-10-01T00:00:00Z",
+    "seen": "2999-01-01T00:00:00Z"
+  },
+  "started": "2999-01-01T00:00:00Z"
+}
+== sync
+== pipeline
+{"project": "sample", "merge": "human", "review_rounds": 1, "gates": ["spec-approval"], "versions": {"global": 3, "project": 2}}
+== board
+stage spec, branch factory/001-test, pipeline {"global": 3, "project": 2}
+== worktree
+{home}/worktrees/sample/001-test
+== documents
+{home}/projects/sample.documents.md
+== batch
+{
+  "lead": "001-test",
+  "riders": [],
+  "candidates": []
+}
+== next
+pick batch riders, then run prompt sample/001-test spec --out and agent record

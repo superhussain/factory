@@ -93,6 +93,16 @@ fn unsafe_branch(name: &str) -> bool {
         || name.starts_with('-')
 }
 
+/// The project file's base branch, or main.
+fn project_base(home: &Path, slug: &str) -> Res<String> {
+    let project = project_files(home, slug)?.0;
+    if !project.exists() {
+        return Ok("main".to_string());
+    }
+    let meta = frontmatter(&project).map_err(|e| os_fail(&e, &project))?.0;
+    Ok(fm_get(&meta, "base").unwrap_or("main").to_string())
+}
+
 /// Why repo's local base branch, or the given job branch, holds history origin's base does not descend from, as an
 /// "unsafe checkout:" line, or None. It fetches origin's base first, so a stale origin/<base> cannot vouch for itself.
 pub(crate) fn checkout_problem(
@@ -101,13 +111,7 @@ pub(crate) fn checkout_problem(
     repo: &str,
     branch: Option<&str>,
 ) -> Res<Option<String>> {
-    let project = project_files(home, slug)?.0;
-    let base = if project.exists() {
-        let meta = frontmatter(&project).map_err(|e| os_fail(&e, &project))?.0;
-        fm_get(&meta, "base").unwrap_or("main").to_string()
-    } else {
-        "main".to_string()
-    };
+    let base = project_base(home, slug)?;
     if unsafe_branch(&base) {
         return Ok(Some(format!(
             "unsafe checkout: {slug} base {base} is not a safe branch name"
@@ -304,6 +308,29 @@ fn worktree_in(home: &Path, slug: &str, job_id: &str) -> Res<PathBuf> {
         }
     }
     prebuild(home, slug, job_id, &wt)?;
+    Ok(wt)
+}
+
+/// Create a new job's worktree on a new factory/<id> branch from the freshly fetched origin/<base>.
+pub(crate) fn new_job_worktree(home: &Path, slug: &str, job_id: &str) -> Res<PathBuf> {
+    let repo = checkout_of(home, slug)?;
+    let branch = format!("factory/{job_id}");
+    if let Some(problem) = checkout_problem(home, slug, &repo, Some(&branch))? {
+        return Err(fail(problem, 6));
+    }
+    let wt = home.join("worktrees").join(slug).join(job_id);
+    let wt_text = wt.to_string_lossy().into_owned();
+    if wt.exists() {
+        return Err(fail(
+            format!("{wt_text} already exists. Nothing was changed"),
+            6,
+        ));
+    }
+    let base = format!("origin/{}", project_base(home, slug)?);
+    git_ok(
+        Path::new(&repo),
+        &["worktree", "add", "-b", &branch, &wt_text, &base],
+    )?;
     Ok(wt)
 }
 
@@ -1591,6 +1618,30 @@ mod tests {
         let head = commit(&t.seed, message);
         sh_git(&t.seed, &["push", "-q", "origin", &branch]);
         head
+    }
+
+    #[test]
+    fn new_job_worktree_branches_from_origin_base() {
+        let t = Lineage::new("wt-new-job");
+        let origin_head = commit(&t.seed, "origin moves");
+        sh_git(&t.seed, &["push", "-q", "origin", "main"]);
+        let wt = new_job_worktree(&t.home, "factory", JOB).unwrap();
+        assert_eq!(wt, t.home.join("worktrees/factory").join(JOB));
+        assert_eq!(sh_git(&wt, &["rev-parse", "HEAD"]), origin_head);
+        assert_eq!(
+            sh_git(&wt, &["rev-parse", "--abbrev-ref", "HEAD"]),
+            format!("factory/{JOB}")
+        );
+        sh_git(&t.repo, &["worktree", "remove", &text(&wt)]);
+        fs::create_dir_all(&wt).unwrap();
+        let e = new_job_worktree(&t.home, "factory", JOB).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr),
+            (
+                6,
+                format!("{} already exists. Nothing was changed\n", wt.display())
+            )
+        );
     }
 
     #[test]

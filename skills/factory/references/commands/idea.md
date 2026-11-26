@@ -4,6 +4,11 @@ Promotes an idea job to `spec` and runs the loop on it. The job keeps its id.
 `factory pickup` spawns this with the tag it claimed the idea under, and it
 works from any directory.
 
+First run `<this skill's dir>/runtime/factory start <id> --session <tag>`. It
+does steps 1 to 4 in one call and prints step 5's candidates. On exit 0 with no
+`rework:` line, go to step 5's picks. On a non-zero exit, follow the step that
+the last `==` header names and continue by hand from there.
+
 1. Run `<this skill's dir>/runtime/factory job <id>`. Immediately check
    `project`. If absent, null, or empty, report `Assign a registered project in the idea drawer before starting this idea`
    and stop before `where`, `hold`, sync, promotion, or worktree creation. Never
