@@ -480,35 +480,27 @@ again. A non-zero exit moves the job to `needs-human` as Pipeline configuration
 describes. When `$PIPELINE.gates` is not empty, follow [gates](references/gates.md)
 before you dispatch the builder.
 
-## Builds
-
-Device builds are slow and metered, so they never run per job. Merged jobs that
-need one wait in the queue, and one build carries all of them.
-
-Read [build](references/commands/build.md) before you check the queue: after every merge, after `next` finds nothing to run, and for `/factory build`.
-
-## Schedules
-
-Schedules are optional prompt templates. Read [schedules](references/schedules.md) before you create, refresh or debug one, or `factory pickup`.
-
 ## Commands
 
-Read a command's file before you run it.
+Read a command's file before you run it. Read [build](references/commands/build.md)
+after every merge and after `next` finds nothing to run. Read
+[schedules](references/schedules.md) before you create, refresh or debug a schedule
+or `factory pickup`.
 
-| Command | File | Read it when |
-| --- | --- | --- |
-| `/factory <feature>` | [feature](references/commands/feature.md) | Every loop run; other commands continue its steps. |
-| `/factory idea <id>` | [idea](references/commands/idea.md) | Pickup or a person starts an idea. |
-| `/factory next` | [next](references/commands/next.md) | You take the next backlog line or queue work. |
-| `/factory deny-notes <id>` | [deny-notes](references/commands/deny-notes.md) | Pickup hands you a denied job's notes. |
-| `/factory babysit <id>` | [babysit](references/commands/babysit.md) | Pickup hands you a PR a person asked to babysit; work it as the Babysit note asks. |
-| `/factory approve <id>`, `/factory approve <id> --session <tag>` | [approve](references/commands/approve.md) | A person approves a `needs-human` job, or pickup hands you a dashboard Approve as is press (`resolve`). |
-| `/factory approve-spec <id>` | [approve-spec](references/commands/approve-spec.md) | A person passes the spec-approval gate. |
-| `/factory rework <id> <note>`, `/factory rework <id> --session <tag>` | [rework](references/commands/rework.md) | A person asks for rework, or pickup hands you a dashboard Rework press (`resolve`), or a job is stuck after a dead session. |
-| `/factory recover <id>` | [recover](references/commands/recover.md) | The resume schedule or pickup recovers a job. |
-| `/factory build` | [build](references/commands/build.md) | You check or trigger the device build queue. |
-| `/factory init` | [init](references/commands/init.md) | You set up a device or register a project. |
-| `/factory catch-up` | [catch-up](references/commands/catch-up.md) | You bring this host up to date with main; run it first on every host. |
-| `/factory handoff <id>` | [handoff](references/commands/handoff.md) | You hand a job to another runtime. |
-| `/factory resume <id>` | [resume](references/commands/resume.md) | You continue a handed-off job. |
-| `/factory retro [--days N]` | [retro](references/commands/retro.md) | A person asks for a cross-host session retro. |
+| Command | File |
+| --- | --- |
+| `/factory <feature>` | [feature](references/commands/feature.md) |
+| `/factory idea <id>` | [idea](references/commands/idea.md) |
+| `/factory next` | [next](references/commands/next.md) |
+| `/factory deny-notes <id>` | [deny-notes](references/commands/deny-notes.md) |
+| `/factory babysit <id>` | [babysit](references/commands/babysit.md) |
+| `/factory approve <id>`, `/factory approve <id> --session <tag>` | [approve](references/commands/approve.md) |
+| `/factory approve-spec <id>` | [approve-spec](references/commands/approve-spec.md) |
+| `/factory rework <id> <note>`, `/factory rework <id> --session <tag>` | [rework](references/commands/rework.md) |
+| `/factory recover <id>` | [recover](references/commands/recover.md) |
+| `/factory build` | [build](references/commands/build.md) |
+| `/factory init` | [init](references/commands/init.md) |
+| `/factory catch-up` | [catch-up](references/commands/catch-up.md) |
+| `/factory handoff <id>` | [handoff](references/commands/handoff.md) |
+| `/factory resume <id>` | [resume](references/commands/resume.md) |
+| `/factory retro [--days N]` | [retro](references/commands/retro.md) |
