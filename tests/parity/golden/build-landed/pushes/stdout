@@ -1,0 +1,12 @@
+== hold
+held sample/001-test as parity session s1
+elapsed 0s
+pulled 0 files
+== build.md
+Run 2: Routing: Claude Code, Opus 5.5.
+== git push
+pushed factory/001-test 6ba780d
+== push
+pushed 2 files
+== next
+run pre-review sample/001-test in the background

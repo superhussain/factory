@@ -1,0 +1,98 @@
+{
+  "cases": [
+    {
+      "id": "build-landed/pushes",
+      "argv": [
+        "--home",
+        "{home}",
+        "build-landed",
+        "sample/001-test"
+      ],
+      "home": "build-landed",
+      "stubs": {
+        "git": [
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "rev-parse",
+              "--short",
+              "refs/heads/factory/001-test"
+            ],
+            "stdout": "6ba780d\n",
+            "stderr": "",
+            "code": 0
+          },
+          {
+            "argv": [
+              "-C",
+              "{home}/worktrees/sample/001-test",
+              "push",
+              "-q",
+              "origin",
+              "refs/heads/factory/001-test:refs/heads/factory/001-test"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "code": 0
+          }
+        ]
+      },
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          200,
+          []
+        ],
+        "PUT /api/jobs/sample/001-test/build.md": [
+          200,
+          ""
+        ],
+        "PUT /api/jobs/sample/001-test/handoff.md": [
+          200,
+          ""
+        ]
+      },
+      "exit": 0
+    },
+    {
+      "id": "build-landed/no-run",
+      "argv": [
+        "--home",
+        "{home}",
+        "build-landed",
+        "sample/001-test"
+      ],
+      "home": "build-landed-no-run",
+      "stubs": {},
+      "env": {
+        "FACTORY_SESSION": "s1"
+      },
+      "routes": {
+        "GET /api/board": [
+          200,
+          "{\"updated\":\"\",\"jobs\":[{\"id\":\"001-test\",\"project\":\"sample\",\"stage\":\"build\",\"round\":0,\"updated\":\"2026-11-01T00:00:00Z\",\"started\":\"2999-01-01T00:00:00Z\",\"claim\":{\"device\":\"parity\",\"session\":\"s1\",\"since\":\"2026-10-01T00:00:00Z\",\"seen\":\"2026-11-01T00:00:00Z\"}}]}\n"
+        ],
+        "PUT /api/board": [
+          200,
+          ""
+        ],
+        "GET /api/jobs/sample/001-test/?etags=1": [
+          200,
+          []
+        ]
+      },
+      "exit": 4
+    }
+  ]
+}
