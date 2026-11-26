@@ -19,7 +19,7 @@ use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{is_link, read_text, resolve, temp_root, write_atomic};
 use crate::shared::home::factory_home;
-use crate::shared::proc::{capture, git, origin_git, paseo_run_with, which, Out};
+use crate::shared::proc::{capture, git, is_batch, origin_git, paseo_run_with, which, Out};
 use crate::shared::project::{project_files, read_paths};
 use crate::shared::py::{os_error, repr, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, DEFAULT};
@@ -960,10 +960,17 @@ pub(crate) fn stale_prompts(home: &Path) -> Vec<String> {
             path.display()
         ));
     }
-    if let Some(Ok(list)) = paseo_bin().map(|p| paseo_legacy(&p)) {
-        for s in list {
+    if let Some(paseo) = paseo_bin().and_then(|p| which(&p)) {
+        let paseo = paseo.to_string_lossy();
+        for s in paseo_legacy(&paseo).unwrap_or_default() {
+            // Catch-up updates factory's own retro schedule, except through paseo.cmd.
+            let fix = if is_batch(&paseo) && factory_retro(&s) {
+                "edit its prompt in Paseo; factory catch-up prints the replacement"
+            } else {
+                "run factory catch-up"
+            };
             found.push(format!(
-                "paseo schedule {} ({}) still names factory.py; run factory catch-up",
+                "paseo schedule {} ({}) still names factory.py; {fix}",
                 s.id, s.name
             ));
         }
@@ -971,12 +978,13 @@ pub(crate) fn stale_prompts(home: &Path) -> Vec<String> {
     found
 }
 
-/// The paseo binary catch-up and doctor run. A test that fakes none never reaches this host's Paseo.
+/// The paseo catch-up and doctor run, as the shared `paseo_bin` finds it, else a bare `paseo` that
+/// `which` then misses. A test that fakes none never reaches this host's Paseo.
 fn paseo_bin() -> Option<String> {
     #[cfg(test)]
     return fake!(paseo).map(|p| p.to_string_lossy().into_owned());
     #[cfg(not(test))]
-    Some("paseo".to_string())
+    Some(crate::shared::proc::paseo_bin().unwrap_or_else(|| "paseo".to_string()))
 }
 
 /// Points factory's own retro schedule at the installed retro prompt, and names every other Paseo
@@ -986,10 +994,11 @@ fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) -> bool {
     let Some(paseo) = paseo_bin() else {
         return false;
     };
-    if which(&paseo).is_none() {
+    let Some(paseo) = which(&paseo) else {
         outln!(out, "paseo schedules: skipped, paseo is not on PATH");
         return false;
-    }
+    };
+    let paseo = paseo.to_string_lossy();
     let found = match paseo_legacy(&paseo) {
         Ok(found) => found,
         Err(why) => {
@@ -997,7 +1006,11 @@ fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) -> bool {
             return false;
         }
     };
-    let (ours, others): (Vec<_>, Vec<_>) = found.into_iter().partition(factory_retro);
+    // paseo.cmd cannot carry the multi-line retro prompt, so on Windows factory's own schedule
+    // gets the same warning as the others, and its update stays manual.
+    let batch = is_batch(&paseo);
+    let (ours, others): (Vec<_>, Vec<_>) =
+        found.into_iter().partition(|s| !batch && factory_retro(s));
     let skill_text = skill.to_string_lossy();
     for s in &others {
         outln!(
@@ -1313,6 +1326,11 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             ok = r.code == 0;
             if ok {
                 outln!(out, "skill: installed {h7} into {}", skill.display());
+                for line in r.stdout.lines() {
+                    if let Some(rest) = line.strip_prefix("install: retro prompt ") {
+                        outln!(out, "retro prompt: {rest}");
+                    }
+                }
             } else {
                 failed += 1;
                 let text = if r.stderr.is_empty() {
@@ -2113,6 +2131,33 @@ mod tests {
         assert_eq!(mode(backup.join("home/.env")), 0o600);
         assert!(!backup.join("home/routes.md").exists());
         assert_eq!(t.worktrees(), 1);
+    }
+
+    /// The child install's retro prompt backup line reaches catch-up's own output.
+    #[test]
+    fn child_install_backup_line_is_echoed() {
+        let t = T::new("install-backup-line");
+        let real = FAKES.with(|f| f.borrow().install.clone()).unwrap();
+        FAKES.with(|f| {
+            f.borrow_mut().install = Some(Rc::new(move |argv| {
+                let mut r = real(argv);
+                r.stdout.push_str(
+                    "install: retro prompt rewritten; the old one is in /synthetic/backups/retro-prompt-1\n",
+                );
+                r
+            }))
+        });
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0, "{out}");
+        let lines: Vec<&str> = out.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.starts_with("skill: installed"))
+            .unwrap();
+        assert_eq!(
+            lines[at + 1],
+            "retro prompt: rewritten; the old one is in /synthetic/backups/retro-prompt-1"
+        );
     }
 
     #[test]
@@ -3803,6 +3848,37 @@ esac
         .unwrap();
         assert_eq!(old[0]["prompt"], OLD_RETRO);
         assert_eq!(old.as_array().unwrap().len(), 2);
+    }
+
+    /// A paseo.cmd, as on Windows, cannot carry the retro prompt, so factory's own schedule gets
+    /// the manual fix and no update is sent.
+    #[test]
+    fn a_batch_paseo_leaves_the_retro_schedule_to_a_person() {
+        let t = T::new("paseo-batch");
+        let bin = fake_paseo(
+            &t,
+            &[(
+                "0a1b2c3d",
+                "Factory retro weekdays (example-host)",
+                OLD_RETRO,
+            )],
+        );
+        let cmd = bin.with_file_name("paseo.cmd");
+        fs::rename(&bin, &cmd).unwrap();
+        FAKES.with(|f| f.borrow_mut().paseo = Some(cmd.clone()));
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0, "{out}");
+        let lines: Vec<&str> = out.lines().filter(|l| l.starts_with("paseo")).collect();
+        assert_eq!(
+            lines,
+            [format!("paseo schedules: 0a1b2c3d (Factory retro weekdays (example-host)) still runs factory.py; in its prompt replace python3 <path>/runtime/factory.py with {}/runtime/factory", t.skill.display())]
+        );
+        assert!(!cmd.with_file_name("update-0a1b2c3d.txt").exists());
+        assert!(retro_backups(&t, "paseo-schedules").is_empty());
+        assert_eq!(
+            stale_prompts(&t.home),
+            ["paseo schedule 0a1b2c3d (Factory retro weekdays (example-host)) still names factory.py; edit its prompt in Paseo; factory catch-up prints the replacement"]
+        );
     }
 
     #[test]

@@ -17,7 +17,7 @@ use crate::shared::fs::{is_link, normpath, resolve, temp_root};
 use crate::shared::home::{factory_home, holder};
 use crate::shared::http::cas;
 use crate::shared::paseo::paseo_session;
-use crate::shared::proc::{capture, git, paseo_run, which};
+use crate::shared::proc::{capture, git, paseo_bin, paseo_run, which};
 use crate::shared::project::{project_files, r2_target, read_paths};
 use crate::shared::py::{os_error, splitlines};
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};
@@ -385,7 +385,7 @@ pub(crate) fn orphan_scan(home: &Path) -> Res<(Vec<Value>, Vec<String>)> {
     let jobs = board_jobs(&board)?;
     let paths = read_paths(home)?;
     let gh = which("gh");
-    scan(home, jobs, &paths, gh.as_deref(), which("paseo").is_some())
+    scan(home, jobs, &paths, gh.as_deref(), paseo_bin().is_some())
 }
 
 /// The board's jobs, refusing anything but a list of objects, where Python would raise.
@@ -709,7 +709,8 @@ pub fn archive_workspace(call: &Call) -> Res<()> {
     }
     let (home, _slug, job_id) = r2_target(&call.args[0], true)?;
     let session = paseo_session();
-    if let Some(reason) = early_reason(session.is_some(), which("paseo").as_deref()) {
+    if let Some(reason) = early_reason(session.is_some(), paseo_bin().map(PathBuf::from).as_deref())
+    {
         println!(
             "{}",
             dumps(&json!({"archived": null, "reason": reason}), DEFAULT)

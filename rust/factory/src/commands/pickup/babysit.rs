@@ -74,13 +74,13 @@ pub(super) fn paseo_statuses() -> Option<Vec<(Value, Value)>> {
     if let Some(f) = fake!(paseo_statuses) {
         return f();
     }
-    let exe = which("paseo")?.to_string_lossy().into_owned();
+    let exe = paseo_bin()?;
     let home = std::env::var("PASEO_HOME").unwrap_or_default();
     let mut argv = vec![exe.as_str(), "ls", "-a", "-g", "--json"];
     if !home.is_empty() {
         argv.extend(["--home", home.as_str()]);
     }
-    let r = capture(&argv, None, &[], Some(Duration::from_secs(20))).ok()?;
+    let r = paseo_capture(&argv, Duration::from_secs(20)).ok()?;
     let agents = loads(&r.stdout).ok().filter(|_| r.code == 0)?;
     Some(
         agents
@@ -131,17 +131,16 @@ pub(super) fn paseo_send(agent: &str, message: &str) -> bool {
     if let Some(f) = fake!(paseo_send) {
         return f(agent, message);
     }
-    let Some(exe) = which("paseo") else {
+    let Some(exe) = paseo_bin() else {
         return false;
     };
-    let exe = exe.to_string_lossy().into_owned();
     let home = std::env::var("PASEO_HOME").unwrap_or_default();
     let mut argv = vec![exe.as_str(), "send", "--no-wait"];
     if !home.is_empty() {
         argv.extend(["--home", home.as_str()]);
     }
     argv.extend([agent, message]);
-    capture(&argv, None, &[], Some(Duration::from_secs(20))).is_ok_and(|o| o.code == 0)
+    paseo_capture(&argv, Duration::from_secs(20)).is_ok_and(|o| o.code == 0)
 }
 
 /// The babysit row for a babysit sent to the job's own Paseo agent.

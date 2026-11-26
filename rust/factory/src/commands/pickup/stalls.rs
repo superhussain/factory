@@ -224,27 +224,21 @@ pub(super) fn stalls_fail(msg: &str) -> Exit {
 
 /// (exit code, stdout) from one paseo call, or 1 when paseo fails or is slow.
 pub(super) fn stalls_paseo(args: &[&str]) -> Res<(i32, String)> {
-    let Some(program) = which("paseo") else {
+    let Some(program) = paseo_bin() else {
         return Err(stalls_fail("paseo is not on PATH"));
     };
-    let program = program.to_string_lossy().into_owned();
     let home = std::env::var("PASEO_HOME").unwrap_or_default();
     let mut argv = vec![program.as_str()];
     if !home.is_empty() {
         argv.extend(["--home", home.as_str()]);
     }
     argv.extend(args);
-    Ok(
-        match capture(
-            &argv,
-            None,
-            &[],
-            Some(Duration::from_secs(STALLS_PASEO_SECONDS)),
-        ) {
-            Ok(out) => (out.code, out.stdout),
-            Err(_) => (1, String::new()),
-        },
-    )
+    match paseo_capture(&argv, Duration::from_secs(STALLS_PASEO_SECONDS)) {
+        Ok(out) => Ok((out.code, out.stdout)),
+        // paseo_capture has already printed why.
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => Err(Exit::raw(1, String::new())),
+        Err(_) => Ok((1, String::new())),
+    }
 }
 
 /// (limit line groups, inspect info) while the agent sits idle and unarchived on a Claude limit
