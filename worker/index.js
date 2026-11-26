@@ -13,7 +13,9 @@ import {
 import {
   ARCHIVE_KEY,
   archiveGet,
+  jobsOf,
   needsTriageKey,
+  readHourly,
   runArchive,
   slimBoard,
   terminal,
@@ -2763,21 +2765,19 @@ const IDEA_ORPHAN_GRACE_MS = 2 * DAY_MS;
 // A board write may add a reference only to an upload this fresh, half the sweep's grace, so no write can name an object a running sweep deletes.
 const IDEA_REF_FRESH_MS = DAY_MS;
 
-// Deletes idea uploads older than IDEA_ORPHAN_GRACE_MS that no board or archive row names.
-// The board is read before the archive, since runArchive writes the archive first.
-async function pruneIdeaUploads(env, now) {
+// Deletes idea uploads older than IDEA_ORPHAN_GRACE_MS that no board or archive row names, from
+// readHourly's read, which takes the board before the archive, since runArchive writes the
+// archive first.
+async function pruneIdeaUploads(env, now, hourly) {
   const named = new Set();
-  for (const key of ["board.json", ARCHIVE_KEY]) {
-    const text =
-      key === "board.json"
-        ? ((await boardStore(env).read())?.text ?? null)
-        : ((await (await env.BUCKET.get(key))?.text()) ?? null);
-    if (text === null && key === ARCHIVE_KEY) continue;
-    let jobs;
-    try {
-      jobs = JSON.parse(text).jobs;
-    } catch {}
-    if (!Array.isArray(jobs)) {
+  const { board, archive } = await hourly;
+  for (const [key, doc] of [
+    ["board.json", board],
+    [ARCHIVE_KEY, archive],
+  ]) {
+    if (doc === null && key === ARCHIVE_KEY) continue;
+    const jobs = jobsOf(doc);
+    if (!jobs) {
       console.warn(`idea upload sweep skipped: ${key} is unreadable`);
       return { status: "skipped", deleted: [] };
     }
@@ -2899,10 +2899,10 @@ async function storedBoard(env) {
 }
 
 // Spend nudges for the hour; a failure is logged so the stuck and stale pushes still go out.
-async function spendEvents(env, at) {
+async function spendEvents(env, at, hourly) {
   if (!pushKey(env)) return { events: [], state: null };
   try {
-    return await spendNudgePass(env, await weeklyBudgets(env), at);
+    return await spendNudgePass(env, await weeklyBudgets(env), at, hourly);
   } catch (error) {
     if (error instanceof Error) console.warn(`spend nudge pass failed: ${error.message}`);
     else console.warn("spend nudge pass failed:", error);
@@ -2912,9 +2912,9 @@ async function spendEvents(env, at) {
 
 // The hourly stuck, stale and spend push. A scheduled env has no config, so it is read here for VAPID.
 // Spend state is recorded only after a device accepts the push.
-async function pushHourly(env, at) {
-  const spend = await spendEvents(env, at);
-  const { jobs } = await storedBoard(env);
+async function pushHourly(env, at, hourly) {
+  const spend = await spendEvents(env, at, hourly);
+  const jobs = jobsOf((await hourly).board) ?? [];
   const delivered = await sendPushes({ ...env, config: readServerConfig(env) }, [
     ...stuckPushes(jobs, at),
     ...stalePushes(jobs, at),
@@ -3859,12 +3859,18 @@ export default {
     }
     return serveFactory(request, { ...env, config }, principal, ctx);
   },
+  // The board and the archive are read and parsed once, and the passes share them. A failed
+  // read fails the passes that need it, each logged.
   scheduled(controller, env, ctx) {
-    ctx.waitUntil(runArchive(env, new Date(controller.scheduledTime)));
-    ctx.waitUntil(pruneRetro(env, new Date(controller.scheduledTime)));
-    ctx.waitUntil(pruneRetroRuns(env, new Date(controller.scheduledTime)));
-    ctx.waitUntil(pruneIdeaUploads(env, new Date(controller.scheduledTime)));
-    ctx.waitUntil(pushHourly(env, new Date(controller.scheduledTime)).catch(() => {}));
+    const now = new Date(controller.scheduledTime);
+    const hourly = readHourly(env);
+    const failed = (pass) => (error) =>
+      console.warn(`${pass} failed: ${error instanceof Error ? error.message : error}`);
+    ctx.waitUntil(runArchive(env, now, hourly).catch(failed("archive pass")));
+    ctx.waitUntil(pruneRetro(env, now));
+    ctx.waitUntil(pruneRetroRuns(env, now));
+    ctx.waitUntil(pruneIdeaUploads(env, now, hourly).catch(failed("idea upload sweep")));
+    ctx.waitUntil(pushHourly(env, now, hourly).catch(() => {}));
   },
 };
 

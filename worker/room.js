@@ -104,6 +104,10 @@ export class BoardEvents extends DurableObject {
     return this.board().read();
   }
 
+  boardIds() {
+    return this.board().ids();
+  }
+
   boardRows(q, at) {
     return this.board().rows(q, at);
   }

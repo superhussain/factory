@@ -122,15 +122,31 @@ const conflict = (reason) => {
   return { status: "conflict", moved: [] };
 };
 
-/** One archive pass. Off unless a valid global pipeline document sets `archive`. */
-export async function runArchive(env, now) {
+/** The board, then the archive, read once for the hourly passes to share. board is as
+ * readBoardJson gives it; archive is null when missing, else { data, etag }, data undefined when
+ * it is not JSON. The board comes first, since the archive pass writes the archive first. */
+export async function readHourly(env) {
+  const board = await readBoardJson(env);
+  const object = await env.BUCKET.get(ARCHIVE_KEY);
+  if (!object) return { board, archive: null };
+  let data;
+  try {
+    data = JSON.parse(await object.text());
+  } catch {}
+  return { board, archive: { data, etag: object.httpEtag } };
+}
+
+/** One archive pass over the promise of readHourly's read. Off unless a valid global pipeline
+ * document sets `archive`. */
+export async function runArchive(env, now, hourly) {
   const pipeline = await readJson(env, "pipeline/global.json");
   if (!pipeline || validatePipeline(pipeline.data) || !pipeline.data.archive)
     return { status: "off", moved: [] };
-  const board = await readBoardJson(env);
+  const { board, archive: stored } = await hourly;
   const jobs = jobsOf(board);
   if (!jobs) return { status: "none", moved: [] };
-  const archive = await readJson(env, ARCHIVE_KEY);
+  // An archive that is not JSON is written only where none exists, so its write fails.
+  const archive = stored?.data === undefined ? null : stored;
   const archiveJobs = jobsOf(archive) ?? [];
   const ids = planArchive(jobs, pipeline.data.archive, now, pipeline.data.tracer?.enabled !== true);
   const boardIds = new Set(jobs.map((j) => j?.id));
@@ -183,6 +199,25 @@ export const reply = (body, status = 200, type = "text/plain") =>
     },
   });
 
+// The archive's rows as last parsed in this isolate, by the R2 etag of BUCKET's archive, so each
+// archive version is parsed once while the isolate lives. The etag names the bytes, so the key
+// holds even if each request gets a new BUCKET object. An archive past ARCHIVE_MEMO_MAX bytes is
+// parsed per request instead of held. The rows are only read.
+const ARCHIVE_MEMO_MAX = 8 << 20;
+let archiveMemo = { etag: null, jobs: [] };
+
+async function archiveRows(env) {
+  const head = await env.BUCKET.head(ARCHIVE_KEY);
+  if (!head) return [];
+  if (archiveMemo.etag === head.httpEtag) return archiveMemo.jobs;
+  const doc = await readJson(env, ARCHIVE_KEY);
+  const jobs = jobsOf(doc) ?? [];
+  // The size is the HEAD's, so only the version it measured is held.
+  if (doc?.etag === head.httpEtag && head.size <= ARCHIVE_MEMO_MAX)
+    archiveMemo = { etag: doc.etag, jobs };
+  return jobs;
+}
+
 /** GET /api/board/archive with exactly one of ?id=, ?page= or ?q=. */
 export async function archiveGet(request, env) {
   const params = new URL(request.url).searchParams;
@@ -193,8 +228,8 @@ export async function archiveGet(request, env) {
   const q = params.get("q");
   if (q !== null && ([...q].length < 1 || [...q].length > 200))
     return reply("q: must be 1 to 200 characters", 400);
-  const boardIds = new Set((jobsOf(await readBoardJson(env)) ?? []).map((j) => j?.id));
-  const jobs = (jobsOf(await readJson(env, ARCHIVE_KEY)) ?? []).filter((j) => !boardIds.has(j?.id));
+  const boardIds = new Set(await boardStore(env).ids());
+  const jobs = (await archiveRows(env)).filter((j) => !boardIds.has(j?.id));
   const json = (body) => reply(body, 200, "application/json");
   if (params.has("id")) {
     const row = jobs.find((j) => j?.id === params.get("id"));

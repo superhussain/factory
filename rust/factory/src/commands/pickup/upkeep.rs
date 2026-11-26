@@ -592,7 +592,7 @@ pub(super) fn audit_push(job_id: &str) -> Res<()> {
     if let Some(f) = fake!(audit_push) {
         return f(job_id);
     }
-    crate::commands::audit::audit_push(job_id)
+    crate::commands::audit::audit_push(job_id, false)
 }
 
 pub(super) fn usage_record(
@@ -678,9 +678,10 @@ pub(super) fn audit_pickup_push(io: &mut Io, home: &Path, data: Option<&Value>) 
                 != Some(stamp)
             {
                 match audit_push(job_id) {
-                    // A transcript a flag pattern could not finish reading pushes nothing, and
-                    // only changed transcripts retry it, so one oversized call cannot stop pickup.
-                    Err(e) if e.stderr.contains(crate::shared::pyre::LIMIT_HIT) => {
+                    // A transcript a flag pattern could not finish reading pushes only a skip
+                    // marker, and only changed transcripts retry it, so one oversized call cannot
+                    // stop pickup.
+                    Err(e) if e.code == crate::shared::exit::LIMIT => {
                         // Pickup goes on and cannot shorten a transcript, so drop the stop advice.
                         let why = e.stderr.trim_end();
                         let why = why.split("; stopping").next().unwrap_or(why);
@@ -689,11 +690,9 @@ pub(super) fn audit_pickup_push(io: &mut Io, home: &Path, data: Option<&Value>) 
                             "audit push skipped {job_id} until its transcripts change: {why}"
                         );
                     }
-                    pushed => {
-                        pushed?;
-                        usage_pickup_record(io, home, job)?;
-                    }
+                    pushed => pushed?,
                 }
+                usage_pickup_record(io, home, job)?;
             }
             kept.insert(job_id.to_string(), Value::from(stamp));
         }

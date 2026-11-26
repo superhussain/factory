@@ -295,16 +295,21 @@ pub(super) fn timer_text(scheduler: &str, values: &TimerValues) -> String {
             log = log.replace('%', "%%"),
         );
     }
-    let run = format!("{} >> \"{log}\" 2>&1", list2cmdline(argv));
     if unit.keep_alive {
         // Task Scheduler starts it once at logon; the loop restarts it 10 seconds after it ends,
-        // until uninstall writes the stop marker.
+        // until uninstall writes the stop marker. cmd's `>>` holds its file without write sharing,
+        // so the loop sends output to a boot log, trimmed past 256 KiB, and the daemon opens and
+        // caps daemon.log itself.
         let stop = daemon::stop_marker(Path::new(&argv[2]));
         let stop = stop.display();
+        let boot = Path::new(log).with_file_name(format!("{}-boot.log", unit.command));
+        let boot = boot.display();
+        let run = format!("{} >> \"{boot}\" 2>&1", list2cmdline(argv));
         return format!(
-            "@echo off\r\nset \"PATH={path};%PATH%\"\r\n:run\r\nif exist \"{stop}\" exit /b 0\r\n{run}\r\nif exist \"{stop}\" exit /b 0\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n"
+            "@echo off\r\nset \"PATH={path};%PATH%\"\r\n:run\r\nif exist \"{stop}\" exit /b 0\r\nif exist \"{boot}\" for %%F in (\"{boot}\") do if %%~zF GTR 262144 type nul > \"{boot}\"\r\n{run}\r\nif exist \"{stop}\" exit /b 0\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n"
         );
     }
+    let run = format!("{} >> \"{log}\" 2>&1", list2cmdline(argv));
     format!("@echo off\r\nset \"PATH={path};%PATH%\"\r\n{run}\r\n")
 }
 
@@ -322,6 +327,95 @@ pub(super) fn schtasks_schedule(unit: &Unit) -> &'static [&'static str] {
 /// The `/TR` value for a `.cmd` path: quoted inside, so a path with a space stays one program.
 pub(super) fn schtasks_run(cmd: &Path) -> String {
     format!("\"{}\"", cmd.display())
+}
+
+/// The daemon task's definition. Its logon trigger names this user, which needs no elevation
+/// where `/SC ONLOGON`'s any-user trigger does, and its KEEP_ALIVE settings replace schtasks'
+/// defaults that would end the loop after 72 hours or on battery.
+pub(super) fn task_xml(cmd: &Path, user: &str) -> String {
+    let (user, command) = (plist_escape(user), plist_escape(&schtasks_run(cmd)));
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>{user}</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    {}
+  </Settings>
+  <Actions>
+    <Exec>
+      <Command>{command}</Command>
+    </Exec>
+  </Actions>
+</Task>
+"#,
+        KEEP_ALIVE.join("\n    ")
+    )
+    .replace('\n', "\r\n")
+}
+
+/// The settings that keep the daemon task's loop running past 72 hours and on battery.
+const KEEP_ALIVE: [&str; 3] = [
+    "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>",
+    "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>",
+    "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>",
+];
+
+/// The unit's scheduled task definition from `schtasks /Query /XML`, or None when there is no task.
+fn task_definition(unit: &Unit) -> Option<String> {
+    let (code, xml) = setup_run(&["schtasks", "/Query", "/TN", unit.task, "/XML"], None);
+    (code == 0).then_some(xml)
+}
+
+/// True when a task definition, as `schtasks /Query /XML` prints it, has every KEEP_ALIVE setting.
+pub(super) fn keeps_alive(xml: &str) -> bool {
+    KEEP_ALIVE.iter().all(|s| xml.contains(s))
+}
+
+/// True when the unit's scheduled task exists and has every KEEP_ALIVE setting.
+fn task_unlimited(unit: &Unit) -> bool {
+    task_definition(unit).is_some_and(|xml| keeps_alive(&xml))
+}
+
+/// Creates or replaces the daemon task from task_xml, through a UTF-16 file beside cmd, the only
+/// encoding `/Create /XML` reads. A running loop keeps running.
+fn create_daemon_task(unit: &Unit, cmd: &Path) -> Res<()> {
+    let user = format!(
+        "{}\\{}",
+        std::env::var("USERDOMAIN").unwrap_or_default(),
+        std::env::var("USERNAME").unwrap_or_default()
+    );
+    let xml = cmd.with_extension("xml");
+    let bytes: Vec<u8> = std::iter::once(0xFEFF)
+        .chain(task_xml(cmd, &user).encode_utf16())
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    mkdirs(cmd.parent().unwrap())?;
+    write_atomic(&xml, &bytes).map_err(|e| fail(os_error(&e, Some(&xml)), 1))?;
+    let shown = xml.to_string_lossy();
+    let created = setup_run(
+        &[
+            "schtasks", "/Create", "/TN", unit.task, "/XML", &shown, "/F",
+        ],
+        None,
+    );
+    let _ = fs::remove_file(&xml);
+    if created.0 != 0 {
+        return Err(fail(
+            format!(
+                "could not install the schtasks {}: {}",
+                unit.noun,
+                strip(&created.1)
+            ),
+            1,
+        ));
+    }
+    Ok(())
 }
 
 /// What the crontab line of a unit does, for the installed detail.
@@ -506,6 +600,18 @@ pub(crate) fn timer_drift(scheduler: &str, values: &TimerValues) -> Option<Strin
     } else {
         let file = timer_path(scheduler, unit);
         if fs::read(&file).ok().as_deref() == Some(timer_text(scheduler, values).as_bytes()) {
+            if scheduler == "schtasks" && unit.keep_alive {
+                match task_definition(unit) {
+                    None => return Some(format!("no scheduled task {}", unit.task)),
+                    Some(xml) if !keeps_alive(&xml) => {
+                        return Some(format!(
+                            "the {} task ends its loop after 72 hours or on battery; --install removes those limits",
+                            unit.task
+                        ))
+                    }
+                    Some(_) => {}
+                }
+            }
             return None;
         }
         return Some(format!(
@@ -566,7 +672,10 @@ pub(super) fn pause(d: Duration) {
 }
 
 /// Polls for a launchd job to come up after a reload: 20 prints 250 ms apart, about 5 s.
-pub(super) const RUNNING_POLLS: u32 = 20;
+pub(crate) const RUNNING_POLLS: u32 = 20;
+
+/// Polls for the daemon after the Windows task's /Run: about 15 s, past the loop's 10 s wait.
+const START_POLLS: u32 = 60;
 
 /// Reloads a launchd job from its plist with bootout then bootstrap: (code, output) of the
 /// bootstrap. launchd re-reads the binary's signature only on bootstrap; after the binary is
@@ -711,26 +820,101 @@ pub(super) fn install_timer(home: &Path, scheduler: &str, unit: &'static Unit) -
         done = format!("installed cron {noun}: crontab");
     } else {
         let cmd = timer_path(scheduler, unit);
-        if unit.keep_alive {
-            clear_stop_marker(home)?;
+        let same = fs::read(&cmd).ok().as_deref() == Some(text.as_bytes());
+        let task = setup_run(&["schtasks", "/Query", "/TN", unit.task], None).0 == 0;
+        let unlimited = !unit.keep_alive || (task && task_unlimited(unit));
+        // A timer is (re)created from its /SC schedule. The daemon task comes from task_xml, before
+        // anything stops the daemon, so a /Create that fails leaves it running. A task that
+        // already has that definition needs none: its action names this fixed path.
+        if !unit.keep_alive && !(same && task) {
+            let run = schtasks_run(&cmd);
+            let mut create = vec!["schtasks", "/Create", "/TN", unit.task];
+            create.extend(schtasks_schedule(unit));
+            create.extend(["/TR", &run, "/F"]);
+            let created = setup_run(&create, None);
+            if created.0 != 0 {
+                return Err(fail(
+                    format!(
+                        "could not install the schtasks {noun}: {}",
+                        strip(&created.1)
+                    ),
+                    1,
+                ));
+            }
         }
-        if fs::read(&cmd).ok().as_deref() == Some(text.as_bytes())
-            && setup_run(&["schtasks", "/Query", "/TN", unit.task], None).0 == 0
-        {
+        if !unlimited {
+            create_daemon_task(unit, &cmd)?;
+        }
+        // cmd reads a batch file by byte offset, so a loop still running when its file is
+        // rewritten resumes mid-line in the new text. End it first; /Run below starts it again,
+        // under the new task definition too.
+        let ended = unit.keep_alive && task && !(same && unlimited);
+        if ended {
+            end_loop(home)?;
+        }
+        let stopped_but = |e: crate::shared::exit::Exit| {
+            if ended {
+                fail(format!("the daemon is stopped, but {}", message(&e)), 1)
+            } else {
+                e
+            }
+        };
+        if unit.keep_alive {
+            clear_stop_marker(home).map_err(|e| {
+                let marker = daemon::stop_marker(home);
+                stopped_but(fail(
+                    format!(
+                        "{}; delete {}, then run factory daemon setup --install",
+                        message(&e),
+                        marker.display()
+                    ),
+                    1,
+                ))
+            })?;
+        }
+        // A loop that died leaves no daemon on the lock, so a current loop still gets /Run.
+        let stopped = unit.keep_alive && matches!(daemon::locked_pid(home), Ok(None));
+        if same && task && unlimited && !stopped {
             return Ok(format!("{}: {}", unit.current, cmd.display()));
         }
-        mkdirs(cmd.parent().unwrap())?;
-        write_file(&cmd, &text)?;
-        let run = schtasks_run(&cmd);
-        let mut create = vec!["schtasks", "/Create", "/TN", unit.task];
-        create.extend(schtasks_schedule(unit));
-        create.extend(["/TR", &run, "/F"]);
-        let mut result = setup_run(&create, None);
-        if result.0 == 0 && unit.keep_alive {
-            result = setup_run(&["schtasks", "/Run", "/TN", unit.task], None);
+        if !same {
+            mkdirs(cmd.parent().unwrap())
+                .and_then(|_| write_file(&cmd, &text))
+                .map_err(stopped_but)?;
         }
-        (code, out) = result;
-        done = format!("installed schtasks {noun}: {}", cmd.display());
+        if unit.keep_alive {
+            let ran = setup_run(&["schtasks", "/Run", "/TN", unit.task], None);
+            if ran.0 != 0 {
+                return Err(fail(
+                    format!(
+                        "could not install the schtasks {noun}: {}; the daemon is not running. Start it with: schtasks /Run /TN {}",
+                        strip(&ran.1),
+                        unit.task
+                    ),
+                    1,
+                ));
+            }
+            // The loop may still be in its 10 s wait before it starts the daemon.
+            daemon_pid(home, None, START_POLLS, &mut || daemon::locked_pid(home)).map_err(|_| {
+                fail(
+                    format!(
+                        "schtasks /Run started the {} task, but no daemon took its lock within 15 s; see {}",
+                        unit.task,
+                        home.join("logs").join("daemon-boot.log").display()
+                    ),
+                    1,
+                )
+            })?;
+        }
+        (code, out) = (0, String::new());
+        done = if same && task && unlimited {
+            format!(
+                "started the stopped daemon with schtasks /Run: {}",
+                cmd.display()
+            )
+        } else {
+            format!("installed schtasks {noun}: {}", cmd.display())
+        };
     }
     if code != 0 {
         let label = if scheduler == "launchd" {
@@ -1278,6 +1462,28 @@ pub(super) fn locked_kill(home: &Path) -> Result<Option<Vec<String>>, String> {
     }
 }
 
+/// Ends the Windows loop and its daemon through the restart's stop path, without its /Run: the
+/// stop marker, /End, then the daemon's kill, waiting for it to let go of the lock. A failure
+/// clears the marker, so the loop is not left to exit at every logon.
+fn end_loop(home: &Path) -> Res<()> {
+    let ended = daemon_restart_argvs("schtasks", home).and_then(|mut argvs| {
+        argvs.pop();
+        for argv in argvs {
+            let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+            setup_run(&args, None);
+            if argv[0] != "schtasks" {
+                let pid = argv.iter().find_map(|w| w.parse().ok()).unwrap_or_default();
+                daemon_stopped(pid, &mut || daemon::locked_pid(home))?;
+            }
+        }
+        Ok(())
+    });
+    ended.map_err(|e| {
+        let _ = clear_stop_marker(home);
+        fail(format!("could not stop the running daemon loop: {e}"), 1)
+    })
+}
+
 /// The commands that restart an installed daemon service so it runs a newly installed binary, in
 /// order; empty when there is nothing to restart. Cron has no service, so it ends the daemon that
 /// holds the lock and the caller starts the new binary with spawn_daemon. On Windows /End can
@@ -1365,15 +1571,16 @@ pub(crate) fn daemon_stopped(
     ))
 }
 
-/// The pid of the daemon that holds the lock once one does, polled for about 5 s. locked is
-/// daemon::locked_pid for home. A new daemon writes its pid file just after it takes the lock,
-/// truncating it first, so an unreadable pid or the killed one means not yet.
+/// The pid of the daemon that holds the lock once one does, polled `polls` times 250 ms apart.
+/// locked is daemon::locked_pid for home. A new daemon writes its pid file just after it takes
+/// the lock, truncating it first, so an unreadable pid or the killed one means not yet.
 pub(crate) fn daemon_pid(
     home: &Path,
     killed: Option<u32>,
+    polls: u32,
     locked: &mut dyn FnMut() -> Result<Option<u32>, String>,
 ) -> Result<u32, String> {
-    for i in 0..RUNNING_POLLS {
+    for i in 0..polls {
         if i > 0 {
             pause(Duration::from_millis(250));
         }
@@ -1383,9 +1590,16 @@ pub(crate) fn daemon_pid(
             }
         }
     }
+    // On Windows the restart loop sends a daemon's startup errors to the boot log.
+    let log = if WINDOWS {
+        "daemon-boot.log"
+    } else {
+        "daemon.log"
+    };
     Err(format!(
-        "no daemon holds the lock 5 s after the restart; see {}",
-        home.join("logs").join("daemon.log").display()
+        "no daemon holds the lock {} s after the restart; see {}",
+        polls / 4,
+        home.join("logs").join(log).display()
     ))
 }
 
@@ -1506,7 +1720,7 @@ pub(super) fn daemon_setup(
         files.extend(timer_backup(pickup_scheduler(), &RETRO_PUSH));
     }
     backup_files(io, home, files)?;
-    // The daemon pushes the retro digest too, so the retro-push timer follows the pickup timer.
+    // The daemon pushes the retro digest too, so install removes the retro-push timer as well.
     match action {
         ServiceAction::Install => {
             outln!(io, "{}", install_timer(home, scheduler, &DAEMON)?);
@@ -1521,13 +1735,11 @@ pub(super) fn daemon_setup(
                 uninstall_timer(home, pickup_scheduler(), &RETRO_PUSH)?
             );
         }
+        // The retro-push timer is not put back: the host may never have had one, or had its own
+        // times, which the install's backup keeps.
         ServiceAction::Uninstall => {
             outln!(io, "{}", install_timer(home, pickup_scheduler(), &PICKUP)?);
-            outln!(
-                io,
-                "retro-push timer: {}",
-                install_timer(home, pickup_scheduler(), &RETRO_PUSH)?
-            );
+            outln!(io, "retro-push timer: left off");
             outln!(io, "{}", uninstall_timer(home, scheduler, &DAEMON)?);
             if scheduler == "cron" || scheduler == "schtasks" {
                 if let Some(line) = stop_daemon(home) {

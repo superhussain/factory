@@ -160,7 +160,10 @@ Measured on 2026-11-23, the mirror answered in under 10 ms on WSL and in 50 to
 
 It installs the daemon as a service and removes the pickup timer. It exits 0
 and prints `daemon setup (<os>, <scheduler>): running`. Run `daemon setup` with no flag to
-see its state, its last pass and its log, `<home>/logs/daemon.log`.
+see its state, its last pass and its log, `<home>/logs/daemon.log`. The daemon trims
+that log to its last 1 MiB once it passes 5 MiB. On Windows the restart loop sends the
+daemon's startup output, such as an error that stops it before it opens its log, to
+`<home>\logs\daemon-boot.log`, which the loop empties once it passes 256 KiB.
 
 | Host                         | Service                                                                                                                            |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
@@ -217,8 +220,10 @@ back before it removes the service.
 The daemon pushes the retro digest at the timer's times, so the host has no
 `retro push` timer either. `daemon setup --install` removes it with the same
 backup, and catch-up removes a survivor and prints
-`retro-push timer: replaced by the daemon`. `daemon setup --uninstall` puts it
-back. A host without the daemon keeps the timer its
+`retro-push timer: replaced by the daemon`. `daemon setup --uninstall` leaves
+it off and prints `retro-push timer: left off`, since the host may never have
+had one or had its own times; restore it from the backup or set it up again. A
+host without the daemon keeps the timer its
 [schedules reference](../skills/factory/references/schedules.md#daily-retro-push)
 lines set up; point it at the binary as the next section shows.
 

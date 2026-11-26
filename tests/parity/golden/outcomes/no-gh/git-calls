@@ -1,0 +1,4 @@
+{"argv": ["-C", "{home}/alpha", "rev-parse", "--show-toplevel"]}
+{"argv": ["-C", "{home}/alpha", "config", "--bool", "extensions.worktreeConfig"]}
+{"argv": ["-C", "{home}/alpha", "config", "--local", "--includes", "--get-regexp", "^(url|http)\\."]}
+{"argv": ["-C", "{home}/alpha", "fetch", "-q", "https://github.com/example/alpha.git", "+refs/heads/main:refs/remotes/origin/main"]}

@@ -5688,8 +5688,11 @@ function renderAudit(f) {
     const [x, y] = [key(a), key(b)];
     return x < y ? -1 : x > y ? 1 : 0;
   });
-  const hosts = new Set(rows.map((r) => r.host)).size;
-  const flagged = rows.filter((r) => Array.isArray(r.flags) && r.flags.length).length;
+  // A row with skipped: true and no flags is the marker a push leaves when it could not read its transcripts, not a call.
+  // A flagged row always counts, whatever else it carries.
+  const calls = rows.filter((r) => r.skipped !== true || (Array.isArray(r.flags) && r.flags.length));
+  const hosts = new Set(calls.map((r) => r.host)).size;
+  const flagged = calls.filter((r) => Array.isArray(r.flags) && r.flags.length).length;
   const n = (count, word) => count + ' ' + word + (count === 1 ? '' : 's');
   const cols = ['Time (UTC)', 'Host', 'Session', 'Agent', 'Tool', 'Flags', 'Target'];
   const head = cols.map((h) => '<th scope="col" role="columnheader">' + h + '</th>').join('');
@@ -5698,7 +5701,7 @@ function renderAudit(f) {
     const cells = [...[r.time, r.host, r.session, r.agent, r.tool].map(esc), flags, '<code>' + esc(r.target) + '</code>'];
     return '<tr role="row">' + cells.map((c, i) => '<td role="cell" data-label="' + cols[i] + '">' + c + '</td>').join('') + '</tr>';
   }).join('');
-  return '<p>' + n(rows.length, 'call') + ' from ' + n(hosts, 'host') + ', ' + flagged + ' flagged. Each host redacted its targets before upload.</p>' +
+  return '<p>' + n(calls.length, 'call') + ' from ' + n(hosts, 'host') + ', ' + flagged + ' flagged. Each host redacted its targets before upload.</p>' +
     '<div class="table-wrap" tabindex="0" role="region" aria-label="Audit rows"><table class="audit" role="table"><thead role="rowgroup"><tr role="row">' + head + '</tr></thead><tbody role="rowgroup">' + body + '</tbody></table></div>';
 }
 

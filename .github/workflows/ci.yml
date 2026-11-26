@@ -106,8 +106,8 @@ jobs:
           prefix-key: v2-rust
           workspaces: rust
           save-if: false
-      # rust-build runs beside this job, so a PR that changes Rust always misses the binary above. rust-build's
-      # incremental artifacts, which this job only reads, cut that build from about 27 s to a few.
+      # rust-build runs beside this job, so a PR that changes Rust can miss the binary above. The incremental
+      # artifacts warm.yml saves from main, which this job only reads, cut that build from about 27 s to a few.
       - name: Restore incremental artifacts
         if: steps.factory-bin.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -203,9 +203,10 @@ jobs:
           prefix-key: v2-rust
           workspaces: rust
       # rust-cache keeps only dependencies and sets CARGO_INCREMENTAL=0, so each source change compiled the factory
-      # crate from scratch. This PR's previous build's incremental artifacts let rustc reuse the unchanged codegen
+      # crate from scratch. main's incremental artifacts, which warm.yml saves, let rustc reuse the unchanged codegen
       # units. rustc checks every artifact against the current source, compiler and dependencies, so a stale one
-      # only costs reuse; the key still pins the toolchain and lockfile so a bump starts clean.
+      # only costs reuse; the key still pins the toolchain and lockfile so a bump starts clean. A PR run only
+      # restores them: a save per run, about 50 MB each, filled the repo's cache budget and evicted main's caches.
       - name: Restore incremental artifacts
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -214,12 +215,6 @@ jobs:
           restore-keys: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-
       - name: Build linux-x64
         run: CARGO_INCREMENTAL=1 cargo build --profile host --locked
-      # Saved before rust-cache's post step, which deletes incremental artifacts from rust/target.
-      - name: Save incremental artifacts
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: rust/target/host/incremental
-          key: v1-rust-incr-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
       # The rust key covers every input of this binary; the -bin suffix keeps it apart from the pass marker.
       - name: Cache the factory binary for targets
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -232,29 +227,39 @@ jobs:
           path: rust/target/host/factory
           retention-days: 1
       # A first install with no Python: a temp HOME, so a cold cache, and a temp skills root. install.sh finds the
-      # binary built above in rust/target, and factory install caches that build instead of compiling again.
+      # binary built above in rust/target, stamps it, and factory install caches that build instead of compiling
+      # again. The grep proves the stamp was trusted, since a rebuild would also pass.
       # CARGO_INCREMENTAL=1 as in the build: cargo fingerprints the setting, and rust-cache's 0 would rebuild.
       - name: Install with tools/install.sh
         run: |
           cargo_home="${CARGO_HOME:-$HOME/.cargo}"
           rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
           root="$(mktemp -d)"
-          CARGO_INCREMENTAL=1 HOME="$root/home" CARGO_HOME="$cargo_home" RUSTUP_HOME="$rustup_home" sh ../tools/install.sh "$root/skills"
+          out="$(CARGO_INCREMENTAL=1 HOME="$root/home" CARGO_HOME="$cargo_home" RUSTUP_HOME="$rustup_home" sh ../tools/install.sh "$root/skills" 2>&1)"
+          printf '%s\n' "$out"
+          printf '%s\n' "$out" | grep -qx "install: Rust binary from $PWD/target/host/factory"
           test -x "$root/skills/factory/runtime/factory"
           grep -q '"entry": \["runtime/factory"\]' "$root/skills/factory/bundle.json"
   rust-test:
+    # Without a name, the check would carry each shard's whole heavy-test filter.
+    name: rust-test (${{ matrix.shard }})
     needs: plan
     if: needs.plan.outputs.all != 'true' && needs.plan.outputs.rust != 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 6
     # nextest runs each test in its own process, so tests that hold TEST_ENV_LOCK no longer wait on each other,
     # and hash partitions split the tests over the shards by name, so a test keeps its shard as others come and
-    # go. Each shard's test step takes about 16 s, and parity, not rust-test, ends last, so more shards would not
-    # shorten a run.
+    # go. The hash put all three heavy tests, the priority-100 ones in rust/.config/nextest.toml, in shard 2,
+    # whose test step took 29-34 s against shard 1's 13-19 s. So every shard leaves them out of its partition
+    # and runs its own share of them beside it.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        include:
+          - shard: 1
+            heavy: test(=commands::audit::tests::pr_merge_is_linear) | test(=commands::retro::tests::redact_supersets_cover_every_match)
+          - shard: 2
+            heavy: test(=commands::retro::tests::redact_matches_every_pass_run_unfiltered)
     defaults:
       run:
         working-directory: rust
@@ -288,7 +293,16 @@ jobs:
       - name: Build the tests
         run: CARGO_INCREMENTAL=1 cargo test --locked --no-run
       - name: Test linux-x64
-        run: CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2
+        env:
+          HEAVY: ${{ matrix.heavy }}
+          ALL_HEAVY: test(=commands::audit::tests::pr_merge_is_linear) | test(=commands::retro::tests::redact_supersets_cover_every_match) | test(=commands::retro::tests::redact_matches_every_pass_run_unfiltered)
+        run: |
+          CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast -E "$HEAVY" &
+          heavy=$!
+          status=0
+          CARGO_INCREMENTAL=1 cargo nextest run --locked --no-fail-fast --partition hash:${{ matrix.shard }}/2 -E "not ($ALL_HEAVY)" || status=1
+          wait "$heavy" || status=1
+          exit "$status"
   # Type-checks the darwin-arm64 and windows-x64 targets.
   rust-check:
     needs: plan
@@ -302,6 +316,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # With its two extra targets, rustup took 10-13 s here and a cache hit 5 s; the other rust jobs gained
+      # 0-3 s, too little for their cache space. The path names rust-toolchain.toml's channel. warm.yml saves
+      # this key from main, so a PR saves its own copy only when main has none, as after a toolchain bump.
+      - name: Cache the pinned toolchain
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.rustup/toolchains/1.100.0-x86_64-unknown-linux-gnu
+            ~/.rustup/update-hashes/1.100.0-x86_64-unknown-linux-gnu
+          key: v1-rustup-targets-${{ hashFiles('rust/rust-toolchain.toml') }}
       - name: Install the pinned toolchain and targets
         run: |
           rustup toolchain install

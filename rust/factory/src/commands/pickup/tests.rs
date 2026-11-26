@@ -4874,28 +4874,155 @@ mod audit_pickup_test {
 
     #[test]
     fn test_a_scan_past_the_backtrack_limit_skips_the_push() {
+        // Sets FACTORY_HOME, which every thread reads, so it runs alone.
+        if !crate::shared::in_own_process(
+            module_path!(),
+            "test_a_scan_past_the_backtrack_limit_skips_the_push",
+        ) {
+            return;
+        }
         let fx = setup();
+        let log = push_fakes(&fx, None);
+        fx.set_fakes(|f| f.audit_push = None);
+        let old = r#"{"host": "host-a", "job": "1017-add-x", "time": "2026-01-01 00:00:00", "session": "3f2a9c1d", "agent": "main", "tool": "Bash", "flags": ["force-push"], "target": "git push --force"}"#;
+        let marker = r#"{"host": "host-a", "job": "1017-add-x", "time": "2026-01-01 00:00:01", "session": "-", "agent": "-", "tool": "-", "flags": [], "target": "audit push skipped: a flag pattern hit its backtrack limit, so newer calls are not shown", "skipped": true}"#;
+        let other = r#"{"host": "host-b", "job": "1017-add-x", "time": "2026-01-01 00:00:02", "tool": "Read", "flags": [], "target": "-"}"#;
+        let pushed: &'static str =
+            Box::leak(format!("{old}\n{marker}\n{other}\n").into_boxed_str());
+        let (origin, seen) =
+            crate::shared::http::tests::serve(vec![(200, pushed, vec![]), (200, "", vec![])]);
+        fs::write(
+            fx.home.join("config.md"),
+            format!("---\ndevice: {DEVICE}\napi_url: {origin}\n---\n"),
+        )
+        .unwrap();
+        let session = fx.root.join(SESSION);
+        let usage = json!({"type": "assistant", "message": {"id": "u1", "model": "claude-opus-5-5",
+            "usage": {"input_tokens": 1200, "output_tokens": 48000}}});
+        fs::write(
+            &session,
+            read_text(&session).unwrap() + &usage.to_string() + "\n",
+        )
+        .unwrap();
         crate::commands::audit::limit_secret_file_for_test();
         // audit_push reads its device from factory_home, which follows XDG_CONFIG_HOME before
-        // HOME, so name the fixture home outright. fx holds the env lock until it drops.
-        let saved = std::env::var_os("FACTORY_HOME");
-        std::env::set_var("FACTORY_HOME", &fx.home);
+        // HOME, so name the fixture home outright.
+        fx.set_env("FACTORY_HOME", &fx.home);
         let (code, out, err) = fx.pickup(&[]);
-        match saved {
-            Some(v) => std::env::set_var("FACTORY_HOME", v),
-            None => std::env::remove_var("FACTORY_HOME"),
-        }
-        assert_eq!((code, out.as_str()), (0, ""));
+        assert_eq!(
+            (code, out.as_str()),
+            (0, "recorded host-a tokens on 1017-add-x\n")
+        );
         assert!(
             err.starts_with("audit push skipped 1017-add-x until its transcripts change: ")
                 && err.ends_with(&format!("{}\n", crate::shared::pyre::LIMIT_HIT))
                 && err.lines().count() == 1,
             "{err}"
         );
-        assert!(fx.calls().iter().all(|c| !c.1.contains("/api/audit/")));
+        let seen = seen.lock().unwrap();
+        let requests: Vec<String> = seen
+            .iter()
+            .map(|s| format!("{} {}", s.method, s.path))
+            .collect();
+        assert_eq!(
+            requests,
+            [
+                "GET /api/audit/1017-add-x",
+                "PUT /api/audit/1017-add-x/host-a.jsonl"
+            ]
+        );
+        let rows: Vec<Value> = std::str::from_utf8(&seen[1].body)
+            .unwrap()
+            .lines()
+            .map(|l| loads(l).unwrap())
+            .collect();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_eq!(rows[0], loads(old).unwrap());
+        let mut fresh = rows[1].clone();
+        assert_eq!(fresh["time"].as_str().unwrap().len(), 19);
+        fresh["time"] = loads(marker).unwrap()["time"].clone();
+        assert_eq!(fresh, loads(marker).unwrap());
         assert_eq!(
             record(&fx),
             json!({"version": 1, "jobs": {"1017-add-x": stamp_now()}})
+        );
+        assert_eq!(*log.borrow(), ["record 1017-add-x"]);
+    }
+
+    #[test]
+    fn test_a_failed_read_past_the_backtrack_limit_is_retried() {
+        // Sets FACTORY_HOME, which every thread reads, so it runs alone.
+        if !crate::shared::in_own_process(
+            module_path!(),
+            "test_a_failed_read_past_the_backtrack_limit_is_retried",
+        ) {
+            return;
+        }
+        let fx = setup();
+        push_fakes(&fx, None);
+        fx.set_fakes(|f| f.audit_push = None);
+        let (origin, seen) = crate::shared::http::tests::serve(vec![
+            (500, "made-up outage", vec![]),
+            (500, "made-up outage", vec![]),
+            (500, "made-up outage", vec![]),
+            (200, "", vec![]),
+            (200, "", vec![]),
+        ]);
+        fs::write(
+            fx.home.join("config.md"),
+            format!("---\ndevice: {DEVICE}\napi_url: {origin}\n---\n"),
+        )
+        .unwrap();
+        crate::commands::audit::limit_secret_file_for_test();
+        fx.set_env("FACTORY_HOME", &fx.home);
+        // audit push exits LIMIT after the read's error; pickup gets the read's exit.
+        for (cli, code) in [(true, crate::shared::exit::LIMIT), (false, 5)] {
+            let e = crate::commands::audit::audit_push("1017-add-x", cli).unwrap_err();
+            assert_eq!(e.code, code, "{}", e.stderr);
+            let lines: Vec<&str> = e.stderr.lines().collect();
+            assert_eq!(lines.len(), 2, "{}", e.stderr);
+            assert!(lines[0].contains("made-up outage"), "{}", e.stderr);
+            assert!(
+                lines[1].contains(crate::shared::pyre::LIMIT_HIT),
+                "{}",
+                e.stderr
+            );
+        }
+        // So pickup records no stamp, and its next run pushes the marker.
+        let (code, _, err) = fx.pickup(&[]);
+        assert_eq!(code, 0);
+        assert!(
+            err.ends_with("audit push stopped (exit 5); the next pickup run retries it\n"),
+            "{err}"
+        );
+        assert!(!fx.home.join(AUDIT_PUSH_FILE).exists());
+        let (code, _, err) = fx.pickup(&[]);
+        assert_eq!(code, 0);
+        assert!(
+            err.starts_with("audit push skipped 1017-add-x until its transcripts change: "),
+            "{err}"
+        );
+        assert!(record(&fx)["jobs"]["1017-add-x"].is_number());
+        let seen = seen.lock().unwrap();
+        let requests: Vec<String> = seen
+            .iter()
+            .map(|s| format!("{} {}", s.method, s.path))
+            .collect();
+        assert_eq!(
+            requests,
+            [
+                "GET /api/audit/1017-add-x",
+                "GET /api/audit/1017-add-x",
+                "GET /api/audit/1017-add-x",
+                "GET /api/audit/1017-add-x",
+                "PUT /api/audit/1017-add-x/host-a.jsonl"
+            ]
+        );
+        // The retried push carries the skip marker.
+        let put = std::str::from_utf8(&seen[4].body).unwrap();
+        assert!(
+            put.contains("audit push skipped: a flag pattern hit its backtrack limit"),
+            "{put}"
         );
     }
 
@@ -6444,12 +6571,7 @@ mod gh_pr_test {
         let fx = Fx::new();
         let bin = fx.root.join("bin");
         fs::create_dir(&bin).unwrap();
-        fs::write(bin.join("gh"), "#!/bin/sh\nprintf 'OPEN \\377\\n'\n").unwrap();
-        Command::new("chmod")
-            .arg("755")
-            .arg(bin.join("gh"))
-            .status()
-            .unwrap();
+        crate::shared::build::tests::script(&bin.join("gh"), "printf 'OPEN \\377\\n'\n");
         fx.set_env(
             "PATH",
             format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -9588,12 +9710,7 @@ mod pickup_setup_test {
         let st = St::new();
         let bin = st.fx.root.join("synthetic/brew/bin");
         fs::create_dir_all(&bin).unwrap();
-        fs::write(bin.join("gh"), "#!/bin/sh\n").unwrap();
-        Command::new("chmod")
-            .arg("755")
-            .arg(bin.join("gh"))
-            .status()
-            .unwrap();
+        crate::shared::build::tests::script(&bin.join("gh"), "");
         st.fx.set_env(
             "PATH",
             format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -9746,12 +9863,7 @@ mod pickup_setup_test {
         let st = St::new();
         let bin = st.fx.root.join("bin");
         fs::create_dir(&bin).unwrap();
-        fs::write(bin.join("fake-agent"), "#!/bin/sh\n").unwrap();
-        Command::new("chmod")
-            .arg("755")
-            .arg(bin.join("fake-agent"))
-            .status()
-            .unwrap();
+        crate::shared::build::tests::script(&bin.join("fake-agent"), "");
         st.fx.set_env(
             "PATH",
             format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
@@ -10213,6 +10325,13 @@ struct Sched {
     /// The same for the retro-push timer.
     retro: bool,
     runs: Vec<Vec<String>>,
+    /// The daemon task's definition, as `/Create /XML` read it.
+    task_xml: String,
+    /// The home whose daemon lock a daemon task's /Run takes, when starts is true; a kill of
+    /// this process lets go of it.
+    home: Option<PathBuf>,
+    starts: bool,
+    daemon: Option<std::fs::File>,
 }
 
 impl Sched {
@@ -10246,6 +10365,27 @@ impl Sched {
                 }
                 _ => (0, String::new()),
             };
+        }
+        match argv {
+            ["schtasks", "/Query", _, "factory-daemon", "/XML"] if self.task => {
+                return (0, self.task_xml.clone());
+            }
+            ["schtasks", "/Create", _, "factory-daemon", "/XML", xml, "/F"] => {
+                let bytes = fs::read(xml).unwrap();
+                let units: Vec<u16> = bytes
+                    .chunks(2)
+                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                    .collect();
+                assert_eq!(units[0], 0xFEFF, "a byte order mark");
+                self.task_xml = String::from_utf16(&units[1..]).unwrap();
+            }
+            ["schtasks", "/Run", _, "factory-daemon"] if self.starts && self.daemon.is_none() => {
+                self.daemon = daemon::take_lock(self.home.as_ref().unwrap()).unwrap();
+            }
+            ["kill", pid] if *pid == std::process::id().to_string() => {
+                self.daemon = None;
+            }
+            _ => {}
         }
         match argv {
             ["crontab", "-l"] if self.crontab.is_empty() => fail("no crontab for user"),
@@ -10319,6 +10459,8 @@ impl Ds {
         let fx = Fx::new();
         let sched = Rc::new(RefCell::new(Sched {
             bus: true,
+            home: Some(fx.home.clone()),
+            starts: true,
             ..Sched::default()
         }));
         let fake = sched.clone();
@@ -10409,9 +10551,10 @@ mod daemon_setup_test {
     }
 
     /// The daemon pushes the retro digest, so install removes the documented retro-push line and
-    /// keeps every other line; uninstall puts a daily 08:30 line back beside the pickup timer.
+    /// keeps every other line. Uninstall puts the pickup timer back but no retro-push line, since
+    /// the host may never have had one, or had its own times.
     #[test]
-    fn cron_install_removes_the_retro_push_line_and_uninstall_restores_it() {
+    fn cron_install_removes_the_retro_push_line_and_uninstall_leaves_it_off() {
         let ds = Ds::new("cron");
         let retro =
             "30 8 * * * /opt/skill/runtime/factory retro push >> /h/logs/retro-push.log 2>&1";
@@ -10436,10 +10579,15 @@ mod daemon_setup_test {
 
         let (code, out, err) = ds.run(Uninstall);
         assert_eq!(code, 0, "{out}{err}");
+        assert!(out.contains("\nretro-push timer: left off\n"), "{out}");
+        let crontab = ds.sched.borrow().crontab.clone();
         assert!(
-            out.contains("\nretro-push timer: installed cron timer: crontab\n"),
-            "{out}"
+            !crontab.contains("retro push") && crontab.contains(other),
+            "{crontab}"
         );
+        assert!(!timer_installed("cron", &RETRO_PUSH).0 && timer_installed("cron", &PICKUP).0);
+        assert!(!timer_installed("cron", &DAEMON).0);
+        // The line the schedules reference sets up, should the person add it back:
         let line = timer_text("cron", &timer_values(&ds.fx.home, &RETRO_PUSH));
         let home = ds.fx.home.display().to_string();
         assert!(line.starts_with("30 8 * * * PATH="), "{line}");
@@ -10454,13 +10602,6 @@ mod daemon_setup_test {
             line.ends_with(&format!(" >> {}/logs/retro-push.log 2>&1", home)),
             "{line}"
         );
-        let crontab = ds.sched.borrow().crontab.clone();
-        assert!(
-            crontab.contains(&line) && crontab.contains(other),
-            "{crontab}"
-        );
-        assert!(timer_installed("cron", &RETRO_PUSH).0 && timer_installed("cron", &PICKUP).0);
-        assert!(!timer_installed("cron", &DAEMON).0);
     }
 
     /// The task's `/ST` is the one time retro_push_times gives Task Scheduler, which the daemon
@@ -10557,11 +10698,11 @@ mod daemon_setup_test {
             Ok(None),
         ];
         assert_eq!(
-            daemon_pid(home, Some(7), &mut || reads.pop().unwrap()),
+            daemon_pid(home, Some(7), RUNNING_POLLS, &mut || reads.pop().unwrap()),
             Ok(9)
         );
         let mut stale = || Ok(Some(7));
-        assert!(daemon_pid(home, Some(7), &mut stale).is_err());
+        assert!(daemon_pid(home, Some(7), RUNNING_POLLS, &mut stale).is_err());
     }
 
     /// spawn_daemon runs the */5 daemon line's command, the installed binary it names, and
@@ -10689,12 +10830,14 @@ mod daemon_setup_test {
         let (code, out, _) = ds.run(Uninstall);
         assert_eq!(code, 0, "{out}");
         assert!(out.starts_with(&format!(
-            "installed launchd timer: {}\nretro-push timer: installed launchd timer: {}\nremoved launchd service: {}\n",
+            "installed launchd timer: {}\nretro-push timer: left off\nremoved launchd service: {}\n",
             timer.display(),
-            retro.display(),
             plist.display()
         )));
-        let doc = plist_loads(&fs::read(&retro).unwrap()).unwrap();
+        // Uninstall leaves the retro-push timer off; its plist, as install_timer writes it:
+        assert!(!retro.exists() && !ds.sched.borrow().retro);
+        let text = timer_text("launchd", &timer_values(&ds.fx.home, &RETRO_PUSH));
+        let doc = plist_loads(text.as_bytes()).unwrap();
         assert_eq!(doc["Label"], "factory.retro-push");
         assert_eq!(
             doc["StartCalendarInterval"],
@@ -10709,7 +10852,6 @@ mod daemon_setup_test {
             doc["StandardOutPath"],
             ds.fx.home.join("logs/retro-push.log").display().to_string()
         );
-        assert!(ds.sched.borrow().retro);
         let domain = format!("gui/{}", getuid());
         let timer_target = format!("gui/{}/factory.pickup", getuid());
         assert!(
@@ -10878,7 +11020,7 @@ mod daemon_setup_test {
         assert_eq!(code, 0, "{out}");
         assert!(
             out.contains(&format!(
-                "\ninstalled cron timer: crontab\nretro-push timer: installed cron timer: crontab\nremoved cron service: crontab\nstopped the running daemon (pid {})\n",
+                "\ninstalled cron timer: crontab\nretro-push timer: left off\nremoved cron service: crontab\nstopped the running daemon (pid {})\n",
                 std::process::id()
             )),
             "{out}"
@@ -10886,10 +11028,9 @@ mod daemon_setup_test {
         assert!(ds.ran(&["kill", &std::process::id().to_string()]));
         let crontab = ds.sched.borrow().crontab.clone();
         let lines: Vec<&str> = crontab.lines().collect();
-        assert_eq!(lines.len(), 3, "{crontab}");
+        assert_eq!(lines.len(), 2, "{crontab}");
         assert_eq!(lines[0], "0 1 * * * true");
         assert!(unit_line(lines[1], &PICKUP) && !unit_line(lines[1], &DAEMON));
-        assert!(unit_line(lines[2], &RETRO_PUSH) && lines[2].starts_with("30 8 * * * "));
     }
 
     #[test]
@@ -10899,34 +11040,109 @@ mod daemon_setup_test {
         let (code, out, err) = ds.run(Install);
         assert_eq!(code, 0, "{out}{err}");
         assert!(out.starts_with(&format!("installed schtasks service: {}\n", cmd.display())));
-        let quoted = format!("\"{}\"", cmd.display());
+        // The task comes from task_xml through a UTF-16 file that is removed afterwards.
+        let xml = cmd.with_extension("xml");
+        let xml_arg = xml.to_string_lossy();
         assert!(ds.ran(&[
             "schtasks",
             "/Create",
             "/TN",
             "factory-daemon",
-            "/SC",
-            "ONLOGON",
-            "/TR",
-            &quoted,
+            "/XML",
+            &xml_arg,
             "/F"
         ]));
+        assert!(!xml.exists());
+        let user = format!(
+            "{}\\{}",
+            std::env::var("USERDOMAIN").unwrap_or_default(),
+            std::env::var("USERNAME").unwrap_or_default()
+        );
+        assert_eq!(ds.sched.borrow().task_xml, task_xml(&cmd, &user));
         assert!(ds.ran(&["schtasks", "/Run", "/TN", "factory-daemon"]));
         assert!(ds.ran(&["schtasks", "/Query", "/TN", "factory-pickup"]));
         let text = fs::read_to_string(&cmd).unwrap();
         let stop = daemon::stop_marker(&ds.fx.home);
         let check = format!("if exist \"{}\" exit /b 0", stop.display());
-        assert!(text.contains(&format!("\r\n:run\r\n{check}\r\n\"/opt/my skill/runtime/factory\" --home {} daemon >> \"{}\" 2>&1\r\n{check}\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n", ds.fx.home.display(), ds.log())), "{text:?}");
+        // The loop sends the daemon's output to a boot log it trims past 256 KiB, so the daemon
+        // can open daemon.log itself and cap it.
+        let boot = ds.fx.home.join("logs/daemon-boot.log");
+        let boot = boot.display();
+        let trim = format!("if exist \"{boot}\" for %%F in (\"{boot}\") do if %%~zF GTR 262144 type nul > \"{boot}\"");
+        assert!(text.contains(&format!("\r\n:run\r\n{check}\r\n{trim}\r\n\"/opt/my skill/runtime/factory\" --home {} daemon >> \"{boot}\" 2>&1\r\n{check}\r\nping -n 11 127.0.0.1 >nul\r\ngoto run\r\n", ds.fx.home.display())), "{text:?}");
 
         ds.sched.borrow_mut().runs.clear();
         let (code, out, _) = ds.run(Install);
         assert_eq!(code, 0);
         assert!(out.starts_with(&format!("service current: {}\n", cmd.display())));
+        assert!(!ds
+            .sched
+            .borrow()
+            .runs
+            .iter()
+            .any(|a| a[1] == "/Create" || a[1] == "/Run"));
+
+        // A current loop with no daemon on the lock gets /Run, so a loop that died comes back.
+        ds.sched.borrow_mut().daemon = None;
+        ds.sched.borrow_mut().runs.clear();
+        let (code, out, _) = ds.run(Install);
+        assert_eq!(code, 0);
+        assert!(
+            out.starts_with(&format!(
+                "started the stopped daemon with schtasks /Run: {}\n",
+                cmd.display()
+            )),
+            "{out}"
+        );
+        assert!(ds.ran(&["schtasks", "/Run", "/TN", "factory-daemon"]));
         assert!(!ds.sched.borrow().runs.iter().any(|a| a[1] == "/Create"));
+        assert!(ds.sched.borrow().daemon.is_some());
+
+        // A loop written before the boot log reads as drift, so catch-up reinstalls it. A running
+        // loop is ended first through the stop path, then its file is rewritten and /Run starts
+        // it. The task exists, so there is no /Create, which can fail without elevation.
+        let old = text
+            .replace(&format!("{trim}\r\n"), "")
+            .replace(&*boot.to_string(), &ds.log());
+        fs::write(&cmd, &old).unwrap();
+        assert!(timer_drift("schtasks", &timer_values(&ds.fx.home, &DAEMON)).is_some());
+        let pid = std::process::id().to_string();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let (fake, log, path, stop2) = (ds.sched.clone(), seen.clone(), cmd.clone(), stop.clone());
+        ds.fx.set_fakes(|f| {
+            f.setup_run = Some(Rc::new(move |argv, stdin| {
+                let file = fs::read_to_string(&path).unwrap_or_default();
+                log.borrow_mut()
+                    .push((argv[..2].join(" "), file, stop2.exists()));
+                fake.borrow_mut().answer(argv, stdin)
+            }))
+        });
+        ds.sched.borrow_mut().runs.clear();
+        let (code, out, _) = ds.run(Install);
+        assert_eq!(code, 0, "{out}");
+        assert!(out.starts_with(&format!("installed schtasks service: {}\n", cmd.display())));
+        assert_eq!(fs::read_to_string(&cmd).unwrap(), text);
+        assert!(!stop.exists(), "install clears the stop marker");
+        let steps: Vec<(String, bool, bool)> = seen
+            .borrow()
+            .iter()
+            .filter(|(argv, ..)| argv != "schtasks /Query")
+            .map(|(argv, file, marker)| (argv.clone(), *file == old, *marker))
+            .collect();
+        assert_eq!(
+            steps[..3],
+            [
+                ("schtasks /End".to_string(), true, true),
+                (format!("kill {pid}"), true, true),
+                ("schtasks /Run".to_string(), false, false),
+            ],
+            "{steps:?}"
+        );
+        assert!(!steps.iter().any(|(argv, ..)| argv == "schtasks /Create"));
 
         // Uninstall writes the stop marker before /End, so a loop /End leaves behind exits, and
         // ends the loop's daemon by its pid.
-        let _lock = daemon::take_lock(&ds.fx.home).unwrap().unwrap();
+        assert!(ds.sched.borrow().daemon.is_some());
         let fake = ds.sched.clone();
         let marked = Rc::new(RefCell::new(None));
         let seen = marked.clone();
@@ -10954,9 +11170,301 @@ mod daemon_setup_test {
         ds.run(Install);
         assert!(!stop.exists(), "install clears the stop marker");
         assert!(
-            out.contains("schtasks): running\n    no scheduled task factory-daemon\n"),
+            out.contains("schtasks): not installed\n    no scheduled task factory-daemon\n"),
             "{out}"
         );
+    }
+
+    /// A schtasks service install with a drifted loop file, after the first install.
+    fn drifted_schtasks() -> (Ds, PathBuf) {
+        let ds = Ds::new("schtasks");
+        let cmd = ds.fx.root.join(".config/factory-daemon.cmd");
+        assert_eq!(ds.run(Install).0, 0);
+        fs::write(&cmd, "old loop").unwrap();
+        ds.sched.borrow_mut().runs.clear();
+        (ds, cmd)
+    }
+
+    /// A /Run that fails after the loop was ended says the daemon is stopped and how to start it.
+    #[test]
+    fn schtasks_run_failure_names_the_next_step() {
+        let (ds, cmd) = drifted_schtasks();
+        let fake = ds.sched.clone();
+        ds.fx.set_fakes(|f| {
+            f.setup_run = Some(Rc::new(move |argv, stdin| {
+                let answer = fake.borrow_mut().answer(argv, stdin);
+                if argv[..2] == ["schtasks", "/Run"] {
+                    return (1, "ERROR: Access is denied.\n".into());
+                }
+                answer
+            }))
+        });
+        let (code, _, err) = ds.run(Install);
+        assert_eq!(code, 1);
+        assert!(
+            err.contains("could not install the schtasks service: ERROR: Access is denied.; the daemon is not running. Start it with: schtasks /Run /TN factory-daemon"),
+            "{err}"
+        );
+        assert!(ds.ran(&["schtasks", "/End", "/TN", "factory-daemon"]));
+        assert!(!ds.sched.borrow().runs.iter().any(|a| a[1] == "/Create"));
+        assert_ne!(fs::read_to_string(&cmd).unwrap(), "old loop");
+        assert!(!daemon::stop_marker(&ds.fx.home).exists());
+    }
+
+    /// A stop marker that can't be removed after the loop was ended fails the install with the
+    /// path to delete, before the file is rewritten or /Run starts a loop that would exit.
+    #[test]
+    fn schtasks_stuck_marker_names_its_path() {
+        let (ds, cmd) = drifted_schtasks();
+        let marker = daemon::stop_marker(&ds.fx.home);
+        let (fake, stuck) = (ds.sched.clone(), marker.clone());
+        ds.fx.set_fakes(|f| {
+            f.setup_run = Some(Rc::new(move |argv, stdin| {
+                if argv[..2] == ["schtasks", "/End"] {
+                    fs::remove_file(&stuck).unwrap();
+                    fs::create_dir(&stuck).unwrap();
+                }
+                fake.borrow_mut().answer(argv, stdin)
+            }))
+        });
+        let (code, _, err) = ds.run(Install);
+        assert_eq!(code, 1);
+        assert!(err.contains("the daemon is stopped, but "), "{err}");
+        assert!(
+            err.contains(&format!(
+                "; delete {}, then run factory daemon setup --install",
+                marker.display()
+            )),
+            "{err}"
+        );
+        assert_eq!(fs::read_to_string(&cmd).unwrap(), "old loop");
+        assert!(!ds.ran(&["schtasks", "/Run", "/TN", "factory-daemon"]));
+    }
+
+    /// A daemon that keeps its lock after the kill fails the install: the stop marker is cleared,
+    /// so the loop still starts at logon, and the old loop file stays.
+    #[test]
+    fn schtasks_stop_timeout_clears_the_marker() {
+        let (ds, cmd) = drifted_schtasks();
+        let fake = ds.sched.clone();
+        ds.fx.set_fakes(|f| {
+            f.setup_run = Some(Rc::new(move |argv, stdin| {
+                if argv[0] == "kill" {
+                    fake.borrow_mut()
+                        .runs
+                        .push(argv.iter().map(|a| a.to_string()).collect());
+                    return (0, String::new());
+                }
+                fake.borrow_mut().answer(argv, stdin)
+            }))
+        });
+        let (code, _, err) = ds.run(Install);
+        assert_eq!(code, 1);
+        let pid = std::process::id();
+        assert!(
+            err.contains(&format!("could not stop the running daemon loop: the old daemon (pid {pid}) still holds its lock 35 s after the kill")),
+            "{err}"
+        );
+        assert!(ds.ran(&["kill", &pid.to_string()]));
+        assert!(!daemon::stop_marker(&ds.fx.home).exists());
+        assert_eq!(fs::read_to_string(&cmd).unwrap(), "old loop");
+        let runs = &ds.sched.borrow().runs;
+        assert!(!runs.iter().any(|a| a[1] == "/Create" || a[1] == "/Run"));
+    }
+
+    /// A daemon that never takes its lock after /Run, such as one that exits at startup, fails the
+    /// install with the boot log to read, rather than a line that says it started.
+    #[test]
+    fn schtasks_run_without_a_daemon_names_the_boot_log() {
+        let ds = Ds::new("schtasks");
+        ds.sched.borrow_mut().starts = false;
+        let (code, _, err) = ds.run(Install);
+        assert_eq!(code, 1);
+        assert!(
+            err.contains(&format!(
+                "schtasks /Run started the factory-daemon task, but no daemon took its lock within 15 s; see {}",
+                ds.fx.home.join("logs").join("daemon-boot.log").display()
+            )),
+            "{err}"
+        );
+        assert!(ds.ran(&["schtasks", "/Run", "/TN", "factory-daemon"]));
+    }
+
+    /// The daemon task's definition: a logon trigger for this user and no execution time limit,
+    /// with the path and user escaped for XML.
+    #[test]
+    fn daemon_task_xml_has_no_time_limit() {
+        let xml = task_xml(
+            Path::new(r"C:\Users\a&b\.config\factory-daemon.cmd"),
+            r"HOST\someone",
+        );
+        assert_eq!(
+            xml,
+            "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n\
+             <Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n  \
+             <Triggers>\r\n    <LogonTrigger>\r\n      <Enabled>true</Enabled>\r\n      \
+             <UserId>HOST\\someone</UserId>\r\n    </LogonTrigger>\r\n  </Triggers>\r\n  \
+             <Settings>\r\n    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\r\n    \
+             <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\r\n    \
+             <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\r\n    \
+             <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\r\n  </Settings>\r\n  <Actions>\r\n    \
+             <Exec>\r\n      <Command>\"C:\\Users\\a&amp;b\\.config\\factory-daemon.cmd\"</Command>\r\n    \
+             </Exec>\r\n  </Actions>\r\n</Task>\r\n"
+        );
+    }
+
+    /// A task made by an older install keeps schtasks' 72-hour limit, so it reads as drift, and
+    /// install replaces it before it ends the running loop, then starts the loop again under it.
+    #[test]
+    fn schtasks_task_with_a_time_limit_is_replaced() {
+        let ds = Ds::new("schtasks");
+        assert_eq!(ds.run(Install).0, 0);
+        // A task with no time limit that still stops on battery drifts too.
+        ds.sched.borrow_mut().task_xml =
+            "<Settings><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings>".into();
+        assert!(timer_drift("schtasks", &timer_values(&ds.fx.home, &DAEMON)).is_some());
+        ds.sched.borrow_mut().task_xml = "<Task><Settings /></Task>".into();
+        let drift = timer_drift("schtasks", &timer_values(&ds.fx.home, &DAEMON));
+        assert_eq!(
+            drift.as_deref(),
+            Some("the factory-daemon task ends its loop after 72 hours or on battery; --install removes those limits")
+        );
+        ds.sched.borrow_mut().runs.clear();
+        let (code, out, err) = ds.run(Install);
+        assert_eq!(code, 0, "{out}{err}");
+        let cmd = ds.fx.root.join(".config/factory-daemon.cmd");
+        assert!(out.starts_with(&format!("installed schtasks service: {}\n", cmd.display())));
+        let xml = cmd.with_extension("xml");
+        let create = [
+            "schtasks",
+            "/Create",
+            "/TN",
+            "factory-daemon",
+            "/XML",
+            &xml.to_string_lossy(),
+            "/F",
+        ];
+        let pid = std::process::id().to_string();
+        assert!(ds.at(&create) < ds.at(&["schtasks", "/End", "/TN", "factory-daemon"]));
+        assert!(ds.at(&["schtasks", "/End", "/TN", "factory-daemon"]) < ds.at(&["kill", &pid]));
+        assert!(ds.at(&["kill", &pid]) < ds.at(&["schtasks", "/Run", "/TN", "factory-daemon"]));
+        assert!(ds
+            .sched
+            .borrow()
+            .task_xml
+            .contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"));
+        assert!(timer_drift("schtasks", &timer_values(&ds.fx.home, &DAEMON)).is_none());
+    }
+
+    /// What `schtasks /Query /XML` printed through a pipe for a task created from task_xml, on a
+    /// Windows host: Task Scheduler reorders the settings and ends lines with CR CR LF. The
+    /// names, SID and path are placeholders.
+    const QUERIED_TASK: [&str; 32] = [
+        "<?xml version=\"1.0\" encoding=\"UTF-16\"?>",
+        "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">",
+        "  <RegistrationInfo>",
+        "    <URI>\\factory-daemon</URI>",
+        "  </RegistrationInfo>",
+        "  <Principals>",
+        "    <Principal id=\"Author\">",
+        "      <UserId>S-1-5-21-0-0-0-1001</UserId>",
+        "      <LogonType>InteractiveToken</LogonType>",
+        "    </Principal>",
+        "  </Principals>",
+        "  <Settings>",
+        "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>",
+        "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>",
+        "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>",
+        "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+        "    <IdleSettings>",
+        "      <StopOnIdleEnd>true</StopOnIdleEnd>",
+        "      <RestartOnIdle>false</RestartOnIdle>",
+        "    </IdleSettings>",
+        "  </Settings>",
+        "  <Triggers>",
+        "    <LogonTrigger>",
+        "      <UserId>HOST\\someone</UserId>",
+        "    </LogonTrigger>",
+        "  </Triggers>",
+        "  <Actions Context=\"Author\">",
+        "    <Exec>",
+        "      <Command>\"C:\\Users\\someone\\.config\\factory-daemon.cmd\"</Command>",
+        "    </Exec>",
+        "  </Actions>",
+        "</Task>",
+    ];
+
+    /// The drift check reads every keep-alive setting in the real query output, so a current task
+    /// does not drift on every catch-up, and a missing setting does.
+    #[test]
+    fn queried_task_keeps_alive() {
+        let xml = QUERIED_TASK.join("\r\r\n") + "\r\r\n";
+        assert!(keeps_alive(&xml));
+        let battery = "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>";
+        assert!(!keeps_alive(&xml.replace(battery, "")));
+    }
+
+    /// With no task to query, drift names the missing task rather than its limits.
+    #[test]
+    fn schtasks_drift_names_a_missing_task() {
+        let ds = Ds::new("schtasks");
+        assert_eq!(ds.run(Install).0, 0);
+        ds.sched.borrow_mut().task = false;
+        assert_eq!(
+            timer_drift("schtasks", &timer_values(&ds.fx.home, &DAEMON)).as_deref(),
+            Some("no scheduled task factory-daemon")
+        );
+    }
+
+    /// A /Create /XML that fails on a limited task leaves the running loop alone: no /End, kill or
+    /// /Run.
+    #[test]
+    fn failed_task_replace_leaves_the_loop_running() {
+        let ds = Ds::new("schtasks");
+        assert_eq!(ds.run(Install).0, 0);
+        ds.sched.borrow_mut().task_xml = "<Task><Settings /></Task>".into();
+        let fake = ds.sched.clone();
+        ds.fx.set_fakes(|f| {
+            f.setup_run = Some(Rc::new(move |argv, stdin| {
+                let answer = fake.borrow_mut().answer(argv, stdin);
+                if argv[..2] == ["schtasks", "/Create"] {
+                    return (1, "ERROR: Access is denied.\n".into());
+                }
+                answer
+            }))
+        });
+        ds.sched.borrow_mut().runs.clear();
+        let (code, _, err) = ds.run(Install);
+        assert_eq!(code, 1);
+        assert!(
+            err.contains("could not install the schtasks service: ERROR: Access is denied."),
+            "{err}"
+        );
+        let runs = &ds.sched.borrow().runs;
+        assert!(runs.iter().any(|a| a[1] == "/Create"));
+        assert!(
+            !runs
+                .iter()
+                .any(|a| a[1] == "/End" || a[1] == "/Run" || a[0] == "kill"),
+            "{runs:?}"
+        );
+        assert!(ds.sched.borrow().daemon.is_some(), "the daemon still runs");
+        let xml = ds.fx.root.join(".config/factory-daemon.xml");
+        assert!(
+            !xml.exists(),
+            "the task XML is removed after a failed /Create"
+        );
+    }
+
+    /// `<` and `>` in the path are escaped in the task's XML.
+    #[test]
+    fn daemon_task_xml_escapes_angle_brackets() {
+        let xml = task_xml(Path::new(r"C:\Users\x<y>\factory-daemon.cmd"), r"HOST\a<b>");
+        assert!(
+            xml.contains("<Command>\"C:\\Users\\x&lt;y&gt;\\factory-daemon.cmd\"</Command>"),
+            "{xml}"
+        );
+        assert!(xml.contains("<UserId>HOST\\a&lt;b&gt;</UserId>"), "{xml}");
     }
 
     #[test]

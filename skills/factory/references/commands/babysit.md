@@ -2,8 +2,8 @@
 
 Takes a `pr-open` job whose PR a person handed over with the dashboard's Babysit PR
 button, and works the PR as the project's Babysit stage notes ask. `factory pickup`
-spawns it with the tag it claimed the job under, so pass `--session <tag>` to `hold` and
-every `board` call.
+spawns it with the tag it claimed the job under, so export `FACTORY_SESSION=<tag>` in
+every shell call that runs the runtime, as Claims in SKILL.md says.
 
 The click counts as the person's merge go-ahead, so pipeline `merge: human` does not
 hold a PR that GitHub shows as approved. It does not lift any other gate.
@@ -78,9 +78,9 @@ Run `"$RUNTIME" pr-state "$SLUG/<id>"`. It prints one JSON line,
 (gh failed): patch `{"needs": "<the stderr line>", "babysit": null, "claim": null}`, report
 that line and stop. Otherwise act on `next`, then read again.
 
-When `rearm` is not empty, run `"$RUNTIME" pr-handled "$SLUG/<id>" --session <tag> --rearm <each sig>` before acting on `next`.
+When `rearm` is not empty, run `"$RUNTIME" pr-handled "$SLUG/<id>" --rearm <each sig>` before acting on `next`.
 
-After a push, reply or rerun on a `fix-reviews`, `rebase` or `fix-ci` reading, run `"$RUNTIME" pr-handled "$SLUG/<id>" --session <tag> <each sig in items>` once before the next read.
+After a push, reply or rerun on a `fix-reviews`, `rebase` or `fix-ci` reading, run `"$RUNTIME" pr-handled "$SLUG/<id>" <each sig in items>` once before the next read.
 
 When the job's pr is in the project's archive repo, not $REPO, babysit only reads it. Pass -R <archive> wherever this file says -R "$REPO". On an archive PR, never push, comment, reply to or resolve a thread, rerun a check, merge or queue, whatever the notes say. Act only on `merged`, `closed`, `wait` and `wait-base`. On any other reading, patch `{"needs": "PR #<n> is in the archive repo and reads <next>: babysit only reads archive PRs, so handle it on GitHub", "babysit": null, "claim": null}` and stop. Never run `pr-queue` or `checks` on it: both exit 4 for an archive PR.
 

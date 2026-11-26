@@ -12,14 +12,14 @@ use crate::commands::pipeline::decision_verdict;
 use crate::shared::board::{dump_board, load_board, read_board};
 use crate::shared::consts::{IDEA, JOB_REL, NOTE_SECRETS, TERMINAL};
 use crate::shared::exit::{fail, Exit, Res};
-use crate::shared::fs::{is_link, read_text, write_atomic};
+use crate::shared::fs::{is_link, read_text, write_atomic, write_temp};
 use crate::shared::home::factory_home;
 use crate::shared::http::{api, cas};
 use crate::shared::project::{
     local_bytes, project_files, pull_project, r2_target, read_project_state, safe_job_folder,
     save_project_state, sha, strong,
 };
-use crate::shared::py::{os_error, printable_line, splitlines, strip};
+use crate::shared::py::{os_error, printable_line, repr, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, INDENT2_SORTED};
 use crate::shared::pyre::{Flags, Pattern};
 use crate::shared::pyval::{py_str, truthy};
@@ -27,9 +27,24 @@ use crate::shared::time::now;
 
 pub(crate) type Manifest = serde_json::Map<String, Value>;
 
+/// The manifest key a pull saves before replacing a file: the hash of the local bytes it replaces.
+const PRE_PULL: &str = "pre_pull_sha256";
+
 static GOAL_HEADING: Pattern = Pattern::new(r"^##\s+(?:\d+\.\s*)?Goal\b", Flags::I);
 static HEADING: Pattern = Pattern::new(r"^##\s", Flags::NONE);
 static PATH_LINE: Pattern = Pattern::new(r"\s*path\s*:", Flags::NONE);
+/// NOTE_SECRETS' AWS access key ID, except keys ending in EXAMPLE, as AWS's documentation uses.
+static AWS_KEY: Pattern = Pattern::new(r"\bAKIA(?![0-9A-Z]{9}EXAMPLE)[0-9A-Z]{16}\b", Flags::ASCII);
+/// The Access client secret with a value after it: the header, its environment variable forms
+/// such as the factory's own `.env` line, and either inside escaped JSON.
+static ACCESS_SECRET: Pattern = Pattern::new(
+    r#"(?:cf[-_]access[-_]client[-_]secret|access_client_secret)\\?["'`]?\s*[:=]\s*\\?["'`]?[A-Za-z0-9]{32,}"#,
+    Flags {
+        ascii: true,
+        ignore_case: true,
+        ..Flags::NONE
+    },
+);
 
 /// Where Python would raise an `OSError`: fail 1 with its text.
 fn os_fail(e: io::Error, p: &Path) -> Exit {
@@ -539,15 +554,26 @@ fn secret_refusal(rel: &str, data: &[u8]) -> Option<String> {
         return None;
     }
     let text = String::from_utf8_lossy(data);
-    // The token-shaped patterns only. The last one matches the Access header's bare name, which
-    // job notes and reviews quote with no value; the name alone is no credential.
-    NOTE_SECRETS[..7]
-        .iter()
-        .find_map(|p| match p.search_or_err(&text) {
-            Ok(None) => None,
-            Ok(Some(_)) => Some("it looks like it holds a secret".to_string()),
-            Err(reason) => Some(reason),
-        })
+    // NOTE_SECRETS' patterns, with two swapped for job files, which quote them in specs and
+    // reviews. AWS_KEY lets through the documentation's example keys. NOTE_SECRETS' last pattern
+    // matches the Access secret's bare name; ACCESS_SECRET needs a value after it. A private key
+    // header alone is still refused.
+    [
+        &NOTE_SECRETS[0],
+        &NOTE_SECRETS[1],
+        &NOTE_SECRETS[2],
+        &AWS_KEY,
+        &NOTE_SECRETS[4],
+        &NOTE_SECRETS[5],
+        &NOTE_SECRETS[6],
+        &ACCESS_SECRET,
+    ]
+    .iter()
+    .find_map(|p| match p.search_or_err(&text) {
+        Ok(None) => None,
+        Ok(Some(_)) => Some("it looks like it holds a secret".to_string()),
+        Err(reason) => Some(reason),
+    })
 }
 
 /// Pushes one job's changed files, writing what `factory push` prints to out. Returns the files
@@ -584,8 +610,13 @@ pub(crate) fn push_job(
                 writeln!(out, "{rel}: deleted in R2, not uploaded again").ok();
                 continue;
             };
-            if entry.get("sha256") == Some(&Value::from(sha(&data))) {
-                if entry.get("etag") != Some(&Value::from(tag.as_str())) {
+            let digest = Value::from(sha(&data));
+            // The bytes a pull cut short before its write meant to replace hold no edit, and R2
+            // has newer ones: uploading them would only make a conflict the pull can't heal.
+            if entry.get("sha256") == Some(&digest) || entry.get(PRE_PULL) == Some(&digest) {
+                if entry.get("etag") != Some(&Value::from(tag.as_str()))
+                    || entry.get(PRE_PULL) == Some(&digest)
+                {
                     writeln!(out, "{rel}: remote newer, run pull").ok();
                     spec_stale = spec_stale || rel == "spec.md";
                 }
@@ -730,16 +761,30 @@ pub fn push(call: &Call) -> Res<()> {
     push_target(&call.args[0])
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Runs in a pull between saving a file's new entry and replacing the file, where a test lands
+    /// a session's edit.
+    pub(crate) static BEFORE_REPLACE: std::cell::Cell<Option<fn(&Path)>> =
+        const { std::cell::Cell::new(None) };
+    /// Runs in a pull right after the rename, where a test kills the pull by panicking.
+    pub(crate) static AFTER_RENAME: std::cell::Cell<Option<fn(&Path)>> =
+        const { std::cell::Cell::new(None) };
+}
+
 /// Download what changed in R2 and keep local edits. (summary line, conflicted files).
 pub(crate) fn pull_job(home: &Path, slug: &str, job_id: &str) -> Res<(String, Vec<String>)> {
     pull_job_files(home, slug, job_id, false).map(|(line, conflicts, _)| (line, conflicts))
 }
 
 /// `pull_job`, also returning the files it downloaded. An automatic pull (the daemon's) records
-/// each replaced or created file's `base`: the ETag its local copy had before, or null when there
-/// was none. Push conditions on the base, so a session that read the old copy and writes it back
-/// blind gets a 412 and keeps both copies. A deliberate pull clears the base of each file it
+/// each replaced or created file's `base`: the ETag its manifest entry had before, or null when
+/// there was none. Push conditions on the base, so a session that read the old copy and writes it
+/// back blind gets a 412 and keeps both copies. A deliberate pull clears the base of each file it
 /// leaves matching R2, since the session took R2's version; a file edited here keeps its base.
+/// Until R2's bytes are written beside a replaced file, ready to rename, its entry also holds
+/// `pre_pull_sha256`, the hash of the bytes being replaced, so a pull cut short before then is
+/// finished by the next one.
 pub(crate) fn pull_job_files(
     home: &Path,
     slug: &str,
@@ -755,6 +800,8 @@ pub(crate) fn pull_job_files(
         let entry = manifest.get(rel).filter(|e| truthy(Some(*e))).cloned();
         let tag_value = Value::from(tag.as_str());
         let stored = |key: &str| entry.as_ref().and_then(|e| e.get(key));
+        let digest = data.as_deref().map(|d| Value::from(sha(d)));
+        let matches = |key: &str| digest.is_some() && stored(key) == digest.as_ref();
         if dot_remote(&path).exists() {
             // Still unmerged. Refresh the saved copy if R2 moved again.
             if stored("etag") != Some(&tag_value) {
@@ -768,14 +815,18 @@ pub(crate) fn pull_job_files(
                     data.as_deref(),
                 )?;
             }
+            // A merge may go back to the bytes an earlier pull meant to replace; they are an edit.
+            if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                e.shift_remove(PRE_PULL);
+            }
             conflicts.push(rel.clone());
-        } else if data
-            .as_ref()
-            .is_none_or(|d| entry.is_some() && stored("sha256") == Some(&Value::from(sha(d))))
-        {
-            if data.is_some() && stored("etag") == Some(&tag_value) {
-                if !auto {
-                    if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+        } else if data.is_none() || matches("sha256") || matches(PRE_PULL) {
+            // The local bytes are the last sync's, or the ones a pull cut short before its write
+            // meant to replace: either way they hold no edit, so R2's copy may replace them.
+            if matches("sha256") && stored("etag") == Some(&tag_value) {
+                if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                    e.shift_remove(PRE_PULL);
+                    if !auto {
                         e.shift_remove("base");
                     }
                 }
@@ -785,30 +836,62 @@ pub(crate) fn pull_job_files(
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(|e| os_fail(e, parent))?;
             }
-            // Written here while the fetch ran: keep it, and save R2's copy beside it, as
-            // reconcile does. The .remote holds push back until a person merges it.
-            if local_bytes(&path) != data {
-                manifest.insert(rel.clone(), fetched);
-                let remote = dot_remote(&path);
-                write_atomic(&remote, &body).map_err(|e| os_fail(e, &remote))?;
-                conflicts.push(rel.clone());
-                continue;
-            }
             // The entry claims R2's ETag before the bytes are here, so it is saved with a base: the
             // ETag the local bytes came from, or null when there were none. A write that fails or
             // is cut short leaves the old bytes under that base, and a push conditions on it and
             // meets a 412. Saving after the write instead would leave R2's bytes under the old
-            // entry, which the next reconcile adopts with no base.
+            // entry, which the next reconcile adopts with no base. A file deleted here takes its
+            // entry's ETag too, so an edit after the restore pushes unless R2 moved. The hash of
+            // the bytes being replaced goes with it, so a retry knows them as unedited.
             let base = match stored("base") {
                 Some(base) => base.clone(),
-                None if data.is_some() => stored("etag").cloned().unwrap_or(Value::Null),
-                None => Value::Null,
+                None => stored("etag").cloned().unwrap_or(Value::Null),
             };
-            let mut entry = fetched;
+            let mut entry = fetched.clone();
             entry["base"] = base;
+            entry[PRE_PULL] = digest.clone().unwrap_or(Value::Null);
             manifest.insert(rel.clone(), entry);
             save_manifest(&folder, &manifest)?;
-            write_atomic(&path, &body).map_err(|e| os_fail(e, &path))?;
+            #[cfg(test)]
+            if let Some(edit) = BEFORE_REPLACE.get() {
+                edit(&path);
+            }
+            let tmp = write_temp(&path, &body).map_err(|e| os_fail(e, &path))?;
+            // Read again with R2's bytes ready to rename, as late as possible. A file written here
+            // since the fetch is kept, and R2's copy goes beside it instead, as reconcile does;
+            // the .remote holds push back until a person merges it. Only a write that lands
+            // between this read and the rename is still replaced.
+            let edited = local_bytes(&path) != data;
+            // The old hash goes before the rename, so it never sits beside the bytes that replace
+            // the old ones: a person may revert or merge back to those very bytes, and a later
+            // push or pull must not take them as unedited. The base stays, so a kill on either
+            // side of the rename leaves an edit to meet a 412. A kill between this save and the
+            // rename only costs the heal: the old bytes then push as an edit and meet a 412.
+            if let Some(Value::Object(e)) = manifest.get_mut(rel) {
+                e.shift_remove(PRE_PULL);
+            }
+            save_manifest(&folder, &manifest).inspect_err(|_| {
+                let _ = fs::remove_file(&tmp);
+            })?;
+            let target = if edited {
+                dot_remote(&path)
+            } else {
+                path.clone()
+            };
+            fs::rename(&tmp, &target).map_err(|e| {
+                let _ = fs::remove_file(&tmp);
+                os_fail(e, &target)
+            })?;
+            #[cfg(test)]
+            if let Some(kill) = AFTER_RENAME.get() {
+                kill(&path);
+            }
+            if edited {
+                manifest.insert(rel.clone(), fetched);
+                save_manifest(&folder, &manifest)?;
+                conflicts.push(rel.clone());
+                continue;
+            }
             // A deliberate pull took R2's version, so once the bytes are here the base goes.
             if !auto {
                 if let Some(Value::Object(e)) = manifest.get_mut(rel) {
@@ -840,6 +923,70 @@ pub(crate) fn pull_job_files(
         line += &format!(", conflict: {}", conflicts.join(", "));
     }
     Ok((line, conflicts, got))
+}
+
+/// The nth conflict copy's name for rel, in rel's own folder: `conflict-<name>`, then
+/// `conflict-2-<name>`, or `conflict.walkthrough.html` for the spec's walkthrough, so every
+/// copy keeps a name job sync uploads.
+fn conflict_rel(rel: &str, n: usize) -> String {
+    let (dir, name) = match rel.rsplit_once('/') {
+        Some((dir, name)) => (format!("{dir}/"), name),
+        None => (String::new(), rel),
+    };
+    let num = if n == 1 {
+        String::new()
+    } else {
+        format!("-{n}")
+    };
+    if name == "walkthrough.html" {
+        format!("{dir}conflict{num}.walkthrough.html")
+    } else {
+        format!("{dir}conflict{num}-{name}")
+    }
+}
+
+/// Copies rel's `.remote` to the first free conflict copy beside it and returns the copy's rel.
+/// The copy is a job file, so R2's version uploads with the next push, and the `.remote` can then
+/// be settled without losing it. Never overwrites.
+fn keep_remote_in(home: &Path, slug: &str, job_id: &str, rel: &str) -> Res<String> {
+    if !JOB_REL.is_full(rel) {
+        return Err(fail(format!("{} is not a job file", repr(rel)), 2));
+    }
+    let folder = safe_job_folder(home, slug, job_id)?;
+    let remote = dot_remote(&folder.join(rel));
+    let data = match fs::read(&remote) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(fail(format!("{rel}.remote does not exist"), 4))
+        }
+        read => read.map_err(|e| os_fail(e, &remote))?,
+    };
+    for n in 1.. {
+        let copy = conflict_rel(rel, n);
+        debug_assert!(JOB_REL.is_full(&copy), "{copy} would not sync");
+        let path = folder.join(&copy);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                file.write_all(&data).map_err(|e| os_fail(e, &path))?;
+                return Ok(copy);
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(os_fail(e, &path)),
+        }
+    }
+    unreachable!()
+}
+
+/// `keep-remote <project>/<id> <file>`: prints the conflict copy it made of `<file>.remote`.
+pub fn keep_remote(call: &Call) -> Res<()> {
+    let (home, slug, job_id) = r2_target(&call.args[0], true)?;
+    let copy = keep_remote_in(&home, &slug, &job_id, &call.args[1])?;
+    let folder = home.join("jobs").join(&slug).join(&job_id);
+    println!("{}", folder.join(copy).display());
+    Ok(())
 }
 
 pub fn pull(call: &Call) -> Res<()> {
@@ -1477,6 +1624,172 @@ mod tests {
     }
 
     #[test]
+    fn an_access_secret_value_is_refused() {
+        let hex = "0123456789abcdef".repeat(4);
+        for text in [
+            format!("CF-Access-Client-Secret: {hex}\n"),
+            format!("cf-access-client-secret={hex}\n"),
+            format!("\"Cf-Access-Client-Secret\": \"{hex}\"\n"),
+            format!("`CF-ACCESS-CLIENT-SECRET`:`{hex}`\n"),
+            format!("FACTORY_ACCESS_CLIENT_SECRET={hex}\n"),
+            format!("export CF_ACCESS_CLIENT_SECRET=\"{hex}\"\n"),
+            format!("{{\\\"CF-Access-Client-Secret\\\": \\\"{hex}\\\"}}\n"),
+            format!("-H 'CF-Access-Client-Secret:\n  {hex}'\n"),
+        ] {
+            assert!(
+                secret_refusal("review.md", text.as_bytes()).is_some(),
+                "{text}"
+            );
+        }
+        for text in [
+            "Send the CF-Access-Client-Secret header.\n".to_string(),
+            "CF-Access-Client-Secret: $FACTORY_ACCESS_CLIENT_SECRET\n".to_string(),
+            format!("CF-Access-Client-Secret: {}\n", "a".repeat(31)),
+            "Set FACTORY_ACCESS_CLIENT_SECRET in .env.\n".to_string(),
+            "FACTORY_ACCESS_CLIENT_SECRET=test-secret\n".to_string(),
+        ] {
+            assert_eq!(secret_refusal("review.md", text.as_bytes()), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_private_key_header_is_refused_even_alone() {
+        // Built at runtime, so no key-shaped line sits in the source.
+        let header = format!("-----BEGIN {}PRIVATE KEY-----", "OPENSSH ");
+        for text in [
+            format!("{header}\n"),
+            format!("| `{header}` | `[redacted]` |\n"),
+            format!("{header}\n{}\n", "A".repeat(64)),
+        ] {
+            assert!(
+                secret_refusal("spec.md", text.as_bytes()).is_some(),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn conflict_copies_keep_names_that_sync() {
+        for (rel, first, second) in [
+            ("build.md", "conflict-build.md", "conflict-2-build.md"),
+            (
+                "round-2/review-code.md",
+                "round-2/conflict-review-code.md",
+                "round-2/conflict-2-review-code.md",
+            ),
+            ("shot.png", "conflict-shot.png", "conflict-2-shot.png"),
+            (
+                "walkthrough.html",
+                "conflict.walkthrough.html",
+                "conflict-2.walkthrough.html",
+            ),
+            (
+                "build.walkthrough.html",
+                "conflict-build.walkthrough.html",
+                "conflict-2-build.walkthrough.html",
+            ),
+            (
+                "round-1/review-ui.walkthrough.html",
+                "round-1/conflict-review-ui.walkthrough.html",
+                "round-1/conflict-2-review-ui.walkthrough.html",
+            ),
+        ] {
+            assert_eq!(
+                (conflict_rel(rel, 1), conflict_rel(rel, 2)),
+                (first.to_string(), second.to_string())
+            );
+            assert!(JOB_REL.is_full(first) && JOB_REL.is_full(second), "{rel}");
+        }
+    }
+
+    #[test]
+    fn keep_remote_copies_beside_the_file_and_never_overwrites() {
+        let home = job_home(
+            "sync-keep-remote",
+            "http://127.0.0.1:9",
+            &[
+                ("build.md", b"Mine\n"),
+                ("build.md.remote", b"R2 one\n"),
+                ("walkthrough.html", b"<p>mine</p>"),
+                ("walkthrough.html.remote", b"<p>r2</p>"),
+            ],
+        );
+        let folder = home.join("jobs/alpha/042-sample-export");
+        fs::create_dir_all(folder.join("round-1")).unwrap();
+        fs::write(folder.join("round-1/review.md.remote"), "R2 review\n").unwrap();
+        let keep = |rel: &str| keep_remote_in(&home, "alpha", "042-sample-export", rel);
+        assert_eq!(keep("build.md").unwrap(), "conflict-build.md");
+        // R2 moved again: the next copy takes the next number and the first is untouched.
+        fs::write(folder.join("build.md.remote"), "R2 two\n").unwrap();
+        assert_eq!(keep("build.md").unwrap(), "conflict-2-build.md");
+        assert_eq!(
+            fs::read(folder.join("conflict-build.md")).unwrap(),
+            b"R2 one\n"
+        );
+        assert_eq!(
+            fs::read(folder.join("conflict-2-build.md")).unwrap(),
+            b"R2 two\n"
+        );
+        assert!(folder.join("build.md.remote").exists());
+        assert_eq!(
+            keep("round-1/review.md").unwrap(),
+            "round-1/conflict-review.md"
+        );
+        assert_eq!(
+            fs::read(folder.join("round-1/conflict-review.md")).unwrap(),
+            b"R2 review\n"
+        );
+        assert_eq!(
+            keep("walkthrough.html").unwrap(),
+            "conflict.walkthrough.html"
+        );
+        assert_eq!(keep("notes.md").unwrap_err().code, 4);
+        assert_eq!(keep("../other/build.md").unwrap_err().code, 2);
+        assert_eq!(keep("scratch/build.md").unwrap_err().code, 2);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keep_remote_refuses_links() {
+        let home = job_home(
+            "sync-keep-remote-link",
+            "http://127.0.0.1:9",
+            &[("build.md", b"Mine\n")],
+        );
+        let folder = home.join("jobs/alpha/042-sample-export");
+        let outside = home.join("outside.md");
+        fs::write(&outside, "secret elsewhere\n").unwrap();
+        std::os::unix::fs::symlink(&outside, folder.join("build.md.remote")).unwrap();
+        let e = keep_remote_in(&home, "alpha", "042-sample-export", "build.md").unwrap_err();
+        assert_eq!(e.code, 6);
+        assert!(!folder.join("conflict-build.md").exists());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn aws_documentation_keys_upload_but_real_keys_are_refused() {
+        // Built at runtime, so no AWS-shaped key sits in the source.
+        let example = format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE");
+        let other_example = format!("{}{}EXAMPLE", "AKIA", "Z".repeat(9));
+        let real = format!("{}{}", "AKIA", "Q".repeat(16));
+        assert_eq!(
+            secret_refusal(
+                "spec.md",
+                format!("aws_access_key_id = {example}\n").as_bytes()
+            ),
+            None
+        );
+        assert_eq!(
+            secret_refusal("spec.md", format!("{other_example}\n").as_bytes()),
+            None
+        );
+        assert!(secret_refusal("spec.md", format!("{real}\n").as_bytes()).is_some());
+        let both = format!("{example} then {real}\n");
+        assert!(secret_refusal("spec.md", both.as_bytes()).is_some());
+    }
+
+    #[test]
     fn refused_spec_skips_the_goal_and_keeps_the_marker() {
         use crate::shared::http::tests::serve;
         let (origin, seen) = serve(vec![(200, "[]", vec![])]);
@@ -1503,11 +1816,8 @@ mod tests {
     fn manual_push_refuses_a_secret() {
         use crate::shared::http::tests::serve;
         let (origin, seen) = serve(vec![(200, "[]", vec![])]);
-        let home = job_home(
-            "sync-push-secret",
-            &origin,
-            &[("notes.md", b"-----BEGIN RSA PRIVATE KEY-----\n")],
-        );
+        let key = format!("-----BEGIN RSA PRIVATE KEY-----\n{}\n", "A".repeat(64));
+        let home = job_home("sync-push-secret", &origin, &[("notes.md", key.as_bytes())]);
         let mut out = Vec::new();
         let e = push_job(&home, "alpha", "042-sample-export", &mut out).unwrap_err();
         assert_eq!(e.code, 6);

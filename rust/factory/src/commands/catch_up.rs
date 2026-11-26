@@ -14,10 +14,10 @@ use serde_json::Value;
 
 use crate::cli::Call;
 use crate::commands::pickup;
-use crate::shared::build::{rust_binary, Host};
+use crate::shared::build::{private_dir, rust_binary, Host, BINARY};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{exit, fail, Res};
-use crate::shared::fs::{read_text, resolve, temp_root};
+use crate::shared::fs::{is_link, read_text, resolve, temp_root};
 use crate::shared::home::factory_home;
 use crate::shared::proc::{capture, git, origin_git, Out};
 use crate::shared::project::{project_files, read_paths};
@@ -63,7 +63,7 @@ struct Fakes {
     backup: Option<Rc<dyn Fn() -> Result<PathBuf, String>>>,
     user_home: Option<PathBuf>,
     run: Option<Rc<dyn Fn(&[String], Option<Duration>) -> Option<io::Result<Out>>>>,
-    build: Option<Rc<dyn Fn(&Path, &mut dyn Write) -> Result<PathBuf, String>>>,
+    build: Option<Rc<dyn Fn(&Path, &mut dyn Write) -> Result<Vec<u8>, String>>>,
     install: Option<Rc<dyn Fn(&[String]) -> Out>>,
     spawn: Option<Rc<dyn Fn() -> Result<(), String>>>,
     locked_pid: Option<Rc<dyn Fn() -> Result<Option<u32>, String>>>,
@@ -195,7 +195,9 @@ fn restart_daemon(scheduler: &str, home: &Path) -> Result<Option<String>, String
         .iter()
         .filter(|a| a[0] == "kill" || a[0] == "taskkill")
         .find_map(|a| a.iter().find_map(|w| w.parse().ok()));
-    let pid = pickup::daemon_pid(home, killed, &mut || locked_pid(home))?;
+    let pid = pickup::daemon_pid(home, killed, pickup::RUNNING_POLLS, &mut || {
+        locked_pid(home)
+    })?;
     Ok(Some(format!("restarted (pid {pid})")))
 }
 
@@ -319,13 +321,63 @@ fn user_home() -> Res<PathBuf> {
         .ok_or_else(|| fail("Could not determine home directory.", 1))
 }
 
-/// The cached binary built from checkout, through the same cache and build folder `install` uses.
-fn build(checkout: &Path, err: &mut dyn Write) -> Result<PathBuf, String> {
+/// The bytes of the cached binary built from checkout, through the same cache and build folder
+/// `install` uses: the ones its sha check passed, or the ones just built.
+fn build(checkout: &Path, err: &mut dyn Write) -> Result<Vec<u8>, String> {
     #[cfg(test)]
     if let Some(f) = fake!(build) {
         return f(checkout, err);
     }
-    rust_binary(checkout, &Host::current()?, err).map(|(path, _)| path)
+    rust_binary(checkout, &Host::current()?, err).map(|(_, bytes)| bytes)
+}
+
+/// Removes the binary copies earlier runs left under <home>/tmp when they are over a day old, best
+/// effort. A folder is removed only when it passes the same private checks it was made with.
+fn sweep_copies(out: &mut dyn Write, home: &Path) {
+    let tmp = home.join("tmp");
+    if is_link(&tmp).unwrap_or(true) {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(&tmp) else {
+        return;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let old = fs::symlink_metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|age| age > Duration::from_secs(24 * 60 * 60));
+        if entry.file_name().to_string_lossy().starts_with("catch-up-")
+            && old
+            && private_dir(&path).is_ok()
+            && fs::remove_dir_all(&path).is_ok()
+        {
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        outln!(
+            out,
+            "skill: removed {removed} leftover binary {} over a day old from {}",
+            if removed == 1 { "copy" } else { "copies" },
+            tmp.display()
+        );
+    }
+}
+
+/// bytes as a new owner-only executable at path, so what runs is what was verified, not whatever
+/// the shared cache path holds by exec time.
+fn private_binary(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o700);
+    options
+        .open(path)
+        .and_then(|mut f| f.write_all(bytes))
+        .map_err(|e| os_error(&e, Some(path)))
 }
 
 /// The new binary's `install` run: argv is the binary, then its operands.
@@ -843,6 +895,7 @@ pub fn catch_up(_call: &Call) -> Res<()> {
 /// Bring this host to origin's skill, pickup timer and Worker, backing up before any local write.
 /// Exit 0 when done or nothing is new, 1 when a step failed, 5 when the fetch failed.
 fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
+    sweep_copies(out, home);
     let skill = here.parent().unwrap_or(here);
     let (slug, repo) = catch_up_repo(home)?;
     let resolved = resolve(&repo).unwrap_or_else(|_| repo.clone());
@@ -957,7 +1010,13 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
     let leftover = timer && daemon.is_some();
     let stale = timer && (leftover || !current || timer_drift(scheduler, home));
     // Only drift reinstalls the daemon: a new skill keeps its binary path, so the unit still matches.
-    let daemon_stale = daemon.is_some_and(|s| daemon_drift(s, home));
+    // A Windows loop that died leaves no daemon on the lock and nothing restarts it before logon,
+    // so a current skill reinstalls too, and the install's /Run starts it. A new skill's restart
+    // already runs /Run.
+    let drifted = daemon.is_some_and(|s| daemon_drift(s, home));
+    let dead =
+        !drifted && current && daemon == Some("schtasks") && matches!(locked_pid(home), Ok(None));
+    let daemon_stale = drifted || dead;
     if current {
         outln!(out, "skill: current at {h7}");
     } else {
@@ -974,19 +1033,23 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             outln!(out, "daemon service: current");
         }
     } else {
-        let backup = match catch_up_backup(home, skill) {
-            Ok(folder) => {
+        // Starting a dead loop rewrites nothing, so it takes no backup. A drifted unit does: this
+        // backup is the only copy of its old file.
+        let service_only = dead && !stale && !retro && legacy.is_empty();
+        let backup = match (!service_only).then(|| catch_up_backup(home, skill)) {
+            None => None,
+            Some(Ok(folder)) => {
                 wrote = true;
                 outln!(out, "backup: {}", folder.display());
                 Some(folder)
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 failed += 1;
                 outln!(out, "backup: {e}");
                 None
             }
         };
-        let mut ok = backup.is_some();
+        let mut ok = service_only || backup.is_some();
         if ok && !current {
             // The installer refuses a source path with a symlinked parent, and macOS's temp
             // root is under /var -> private/var, so build the path from the canonical root.
@@ -1005,6 +1068,10 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                 .map_err(|e| fail(os_error(&e, Some(&tmp)), 1))?;
             let src = tmp.join("src");
             let src_text = src.to_string_lossy().into_owned();
+            // The private copy lives under the factory home, not the temp root, which may be mounted
+            // noexec or, on Windows, fall back to a folder other users can write.
+            let copy = home.join("tmp").join(format!("catch-up-{}", random_hex(4)));
+            let binary = copy.join(Path::new(BINARY).file_name().unwrap_or_default());
             let mut r = run(
                 &git_argv(
                     &repo,
@@ -1015,7 +1082,10 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             if r.code == 0 {
                 // The installer comes from the fetched commit: build its binary, then run its install.
                 let mut said = Vec::new();
-                let built = build(&src, &mut said);
+                let built = build(&src, &mut said).and_then(|bytes| {
+                    private_dir(&copy)?;
+                    private_binary(&binary, &bytes).map(|_| &binary)
+                });
                 for line in String::from_utf8_lossy(&said).lines() {
                     outln!(out, "skill: {}", line.trim_start_matches("install: "));
                 }
@@ -1040,6 +1110,9 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
                     },
                 };
             }
+            // Best effort: a scanner can hold a just-run exe for a moment, and the install has finished.
+            let _ = fs::remove_file(&binary);
+            let _ = fs::remove_dir(&copy);
             if src.exists() {
                 run(&git_argv(&repo, &["worktree", "remove", &src_text]), None);
             }
@@ -1457,15 +1530,21 @@ mod tests {
             let user = root.clone();
             let (builds, installs): (Calls, Calls) = (Rc::default(), Rc::default());
             let (built, ran) = (builds.clone(), installs.clone());
-            let binary = root.join("built/factory");
             FAKES.with(|f| {
                 *f.borrow_mut() = Fakes {
                     build: Some(Rc::new(move |checkout, err| {
                         built.borrow_mut().push(vec![text(checkout).to_string()]);
                         let _ = writeln!(err, "install: Rust binary from cache 0123abcd");
-                        Ok(binary.clone())
+                        Ok(b"verified bytes".to_vec())
                     })),
                     install: Some(Rc::new(move |argv| {
+                        // What runs is a private copy of the bytes the build verified.
+                        let binary = Path::new(&argv[0]);
+                        assert_eq!(fs::read(binary).unwrap(), b"verified bytes");
+                        assert_eq!(
+                            fs::metadata(binary).unwrap().permissions().mode() & 0o777,
+                            0o700
+                        );
                         ran.borrow_mut().push(argv.to_vec());
                         let (mut out, mut err) = (Vec::new(), Vec::new());
                         let (source, destination) = (Path::new(&argv[3]), Path::new(&argv[5]));
@@ -1926,6 +2005,57 @@ mod tests {
     }
 
     #[test]
+    fn sweeps_private_copies_over_a_day_old() {
+        let t = T::new("sweep-copies");
+        let tmp = t.home.join("tmp");
+        let old = std::time::SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60);
+        for (name, mode, age) in [
+            ("catch-up-old1", 0o700, Some(old)),
+            ("catch-up-old2", 0o700, Some(old)),
+            ("catch-up-new", 0o700, None),
+            ("catch-up-open", 0o755, Some(old)),
+            ("unrelated-old", 0o700, Some(old)),
+        ] {
+            let dir = tmp.join(name);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("factory"), "left over").unwrap();
+            fs::set_permissions(&dir, fs::Permissions::from_mode(mode)).unwrap();
+            if let Some(age) = age {
+                fs::File::open(&dir).unwrap().set_modified(age).unwrap();
+            }
+        }
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            out.lines().any(|l| l
+                == format!(
+                    "skill: removed 2 leftover binary copies over a day old from {}",
+                    tmp.display()
+                )),
+            "{out}"
+        );
+        let mut left: Vec<String> = fs::read_dir(&tmp)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        // A fresh copy, one another user could have written, and anything else stay.
+        assert_eq!(left, ["catch-up-new", "catch-up-open", "unrelated-old"]);
+        // One removed copy reads in the singular.
+        let dir = tmp.join("catch-up-old3");
+        fs::create_dir_all(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::File::open(&dir).unwrap().set_modified(old).unwrap();
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0, "{out}");
+        let line = format!(
+            "skill: removed 1 leftover binary copy over a day old from {}",
+            tmp.display()
+        );
+        assert!(out.lines().any(|l| l == line), "{out}");
+    }
+
+    #[test]
     fn builds_and_runs_the_origin_binary() {
         let t = T::new("origin-installer");
         fs::write(t.src.join("notes.txt"), "Commit C.\n").unwrap();
@@ -1950,10 +2080,22 @@ mod tests {
         let expected = temp_root().unwrap();
         assert_eq!(tmp.parent().unwrap(), expected);
         assert!(!tmp.exists());
+        // The private copy ran from a fresh folder under the factory home, removed afterwards.
+        let installs = t.installs.borrow().clone();
+        let copy = Path::new(&installs[0][0]).parent().unwrap();
+        assert_eq!(copy.parent().unwrap(), t.home.join("tmp"));
+        assert!(copy
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("catch-up-"));
+        assert!(!copy.exists());
+        assert_eq!(fs::read_dir(t.home.join("tmp")).unwrap().count(), 0);
         assert_eq!(
-            *t.installs.borrow(),
+            installs,
             [[
-                text(&t.root.join("built/factory")),
+                text(&copy.join("factory")),
                 "install",
                 "--source",
                 text(&src),
@@ -2558,6 +2700,7 @@ mod tests {
         t.daemon(Some("launchd"), true);
         let (code, lines) = t.lines();
         assert_eq!(code, 0);
+        // A drifted unit is backed up before the install rewrites it.
         assert_eq!(t.backups().len(), backups + 1);
         assert_eq!(
             lines[4..6],
@@ -2603,6 +2746,48 @@ mod tests {
         let (code, lines) = t.lines();
         assert_eq!((code, calls.borrow().len()), (0, 1));
         assert!(!lines.iter().any(|l| l.starts_with("daemon service:")));
+    }
+
+    /// A Windows loop that died leaves no daemon on the lock, so catch-up runs the install, whose
+    /// /Run starts it. With a daemon on the lock, the service is current.
+    #[test]
+    fn current_windows_service_without_a_daemon_is_reinstalled() {
+        let t = T::new("daemon-dead-loop");
+        t.timer(false);
+        t.drift(None);
+        let (reply, reply_code) = default_timer_reply();
+        t.timer_calls(reply, reply_code);
+        let calls = t.daemon_calls(
+            "started the stopped daemon with schtasks /Run: /synthetic/factory-daemon.cmd\n",
+            0,
+        );
+        // The first run installs the skill; a new skill's restart already runs /Run.
+        t.daemon(None, false);
+        assert_eq!(t.lines().0, 0);
+        t.daemon(Some("schtasks"), false);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"daemon service: started the stopped daemon with schtasks /Run: /synthetic/factory-daemon.cmd".to_string()),
+            "{lines:?}"
+        );
+        assert_eq!(calls.borrow().len(), 1);
+        assert!(!lines.iter().any(|l| l.starts_with("backup:")), "{lines:?}");
+
+        daemon_runs(&t.home);
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(
+            lines.contains(&"daemon service: current".to_string()),
+            "{lines:?}"
+        );
+        assert_eq!(calls.borrow().len(), 1);
+
+        t.daemon(Some("launchd"), false);
+        stop();
+        let (code, lines) = t.lines();
+        assert_eq!(code, 0, "{lines:?}");
+        assert_eq!(calls.borrow().len(), 1, "only Windows checks the lock");
     }
 
     /// With the daemon service installed, a leftover pickup timer is removed after the backup, and

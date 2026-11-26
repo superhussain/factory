@@ -14,7 +14,17 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { expand, httpFixture, loadCases, readIds, requestLines, runCase, runSide } from "./run.mjs";
+import {
+  SLOW,
+  expand,
+  feedOrder,
+  httpFixture,
+  loadCases,
+  readIds,
+  requestLines,
+  runCase,
+  runSide,
+} from "./run.mjs";
 import { launcher } from "./stub.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -304,4 +314,28 @@ test("skip_stderr leaves stderr out of a case", { skip: windows }, async (t) => 
     Object.fromEntries(await runSide({ ...c, ...extra }, [process.execPath, noisy])).stderr;
   assert.equal(await stderr({}), "noise\n");
   assert.equal(await stderr({ skip_stderr: true }), "");
+});
+
+test("no_gh leaves gh off PATH and keeps the other stubs", { skip: windows }, async (t) => {
+  const probe = join(temp(t), "probe.mjs");
+  writeFileSync(
+    probe,
+    'import { spawnSync } from "node:child_process";\n' +
+      'const status = (tool) => { const r = spawnSync(tool, ["x"]); return r.error ? r.error.code : r.status; };\n' +
+      'console.log(status("gh"), status("git"));\n',
+  );
+  const c = { id: "main/probe", argv: [], home: null, stubs: {} };
+  const stdout = async (extra) =>
+    Object.fromEntries(await runSide({ ...c, ...extra }, [process.execPath, probe])).stdout;
+  assert.equal(await stdout({}), "127 127\n");
+  assert.equal(await stdout({ no_gh: true }), "ENOENT 127\n");
+});
+
+test("the slow cases exist and the workers take them first, then the rest in case order", () => {
+  const ids = new Set(loadCases().map((c) => c.id));
+  for (const id of SLOW) assert.ok(ids.has(id), id);
+  const cases = ["a/one", SLOW[1], "a/two", SLOW[0], "a/three"].map((id) => ({ id }));
+  assert.deepEqual(feedOrder(cases), [3, 1, 0, 2, 4]);
+  // A shard without them keeps case order.
+  assert.deepEqual(feedOrder(cases.filter((c) => !SLOW.includes(c.id))), [0, 1, 2]);
 });

@@ -10,10 +10,12 @@
 //! gone, closed, or idle with no running child is left to age out, so takeover and `stuck` work
 //! as before.
 //!
-//! The agent must also carry the title pickup launches the job's sessions with, `factory <id>` or
-//! `babysit <id>`. A long-lived agent that changed its session tag, left a job without releasing
-//! it, or kept a stale link from idea pickup is titled for another job or for none, so its claims
-//! age out.
+//! The agent must have claimed the job on this host, as the `paseo-claims/<job>/<agent>` marker
+//! that `claim`, `board` and `hold` write shows, so a board row pointed at some other local agent
+//! never keeps a claim alive. The agent must also carry the title pickup launches the job's
+//! sessions with, `factory <id>` or `babysit <id>`. A long-lived agent that changed its session
+//! tag, left a job without releasing it, or kept a stale link from idea pickup is titled for
+//! another job or for none, so its claims age out.
 //!
 //! A claim that stays due, such as a dead session's, does not make every pass run `paseo ls`: the
 //! heartbeat skips the read while the due claims match its last read, for up to 10 minutes.
@@ -25,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::commands::claims::CLAIM_REFRESH_MINUTES;
+use crate::commands::claims::{paseo_claim_path, CLAIM_REFRESH_MINUTES};
 use crate::shared::board::{dump_board, load_board};
 use crate::shared::board_client::{cas_via, Api};
 use crate::shared::consts::TERMINAL;
@@ -130,11 +132,16 @@ impl Heart {
             let cutoff = unix_now() - (CLAIM_REFRESH_MINUTES * 60.0) as i64;
             let mut due = due_claims(&board, device, server, cutoff);
             let quiet_since = unix_now() - QUIET_CAP_HOURS * 3600;
-            due.retain(|(i, _)| {
-                board["jobs"][*i]["updated"]
+            due.retain(|(i, agent)| {
+                let job = &board["jobs"][*i];
+                job["updated"]
                     .as_str()
                     .and_then(parse_stamp)
                     .is_some_and(|u| u >= quiet_since)
+                    && job["id"]
+                        .as_str()
+                        .and_then(|id| paseo_claim_path(home, id, agent))
+                        .is_some_and(|marker| marker.is_file())
             });
             if due.is_empty() {
                 return Ok((None, Vec::new()));
@@ -343,10 +350,23 @@ pub(crate) mod tests {
         json!({"updated": "2026-11-24T00:00:00Z", "jobs": jobs})
     }
 
+    /// Writes the paseo-claims marker for each job's agent on board, as `hold` does when this
+    /// host's session claims it.
+    pub(crate) fn mark(home: &Path, board: &Value) {
+        for j in board["jobs"].as_array().unwrap() {
+            if let (Some(id), Some(agent)) = (j["id"].as_str(), j["paseo"]["agent"].as_str()) {
+                let path = paseo_claim_path(home, id, agent).unwrap();
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, "").unwrap();
+            }
+        }
+    }
+
     /// The ids one heartbeat over board refreshes, and the board requests it sent.
     fn beat_on(name: &str, board: &Value, fake: &Fake) -> (Vec<String>, Vec<String>) {
         let (origin, seen) = serve(vec![get(board), (200, "{}", vec![])]);
         let home = home_for(name, &origin);
+        mark(&home, board);
         let ids = Heart::default()
             .beat_with(
                 &home,
@@ -442,6 +462,7 @@ pub(crate) mod tests {
         ]);
         let (origin, seen) = serve(vec![get(&board), (200, "{}", vec![])]);
         let home = home_for("heartbeat-patch", &origin);
+        mark(&home, &board);
         let fake = Fake::new(
             json!([
                 agent("live1", "running", "factory 001-a"),
@@ -512,6 +533,56 @@ pub(crate) mod tests {
         let (ids, methods) = beat_on("heartbeat-silent", &board, &fake);
         assert!(ids.is_empty());
         assert_eq!(methods, ["GET"]);
+    }
+
+    /// Only a claim whose agent this host recorded claiming the job is refreshed. A row whose
+    /// link names a running local agent with no marker, as a session on another host or a
+    /// hand-edited row leaves, ages out, and with no marked claim due Paseo is not asked.
+    #[test]
+    fn a_claim_without_this_hosts_marker_ages_out() {
+        let old = minutes_ago(30);
+        let marked = job(
+            "001-a",
+            "build",
+            claim("mac", "s1", &old),
+            Some((SERVER, "mine")),
+        );
+        let unmarked = job(
+            "002-b",
+            "build",
+            claim("mac", "s2", &old),
+            Some((SERVER, "other")),
+        );
+        let fake = Fake::new(
+            json!([
+                agent("mine", "running", "factory 001-a"),
+                agent("other", "running", "factory 002-b"),
+            ]),
+            vec![],
+        );
+        let board = board_of(vec![marked.clone(), unmarked.clone()]);
+        let (origin, seen) = serve(vec![get(&board), (200, "{}", vec![]), get(&board)]);
+        let home = home_for("heartbeat-marker", &origin);
+        mark(&home, &board_of(vec![marked]));
+        let mut heart = Heart::default();
+        let list = |p: Option<&str>| fake.list(p);
+        let ids = heart
+            .beat_with(&home, "mac", SERVER, &list, &crate::shared::http::api)
+            .unwrap();
+        assert_eq!(ids, ["001-a"]);
+        std::fs::remove_dir_all(home.join("paseo-claims")).unwrap();
+        let ids = heart
+            .beat_with(&home, "mac", SERVER, &list, &crate::shared::http::api)
+            .unwrap();
+        assert!(ids.is_empty());
+        assert_eq!(fake.asked.borrow().len(), 1, "no marked claim: no read");
+        let methods: Vec<String> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.method.clone())
+            .collect();
+        assert_eq!(methods, ["GET", "PATCH", "GET"]);
     }
 
     /// A running agent refreshes only the job its title names. One titled for another job, as a
@@ -628,6 +699,7 @@ pub(crate) mod tests {
         let two = board_of(vec![dead, other]);
         let (origin, seen) = serve(vec![get(&one), get(&one), get(&two), get(&two), get(&two)]);
         let home = home_for("heartbeat-reprobe", &origin);
+        mark(&home, &two);
         let fake = Fake::new(json!([agent("a", "closed", "factory 001-a")]), vec![]);
         // A reprobe that never comes for the skips, then none at all for the reread, so no
         // assertion waits on the clock.
@@ -675,6 +747,7 @@ pub(crate) mod tests {
             (200, "{}", vec![]),
         ]);
         let home = home_for("heartbeat-retry", &origin);
+        mark(&home, &board);
         let fake = Fake::new(json!([agent("a", "running", "factory 001-a")]), vec![]);
         let mut heart = Heart::every(Duration::MAX);
         let list = |p: Option<&str>| fake.list(p);

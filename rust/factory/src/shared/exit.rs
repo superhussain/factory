@@ -14,6 +14,8 @@ pub const WORKER: i32 = 5;
 pub const CONFLICT: i32 = 6;
 /// A person reviews and merges the PR, so nothing merges.
 pub const HUMAN: i32 = 7;
+/// A pattern hit its regex backtrack limit, so nothing it was reading passed on.
+pub const LIMIT: i32 = 8;
 
 #[derive(Debug)]
 pub struct Exit {

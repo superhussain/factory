@@ -642,9 +642,14 @@ pub fn cas_via<T>(
     // A daemon that took a write and never answered gets no more of this change's writes.
     let mut lost = false;
     for _ in 0..20 {
-        let read = match (direct, mirror_read(home, Map::new())) {
-            (false, Some(read)) => read,
-            _ => match http_read_via(home, api) {
+        let mirrored = if direct {
+            None
+        } else {
+            mirror_read(home, Map::new())
+        };
+        let read = match mirrored {
+            Some(read) => read,
+            None => match http_read_via(home, api) {
                 Ok(read) => read,
                 Err(e) if wait_busy(&e) => {
                     direct = true;
@@ -1158,7 +1163,8 @@ mod tests {
     }
 
     /// Runs `cas` adding row 2001-new through a fake daemon that serves the board read and then
-    /// takes every write or await without a reply, with the Worker sending `replies`. Returns how
+    /// takes every write or await without a reply, with the Worker sending `replies`. It checks
+    /// that only the first read went to the daemon. Returns how
     /// many times the change ran, how many writes and awaits the daemon took, and the Worker's
     /// request methods.
     #[cfg(unix)]
@@ -1193,16 +1199,20 @@ mod tests {
         let home = std::fs::canonicalize(&home).unwrap();
         let listener = UnixListener::bind(socket_path(&home)).unwrap();
         let taken = Arc::new(AtomicUsize::new(0));
-        let count = taken.clone();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let (count, read) = (taken.clone(), reads.clone());
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let mut stream = stream.unwrap();
                 let mut line = String::new();
                 BufReader::new(&stream).read_line(&mut line).unwrap();
                 match serde_json::from_str::<Value>(&line).unwrap()["op"].as_str() {
-                    Some("board") => stream
+                    Some("board") => {
+                        read.fetch_add(1, Ordering::SeqCst);
+                        stream
                         .write_all(b"{\"v\":1,\"ok\":true,\"etag\":\"\\\"e1\\\"\",\"patch\":true}\n{\"updated\":\"\",\"jobs\":[{\"id\":\"1999-a\"}]}\n")
-                        .unwrap(),
+                        .unwrap()
+                    }
                     Some("patch" | "await") => {
                         count.fetch_add(1, Ordering::SeqCst);
                     }
@@ -1222,6 +1232,12 @@ mod tests {
         })
         .unwrap();
         let _ = std::fs::remove_dir_all(&home);
+        // Every read after the lost write goes straight to the Worker, never to the daemon.
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            1,
+            "only the first read asks the daemon"
+        );
         let methods = seen
             .lock()
             .unwrap()

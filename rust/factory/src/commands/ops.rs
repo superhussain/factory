@@ -12,7 +12,7 @@ use crate::commands::{checks, claims, worktree};
 use crate::shared::board::{dump_board, load_board, read_board};
 use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::consts::{PASEO_ID, TERMINAL};
-use crate::shared::exit::{exit, fail, Res};
+use crate::shared::exit::{exit, fail, Res, CONFLICT};
 use crate::shared::fs::{is_link, normpath, resolve, temp_root};
 use crate::shared::home::{factory_home, holder};
 use crate::shared::http::cas;
@@ -51,8 +51,12 @@ fn git_timeout() -> Duration {
     GIT_TIMEOUT
 }
 
+/// Print the PIDs still running in the worktree after SIGTERM and exit 1, or exit CONFLICT when
+/// stop_pids refused to check it.
 pub fn stop(call: &Call) -> Res<()> {
-    let alive = worktree::stop_pids(Path::new(&call.args[0])).unwrap_or_default();
+    let Some(alive) = worktree::stop_pids(Path::new(&call.args[0])) else {
+        return Err(exit(CONFLICT));
+    };
     for pid in &alive {
         println!("{pid}");
     }
@@ -1074,7 +1078,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn archive_git_times_out() {
-        use std::os::unix::fs::PermissionsExt;
         let _lock = crate::shared::test_env_lock();
         TEST_GIT_TIMEOUT.with(|t| t.set(Some(Duration::from_secs(1))));
         let home = temp_dir("archive-git-times-out");
@@ -1083,16 +1086,13 @@ mod tests {
         let bin = home.join("bin");
         fs::create_dir_all(&bin).unwrap();
         // Hangs only for the hung folder, so a concurrent test's git still runs.
-        let shim = bin.join("git");
-        fs::write(
-            &shim,
-            format!(
-                "#!/bin/sh\nif [ \"$2\" = \"{}\" ]; then sleep 60; fi\nexec /usr/bin/git \"$@\"\n",
+        crate::shared::build::tests::script(
+            &bin.join("git"),
+            &format!(
+                "if [ \"$2\" = \"{}\" ]; then sleep 60; fi\nexec /usr/bin/git \"$@\"\n",
                 hung.display()
             ),
-        )
-        .unwrap();
-        fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let path = std::env::var_os("PATH");
         let mut dirs = vec![bin];
         dirs.extend(std::env::split_paths(path.as_deref().unwrap_or_default()));

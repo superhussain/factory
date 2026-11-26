@@ -13,7 +13,7 @@ body defines the work and output file for other agents.
 | Other agents | Launch a general worker and have it read the canonical role file's body, the project file, and job files. Pass absolute paths and the base branch. |
 | Paseo (optional) | Discover configured profiles/providers with native tools and create a worker in the existing job worktree, not a second branch. Resolve that host's checkout and paths first. See integrations.md. |
 
-Before each role dispatch, run `"$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>] --session <tag>`.
+Before each role dispatch, run `"$RUNTIME" agent record "$SLUG/<id>" <role> <harness> <via> <model> [<effort>]`.
 For via `paseo`, run it right after the Paseo worker is created, with `--paseo-agent <agent-id>` naming that worker on this host's Paseo server. The row then links to the worker. Without the flag it links to this session.
 After hold, record the orchestrator once when no orchestrator row carries this session.
 `<harness>` is the route provider or the runtime name. Leave out `<effort>` when the

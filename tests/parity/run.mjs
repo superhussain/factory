@@ -3,8 +3,8 @@
 // node tests/parity/run.mjs --bin PATH [--ids FILE|DIR] [--case ID]... [--jobs N] [--shard K/N] [--record]
 //
 // Each case runs in its own temp root with its own home, stub folder and HTTP port, so cases run in a pool of
-// worker threads. Results print in case order. --shard K/N keeps every Nth case starting at the Kth, for a CI
-// matrix. --record writes each selected case's normalized output to tests/parity/golden/<case-id>/ instead of
+// worker threads. The slow cases start first, and results print in case order. --shard K/N keeps every Nth case
+// starting at the Kth, for a CI matrix. --record writes each selected case's normalized output to tests/parity/golden/<case-id>/ instead of
 // comparing it.
 //
 // Byte data stays in latin1 strings, one character per byte, so every comparison and replacement is byte-exact.
@@ -489,7 +489,7 @@ export async function runSide(c, command, homes = join(HERE, "homes")) {
     } else mkdirSync(home);
     mkdirSync(binDir);
     mkdirSync(stubDir);
-    for (const tool of TOOLS) launcher(binDir, tool);
+    for (const tool of TOOLS) if (!(c.no_gh && tool === "gh")) launcher(binDir, tool);
     // Stub files are JSON text, so each value goes in JSON-escaped.
     const jsonValues = Object.fromEntries(
       Object.entries(values).map(([k, v]) => [k, JSON.stringify(v).slice(1, -1)]),
@@ -504,8 +504,9 @@ export async function runSide(c, command, homes = join(HERE, "homes")) {
     // The binary's local dates are UTC dates, so a golden holds the same dates in every zone.
     env.TZ = "UTC";
     env.FACTORY_PARITY_NOW = String(NOW / 1000);
+    // A no_gh case has only the stub folder, which then holds no gh, on PATH, so the host's own gh cannot answer.
     Object.assign(env, c.env ?? {}, {
-      PATH: binDir + ":" + (process.env.PATH ?? ""),
+      PATH: c.no_gh ? binDir : binDir + ":" + (process.env.PATH ?? ""),
       FACTORY_STUB_DIR: stubDir,
     });
     const argv = c.argv.map((arg) => arg.replaceAll("{home}", home));
@@ -666,6 +667,19 @@ export async function runCase(c, command, record) {
   return [];
 }
 
+// The cases that take seconds on a CI runner: each retries a conflicting write 20 times with 50-500 ms of
+// jitter. Fed last in case order, the slowest started about 11 s into its shard and ended it at about 20 s.
+export const SLOW = [
+  "pipeline/batch-failed-rollback-names-riders-left",
+  "pipeline/batch-backlog-412-rolls-back-riders-and-exits-5",
+];
+
+// The case indices in the order the workers take them: SLOW's cases first, then the rest in case order.
+export function feedOrder(cases) {
+  const slow = SLOW.map((id) => cases.findIndex((c) => c.id === id)).filter((i) => i >= 0);
+  return [...slow, ...Array.from(cases.keys()).filter((i) => !slow.includes(i))];
+}
+
 function usage(message) {
   console.error(message);
   return 2;
@@ -729,6 +743,7 @@ async function main(argv) {
   let printed = 0;
   let failed = 0;
   let next = 0;
+  const order = feedOrder(cases);
   const flush = () => {
     while (printed < cases.length && results[printed] !== undefined) {
       const lines = results[printed];
@@ -749,7 +764,7 @@ async function main(argv) {
             worker.disconnect();
             return done();
           }
-          const i = next++;
+          const i = order[next++];
           worker.send([i, cases[i].id]);
         };
         worker.on("message", ([i, lines]) => {

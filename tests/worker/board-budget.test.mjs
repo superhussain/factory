@@ -16,7 +16,8 @@ const op = (work, prefix) => Object.entries(work.rows).find(([name]) => name.sta
 // version is built and copied to R2 at most once, by its first read or else by the alarm, so a
 // day holds at most one copy per PATCH; every other GET streams R2's copy. The dashboard's slim
 // reads were 9 in 12.6 minutes of job 2280's tail, about 1,030 a day; the projection counts
-// 8,500, each as a miss in an evicted room, which joins the slim body from every page.
+// 8,500, each as a miss in an evicted room, which joins the slim body from every page. Archive
+// reads were 13 in 9.7 minutes of job 2298's tail, about 1,930 a day.
 const DAY = {
   patch: 5900,
   claim: 590,
@@ -24,6 +25,7 @@ const DAY = {
   slim: 8500,
   copy: 2880,
   archive: 24,
+  archiveRead: 1930,
 };
 
 const costlier = (a, b) => ({
@@ -43,6 +45,7 @@ function projection(work, rate) {
     // Each setAlarm writes the room's alarm, which no cursor counts: one row written.
     [Math.min(DAY.copy, n("patch")), { read: 0, written: 1 }],
     [n("archive"), op(work, "full PUT, archive pass")],
+    [n("archiveRead"), op(work, "GET /api/board/archive")],
     // One seed a day, as on a deploy day.
     [1, op(work, "seed")],
   ];
@@ -103,8 +106,19 @@ test("a slim read costs a row per page on a miss, almost none on a hit, and writ
   }
 });
 
-test("the daily projection at twice today's board and traffic stays under half of each cap", () => {
+// The archive read takes the board's ids from the room's stages row, never its pages.
+test("an archive read costs the same few SQL rows as the board doubles and writes none", () => {
+  const name = "GET /api/board/archive";
+  assert.deepEqual(op(doubled, name), op(today, name));
+  assert.ok(
+    op(doubled, name).read <= 5 && op(doubled, name).written === 0,
+    JSON.stringify(op(doubled, name)),
+  );
+});
+
+test("the daily projection at twice today's board and traffic stays under half of each cap", (t) => {
   const p = projection(doubled, 2);
+  t.diagnostic(`rows read a day ${p.read}, rows written a day ${p.written}`);
   assert.ok(p.read < 2_500_000, `rows read a day ${p.read}`);
   assert.ok(p.written < 50_000, `rows written a day ${p.written}`);
 });
