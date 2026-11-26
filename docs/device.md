@@ -289,7 +289,8 @@ the host.
 `retro aggregate` pulls every host's digest for the last N days (default 7, at
 most 30), oldest date first, into a new run folder `<home>/retro/<run>/`. The run
 tag is the UTC time plus 6 random hex digits. It writes `digest.jsonl`, the rows,
-and `aggregate.json`: token sums, context medians, error, denial and command
+and `aggregate.json`: token sums, context medians (job sessions only, a missing
+attachment kind counted as 0), error, denial and command
 patterns with counts and up to 5 `host/session` refs, the registered
 projects, and `merged`: up to 100 board jobs of registered projects merged in the
 window, each with `id`, `project`, `title` and `merged` time, newest first. It also writes `red_flags`: each row of the red-flag index without an `ack` whose job is a board job of a registered project, newest first, as `{time, job, project, host, agent, tool, flags, target, sessions}`. `sessions` lists up to 5 digest `host/session` refs of that job on that host. A Worker that answers 404 gives `[]`. It also writes `lessons`: up to 20 rows from jobs of registered projects in the window, closed jobs and repeated findings together, newest first, as `{job, project, kind, title, reason, at, sessions}`. `kind` is `denied` with the deny notes as `reason`, or `pr-closed` with the close reason. Rows with no usable reason are left out. It also lists each `repeated` board row from the window, at any stage, as kind `repeated-finding` with `reviewer` and `signature`. Every ad-hoc row's `project` becomes `ad-hoc` in both files, so neither

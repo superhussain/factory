@@ -365,8 +365,12 @@ configuration. The repository ships none.
 
   ```json
   ["env", "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0", "claude", "-p", "{prompt}",
-   "--model", "{model}", "--effort", "{effort}", "--permission-mode", "auto"]
+   "--model", "{model}", "--effort", "{effort}", "--permission-mode", "auto",
+   "--strict-mcp-config"]
   ```
+
+  `--strict-mcp-config` with no `--mcp-config` starts no MCP servers; the factory
+  skill needs none.
 
   `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` keeps a headless run waiting on its own
   background work, as SKILL.md requires. `--permission-mode auto` lets Claude Code
@@ -377,6 +381,17 @@ configuration. The repository ships none.
   user environment variable and drop the first two items.
 
 Core needs neither. Any program that accepts these values works.
+
+## Lean orchestrator sessions
+
+- Pass a settings file with `--settings`: `syncClaudeAiSkills: false`,
+  `disableClaudeAiConnectors: true`, and `skillOverrides` mapping every skill
+  except `factory`, and the skills your stage notes tell agents to load, to
+  `"user-invocable-only"`. Map those stage-note skills to `"name-only"`.
+- Paseo: add a provider
+  `{"extends": "claude", "options": {"extraArgs": {"settings": "<settings file>", "strict-mcp-config": null}}}`
+  to the Paseo config and name it in `routes.md`.
+- Check a launched session's first turn with `factory retro digest`.
 
 ## Standing instruction for unattended runs
 
