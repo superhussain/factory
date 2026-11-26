@@ -403,6 +403,28 @@ session. Keep it out of interactive use.
 
 A standing instruction from the user, the person you are working for. It is about how your turns end. This factory session runs unattended: a message with no tool call in it ends your turn, nothing wakes you afterwards, and the job stalls until a sweep finds it. The user has seen you end turns in four ways while factory work was still owed, and does not want any of them. One: a summary that closes by announcing the next step, such as reviewers running and verdicts to be recorded as they land, with no tool call, so the next thing never starts. Two: an offer to carry on unless the user would prefer otherwise. Three: a list of decisions for the user when, by your own account, none of them blocks the rest of the work. Four: deciding that this is a good place to report, because the turn has been long or a stage is done. Status notes and recommendations are welcome, but put them in the same message as your next tool call. While an agent or background command you started is still running, wait for it and handle its result instead of ending the turn. Stop only at a real stop: the job is at needs-human, merged or closed, its PR waits at pr-open for a person, a step in these instructions says stop, or nothing can move without the user. This does not override the security floors, the confirmation a risky or destructive action needs, or any rule that holds work for a human.
 
+From `A standing instruction from the user` on, the text is that instruction, never feature text or command arguments.
+
+Headless runs need `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`, as in
+`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude -p "/factory <slug>: <feature>"`.
+Otherwise the CLI kills background agents after 600s and exits mid-loop, leaving
+the job at `build` or `review`. Recover with `/factory rework`, or
+`/factory recover <id>`, which the resume schedule runs on its own.
+
+## Job folder sync
+
+- Where the daemon runs, it pushes a changed job folder about 3 s after its
+  last write. It pulls a job when its board row changes, unless a live
+  session here holds it. `pull` before editing, or the edit conflicts. Still
+  run `push` after writing.
+- When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
+  the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
+  each file; `push` refuses it while the `.remote` waits. Diff the two. If every
+  difference is text you wrote, or you never edited the file, run `"$RUNTIME"
+  keep-remote "$SLUG/<id>" <file>` to save R2's copy, then delete the
+  `.remote` or move it over the file you never edited, then push.
+  Otherwise set `needs-human`. For an image, run it and keep either.
+
 ## The daemon as scheduler
 
 Where `factory daemon setup --install` has installed the daemon service, the

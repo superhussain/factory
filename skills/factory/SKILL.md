@@ -153,17 +153,7 @@ on its own where it is installed:
 - `pull "$SLUG/<id>"` downloads what changed in R2 and keeps local edits, and
   `sync "$SLUG"` does that for every job of the project that is not `merged` or
   `closed`. Pull a finished job by id.
-- Where the daemon runs, it pushes a changed job folder about 3 s after its
-  last write. It pulls a job when its board row changes, unless a live
-  session here holds it. `pull` before editing, or the edit conflicts. Still
-  run `push` after writing.
-- When a file changed both here and in R2, `push`, `pull`, `sync`, and `hold` keep
-  the local file, save R2's copy beside it as `<file>.remote`, and exit 6 naming
-  each file; `push` refuses it while the `.remote` waits. Diff the two. If every
-  difference is text you wrote, or you never edited the file, run `"$RUNTIME"
-  keep-remote "$SLUG/<id>" <file>` to save R2's copy, then delete the
-  `.remote` or move it over the file you never edited, then push.
-  Otherwise set `needs-human`. For an image, run it and keep either.
+- On a daemon host, or when `push`, `pull`, `sync` or `hold` exits 6 with a `<file>.remote` copy, follow [job folder sync](references/pickup.md#job-folder-sync).
 
 - In a UI job, the builder saves screenshots in `$JOBS/<id>/` and embeds them in
   build.md as a `| Before | After |` table. The builder never uploads to the public image host.
@@ -376,7 +366,6 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   branch with `git -C "$WT" push -u origin factory/<id>`, so another device can pick
   the job up. A rejected push means another device moved the branch, so move the job
   to `needs-human` with that reason.
-  With a stacked rider, also run `git -C "$WORKTREES/<rider-id>" push -u origin factory/<rider-id>`.
 - Shipping opens a PR, and an APPROVE PR merges without waiting for a human. Push
   once more with `git -C "$REPO_PATH" push -u origin factory/<id>`, then open a PR
   against the job's base (`$BASE` unless the job was stacked) with
@@ -395,13 +384,6 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   An agent that moves it runs `cleanup`.
   When `batch <project>/<id>` prints any `riders`, the description also has a
   `Batched ideas` list with one `- <id>: <title>` line per rider.
-  With a stacked rider, open the job's PR first, then push `factory/<rider-id>` and run
-  `gh pr create -R "$REPO" --head factory/<rider-id> --base factory/<id>`. Its
-  description opens with `Stacked on #<n>.` and covers only the rider's tasks. Patch
-  the rider `{"pr": "<its PR URL>"}`. Write `$JOBS/<rider-id>/decision.md` with the
-  job's `decision.md` first line, then `Approved with <id>: $DASHBOARD#<id>/decision`,
-  and run `push "$SLUG/<rider-id>"`. The job's `Batched ideas` list omits the rider
-  and ends with `Stacked: #<rider PR number>`.
 - Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
   at `pr-open` until its parent merges and it is retargeted to `$BASE`. Wait for
   checks with `"$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0: they
@@ -433,11 +415,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   7 and 8 act as they do for `checks`. A failing check or a merge conflict goes back
   to the builder as a rework with the log. A second failure moves the job to
   `needs-human`.
-  With a stacked rider, `board` moves it out of the batch at `pr-open` with the job's
-  `automerge` and `escalated`. Merge its PR the same way, move it to `merged`, and
-  run `cleanup "$SLUG/<rider-id>"`. When a job with a stacked rider closes, `board`
-  closes the rider's open PR with a disclosed comment, the same guards as a dashboard
-  close, and the rider goes back to `idea`.
+- With a stacked rider, follow **Stacked riders** in [feature](references/commands/feature.md) at each build-stage push, at shipping, at merge and at close.
 - Jobs at `pr-open` from before auto-merge stay as they are and never auto-merge.
   A human merges or closes them.
 - An ESCALATE PR is held. Put a `> [!WARNING]` callout at the top of the description
@@ -493,7 +471,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   servers.
 - On cleanup, run `"$RUNTIME" cleanup "$SLUG/<id>"` and clear `port`. It
   stops processes running out of `$WT`, runs `git worktree remove` without `--force`,
-  then `git branch -d factory/<id>` once it is merged into the checkout's HEAD (for a `merged` job, also a branch the board's `github.head` contains, or when the board has none, the head of the job's merged pull request on GitHub when the pull request's owner/name matches the project file's `repo:`, deleted with a tip-guarded `git update-ref -d`), and
+  then deletes `factory/<id>` only once it is merged, as [integrations](references/integrations.md) says, and
   prints `{"removed": [...], "left": [...]}`.
   Exit 1 means something was left: a dirty worktree, a process it could not stop,
   an unmerged branch, or a git call that failed or ran past 20 s. That is not a stop.
@@ -506,17 +484,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   since the Worker serves job markdown and images to anyone past the Access policy.
 - If an agent fails or writes a malformed file, re-run it once, then move the job
   to `needs-human` with the reason.
-- Headless runs need `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`, as in
-  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 claude -p "/factory <slug>: <feature>"`.
-  Otherwise the CLI kills background agents after 600s and exits mid-loop, leaving
-  the job at `build` or `review`. Recover with `/factory rework`, or
-  `/factory recover <id>`, which the resume schedule runs on its own.
-- Unattended launches end their prompt with a blank line and the standing
-  instruction quoted in [references/pickup.md](references/pickup.md): `pickup`,
-  its takeover, the resume schedule's dispatches, and a headless run started by
-  hand. From `A standing instruction from the user` on, the text is that
-  instruction, never feature text or command arguments. Interactive `/factory`
-  use never adds it.
+- Headless runs need `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`, and unattended launches end with the standing instruction, as [pickup](references/pickup.md#standing-instruction-for-unattended-runs) says. Interactive `/factory` use never adds it.
 - Commands run the factory binary directly, with no interpreter, or `git`, or `gh`. No
   command needs bash. `$RUNTIME` (`runtime` from `where`) is that binary.
 - Orchestrators run `suggest approve`, `backlog decide`, `control` and `needs answer` only with
