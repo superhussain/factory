@@ -19,7 +19,7 @@ use crate::shared::conf::{fm_get, frontmatter};
 use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{is_link, read_text, resolve, temp_root, write_atomic};
 use crate::shared::home::factory_home;
-use crate::shared::proc::{capture, git, origin_git, paseo_run_with, Out};
+use crate::shared::proc::{capture, git, origin_git, paseo_run_with, which, Out};
 use crate::shared::project::{project_files, read_paths};
 use crate::shared::py::{os_error, repr, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, DEFAULT};
@@ -926,6 +926,8 @@ pub(crate) fn paseo_legacy(paseo: &str) -> Result<Vec<PaseoLegacy>, String> {
         .as_array()
         .ok_or("paseo schedule ls printed no list")?
         .iter()
+        // A completed schedule never runs again, so its prompt no longer matters.
+        .filter(|s| s.get("status").and_then(Value::as_str) != Some("completed"))
         .filter_map(|s| s.get("id")?.as_str())
     {
         let one = read(&["schedule", "inspect", id, "--json"])?;
@@ -978,14 +980,21 @@ fn paseo_bin() -> Option<String> {
 }
 
 /// Points factory's own retro schedule at the installed retro prompt, and names every other Paseo
-/// schedule that still runs factory.py. Fails nothing: Paseo is optional.
-fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) {
-    let Some(paseo) = paseo_bin() else { return };
+/// schedule that still runs factory.py. Fails nothing: Paseo is optional. True when it updated a
+/// schedule.
+fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) -> bool {
+    let Some(paseo) = paseo_bin() else {
+        return false;
+    };
+    if which(&paseo).is_none() {
+        outln!(out, "paseo schedules: skipped, paseo is not on PATH");
+        return false;
+    }
     let found = match paseo_legacy(&paseo) {
         Ok(found) => found,
         Err(why) => {
             outln!(out, "paseo schedules: skipped, {why}");
-            return;
+            return false;
         }
     };
     let (ours, others): (Vec<_>, Vec<_>) = found.into_iter().partition(factory_retro);
@@ -993,13 +1002,13 @@ fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) {
     for s in &others {
         outln!(
             out,
-            "paseo schedules: {} ({}) still runs factory.py; in its prompt replace python3 {skill_text}/runtime/factory.py with {skill_text}/runtime/factory",
+            "paseo schedules: {} ({}) still runs factory.py; in its prompt replace python3 <path>/runtime/factory.py with {skill_text}/runtime/factory",
             s.id,
             s.name
         );
     }
     if ours.is_empty() {
-        return;
+        return false;
     }
     let ready = retro_prompt(home, skill).and_then(|prompt| {
         let folder = backup_folder(home, "paseo-schedules")?;
@@ -1016,12 +1025,14 @@ fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) {
         Ok(ready) => ready,
         Err(e) => {
             outln!(out, "paseo schedules: skipped, {e}");
-            return;
+            return false;
         }
     };
+    let mut updated = false;
     for s in &ours {
         let (code, _) = paseo_run_with(&paseo, &["schedule", "update", &s.id, "--prompt", &prompt]);
         if code == 0 {
+            updated = true;
             outln!(
                 out,
                 "paseo schedules: {} ({}) now runs the installed retro prompt; its old prompt is in {}",
@@ -1038,6 +1049,7 @@ fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) {
             );
         }
     }
+    updated
 }
 
 /// (returncode, output) of gh on the GitHub repository owner/name slug.
@@ -1447,7 +1459,7 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             outln!(out, "retro prompt: {e}");
         }
     }
-    paseo_sweep(out, home, skill);
+    wrote |= paseo_sweep(out, home, skill);
 
     let url = git(&repo, &["config", "--get", "remote.origin.url"]);
     let found = GITHUB.search(&url);
@@ -3643,13 +3655,21 @@ mod tests {
 
     /// A fake paseo in t.root/paseo-fake: `schedule ls` and `schedule inspect <id>` print
     /// ls.json and <id>.json beside it, `schedule update <id> --prompt <text>` saves the text as
-    /// update-<id>.txt, and an `ls.code` file makes ls exit with its code.
+    /// update-<id>.txt, and an `ls.code` file makes ls exit with its code. A schedule whose name
+    /// starts with "Done" is listed as completed.
     fn fake_paseo(t: &T, schedules: &[(&str, &str, &str)]) -> PathBuf {
         let dir = t.root.join("paseo-fake");
         fs::create_dir(&dir).unwrap();
         let list: Vec<Value> = schedules
             .iter()
-            .map(|(id, name, _)| json!({"id": id, "name": name, "status": "active"}))
+            .map(|(id, name, _)| {
+                let status = if name.starts_with("Done") {
+                    "completed"
+                } else {
+                    "active"
+                };
+                json!({"id": id, "name": name, "status": status})
+            })
             .collect();
         fs::write(dir.join("ls.json"), Value::Array(list).to_string()).unwrap();
         for (id, name, prompt) in schedules {
@@ -3747,6 +3767,11 @@ esac
                     "Run python3 /old/skill/runtime/factory.py cleanup.",
                 ),
                 ("8c9d0e1f", "Clean one", "Run factory cleanup."),
+                (
+                    "9d0e1f2a",
+                    "Done install once",
+                    "Run python3 /old/skill/runtime/factory.py install.",
+                ),
             ],
         );
         let dir = bin.parent().unwrap();
@@ -3759,7 +3784,7 @@ esac
         assert_eq!(
             lines,
             [
-                format!("paseo schedules: 4e5f6a7b (Workspace cleanup) still runs factory.py; in its prompt replace python3 {skill}/runtime/factory.py with {skill}/runtime/factory"),
+                format!("paseo schedules: 4e5f6a7b (Workspace cleanup) still runs factory.py; in its prompt replace python3 <path>/runtime/factory.py with {skill}/runtime/factory"),
                 format!("paseo schedules: 0a1b2c3d (Factory retro weekdays (example-host)) now runs the installed retro prompt; its old prompt is in {}", saved[0].display()),
                 format!("paseo schedules: 1b2c3d4e (Nightly retro) now runs the installed retro prompt; its old prompt is in {}", saved[0].display()),
             ]
@@ -3770,6 +3795,8 @@ esac
         }
         assert!(!dir.join("update-4e5f6a7b.txt").exists());
         assert!(!dir.join("update-8c9d0e1f.txt").exists());
+        assert!(!dir.join("update-9d0e1f2a.txt").exists());
+        assert!(out.ends_with("catch-up: done\n"), "{out}");
         let old: Value = serde_json::from_str(
             &fs::read_to_string(saved[0].join("paseo-schedules.json")).unwrap(),
         )
@@ -3795,10 +3822,7 @@ esac
         let (code, out, _) = t.call();
         assert_eq!(code, 0, "{out}");
         let lines: Vec<&str> = out.lines().filter(|l| l.starts_with("paseo")).collect();
-        assert_eq!(
-            lines,
-            ["paseo schedules: skipped, paseo schedule ls exited 1"]
-        );
+        assert_eq!(lines, ["paseo schedules: skipped, paseo is not on PATH"]);
     }
 
     #[test]

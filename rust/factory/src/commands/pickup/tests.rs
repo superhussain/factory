@@ -4510,7 +4510,7 @@ mod retro_catchup_test {
         fs::write(
             fx.home.join("paths.md"),
             format!(
-                "---\ndeets: {}\nfactory: {}\n---\n",
+                "---\nexample-app: {}\nfactory: {}\n---\n",
                 other.display(),
                 fx.repo_a.display()
             ),
@@ -4530,7 +4530,10 @@ mod retro_catchup_test {
         force_due(&fx);
         fs::write(
             fx.home.join("paths.md"),
-            format!("---\ndeets: {}\n---\n", fx.root.join("repo-b").display()),
+            format!(
+                "---\nexample-app: {}\n---\n",
+                fx.root.join("repo-b").display()
+            ),
         )
         .unwrap();
         assert_eq!(

@@ -56,8 +56,10 @@ rewrites the pickup timer if the host has one, and catch-up checks the Worker's
 beside it, and reloads launchd and systemd. It prints one `timers:` line for each.
 When `<home>/retro-schedule-prompt.md` differs from the installed `schedules/retro.md`
 with `<installed-skill>` and `<home>` filled in, catch-up and `install` copy the old
-file to `<home>/backups/retro-prompt-<stamp>` and rewrite it. Catch-up then reads
-this host's Paseo schedules. It replaces the prompt of factory's own retro schedule
+file to `<home>/backups/retro-prompt-<stamp>` and rewrite it. `install` does so only
+when it installs this host's own skill: the one the prompt already runs, or
+`~/.agents/skills/factory` or `~/.claude/skills/factory`. Catch-up then reads
+this host's Paseo schedules, skipping completed ones. It replaces the prompt of factory's own retro schedule
 (its prompt starts with the template's heading, or its name starts with
 `Factory retro`) when the prompt names `factory.py`, after saving the old one to
 `<home>/backups/paseo-schedules-<stamp>`. Any other schedule that names `factory.py`
