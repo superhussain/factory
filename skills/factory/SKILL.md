@@ -459,6 +459,7 @@ Every job field, with an example row and who writes it, is in [board fields](ref
   split off a larger feature, and `depends-on` for a job that must wait until
   another merges. Prefer several small jobs to one large one.
 - Never push to `$BASE` or force-push. Merge only APPROVE PRs, and only as above.
+- Undo a commit on a job branch with `git revert --no-edit <sha>`, and bring one file back with `git restore --source=<sha> -- <path>` and a new commit. Never run `git reset --hard`, and never make a backup branch and then reset. A reset drops work that another round or host may depend on, and `factory audit` flags it as `hard-reset`.
 - At each stage change, send one line with the event and a deep link to the file
   that explains it, as in
   `merged: <PR URL> · $DASHBOARD#<id>/decision`.
