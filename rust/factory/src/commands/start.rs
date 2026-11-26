@@ -45,11 +45,6 @@ pub fn start(call_in: &Call) -> Res<()> {
             2,
         ));
     }
-    let jobs = read_board(&home)?["jobs"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    let stack_base = stack_parent(&row, &jobs).map(|p| format!("factory/{p}"));
     let target = format!("{project}/{id}");
     header("where");
     lookup::where_cmd(&call(&project))?;
@@ -78,6 +73,17 @@ pub fn start(call_in: &Call) -> Res<()> {
     view.as_object_mut().unwrap().remove("prompts");
     println!("{}", dumps(&view, DEFAULT));
     header("board");
+    // Only an idea with a depends-on ref reads the whole board to find a draft parent.
+    let depends = row["refs"]
+        .as_array()
+        .is_some_and(|refs| refs.iter().any(|r| r["kind"] == "depends-on"));
+    let stack_base = if depends {
+        let board = read_board(&home)?;
+        let jobs = board["jobs"].as_array().map_or(&[][..], Vec::as_slice);
+        stack_parent(&row, jobs).map(|p| format!("factory/{p}"))
+    } else {
+        None
+    };
     let branch = format!("factory/{id}");
     let versions = view["versions"].clone();
     let mut patch = Map::from_iter([
