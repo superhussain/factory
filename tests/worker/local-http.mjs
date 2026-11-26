@@ -19,7 +19,7 @@ export function testUrl() {
 export async function request(origin, path, { method = "GET", body, headers = {} } = {}) {
   const r = await fetch(origin + path, {
     method,
-    body,
+    ...(body === undefined ? {} : { body }),
     headers,
     redirect: "manual",
     signal: AbortSignal.timeout(30_000),
