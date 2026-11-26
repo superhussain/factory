@@ -137,10 +137,53 @@ pub fn origin_git(repo: &Path, args: &[&str]) -> Res<String> {
 }
 
 /// The paseo program every Paseo call runs: the path `which` finds, so Windows gets the desktop
-/// app's `paseo.cmd`, which a bare `paseo` misses. Rust runs a `.cmd` or `.bat` path through
-/// cmd.exe with batch escaping, and refuses an argument cmd.exe cannot carry, such as a newline.
+/// app's `paseo.cmd`, which a bare `paseo` misses. On Windows with no paseo on PATH, the app's
+/// bundled `paseo.cmd` under %LOCALAPPDATA%.
 pub fn paseo_bin() -> Option<String> {
-    which("paseo").map(|p| p.to_string_lossy().into_owned())
+    which("paseo")
+        .or_else(|| {
+            cfg!(windows)
+                .then(|| app_paseo(&std::env::var_os("LOCALAPPDATA")?))
+                .flatten()
+        })
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
+/// The Paseo desktop app's bundled `paseo.cmd` under the folder %LOCALAPPDATA% names, when it exists.
+fn app_paseo(local: &std::ffi::OsStr) -> Option<PathBuf> {
+    let p = ["Programs", "Paseo", "resources", "bin", "paseo.cmd"]
+        .iter()
+        .fold(PathBuf::from(local), |p, part| p.join(part));
+    p.is_file().then_some(p)
+}
+
+pub const BATCH_REFUSED: &str =
+    "paseo on Windows runs through paseo.cmd, which can't pass this argument safely";
+
+/// Whether bin is a `.cmd` or `.bat` file, which Windows runs through cmd.exe.
+pub fn is_batch(bin: &str) -> bool {
+    Path::new(bin)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"))
+}
+
+/// Whether bin is a batch file and one of args holds a character cmd.exe would change on its way
+/// through `%*` to Paseo: a newline, a quote, or one of `%^&|<>`.
+pub fn batch_unsafe(bin: &str, args: &[&str]) -> bool {
+    is_batch(bin)
+        && args
+            .iter()
+            .any(|a| a.contains(['\n', '\r', '"', '%', '^', '&', '|', '<', '>']))
+}
+
+/// `capture` for a paseo argv, which refuses with BATCH_REFUSED, printed to stderr too, rather than
+/// send an argument paseo.cmd would mangle.
+pub fn paseo_capture(argv: &[&str], timeout: Duration) -> io::Result<Out> {
+    if batch_unsafe(argv[0], &argv[1..]) {
+        eprintln!("factory: {BATCH_REFUSED}");
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, BATCH_REFUSED));
+    }
+    capture(argv, None, &[], Some(timeout))
 }
 
 /// (exit code, stdout) of one paseo command, or (1, "") when it cannot run.
@@ -159,7 +202,7 @@ pub fn paseo_run_with(bin: &str, args: &[&str]) -> (i32, String) {
         argv.extend(["--home", home.as_str()]);
     }
     argv.extend(args);
-    match capture(&argv, None, &[], Some(Duration::from_secs(20))) {
+    match paseo_capture(&argv, Duration::from_secs(20)) {
         Ok(o) => (o.code, o.stdout),
         Err(_) => (1, String::new()),
     }
@@ -279,5 +322,45 @@ mod tests {
         assert!(which("sh").is_some());
         assert!(which("no-such-tool-here").is_none());
         assert_eq!(git(Path::new("/"), &["rev-parse", "--no-such-flag"]), "");
+    }
+
+    #[test]
+    fn batch_paseo_refuses_what_cmd_would_change() {
+        let cmd = r"C:\Paseo\resources\bin\paseo.cmd";
+        assert!(!batch_unsafe(
+            cmd,
+            &["schedule", "inspect", "0a1b2c3d", "--json"]
+        ));
+        assert!(!batch_unsafe(
+            cmd,
+            &["send", "agent-1", "a plain message, with spaces."]
+        ));
+        for bad in [
+            "line one\nline two",
+            "a\rb",
+            "say \"hi\"",
+            "100%",
+            "a^b",
+            "a&b",
+            "a|b",
+            "<a>",
+        ] {
+            assert!(batch_unsafe(cmd, &["send", "agent-1", bad]), "{bad:?}");
+            assert!(batch_unsafe("PASEO.BAT", &[bad]), "{bad:?}");
+            assert!(!batch_unsafe("/usr/local/bin/paseo", &[bad]), "{bad:?}");
+        }
+        let refused = paseo_capture(&[cmd, "send", "agent-1", "a\nb"], Duration::from_secs(1));
+        assert_eq!(refused.err().unwrap().to_string(), BATCH_REFUSED);
+    }
+
+    #[test]
+    fn app_paseo_is_the_bundled_cmd_when_present() {
+        let local = crate::shared::fs::temp_dir("app-paseo");
+        assert_eq!(app_paseo(local.as_os_str()), None);
+        let bin = local.join("Programs/Paseo/resources/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("paseo.cmd"), "@echo off\r\n").unwrap();
+        assert_eq!(app_paseo(local.as_os_str()), Some(bin.join("paseo.cmd")));
+        std::fs::remove_dir_all(local).unwrap();
     }
 }

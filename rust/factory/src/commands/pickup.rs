@@ -32,7 +32,7 @@ use crate::shared::exit::{exit, fail, Exit, Res};
 use crate::shared::fs::{is_link, read_text, regular_metadata, resolve, write_atomic};
 use crate::shared::home::{factory_home, holder, skill_root, validate_home};
 use crate::shared::http::{endpoint_message, normalized_origin, token_message, Response};
-use crate::shared::proc::{capture, git, hostname, paseo_bin, which, Out};
+use crate::shared::proc::{capture, git, hostname, paseo_bin, paseo_capture, which, Out};
 use crate::shared::project::{project_files, read_paths};
 use crate::shared::py::{is_space, os_error, printable_line, repr, splitlines, strip};
 use crate::shared::pyjson::{dumps, loads, DEFAULT, INDENT2};

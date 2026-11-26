@@ -233,17 +233,13 @@ pub(super) fn stalls_paseo(args: &[&str]) -> Res<(i32, String)> {
         argv.extend(["--home", home.as_str()]);
     }
     argv.extend(args);
-    Ok(
-        match capture(
-            &argv,
-            None,
-            &[],
-            Some(Duration::from_secs(STALLS_PASEO_SECONDS)),
-        ) {
-            Ok(out) => (out.code, out.stdout),
-            Err(_) => (1, String::new()),
-        },
-    )
+    match paseo_capture(&argv, Duration::from_secs(STALLS_PASEO_SECONDS)) {
+        Ok(out) => Ok((out.code, out.stdout)),
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => {
+            Err(stalls_fail(crate::shared::proc::BATCH_REFUSED))
+        }
+        Err(_) => Ok((1, String::new())),
+    }
 }
 
 /// (limit line groups, inspect info) while the agent sits idle and unarchived on a Claude limit

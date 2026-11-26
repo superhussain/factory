@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::consts::PASEO_ID;
-use super::proc::{capture, paseo_bin};
+use super::proc::{paseo_bin, paseo_capture};
 use super::py::{strip, universal_newlines};
 
 /// This host's Paseo server id, else None.
@@ -54,7 +54,7 @@ fn paseo_ls_with(exe: &str, extra: &[&str]) -> Option<Value> {
         if !home.is_empty() {
             argv.extend(["--home", home.as_str()]);
         }
-        capture(&argv, None, &[], Some(Duration::from_secs(20))).ok()
+        paseo_capture(&argv, Duration::from_secs(20)).ok()
     };
     let mut r = run(BACKGROUND.load(Ordering::Relaxed))?;
     if r.code != 0

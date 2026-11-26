@@ -23,7 +23,7 @@ use crate::shared::fs::{is_link, read_text, write_atomic};
 use crate::shared::home::{factory_home, holder};
 use crate::shared::http::{api, api_url, cas};
 use crate::shared::paseo::paseo_server;
-use crate::shared::proc::{capture, git, paseo_bin};
+use crate::shared::proc::{git, paseo_bin, paseo_capture};
 use crate::shared::project::{local_bytes, r2_target, read_paths, safe_job_folder, sha};
 use crate::shared::py::{
     is_space, os_error, printable_line, repr, round_int, rstrip, splitlines, strip,
@@ -5634,7 +5634,7 @@ fn paseo_statuses() -> Option<Vec<(Value, Value)>> {
     if !home.is_empty() {
         argv.extend(["--home", home.as_str()]);
     }
-    let out = capture(&argv, None, &[], Some(std::time::Duration::from_secs(20))).ok()?;
+    let out = paseo_capture(&argv, std::time::Duration::from_secs(20)).ok()?;
     if out.code != 0 {
         return None;
     }
