@@ -34,7 +34,8 @@ feature.
    needs one. It commits on
    the branch and writes `build.md`.
    After every builder run, run `"$RUNTIME" build-landed "$SLUG/<id>"` and read the
-   run line under `== build.md`. Exit 4 resumes the builder to write its run section.
+   run line under `== build.md`. Exit 4 with `no run section` resumes the builder to write its run
+   section. Any other exit 4 puts its stderr line in the board `note` and stops.
    Exit 5 runs it once more, then puts its stderr line in the board `note` and stops.
    When the run line
    starts `BLOCKED-ENV:`, start no pre-review or review round and keep the tier.
