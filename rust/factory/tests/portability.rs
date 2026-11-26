@@ -66,7 +66,7 @@ fn exact_bundle_and_relative_installed_references() {
 fn skill_md_is_small_and_indexes_every_command() {
     let root = Path::new(SKILL);
     let skill = fs::read_to_string(root.join("SKILL.md")).unwrap();
-    assert!(skill.len() < 45000, "SKILL.md is {} bytes", skill.len());
+    assert!(skill.len() < 37500, "SKILL.md is {} bytes", skill.len());
     let mut commands: Vec<_> = fs::read_dir(root.join("references/commands"))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())

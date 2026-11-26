@@ -3,7 +3,7 @@
 Takes a `pr-open` job whose PR a person handed over with the dashboard's Babysit PR
 button, and works the PR as the project's Babysit stage notes ask. `factory pickup`
 spawns it with the tag it claimed the job under, so export `FACTORY_SESSION=<tag>` in
-every shell call that runs the runtime, as Claims in SKILL.md says.
+every shell call that runs the runtime, as [claims](../claims.md) says.
 
 The click counts as the person's merge go-ahead, so pipeline `merge: human` does not
 hold a PR that GitHub shows as approved. It does not lift any other gate.

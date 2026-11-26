@@ -9,7 +9,7 @@ for a line that waits on a `Depends on:` prerequisite. An item may be followed b
 `next` and `batch` skip a line whose `Depends on:` line names an unchecked line or a job still open on the board. `batch` names each line it leaves out with a `skipping backlog:<key>` stderr line.
 
 1. Run `<this skill's dir>/runtime/factory sync`, with no slug, since the
-   project isn't known before `next` runs. Conflicts don't block, as in the Claims table.
+   project isn't known before `next` runs. Conflicts don't block, as in the [claims](../claims.md) table.
 2. Run `<this skill's dir>/runtime/factory next --session <tag>` (no tag on
    the first call) and read its JSON: `id`, `project`, and `feature`. It claims the
    id under that project and marks the line `- [x] <slug>: <feature> (<id>)`.
@@ -20,7 +20,7 @@ for a line that waits on a `Depends on:` prerequisite. An item may be followed b
    the sync and claim, since `next` already claimed `<id>` for this session. `next`
    already put the job's `refs` on the board, so leave `refs` out of that first board patch.
    Continue the loop from there.
-5. On exit 3, check the build queue as Builds describes before stopping.
+5. On exit 3, check the build queue as [build](build.md) describes before stopping.
 
 A decision from the dashboard's backlog decision page checks lines off the same way.
 

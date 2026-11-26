@@ -736,7 +736,7 @@ fn checks_are_sized_to_the_change() {
         ],
     );
     has(
-        &flat("SKILL.md"),
+        &flat("references/claims.md"),
         "A session already running babysit.md is the babysitter: it ignores the line and goes on with its loop.",
     );
 }
@@ -830,4 +830,23 @@ fn session_tag_is_exported_once_known() {
         "pr-handled \"$SLUG/<id>\" --session",
     );
     lacks(&flat("references/commands/deny-notes.md"), "done --session");
+}
+
+#[test]
+fn round_wait_is_called_once_per_round() {
+    has(
+        &flat("SKILL.md"),
+        "Call `round-wait` once per round with no `--timeout`.",
+    );
+    has(
+        &flat("references/commands/feature.md"),
+        "no `--timeout`, never inside a shell loop",
+    );
+}
+
+#[test]
+fn no_leading_sleep() {
+    for rel in ["SKILL.md", "agents/factory-spec-writer.md"] {
+        has(&flat(rel), "Never start a command with `sleep`");
+    }
 }

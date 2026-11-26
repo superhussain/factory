@@ -19,7 +19,7 @@ feature.
 3. Before the gate, run `batch "$SLUG/<id>"`. When `spec.md`
    names a batched id missing from its `riders`, a person used Remove from batch.
    Respawn the spec writer with a fresh `prompt` file.
-   Apply the spec-approval gate as Gate stages describes.
+   Apply the spec-approval gate as [gates](../gates.md) describes.
    When `spec.md` has a `## Stacked PR` section, run
    `"$RUNTIME" stack "$SLUG/<id>" <rider-id>` with the id on its
    line, then `git -C "$REPO_PATH" worktree add "$WORKTREES/<rider-id>" -b factory/<rider-id> factory/<id>`.
@@ -82,7 +82,8 @@ feature.
    and `factory/<rider-id>` in place of the job's worktree and branch, since that
    branch holds the whole stack.
    Then run `"$RUNTIME" round-wait "$SLUG/<id>" <N>` with the Bash tool timeout
-   at 600000 ms. It records each verdict on the board. On `timeout`, run it again. On
+   at 600000 ms and no `--timeout`, never inside a shell loop. It records each
+   verdict on the board. On `timeout`, run it again. On
    `malformed`, read the review file whose `files` entry is not a valid `VERDICT:`
    line, resume its agent, then run `round-wait` again.
 5. Once `round-wait` prints `round`, run `"$RUNTIME" grounding "$SLUG/<id>" <N>`.
@@ -127,7 +128,7 @@ feature.
    one moves the job to `needs-human`.
 7. After a merge, queue the job for a device build if the project file's Device
    builds section says its diff needs one: patch `{"build": {"state": "queued"}}`.
-   Then check the build queue as Builds describes.
+   Then check the build queue as [build](build.md) describes.
 8. If `spec.md` lists sub-jobs, queue each one in list order with
    `factory backlog add "<slug>: <feature> (sub-job-of <id>)" --context <file>`.
    Write the file first, in a temporary location outside the job folder. Its first
