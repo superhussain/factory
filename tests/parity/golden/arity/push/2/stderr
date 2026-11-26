@@ -123,6 +123,8 @@ usage:
   factory pre-review <project-slug>/<job-id>
                                             run the base branch's .factory/checks.json in the job
                                             worktree, write pre-review.md, print one JSON line; FAIL exits 1
+  factory build-landed <project-slug>/<job-id>
+                                            hold the job, print the latest build.md run's first line, push factory/<id> and the job folder
   factory grounding <project-slug>/<job-id> <round>
                                             check each path:line a round's reviews cite, write
                                             round-N/grounding.md and the round's unverified list; flags only
