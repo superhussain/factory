@@ -19,7 +19,7 @@ feature.
 3. Before the gate, run `batch "$SLUG/<id>"`. When `spec.md`
    names a batched id missing from its `riders`, a person used Remove from batch.
    Respawn the spec writer with a fresh `prompt` file.
-   Apply the spec-approval gate as Gate stages describes.
+   Apply the spec-approval gate as [gates](../gates.md) describes.
    When `spec.md` has a `## Stacked PR` section, run
    `"$RUNTIME" stack "$SLUG/<id>" <rider-id>` with the id on its
    line, then `git -C "$REPO_PATH" worktree add "$WORKTREES/<rider-id>" -b factory/<rider-id> factory/<id>`.
