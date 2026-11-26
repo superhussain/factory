@@ -510,9 +510,35 @@ pub fn unlisten(home: &Path) {
 mod tests {
     use super::*;
     use crate::shared::board_client;
-    use crate::shared::http::tests::{home_for, serve};
+    use crate::shared::http::tests::serve;
 
     const E1: &str = "\"e1\"";
+
+    /// A test home under /tmp on unix, so the socket path stays under macOS's 104-byte limit.
+    fn mirror_home(name: &str, origin: &str) -> PathBuf {
+        #[cfg(unix)]
+        {
+            let dir = PathBuf::from(format!("/tmp/fm-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let home = crate::shared::fs::resolve(&dir).unwrap();
+            std::fs::write(
+                home.join("config.md"),
+                format!("---\napi_url: {origin}\n---\n"),
+            )
+            .unwrap();
+            std::fs::write(
+                home.join(".env"),
+                "FACTORY_ACCESS_CLIENT_ID=test-id\nFACTORY_ACCESS_CLIENT_SECRET=test-secret\n",
+            )
+            .unwrap();
+            home
+        }
+        #[cfg(not(unix))]
+        {
+            crate::shared::http::tests::home_for(&format!("mirror-{name}"), origin)
+        }
+    }
 
     fn board_json() -> &'static str {
         r#"{"updated":"2026-11-23T10:00:00Z","jobs":[{"id":"1999-synthetic-build","stage":"build"},{"id":"2000-synthetic-spec","stage":"spec"}]}"#
@@ -533,7 +559,7 @@ mod tests {
         )];
         replies.extend(extra);
         let (origin, seen) = serve(replies);
-        let home = home_for(&format!("mirror-{name}"), &origin);
+        let home = mirror_home(name, &origin);
         let mirror = Mirror::new(&home);
         mirror.connected();
         assert_eq!(mirror.fetch(), Ok(2));

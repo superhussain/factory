@@ -4,8 +4,8 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use crate::commands::{
-    audit, bootstrap, catch_up, checks, claims, daemon, install, intake, lookup, ops, pickup,
-    pipeline, prompt, retro, screenshots, setup, start, sync, tracer, wait, worktree,
+    audit, bootstrap, build_landed, catch_up, checks, claims, daemon, install, intake, lookup, ops,
+    pickup, pipeline, prompt, retro, screenshots, setup, start, sync, tracer, wait, worktree,
 };
 use crate::shared::consts::{MAX_RIDERS, SLUG};
 use crate::shared::exit::{fail, Exit, Res};
@@ -83,6 +83,7 @@ pub const COMMANDS: &[(&str, Handler, usize, usize)] = &[
     ("review-plan", pipeline::review_plan_cmd, 2, 2),
     ("review-floor", pipeline::review_floor_cmd, 1, 1),
     ("pre-review", pipeline::pre_review_cmd, 1, 1),
+    ("build-landed", build_landed::build_landed, 1, 1),
     ("grounding", pipeline::grounding_cmd, 2, 2),
     ("batch", pipeline::batch_cmd, 1, 1 + MAX_RIDERS),
     ("stack", pipeline::stack_cmd, 2, 2),
@@ -287,6 +288,13 @@ mod tests {
         assert!(handler_for("start", 0).is_none());
         assert!(handler_for("start", 1).is_some());
         assert!(handler_for("start", 2).is_none());
+    }
+
+    #[test]
+    fn build_landed_takes_one_target() {
+        assert!(handler_for("build-landed", 0).is_none());
+        assert!(handler_for("build-landed", 1).is_some());
+        assert!(handler_for("build-landed", 2).is_none());
     }
 
     #[test]
