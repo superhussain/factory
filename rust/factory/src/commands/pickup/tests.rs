@@ -4142,6 +4142,40 @@ mod depends_on_test {
     }
 
     #[test]
+    fn test_draft_pr_dependency_launches() {
+        let fx = Fx::new();
+        alpha_on(&fx);
+        fx.jobs(json!([
+            with(api_row("pr-open"), json!({"draft": true})),
+            idea("202-sample-csv-button", "alpha", json!({"refs": depends()}))
+        ]));
+        let (code, out, err) = fx.pickup(&[]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert!(
+            matches(
+                "(?s).*launched 202-sample-csv-button alpha on primary session [0-9a-f]{6}\n",
+                &out
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn test_ready_pr_dependency_waits() {
+        let fx = Fx::new();
+        alpha_on(&fx);
+        fx.jobs(json!([
+            with(api_row("pr-open"), json!({"draft": false})),
+            idea("202-sample-csv-button", "alpha", json!({"refs": depends()}))
+        ]));
+        let (code, out, err) = fx.pickup(&["--dry-run"]);
+        assert_eq!((code, err.as_str()), (0, ""));
+        assert!(
+            lines(&out).contains(&"skip 202-sample-csv-button alpha: waits on 201-sample-csv-api")
+        );
+    }
+
+    #[test]
     fn test_claim_ideas_skips_a_waiting_job() {
         let fx = Fx::new();
         fx.jobs(json!([
@@ -5861,6 +5895,34 @@ mod backpressure_test {
                 "{bad}"
             );
         }
+    }
+
+    fn proto(draft: bool) -> Value {
+        json!({"id": "300-proto-pacing", "stage": "pr-open", "project": "alpha", "escalated": true,
+               "draft": draft, "needs": "review the prototype PR #70", "updated": "2026-01-01T00:00:00Z"})
+    }
+
+    #[test]
+    fn test_draft_prs_do_not_count() {
+        let fx = setup();
+        let mut jobs = waiting_jobs(4, "alpha");
+        jobs.push(proto(true));
+        board(&fx, jobs);
+        let lines = dry(&fx);
+        assert!(lines[0].starts_with("would launch 120-add-csv-export alpha on primary: "));
+        assert_eq!(lines[1..], [format!("host {DEVICE}: would launch 1")]);
+    }
+
+    #[test]
+    fn test_ready_pr_still_counts() {
+        let fx = setup();
+        let mut jobs = waiting_jobs(4, "alpha");
+        jobs.push(proto(false));
+        board(&fx, jobs);
+        assert_eq!(
+            dry(&fx),
+            [hold(5, 5), format!("host {DEVICE}: would launch 0")]
+        );
     }
 
     #[test]
