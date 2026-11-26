@@ -63,7 +63,9 @@ pub fn build_landed(call: &Call) -> Res<()> {
     println!("== push");
     push_target(target)?;
     println!("== next");
-    if line.starts_with("BLOCKED:") || line.starts_with("BLOCKED-ENV:") {
+    if line.starts_with("BLOCKED:") {
+        println!("blocked: act on the {run} line as feature.md step 3 and execution.md say; start no pre-review");
+    } else if line.starts_with("BLOCKED-ENV:") {
         println!("blocked: act on the {run} line as feature.md step 3 says; start no pre-review");
     } else {
         println!("run pre-review {target} in the background");
