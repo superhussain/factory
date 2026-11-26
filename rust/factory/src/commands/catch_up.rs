@@ -1313,6 +1313,11 @@ fn catch_up_cmd(out: &mut dyn Write, home: &Path, here: &Path) -> Res<()> {
             ok = r.code == 0;
             if ok {
                 outln!(out, "skill: installed {h7} into {}", skill.display());
+                for line in r.stdout.lines() {
+                    if let Some(rest) = line.strip_prefix("install: retro prompt ") {
+                        outln!(out, "retro prompt: {rest}");
+                    }
+                }
             } else {
                 failed += 1;
                 let text = if r.stderr.is_empty() {
@@ -2113,6 +2118,33 @@ mod tests {
         assert_eq!(mode(backup.join("home/.env")), 0o600);
         assert!(!backup.join("home/routes.md").exists());
         assert_eq!(t.worktrees(), 1);
+    }
+
+    /// The child install's retro prompt backup line reaches catch-up's own output.
+    #[test]
+    fn child_install_backup_line_is_echoed() {
+        let t = T::new("install-backup-line");
+        let real = FAKES.with(|f| f.borrow().install.clone()).unwrap();
+        FAKES.with(|f| {
+            f.borrow_mut().install = Some(Rc::new(move |argv| {
+                let mut r = real(argv);
+                r.stdout.push_str(
+                    "install: retro prompt rewritten; the old one is in /synthetic/backups/retro-prompt-1\n",
+                );
+                r
+            }))
+        });
+        let (code, out, _) = t.call();
+        assert_eq!(code, 0, "{out}");
+        let lines: Vec<&str> = out.lines().collect();
+        let at = lines
+            .iter()
+            .position(|l| l.starts_with("skill: installed"))
+            .unwrap();
+        assert_eq!(
+            lines[at + 1],
+            "retro prompt: rewritten; the old one is in /synthetic/backups/retro-prompt-1"
+        );
     }
 
     #[test]
