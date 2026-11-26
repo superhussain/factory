@@ -1533,7 +1533,17 @@ mod tests {
             Err(fs::TryLockError::WouldBlock)
         ));
         drop(held);
-        other.try_lock().unwrap();
+        // A child another test forks can briefly inherit the locked descriptor.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            match other.try_lock() {
+                Ok(()) => break,
+                Err(fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(10))
+                }
+                Err(e) => panic!("{e}"),
+            }
+        }
         assert!(walk(&home.join("jobs/alpha/042-sample-export"))
             .unwrap()
             .is_empty());
