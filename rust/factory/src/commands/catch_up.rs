@@ -960,7 +960,10 @@ pub(crate) fn stale_prompts(home: &Path) -> Vec<String> {
             path.display()
         ));
     }
-    if let Some(Ok(list)) = paseo_bin().map(|p| paseo_legacy(&p)) {
+    if let Some(Ok(list)) = paseo_bin()
+        .and_then(|p| which(&p))
+        .map(|p| paseo_legacy(&p.to_string_lossy()))
+    {
         for s in list {
             found.push(format!(
                 "paseo schedule {} ({}) still names factory.py; run factory catch-up",
@@ -971,7 +974,8 @@ pub(crate) fn stale_prompts(home: &Path) -> Vec<String> {
     found
 }
 
-/// The paseo binary catch-up and doctor run. A test that fakes none never reaches this host's Paseo.
+/// The paseo name catch-up and doctor resolve with `which`, so Windows finds `paseo.cmd`. A test
+/// that fakes none never reaches this host's Paseo.
 fn paseo_bin() -> Option<String> {
     #[cfg(test)]
     return fake!(paseo).map(|p| p.to_string_lossy().into_owned());
@@ -986,10 +990,11 @@ fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) -> bool {
     let Some(paseo) = paseo_bin() else {
         return false;
     };
-    if which(&paseo).is_none() {
+    let Some(paseo) = which(&paseo) else {
         outln!(out, "paseo schedules: skipped, paseo is not on PATH");
         return false;
-    }
+    };
+    let paseo = paseo.to_string_lossy();
     let found = match paseo_legacy(&paseo) {
         Ok(found) => found,
         Err(why) => {

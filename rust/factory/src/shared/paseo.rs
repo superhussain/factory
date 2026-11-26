@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 use super::consts::PASEO_ID;
-use super::proc::{capture, which};
+use super::proc::{capture, paseo_bin};
 use super::py::{strip, universal_newlines};
 
 /// This host's Paseo server id, else None.
@@ -39,8 +39,7 @@ static BACKGROUND: AtomicBool = AtomicBool::new(true);
 /// agents in background workspaces, which the plain list leaves out. A Paseo that rejects the
 /// flag is asked once more without it, and the flag stays off until the daemon restarts.
 pub fn paseo_ls(extra: &[&str]) -> Option<Value> {
-    let exe = which("paseo")?.to_string_lossy().into_owned();
-    paseo_ls_with(&exe, extra)
+    paseo_ls_with(&paseo_bin()?, extra)
 }
 
 fn paseo_ls_with(exe: &str, extra: &[&str]) -> Option<Value> {

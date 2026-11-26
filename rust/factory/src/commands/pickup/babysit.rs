@@ -74,7 +74,7 @@ pub(super) fn paseo_statuses() -> Option<Vec<(Value, Value)>> {
     if let Some(f) = fake!(paseo_statuses) {
         return f();
     }
-    let exe = which("paseo")?.to_string_lossy().into_owned();
+    let exe = paseo_bin()?;
     let home = std::env::var("PASEO_HOME").unwrap_or_default();
     let mut argv = vec![exe.as_str(), "ls", "-a", "-g", "--json"];
     if !home.is_empty() {
@@ -131,10 +131,9 @@ pub(super) fn paseo_send(agent: &str, message: &str) -> bool {
     if let Some(f) = fake!(paseo_send) {
         return f(agent, message);
     }
-    let Some(exe) = which("paseo") else {
+    let Some(exe) = paseo_bin() else {
         return false;
     };
-    let exe = exe.to_string_lossy().into_owned();
     let home = std::env::var("PASEO_HOME").unwrap_or_default();
     let mut argv = vec![exe.as_str(), "send", "--no-wait"];
     if !home.is_empty() {

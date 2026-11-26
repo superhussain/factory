@@ -136,9 +136,19 @@ pub fn origin_git(repo: &Path, args: &[&str]) -> Res<String> {
     }
 }
 
+/// The paseo program every Paseo call runs: the path `which` finds, so Windows gets the desktop
+/// app's `paseo.cmd`, which a bare `paseo` misses. Rust runs a `.cmd` or `.bat` path through
+/// cmd.exe with batch escaping, and refuses an argument cmd.exe cannot carry, such as a newline.
+pub fn paseo_bin() -> Option<String> {
+    which("paseo").map(|p| p.to_string_lossy().into_owned())
+}
+
 /// (exit code, stdout) of one paseo command, or (1, "") when it cannot run.
 pub fn paseo_run(args: &[&str]) -> (i32, String) {
-    paseo_run_with("paseo", args)
+    match paseo_bin() {
+        Some(bin) => paseo_run_with(&bin, args),
+        None => (1, String::new()),
+    }
 }
 
 /// `paseo_run` with the paseo binary at bin.
