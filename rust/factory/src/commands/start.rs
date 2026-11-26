@@ -1,6 +1,6 @@
 //! The start command: promote an idea to spec in one call, from job lookup to batch candidates.
 
-use serde_json::{json, Value};
+use serde_json::{Map, Value};
 
 use crate::cli::Call;
 use crate::commands::claims::{board_write, hold_target, WriteOpts};
@@ -74,11 +74,13 @@ pub fn start(call_in: &Call) -> Res<()> {
     header("board");
     let branch = format!("factory/{id}");
     let versions = view["versions"].clone();
-    let Value::Object(patch) =
-        json!({"stage": "spec", "round": 0, "rounds": [], "branch": branch, "pipeline": versions})
-    else {
-        unreachable!()
-    };
+    let patch = Map::from_iter([
+        ("stage".to_string(), Value::from("spec")),
+        ("round".to_string(), Value::from(0)),
+        ("rounds".to_string(), Value::Array(Vec::new())),
+        ("branch".to_string(), Value::from(branch.as_str())),
+        ("pipeline".to_string(), versions.clone()),
+    ]);
     board_write(
         &home,
         id,
