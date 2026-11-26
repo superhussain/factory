@@ -12,3 +12,6 @@ serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision
 sha2 = "0.10"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake", "native-tls"] }
 ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
+
+[lints.clippy]
+type_complexity = "allow"
