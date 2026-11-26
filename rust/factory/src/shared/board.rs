@@ -240,6 +240,11 @@ pub fn escalated(j: &Value) -> bool {
         || get_str(j, "note").is_some_and(|n| n.to_lowercase().starts_with("escalated:"))
 }
 
+/// True for a `pr-open` job whose PR is a draft that is not meant to merge.
+pub fn draft_pr(j: &Value) -> bool {
+    get_str(j, "stage") == Some("pr-open") && j.get("draft") == Some(&Value::Bool(true))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,6 +323,9 @@ mod tests {
         assert!(
             escalated(&json!({"note": "Escalated: x"})) && !escalated(&json!({"escalated": 1}))
         );
+        assert!(draft_pr(&json!({"stage": "pr-open", "draft": true})));
+        assert!(!draft_pr(&json!({"stage": "build", "draft": true})));
+        assert!(!draft_pr(&json!({"stage": "pr-open", "draft": "true"})));
         assert_eq!(
             batch_refs(&data["jobs"][1]["refs"])
                 .into_iter()
