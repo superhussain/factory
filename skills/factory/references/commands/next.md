@@ -20,7 +20,7 @@ for a line that waits on a `Depends on:` prerequisite. An item may be followed b
    the sync and claim, since `next` already claimed `<id>` for this session. `next`
    already put the job's `refs` on the board, so leave `refs` out of that first board patch.
    Continue the loop from there.
-5. On exit 3, check the build queue as Builds describes before stopping.
+5. On exit 3, check the build queue as [build](build.md) describes before stopping.
 
 A decision from the dashboard's backlog decision page checks lines off the same way.
 

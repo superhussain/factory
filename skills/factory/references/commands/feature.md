@@ -128,7 +128,7 @@ feature.
    one moves the job to `needs-human`.
 7. After a merge, queue the job for a device build if the project file's Device
    builds section says its diff needs one: patch `{"build": {"state": "queued"}}`.
-   Then check the build queue as Builds describes.
+   Then check the build queue as [build](build.md) describes.
 8. If `spec.md` lists sub-jobs, queue each one in list order with
    `factory backlog add "<slug>: <feature> (sub-job-of <id>)" --context <file>`.
    Write the file first, in a temporary location outside the job folder. Its first
