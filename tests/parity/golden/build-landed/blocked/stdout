@@ -1,0 +1,12 @@
+== hold
+held sample/001-test as parity session s1
+elapsed 0s
+pulled 0 files
+== build.md
+Run 2: BLOCKED: task 2: the spec names no file.
+== git push
+pushed factory/001-test 6ba780d
+== push
+pushed 2 files
+== next
+blocked: act on the Run 2 line as feature.md step 3 and execution.md say; start no pre-review
