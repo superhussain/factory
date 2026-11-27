@@ -80,7 +80,7 @@ pub fn start(call_in: &Call) -> Res<()> {
     let stack_base = if depends {
         let board = read_board(&home)?;
         let jobs = board["jobs"].as_array().map_or(&[][..], Vec::as_slice);
-        stack_parent(&row, jobs).map(|p| format!("factory/{p}"))
+        stack_parent(&row, jobs, &project).map(|p| format!("factory/{p}"))
     } else {
         None
     };
@@ -129,16 +129,19 @@ pub fn start(call_in: &Call) -> Res<()> {
     Ok(())
 }
 
-/// The first depends-on id of row whose job is a draft PR, which the new job stacks on.
-fn stack_parent(row: &Value, jobs: &[Value]) -> Option<String> {
+/// The first depends-on id of row whose job is a draft PR in the same project, which the new job stacks on.
+fn stack_parent(row: &Value, jobs: &[Value], project: &str) -> Option<String> {
     row.get("refs")
         .and_then(Value::as_array)?
         .iter()
         .filter(|r| r.get("kind").and_then(Value::as_str) == Some("depends-on"))
         .filter_map(|r| r.get("id").and_then(Value::as_str))
         .find(|id| {
-            jobs.iter()
-                .any(|j| j.get("id").and_then(Value::as_str) == Some(id) && draft_pr(j))
+            jobs.iter().any(|j| {
+                j.get("id").and_then(Value::as_str) == Some(id)
+                    && draft_pr(j)
+                    && j.get("project").and_then(Value::as_str) == Some(project)
+            })
         })
         .map(String::from)
 }
