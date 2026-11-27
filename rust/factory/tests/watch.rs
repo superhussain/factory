@@ -25,8 +25,13 @@ fn skill_uses_watch() {
     assert!(skill.contains("`\"event\": \"timeout\"`"));
     assert!(skill.contains("\"event\": \"malformed\""));
     assert!(skill.contains("`watch` and `wait` print those first lines."));
-    let babysit = raw("references/commands/babysit.md");
+    let babysit = read("references/commands/babysit.md");
     assert!(!babysit.contains("--wait 540"));
     assert!(babysit.contains("watch \"$SLUG/<id>\" --pr"));
-    assert!(babysit.contains("Run every watch with the Bash tool timeout at 600000 ms."));
+    assert!(!babysit.contains("Run every watch with the Bash tool timeout at 600000 ms."));
+    assert!(babysit.contains(
+        "Start every watch as `\"$RUNTIME\" watch \"$SLUG/<id>\" --pr --timeout 7080` once, with the Bash tool's `run_in_background` and its timeout at 7200000 ms"
+    ));
+    assert!(babysit.contains("On `\"event\": \"timeout\"`, start it again."));
+    assert!(babysit.contains("Time inside a watch does not count toward the 10 minutes."));
 }

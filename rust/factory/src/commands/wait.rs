@@ -379,7 +379,7 @@ pub fn watch_cmd(call: &Call) -> Res<()> {
     Ok(())
 }
 
-/// Run hold once, then wait until all four review files of round N have a valid first line, writing the
+/// Run hold first and every 600 seconds while waiting until all four review files of round N have a valid first line, writing the
 /// board's rounds entry each time its verdicts change, and return one JSON line. A file that keeps an
 /// invalid non-empty first line for two reads, or --timeout passing, also ends it.
 fn round_wait_run(
@@ -400,11 +400,11 @@ fn round_wait_run(
     let rest = &args[1..];
     let mut timeout = WATCH_TIMEOUT;
     if !rest.is_empty() {
-        match timeout_arg(rest.get(1), WATCH_TIMEOUT, 1) {
+        match timeout_arg(rest.get(1), WATCH_MAX_TIMEOUT, 1) {
             Some(t) if rest.len() == 2 && rest[0] == "--timeout" => timeout = t,
             _ => {
                 return Err(fail(
-                    format!("--timeout takes one value from 1 to 540 seconds. {ROUND_WAIT_USAGE}"),
+                    format!("--timeout takes one value from 1 to 7080 seconds. {ROUND_WAIT_USAGE}"),
                     2,
                 ))
             }
@@ -443,6 +443,7 @@ fn round_wait_run(
     let names: Vec<&str> = artifacts.iter().map(String::as_str).collect();
     let start = (io.now)();
     let deadline = start + timeout as f64;
+    let mut held_at = start;
     let mut bad_before: BTreeMap<String, String> = BTreeMap::new();
     loop {
         let lines = job_file_lines(&folder, &names)?;
@@ -490,6 +491,11 @@ fn round_wait_run(
             "timeout"
         } else {
             bad_before = bad;
+            let now = (io.now)();
+            if now - held_at >= WATCH_HOLD_SECONDS {
+                (io.hold)(target)?;
+                held_at = now;
+            }
             (io.sleep)(1.0);
             continue;
         };
@@ -940,7 +946,7 @@ mod tests {
         for args in [
             &["1", "--timeout"][..],
             &["1", "--timeout", "0"],
-            &["1", "--timeout", "541"],
+            &["1", "--timeout", "7081"],
             &["1", "-t", "5"],
         ] {
             let e = run(args);
@@ -949,12 +955,53 @@ mod tests {
                 (
                     2,
                     format!(
-                        "--timeout takes one value from 1 to 540 seconds. {ROUND_WAIT_USAGE}\n"
+                        "--timeout takes one value from 1 to 7080 seconds. {ROUND_WAIT_USAGE}\n"
                     )
                 ),
                 "{args:?}"
             );
         }
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn round_wait_holds_every_600_seconds() {
+        use crate::shared::http::tests::{home_for, serve};
+        let board = json!({"updated": "", "jobs": [{
+            "id": "042-sample-export", "project": "sample",
+            "rounds": [{"security": "pending", "ux": "pending", "ui": "pending", "code": "pending"}],
+        }]})
+        .to_string();
+        let board: &'static str = Box::leak(board.into_boxed_str());
+        let (origin, _) = serve(vec![(200, board, vec![("ETag", "\"e1\"")])]);
+        let home = home_for("round-wait-rehold", &origin);
+        fs::create_dir_all(home.join("jobs/sample/042-sample-export/round-1")).unwrap();
+        let clock = Cell::new(0.0);
+        let holds = RefCell::new(Vec::new());
+        let hold = |_: &str| {
+            holds.borrow_mut().push(clock.get());
+            Ok(())
+        };
+        let io = Io {
+            hold: &hold,
+            now: &|| clock.get(),
+            sleep: &|s| clock.set(clock.get() + s),
+        };
+        let out = round_wait_run(
+            &home,
+            "sample",
+            "042-sample-export",
+            "sample/042-sample-export",
+            &strings(&["1", "--timeout", "7080"]),
+            &io,
+        )
+        .unwrap();
+        assert!(out.starts_with("{\"event\": \"timeout\""), "{out}");
+        assert!(out.contains("\"elapsed\": 7080"), "{out}");
+        assert_eq!(
+            *holds.borrow(),
+            (0..12).map(|k| k as f64 * 600.0).collect::<Vec<_>>()
+        );
         fs::remove_dir_all(home).unwrap();
     }
 

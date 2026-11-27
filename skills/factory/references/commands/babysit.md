@@ -66,10 +66,10 @@ the lower one wins.
 - Babysit never runs spec, build, review rounds or the approver.
 - Only required checks count. A failing check that is not required never reads fix-ci and never causes a hand-back.
 - One commit, one push: on a fix-reviews or fix-ci reading, read every counted review, every thread bots or threads counts, and every failing required check once. Fix them all in one commit, push once, reply in every thread, resolve each thread when the notes ask, then run watch "$SLUG/<id>" --pr once.
-- Run every watch with the Bash tool timeout at 600000 ms.
+- Start every watch as `"$RUNTIME" watch "$SLUG/<id>" --pr --timeout 7080` once, with the Bash tool's `run_in_background` and its timeout at 7200000 ms. Do nothing else while it runs, and act on its completion notification. On `"event": "timeout"`, start it again. With no background commands, run it in the foreground with no `--timeout` and the Bash tool timeout at 600000 ms.
 - For a one-file logic or cross-cutting fix, also run the project file's Babysit verify: line when its Verify section has one.
 - Change only what a counted review, thread or failing required check asks. No refactors, polish, new ideas or backlog entries, and no investigation beyond the failing log.
-- Past 10 minutes, patch `{"note": "babysit stopped after 10 minutes: <why>", "needs": "PR #<n>: babysit stopped after 10 minutes, see the note", "babysit": null, "claim": null}` and stop.
+- Time inside a watch does not count toward the 10 minutes. Past 10 minutes, patch `{"note": "babysit stopped after 10 minutes: <why>", "needs": "PR #<n>: babysit stopped after 10 minutes, see the note", "babysit": null, "claim": null}` and stop.
 
 ## Loop
 
