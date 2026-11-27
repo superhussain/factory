@@ -75,8 +75,8 @@ usage:
   factory round-wait <project-slug>/<job-id> <round> [--timeout S]
                                             block until all four review files of round N have a verdict
                                             line, write each verdict to the board's rounds entry as it
-                                            lands, print one JSON line (default and max 540 seconds); runs
-                                            hold first
+                                            lands, print one JSON line (default 540, max 7080 seconds); runs
+                                            hold first and every 600 seconds
   factory verdict <project-slug>/<job-id> <round> <reviewer> <verdict>
                                             set one reviewer's verdict in the board's rounds entry, print it
                                             as JSON
