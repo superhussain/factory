@@ -813,6 +813,19 @@ fn review_code_new_tests_and_spec_checks() {
 }
 
 #[test]
+fn grep_checks_target_formatter_safe_tokens() {
+    let writer = flat("agents/factory-spec-writer.md");
+    all(
+        &writer,
+        &[
+            "Point a grep at one token a formatter keeps on a single line",
+            "Never grep for a whole chained call",
+            "`cargo fmt`, prettier and oxfmt wrap long chains across lines",
+        ],
+    );
+}
+
+#[test]
 fn session_tag_is_exported_once_known() {
     let skill_md = flat("SKILL.md");
     has(

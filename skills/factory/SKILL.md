@@ -351,37 +351,7 @@ patch exits non-zero, or when you need a field's meaning.
   `{"draft": null}`.
   When `batch <project>/<id>` prints any `riders`, the description also has a
   `Batched ideas` list with one `- <id>: <title>` line per rider.
-- Merging an APPROVE PR: only a PR whose base is `$BASE` merges. A stacked PR waits
-  at `pr-open` until its parent merges and it is retargeted to `$BASE`. Wait for
-  checks with `"$RUNTIME" checks "$SLUG/<id>" --timeout 540`. Exit 0: they
-  passed, or the repo has none. It records that head as `checked_head`, and
-  `pr-merge` merges only that head. On a PR behind `$BASE`, it runs
-  `gh pr update-branch` and rechecks the new head. Exit 3: still pending; run it
-  again once. A second exit 3 in a row from `checks` or `pr-merge` moves the job to
-  `needs-human` with the note `merge stalled: exit 3 twice` and `needs` `merge or
-  close PR #<n>: checks or mergeability stayed pending`. Nothing merges. Exit 1
-  names failing checks. Exit 4: no open PR. Exit 5: no usable gh
-  reply. Exit 6: `gh pr update-branch` failed; treat it as a merge conflict.
-  Exit 7 means the approver escalated the job: the board marks
-  it escalated or its decision.md says ESCALATE. Nothing merges. Patch
-  {"automerge": false, "escalated": true, "needs": "review and merge PR #<n>: the
-  approver escalated it", "note": "escalated: checks held the merge"} and stop.
-  Exit 8: earned autonomy holds the class after a revert; checks already set
-  automerge false and needs. Stop.
-  Never poll `gh pr checks` in a loop or with `--watch`.
-  Immediately before every `pr-merge`, run `factory pipeline "$SLUG"` again
-  and use that fresh `$PIPELINE`. A non-zero exit moves the job to `needs-human` as
-  Pipeline configuration describes, and nothing merges. When `$PIPELINE.merge` is
-  `human`, patch `automerge` false and `needs` as in Shipping, and do not merge.
-  Otherwise retarget any PR stacked on this one to `$BASE`, and run
-  `"$RUNTIME" pr-merge "$SLUG/<id>"` as its own command, never a bare `gh pr merge`.
-  `merged`: move the job to `merged`, then run `cleanup`. `enqueued`: leave it at
-  `pr-open` with note `queued: <detail>`. Exit 6: the conflict goes back to the
-  builder as a rework. Exit 3: run `checks` again, then `pr-merge`, under the same
-  cap. Exit 1: move the job to `needs-human` with `detail` as the note. Exits 4, 5,
-  7 and 8 act as they do for `checks`. A failing check or a merge conflict goes back
-  to the builder as a rework with the log. A second failure moves the job to
-  `needs-human`.
+- Merging an APPROVE PR: only a PR whose base is `$BASE` merges, through `"$RUNTIME" checks` and then `"$RUNTIME" pr-merge "$SLUG/<id>"`, never a bare `gh pr merge`. Follow [merging](references/execution.md#merging-an-approve-pr) for each exit code, the fresh `pipeline` read before the merge, and stacked PRs.
 - With a stacked rider, follow **Stacked riders** in [feature](references/commands/feature.md) at each build-stage push, at shipping, at merge and at close.
 - Jobs at `pr-open` from before auto-merge stay as they are and never auto-merge.
   A human merges or closes them.
