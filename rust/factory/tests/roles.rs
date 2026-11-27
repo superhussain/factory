@@ -850,3 +850,19 @@ fn no_leading_sleep() {
         has(&flat(rel), "Never start a command with `sleep`");
     }
 }
+
+#[test]
+fn idea_path_defers_feature_read() {
+    has(
+        &flat("SKILL.md"),
+        "read feature.md after the spec writer returns",
+    );
+    has(
+        &flat("references/commands/idea.md"),
+        "They carry loop step 2",
+    );
+    has(
+        &read("rust/factory/src/commands/start.rs"),
+        "read references/commands/feature.md and continue at step 3",
+    );
+}

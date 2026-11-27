@@ -58,4 +58,8 @@ stage spec, branch factory/001-test, pipeline {"global": 3, "project": 2}
   "candidates": []
 }
 == next
-pick batch riders, then run prompt sample/001-test spec --out and agent record
+1. Pick batch riders as idea.md step 5 says, or none: batch sample/001-test <candidate-id> ...
+2. agent record sample/001-test spec <harness> <via> <model> [<effort>]
+3. prompt sample/001-test spec --out {home}/prompts/sample/001-test/spec.txt
+4. Spawn factory-spec-writer with: Your full prompt is in <printed path>. Read it first and follow it exactly.
+5. After spec.md lands, read references/commands/feature.md and continue at step 3.

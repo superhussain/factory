@@ -122,7 +122,18 @@ pub fn start(call_in: &Call) -> Res<()> {
     header("batch");
     batch_cmd(&call(&target))?;
     header("next");
-    println!("pick batch riders, then run prompt {target} spec --out and agent record");
+    let out = home
+        .join("prompts")
+        .join(&project)
+        .join(id)
+        .join("spec.txt");
+    println!(
+        "1. Pick batch riders as idea.md step 5 says, or none: batch {target} <candidate-id> ..."
+    );
+    println!("2. agent record {target} spec <harness> <via> <model> [<effort>]");
+    println!("3. prompt {target} spec --out {}", out.display());
+    println!("4. Spawn factory-spec-writer with: Your full prompt is in <printed path>. Read it first and follow it exactly.");
+    println!("5. After spec.md lands, read references/commands/feature.md and continue at step 3.");
     if let Some(base) = &stack_base {
         println!("stacked: ship as a draft PR against {base} with automerge false and draft true");
     }
