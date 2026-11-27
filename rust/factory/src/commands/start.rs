@@ -156,15 +156,24 @@ mod tests {
         let row = json!({"id": "301-proto-pacing-chart", "stage": "idea", "refs": [
             {"id": "299-other", "kind": "rework-of"},
             {"id": "250-ready", "kind": "depends-on"},
+            {"id": "400-shared-chart", "kind": "depends-on"},
             {"id": "300-proto-pacing", "kind": "depends-on"},
         ]});
         let jobs = [
-            json!({"id": "299-other", "stage": "pr-open", "draft": true}),
-            json!({"id": "250-ready", "stage": "pr-open", "draft": false}),
-            json!({"id": "300-proto-pacing", "stage": "pr-open", "draft": true}),
+            json!({"id": "299-other", "project": "factory", "stage": "pr-open", "draft": true}),
+            json!({"id": "250-ready", "project": "factory", "stage": "pr-open", "draft": false}),
+            json!({"id": "300-proto-pacing", "project": "factory", "stage": "pr-open", "draft": true}),
+            json!({"id": "400-shared-chart", "project": "deets", "stage": "pr-open", "draft": true}),
         ];
-        assert_eq!(stack_parent(&row, &jobs), Some("300-proto-pacing".into()));
-        assert_eq!(stack_parent(&row, &jobs[..2]), None);
-        assert_eq!(stack_parent(&json!({"id": "302-x"}), &jobs), None);
+        assert_eq!(
+            stack_parent(&row, &jobs, "factory"),
+            Some("300-proto-pacing".into())
+        );
+        let other_project = [jobs[0].clone(), jobs[1].clone(), jobs[3].clone()];
+        assert_eq!(stack_parent(&row, &other_project, "factory"), None);
+        assert_eq!(
+            stack_parent(&json!({"id": "302-x"}), &jobs, "factory"),
+            None
+        );
     }
 }
