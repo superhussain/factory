@@ -3392,6 +3392,147 @@ mod idle_watch_test {
         );
         assert_eq!(p.sent().len(), 2);
     }
+
+    /// Re-view alpha with a pickup setting that lists only another host.
+    fn unlisted(fx: &Fx) {
+        fx.view(
+            "alpha",
+            200,
+            effective(
+                "alpha",
+                Some(json!({"pickup": {"enabled": true, "hosts": ["other-host"]}})),
+                None,
+            ),
+        );
+    }
+
+    fn needs_human(fx: &Fx, extra: Value) {
+        export_job(
+            fx,
+            with(
+                json!({"stage": "needs-human", "claim": null, "needs": "check the merge", "pr": PR7}),
+                extra,
+            ),
+        );
+    }
+
+    fn set_cap(fx: &Fx) {
+        fs::write(
+            fx.home.join("config.md"),
+            format!("---\ndevice: {DEVICE}\njob_token_cap: 1000000\n---\n"),
+        )
+        .unwrap();
+    }
+
+    /// Count usage_totals calls from now on.
+    fn count_scans(fx: &Fx) -> Rc<RefCell<usize>> {
+        let scans = Rc::new(RefCell::new(0));
+        let counter = scans.clone();
+        fx.set_fakes(|f| {
+            f.usage_totals = Some(Rc::new(move |_, _, _| {
+                *counter.borrow_mut() += 1;
+                Ok(json!({"transcripts": 0, "models": {}}))
+            }))
+        });
+        scans
+    }
+
+    #[test]
+    fn test_needs_human_merged_pr_syncs_when_pickup_skips_it() {
+        let (fx, p) = setup();
+        unlisted(&fx);
+        github(&fx, &[(7, "MERGED")]);
+        needs_human(&fx, json!({}));
+        let (code, out, _) = fx.pickup(&["--dry-run"]);
+        assert_eq!(code, 0);
+        assert!(out.contains(&format!(
+            "skip sync 042-sample-export alpha: pickup does not list host {DEVICE}\nwould sync idle 042-sample-export alpha: merged on GitHub\n"
+        )));
+        assert!(fx.puts().is_empty());
+        let (code, out, _) = fx.pickup(&[]);
+        assert_eq!(code, 0);
+        assert!(out.contains("synced idle 042-sample-export alpha: merged on GitHub\n"));
+        let job = fx.job("042-sample-export");
+        assert_eq!(job["stage"], "merged");
+        assert!(job.get("needs").is_none() && job.get("claim").is_none());
+        assert!(p.sent().is_empty());
+    }
+
+    #[test]
+    fn test_needs_human_closed_pr_queues_a_close_when_pickup_skips_it() {
+        let (fx, _p) = setup();
+        let files = Files::install(&fx);
+        unlisted(&fx);
+        github(&fx, &[(7, "CLOSED")]);
+        needs_human(&fx, json!({}));
+        let (code, out, _) = fx.pickup(&[]);
+        assert_eq!(code, 0);
+        assert!(out.contains("synced idle 042-sample-export alpha: PR closed on GitHub\n"));
+        let close = fx.job("042-sample-export")["close"].clone();
+        assert_eq!(
+            (&close["reason"], &close["via"]),
+            (&json!("PR closed on GitHub"), &json!("github"))
+        );
+        assert!(files
+            .get("/api/jobs/alpha/042-sample-export/decision.md")
+            .is_some_and(|d| d.starts_with("CLOSED:")));
+    }
+
+    #[test]
+    fn test_needs_human_recheck_leaves_busy_or_foreign_jobs() {
+        let (fx, p) = setup();
+        unlisted(&fx);
+        github(&fx, &[(7, "MERGED")]);
+        for (name, extra) in [
+            ("running", json!({})),
+            (
+                "other claim",
+                json!({"claim": {"device": "other-host", "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"}}),
+            ),
+            (
+                "other server",
+                json!({"paseo": {"server": "other-server", "agent": "synthetic-agent"}}),
+            ),
+            (
+                "queued close",
+                json!({"close": {"at": "2026-01-02T12:00:00Z"}}),
+            ),
+        ] {
+            *p.statuses.borrow_mut() = agents(&[(
+                "synthetic-agent",
+                if name == "running" { "running" } else { "idle" },
+            )]);
+            needs_human(&fx, extra);
+            let (_, out, _) = fx.pickup(&[]);
+            assert!(!out.contains("synced idle"), "{name}: {out}");
+        }
+    }
+
+    #[test]
+    fn test_idle_sync_refreshes_rows_for_later_passes() {
+        let (fx, _p) = setup();
+        set_cap(&fx);
+        github(&fx, &[(7, "MERGED")]);
+        export_job(&fx, json!({"pr": PR7}));
+        fx.pickup(&[]);
+        age(&fx, &["since"]);
+        let scans = count_scans(&fx);
+        let (_, out, _) = fx.pickup(&[]);
+        assert!(out.contains("synced idle 042-sample-export alpha: merged on GitHub\n"));
+        assert_eq!(*scans.borrow(), 0);
+    }
+
+    #[test]
+    fn test_idle_escalation_refreshes_rows_for_later_passes() {
+        let (fx, p) = setup();
+        set_cap(&fx);
+        checked_twice(&fx, &p);
+        age_by(&fx, &["nudged"], 81);
+        let scans = count_scans(&fx);
+        let (_, out, _) = fx.pickup(&[]);
+        assert!(out.contains(&format!("needs-human 042-sample-export alpha: {NOTE}\n")));
+        assert_eq!(*scans.borrow(), 0);
+    }
 }
 
 mod token_cap_test {

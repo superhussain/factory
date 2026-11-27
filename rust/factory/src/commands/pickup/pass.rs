@@ -260,6 +260,7 @@ pub(super) fn pickup_pass(
         &mut settings,
         dry,
     )?;
+    needs_human_recheck_pass(io, home, &mut data, device, dry)?;
     autonomy_hold_pass(io, home, &mut data, dry)?;
     close_pass(io, home, &mut data, device, minutes, dry)?;
     close_cleanup_pass(io, home, &mut data, device, &paths, &mut settings, dry)?;
