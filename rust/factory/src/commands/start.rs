@@ -80,7 +80,7 @@ pub fn start(call_in: &Call) -> Res<()> {
     let stack_base = if depends {
         let board = read_board(&home)?;
         let jobs = board["jobs"].as_array().map_or(&[][..], Vec::as_slice);
-        stack_parent(&row, jobs).map(|p| format!("factory/{p}"))
+        stack_parent(&row, jobs, &project).map(|p| format!("factory/{p}"))
     } else {
         None
     };
@@ -129,16 +129,19 @@ pub fn start(call_in: &Call) -> Res<()> {
     Ok(())
 }
 
-/// The first depends-on id of row whose job is a draft PR, which the new job stacks on.
-fn stack_parent(row: &Value, jobs: &[Value]) -> Option<String> {
+/// The first depends-on id of row whose job is a draft PR in the same project, which the new job stacks on.
+fn stack_parent(row: &Value, jobs: &[Value], project: &str) -> Option<String> {
     row.get("refs")
         .and_then(Value::as_array)?
         .iter()
         .filter(|r| r.get("kind").and_then(Value::as_str) == Some("depends-on"))
         .filter_map(|r| r.get("id").and_then(Value::as_str))
         .find(|id| {
-            jobs.iter()
-                .any(|j| j.get("id").and_then(Value::as_str) == Some(id) && draft_pr(j))
+            jobs.iter().any(|j| {
+                j.get("id").and_then(Value::as_str) == Some(id)
+                    && draft_pr(j)
+                    && j.get("project").and_then(Value::as_str) == Some(project)
+            })
         })
         .map(String::from)
 }
@@ -153,15 +156,24 @@ mod tests {
         let row = json!({"id": "301-proto-pacing-chart", "stage": "idea", "refs": [
             {"id": "299-other", "kind": "rework-of"},
             {"id": "250-ready", "kind": "depends-on"},
+            {"id": "400-shared-chart", "kind": "depends-on"},
             {"id": "300-proto-pacing", "kind": "depends-on"},
         ]});
         let jobs = [
-            json!({"id": "299-other", "stage": "pr-open", "draft": true}),
-            json!({"id": "250-ready", "stage": "pr-open", "draft": false}),
-            json!({"id": "300-proto-pacing", "stage": "pr-open", "draft": true}),
+            json!({"id": "299-other", "project": "factory", "stage": "pr-open", "draft": true}),
+            json!({"id": "250-ready", "project": "factory", "stage": "pr-open", "draft": false}),
+            json!({"id": "300-proto-pacing", "project": "factory", "stage": "pr-open", "draft": true}),
+            json!({"id": "400-shared-chart", "project": "deets", "stage": "pr-open", "draft": true}),
         ];
-        assert_eq!(stack_parent(&row, &jobs), Some("300-proto-pacing".into()));
-        assert_eq!(stack_parent(&row, &jobs[..2]), None);
-        assert_eq!(stack_parent(&json!({"id": "302-x"}), &jobs), None);
+        assert_eq!(
+            stack_parent(&row, &jobs, "factory"),
+            Some("300-proto-pacing".into())
+        );
+        let other_project = [jobs[0].clone(), jobs[1].clone(), jobs[3].clone()];
+        assert_eq!(stack_parent(&row, &other_project, "factory"), None);
+        assert_eq!(
+            stack_parent(&json!({"id": "302-x"}), &jobs, "factory"),
+            None
+        );
     }
 }

@@ -93,7 +93,7 @@ Approving a backlog line turns each `Depends on: <slug>: <feature>` context line
 `repeated` holds the newest 20 review findings `factory repeats` saw again, and only it writes them. `board` refuses a `repeated` patch with exit 2.
 `escalated` is set when an ESCALATE PR ships, and marks a PR that waits on a human.
 `draft` (true, false or null) marks a `pr-open` job whose PR is a GitHub draft that is not meant to merge. Such a job never waits on you: pickup backpressure, the inbox and the Needs you column skip it. Whoever marks the PR ready patches `{"draft": null}`.
-`stack_base` is `factory/<job-id>` or null. `factory start` sets it when an idea depends on a draft `pr-open` job, and cuts the new worktree from that branch. `board` refuses any other value with `stack_base must be factory/<job-id> or null` (exit 2).
+`stack_base` is `factory/<job-id>` or null. `factory start` sets it when an idea depends on a draft `pr-open` job in the same project, and cuts the new worktree from that branch. A draft dependency in another project does not stack; the worktree comes from the base branch. `board` refuses any other value with `stack_base must be factory/<job-id> or null` (exit 2).
 `automerge` marks an APPROVE PR waiting to merge. `board` refuses `automerge` true
 unless the local decision.md opens with APPROVE, and refuses stage `approve` unless
 the last `rounds` entry is all PASS or SKIPPED; factory says it cannot move to
