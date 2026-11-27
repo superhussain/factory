@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeSet;
 
 /// The jobs dict of <home>/idle-watch.json, {} when the file is missing or malformed.
 pub(super) fn read_idle_watch(home: &Path) -> Map<String, Value> {
@@ -129,9 +130,130 @@ pub(super) fn beating(j: &Value) -> bool {
     })
 }
 
-/// Nudge the idle Paseo agent of an in-flight job claimed on this host once its worktree and
-/// board job sit unchanged for IDLE_NUDGE_MINUTES, and move it to needs-human when they stay
-/// unchanged that long again.
+/// How many diagnostic prompts a watch entry records; a legacy entry with nudged counts as one.
+fn nudges_of(entry: &Value) -> i64 {
+    int_of(entry.get("nudges")).unwrap_or(i64::from(entry.get("nudged").is_some()))
+}
+
+/// The IDLE_DIAGNOSE prompt for one agent's due jobs, listed as `<id> (<project>, <stage>)`.
+fn idle_prompt(check: i64, jobs: &[Value]) -> String {
+    let listed: Vec<String> = jobs
+        .iter()
+        .map(|j| {
+            format!(
+                "{} ({}, {})",
+                text_of(j.get("id")),
+                text_of(j.get("project")),
+                text_of(j.get("stage"))
+            )
+        })
+        .collect();
+    IDLE_DIAGNOSE
+        .replace("{check}", &check.to_string())
+        .replace("{jobs}", &listed.join(", "))
+}
+
+/// Sync each job whose pull request GitHub reports merged or closed with the PR sync's patch, and
+/// return their ids. One gh api graphql call per repo; the write needs the same stage and a claim
+/// by this host. A dry run prints the syncs and returns their ids without writing.
+fn idle_finished(
+    io: &mut Io,
+    home: &Path,
+    device: &str,
+    dry: bool,
+    jobs: &[Value],
+) -> Res<BTreeSet<String>> {
+    let mut repos = HashMap::new();
+    let mut groups: Vec<(String, Vec<(Value, u64)>)> = Vec::new();
+    for j in jobs {
+        let Some(m) = get_str(j, "pr").and_then(|pr| GH_PR_PARTS.fullmatch(pr)) else {
+            continue;
+        };
+        let repo = format!("{}/{}", &m[1], &m[2]).to_lowercase();
+        if project_repo(home, get_str(j, "project").unwrap(), &mut repos)? != repo {
+            continue;
+        }
+        let entry = (j.clone(), m[3].parse().unwrap());
+        match groups.iter_mut().find(|(r, _)| *r == repo) {
+            Some(slot) => slot.1.push(entry),
+            None => groups.push((repo, vec![entry])),
+        }
+    }
+    let mut done = BTreeSet::new();
+    let mut pending: Vec<(Value, Value, String)> = Vec::new();
+    for (repo, jobs) in groups {
+        let numbers: Vec<u64> = jobs.iter().map(|(_, n)| *n).collect();
+        let states = match pr_states(&repo, &numbers, device) {
+            Ok(states) => states,
+            Err(why) => {
+                errln!(io, "pickup skips the idle PR check for {repo}: {why}");
+                continue;
+            }
+        };
+        for (j, n) in jobs {
+            let Some((state, head)) = states.get(&n) else {
+                continue;
+            };
+            let merged = match state.as_str() {
+                Some("MERGED") => true,
+                Some("CLOSED") => false,
+                _ => continue,
+            };
+            let line = format!(
+                "idle {} {}: {}",
+                text_of(j.get("id")),
+                text_of(j.get("project")),
+                if merged {
+                    MERGED_NOTE
+                } else {
+                    GITHUB_CLOSE_REASON
+                }
+            );
+            if dry {
+                outln!(io, "would sync {line}");
+                done.insert(text_of(j.get("id")));
+                continue;
+            }
+            pending.push((j, pr_sync_patch(merged, head), line));
+        }
+    }
+    if pending.is_empty() {
+        return Ok(done);
+    }
+    let synced = cas(home, "/api/board", |text| {
+        let mut board = load_board(text)?;
+        let mut synced = Vec::new();
+        for (j, patch, line) in &pending {
+            let job_id = get_str(j, "id").unwrap();
+            let Some(found) = job_index(&board, job_id).map(|b| &board["jobs"][b]) else {
+                continue;
+            };
+            if found.get("stage") != j.get("stage")
+                || found.get("pr") != j.get("pr")
+                || found
+                    .get("claim")
+                    .filter(|c| c.is_object())
+                    .and_then(|c| get_str(c, "device"))
+                    != Some(device)
+            {
+                continue;
+            }
+            patch_job(&mut board, job_id, patch);
+            synced.push((job_id.to_string(), line.clone()));
+        }
+        Ok(((!synced.is_empty()).then(|| dump_board(&board)), synced))
+    })?;
+    for (job_id, line) in synced {
+        outln!(io, "synced {line}");
+        done.insert(job_id);
+    }
+    Ok(done)
+}
+
+/// Prompt the idle Paseo agent of each in-flight job claimed on this host once its worktree and
+/// board job sit unchanged for IDLE_NUDGE_MINUTES, once more IDLE_RECHECK_MINUTES after that, and
+/// move it to needs-human IDLE_ESCALATE_MINUTES after the last check. A job whose pull request
+/// GitHub reports merged or closed is synced instead. Each agent gets one prompt for all its jobs.
 pub(super) fn idle_watch_pass(
     io: &mut Io,
     home: &Path,
@@ -165,11 +287,16 @@ pub(super) fn idle_watch_pass(
         errln!(io, "pickup skips idle checks: paseo did not answer");
         return Ok(());
     };
-    let cutoff = format_stamp(unix_now() - IDLE_NUDGE_MINUTES * 60);
+    let ago = |minutes: i64| format_stamp(unix_now() - minutes * 60);
+    let (first, recheck, escalate) = (
+        ago(IDLE_NUDGE_MINUTES),
+        ago(IDLE_RECHECK_MINUTES),
+        ago(IDLE_ESCALATE_MINUTES),
+    );
+    let mut ready = Vec::new();
     for j in &jobs {
         let (job_id, project) = (get_str(j, "id").unwrap(), get_str(j, "project").unwrap());
         let agent_value = j["paseo"].get("agent").cloned().unwrap_or(Value::Null);
-        let agent = text_of(Some(&agent_value));
         let prev = old
             .get(job_id)
             .filter(|p| p.is_object())
@@ -211,78 +338,34 @@ pub(super) fn idle_watch_pass(
             watch.insert(job_id.into(), entry);
             continue;
         }
-        let mut entry = prev.clone();
-        let line = format!("{job_id} {project}: agent {agent}");
-        if entry.get("nudged").is_none() {
-            if get_str(&entry, "since").unwrap() >= cutoff.as_str() {
-                watch.insert(job_id.into(), entry);
-                continue;
-            }
-            let waits = awaits_permission(&agent);
-            if waits != Some(false) {
-                let why = if waits == Some(true) {
-                    "waits at a permission dialog"
-                } else {
-                    "permission state unknown"
-                };
-                outln!(io, "skip idle nudge {line} {why}");
-                if waits == Some(true) && entry.get("surfaced").is_none() {
-                    let note = PERMISSION_NOTE
-                        .replace("{agent}", &agent)
-                        .replace("{minutes}", &IDLE_NUDGE_MINUTES.to_string());
-                    if dry {
-                        outln!(io, "would surface {job_id} {project}: {note}");
-                        watch.insert(job_id.into(), entry);
-                        continue;
-                    }
-                    let stage = j.get("stage").cloned();
-                    let updated = cas(home, "/api/board", |text| {
-                        let mut board = load_board(text)?;
-                        let Some(b) = job_index(&board, job_id) else {
-                            return Ok((None, None));
-                        };
-                        let found = &board["jobs"][b];
-                        if found.get("stage").cloned() != stage
-                            || found
-                                .get("claim")
-                                .filter(|c| c.is_object())
-                                .and_then(|c| get_str(c, "device"))
-                                != Some(device)
-                        {
-                            return Ok((None, None));
-                        }
-                        if get_str(found, "note") == Some(note.as_str()) {
-                            return Ok((None, found.get("updated").cloned()));
-                        }
-                        let row = patch_job(&mut board, job_id, &json!({"note": note}));
-                        Ok((Some(dump_board(&board)), row.get("updated").cloned()))
-                    })?;
-                    if let Some(updated) = updated.filter(|u| truthy(Some(u))) {
-                        entry["surfaced"] = now().into();
-                        entry["updated"] = updated;
-                        outln!(io, "surfaced {job_id} {project}: {note}");
-                    }
-                }
-            } else if dry {
-                outln!(io, "would nudge idle {line}");
-            } else if !paseo_send(&agent, &IDLE_NUDGE.replace("{id}", job_id)) {
-                errln!(
-                    io,
-                    "pickup could not nudge idle {job_id}: paseo send failed"
-                );
-            } else {
-                entry["nudged"] = now().into();
-                outln!(io, "nudged idle {line}");
-            }
-            watch.insert(job_id.into(), entry);
+        let (field, cutoff) = match nudges_of(&prev) {
+            n if n < 1 => ("since", &first),
+            n if n < IDLE_CHECKS => ("nudged", &recheck),
+            _ => ("nudged", &escalate),
+        };
+        if get_str(&prev, field).is_some_and(|s| s < cutoff.as_str()) {
+            ready.push(j.clone());
+        }
+        watch.insert(job_id.into(), prev);
+    }
+    let finished = idle_finished(io, home, device, dry, &ready)?;
+    let mut prompts: Vec<(String, Vec<Value>)> = Vec::new();
+    for j in &ready {
+        let (job_id, project) = (get_str(j, "id").unwrap(), get_str(j, "project").unwrap());
+        if finished.contains(job_id) {
+            watch.shift_remove(job_id);
             continue;
         }
-        watch.insert(job_id.into(), entry.clone());
-        if !get_str(&entry, "nudged").is_some_and(|n| n < cutoff.as_str()) {
+        let agent = text_of(j["paseo"].get("agent"));
+        if nudges_of(&watch[job_id]) < IDLE_CHECKS {
+            match prompts.iter_mut().find(|(a, _)| *a == agent) {
+                Some(slot) => slot.1.push(j.clone()),
+                None => prompts.push((agent, vec![j.clone()])),
+            }
             continue;
         }
         let note = format!(
-            "idle: no progress {IDLE_NUDGE_MINUTES} minutes after a nudge to agent {agent}"
+            "idle: no progress {IDLE_ESCALATE_MINUTES} minutes after {IDLE_CHECKS} diagnostic prompts to agent {agent}"
         );
         if dry {
             outln!(io, "would move needs-human {job_id} {project}: {note}");
@@ -316,6 +399,97 @@ pub(super) fn idle_watch_pass(
             outln!(io, "needs-human {job_id} {project}: {note}");
         }
         watch.shift_remove(job_id);
+    }
+    for (agent, jobs) in prompts {
+        let waits = awaits_permission(&agent);
+        if waits != Some(false) {
+            let why = if waits == Some(true) {
+                "waits at a permission dialog"
+            } else {
+                "permission state unknown"
+            };
+            for j in &jobs {
+                let (job_id, project) = (get_str(j, "id").unwrap(), get_str(j, "project").unwrap());
+                outln!(
+                    io,
+                    "skip idle nudge {job_id} {project}: agent {agent} {why}"
+                );
+                if waits != Some(true) || watch[job_id].get("surfaced").is_some() {
+                    continue;
+                }
+                let note = PERMISSION_NOTE
+                    .replace("{agent}", &agent)
+                    .replace("{minutes}", &IDLE_NUDGE_MINUTES.to_string());
+                if dry {
+                    outln!(io, "would surface {job_id} {project}: {note}");
+                    continue;
+                }
+                let stage = j.get("stage").cloned();
+                let updated = cas(home, "/api/board", |text| {
+                    let mut board = load_board(text)?;
+                    let Some(b) = job_index(&board, job_id) else {
+                        return Ok((None, None));
+                    };
+                    let found = &board["jobs"][b];
+                    if found.get("stage").cloned() != stage
+                        || found
+                            .get("claim")
+                            .filter(|c| c.is_object())
+                            .and_then(|c| get_str(c, "device"))
+                            != Some(device)
+                    {
+                        return Ok((None, None));
+                    }
+                    if get_str(found, "note") == Some(note.as_str()) {
+                        return Ok((None, found.get("updated").cloned()));
+                    }
+                    let row = patch_job(&mut board, job_id, &json!({"note": note}));
+                    Ok((Some(dump_board(&board)), row.get("updated").cloned()))
+                })?;
+                if let Some(updated) = updated.filter(|u| truthy(Some(u))) {
+                    let entry = &mut watch[job_id];
+                    entry["surfaced"] = now().into();
+                    entry["updated"] = updated;
+                    outln!(io, "surfaced {job_id} {project}: {note}");
+                }
+            }
+            continue;
+        }
+        let checks: Vec<i64> = jobs
+            .iter()
+            .map(|j| nudges_of(&watch[get_str(j, "id").unwrap()]) + 1)
+            .collect();
+        let line = |j: &Value, check: i64| {
+            format!(
+                "{} {}: agent {agent} (check {check} of {IDLE_CHECKS})",
+                text_of(j.get("id")),
+                text_of(j.get("project"))
+            )
+        };
+        if dry {
+            for (j, check) in jobs.iter().zip(&checks) {
+                outln!(io, "would nudge idle {}", line(j, *check));
+            }
+            continue;
+        }
+        let check = *checks.iter().max().unwrap();
+        if !paseo_send(&agent, &idle_prompt(check, &jobs)) {
+            for j in &jobs {
+                errln!(
+                    io,
+                    "pickup could not nudge idle {}: paseo send failed",
+                    text_of(j.get("id"))
+                );
+            }
+            continue;
+        }
+        let at = now();
+        for (j, check) in jobs.iter().zip(checks) {
+            let entry = &mut watch[get_str(j, "id").unwrap()];
+            entry["nudged"] = at.clone().into();
+            entry["nudges"] = check.into();
+            outln!(io, "nudged idle {}", line(j, check));
+        }
     }
     if !dry && watch != old {
         write_file(
