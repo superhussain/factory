@@ -14,7 +14,12 @@ manifest, the affected areas, and the code the feature touches.
 
 Unless the project file names a test suite, every acceptance criterion needs a
 concrete way to check it: a command, a grep, a type that must compile, or a short
-manual step. Keep the feature small. If the request is more than one reviewable PR,
+manual step. Point a grep at one token a formatter keeps on a single line, such as
+a function name, a field name or a string literal. Never grep for a whole chained
+call: `cargo fmt`, prettier and oxfmt wrap long chains across lines, so the grep
+fails on correct code.
+
+Keep the feature small. If the request is more than one reviewable PR,
 spec the smallest useful slice and list each remaining slice under **Sub-jobs** as a
 numbered list, one `<n>. <feature>` item each, written so it stands alone as a feature
 request. A sub-job that must wait for others adds an indented `   - Depends on: <n>[, <n>]`
