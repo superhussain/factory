@@ -518,8 +518,8 @@
       "from": "tests/cli/test_watch.py::WatchTest.test_bad_usage_exits_2"
     },
     {
-      "id": "wait/watch-usage-timeout-541",
-      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "--timeout", "541"],
+      "id": "wait/watch-usage-timeout-7081",
+      "argv": ["--home", "{home}", "watch", "sample/042-sample-export", "--timeout", "7081"],
       "home": "wait",
       "stubs": {},
       "exit": 2,

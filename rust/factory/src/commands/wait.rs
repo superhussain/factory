@@ -31,6 +31,8 @@ const WAIT_USAGE: &str = "usage: wait <project-slug>/<job-id> <artifact>... [--t
 const WATCH_USAGE: &str =
     "usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]";
 const WATCH_TIMEOUT: u64 = 540;
+const WATCH_MAX_TIMEOUT: u64 = 7080;
+const WATCH_HOLD_SECONDS: f64 = claims::CLAIM_REFRESH_MINUTES * 60.0;
 const PR_STATE_INTERVAL: f64 = 30.0;
 const ROUND_WAIT_USAGE: &str = "usage: round-wait <project-slug>/<job-id> <round> [--timeout S]";
 const REVIEWERS: [&str; 4] = ["security", "ux", "ui", "code"];
@@ -227,11 +229,11 @@ fn watch_run(
             watch_pr = true;
             i += 1;
         } else if args[i] == "--timeout" {
-            match (timeout, timeout_arg(args.get(i + 1), WATCH_TIMEOUT, 1)) {
+            match (timeout, timeout_arg(args.get(i + 1), WATCH_MAX_TIMEOUT, 1)) {
                 (None, Some(t)) => timeout = Some(t),
                 _ => {
                     return Err(fail(
-                        format!("--timeout takes one value from 1 to 540 seconds. {WATCH_USAGE}"),
+                        format!("--timeout takes one value from 1 to 7080 seconds. {WATCH_USAGE}"),
                         2,
                     ))
                 }
@@ -294,7 +296,7 @@ fn watch_run(
     let start = (io.now)();
     let deadline = start + timeout.unwrap_or(WATCH_TIMEOUT) as f64;
     let mut bad_before: BTreeMap<String, String> = BTreeMap::new();
-    let (mut reading, mut read_at) = (Value::Null, start);
+    let (mut reading, mut read_at, mut held_at) = (Value::Null, start, start);
     loop {
         let lines = job_file_lines(&folder, &artifacts)?;
         let bad: BTreeMap<String, String> = artifacts
@@ -328,6 +330,11 @@ fn watch_run(
             "timeout"
         } else {
             bad_before = bad;
+            let now = (io.now)();
+            if session && now - held_at >= WATCH_HOLD_SECONDS {
+                (io.hold)(target)?;
+                held_at = now;
+            }
             (io.sleep)(1.0);
             continue;
         };
@@ -811,6 +818,97 @@ mod tests {
             sleep: &|_| {},
         };
         assert_eq!(watch(&home, &["spec.md", "--pr"], &io).unwrap_err().code, 6);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn watch_accepts_timeout_7080() {
+        let (home, _) = home("watch-7080", "042-sample-export");
+        let clock = Cell::new(0.0);
+        let io = Io {
+            hold: &no_hold,
+            now: &|| clock.get(),
+            sleep: &|s| clock.set(clock.get() + s),
+        };
+        assert_eq!(
+            watch(&home, &["decision.md", "--timeout", "7080"], &io).unwrap(),
+            "{\"event\": \"timeout\", \"files\": {\"decision.md\": null}, \"pr\": null, \"elapsed\": 7080}\n"
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn watch_rejects_timeout_7081() {
+        let (home, _) = home("watch-7081", "042-sample-export");
+        let io = Io {
+            hold: &no_hold,
+            now: &|| 0.0,
+            sleep: &|_| {},
+        };
+        let e = watch(&home, &["decision.md", "--timeout", "7081"], &io).unwrap_err();
+        assert_eq!(
+            (e.code, e.stderr),
+            (
+                2,
+                format!("--timeout takes one value from 1 to 7080 seconds. {WATCH_USAGE}\n")
+            )
+        );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn watch_holds_every_600_seconds() {
+        let (home, _) = home("watch-rehold", "042-sample-export");
+        let clock = Cell::new(0.0);
+        let holds = RefCell::new(Vec::new());
+        let hold = |_: &str| {
+            holds.borrow_mut().push(clock.get());
+            Ok(())
+        };
+        let io = Io {
+            hold: &hold,
+            now: &|| clock.get(),
+            sleep: &|s| clock.set(clock.get() + s),
+        };
+        assert!(watch(&home, &["decision.md", "--timeout", "1300"], &io)
+            .unwrap()
+            .starts_with("{\"event\": \"timeout\""));
+        assert_eq!(*holds.borrow(), [0.0, 600.0, 1200.0]);
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn watch_without_session_never_holds() {
+        use crate::shared::http::tests::{home_for, serve};
+        let board =
+            json!({"updated": "", "jobs": [{"id": "042-sample-export", "project": "sample"}]})
+                .to_string();
+        let board: &'static str = Box::leak(board.into_boxed_str());
+        let (origin, _) = serve(vec![(200, board, vec![("ETag", "\"e1\"")])]);
+        let home = home_for("watch-no-session", &origin);
+        let clock = Cell::new(0.0);
+        let holds = RefCell::new(Vec::new());
+        let hold = |_: &str| {
+            holds.borrow_mut().push(clock.get());
+            Ok(())
+        };
+        let io = Io {
+            hold: &hold,
+            now: &|| clock.get(),
+            sleep: &|s| clock.set(clock.get() + s),
+        };
+        assert!(watch_run(
+            &home,
+            "sample",
+            "042-sample-export",
+            "sample/042-sample-export",
+            &strings(&["decision.md", "--timeout", "1300"]),
+            false,
+            &io,
+        )
+        .unwrap()
+        .starts_with("{\"event\": \"timeout\""));
+        assert!(holds.borrow().is_empty());
         fs::remove_dir_all(home).unwrap();
     }
 

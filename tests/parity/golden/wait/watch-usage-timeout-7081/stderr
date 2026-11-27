@@ -1,0 +1,1 @@
+--timeout takes one value from 1 to 7080 seconds. usage: watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]

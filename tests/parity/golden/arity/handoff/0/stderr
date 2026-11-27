@@ -70,8 +70,8 @@ usage:
   factory watch <project-slug>/<job-id> [<artifact>...] [--pr] [--timeout S]
                                             print one JSON line when every job file has a valid first
                                             line, one keeps an invalid first line, --pr's next leaves
-                                            wait, or S seconds pass (default and max 540); runs hold first
-                                            when a session tag is set
+                                            wait, or S seconds pass (default 540, max 7080); runs hold
+                                            first and every 600 seconds when a session tag is set
   factory round-wait <project-slug>/<job-id> <round> [--timeout S]
                                             block until all four review files of round N have a verdict
                                             line, write each verdict to the board's rounds entry as it
