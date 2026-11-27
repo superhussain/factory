@@ -3370,6 +3370,26 @@ mod tests {
                 1,
                 failed1,
             ),
+            (
+                vec![(
+                    0,
+                    format!(
+                        "\x1b[1;38m{}\x1b[m",
+                        deployed()
+                            .1
+                            .replace("\"success\"", "\x1b[32m\"success\"\x1b[m")
+                    ),
+                )],
+                format!("worker: deployed at {b7}"),
+                0,
+                nothing,
+            ),
+            (
+                vec![(1, "\x1b[31mHTTP 502\x1b[0m".into())],
+                "worker: HTTP 502".into(),
+                1,
+                failed1,
+            ),
         ];
         for (replies, line, exit_code, last) in cases {
             t.gh_calls.borrow_mut().clear();
