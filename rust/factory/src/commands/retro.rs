@@ -414,6 +414,7 @@ fn redact_step(
     *hits = redact_set().matches(text);
 }
 
+#[allow(clippy::needless_range_loop)]
 pub(crate) fn retro_redact(text: &str) -> String {
     let set = redact_set();
     let mut text = text.to_string();
@@ -557,6 +558,7 @@ fn scan_set() -> &'static RegexSet {
 }
 
 /// One transcript reduced to digest fields. main=false also counts isSidechain lines.
+#[allow(clippy::unnecessary_unwrap)]
 fn scan(path: &Path, main: bool) -> io::Result<Value> {
     let (mut usage, mut usage_at) = (Vec::<[i64; 4]>::new(), HashMap::<String, usize>::new());
     let (mut tools, mut cmds, mut attachments) = (Map::new(), Map::new(), Map::new());
@@ -673,7 +675,7 @@ fn scan(path: &Path, main: bool) -> io::Result<Value> {
             let is_result = |b: &&Map<String, Value>| {
                 b.get("type").and_then(Value::as_str) == Some("tool_result")
             };
-            if blocks.iter().any(|b| is_result(&b)) {
+            if blocks.iter().any(&is_result) {
                 for b in blocks.iter().filter(|b| is_result(b)) {
                     let id = dumps(b.get("tool_use_id").unwrap_or(&Value::Null), DEFAULT);
                     let (name, inp) = calls.get(&id).cloned().unwrap_or(("?".into(), json!({})));
@@ -3146,7 +3148,7 @@ fn backlog_context(s: &Value, run: &str, fp: &str, created: &str) -> String {
         );
         let joined = |k: &str| {
             o[k].as_array()
-                .map(|a| a.iter().map(|x| py_str(x)).collect::<Vec<_>>().join("; "))
+                .map(|a| a.iter().map(py_str).collect::<Vec<_>>().join("; "))
         };
         if let Some(pros) = joined("pros").filter(|p| !p.is_empty() || truthy(&o["pros"])) {
             row += &format!(" Pros: {pros}.");
@@ -3416,7 +3418,7 @@ fn commas(n: i64) -> String {
     let digits = n.unsigned_abs().to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -4321,7 +4323,7 @@ mod tests {
         let last = scan_of(
             &projects,
             &[
-                assistant("a1", &[archive.clone()]),
+                assistant("a1", std::slice::from_ref(&archive)),
                 result("a1", "Exit code 137", true, 0),
             ],
         );

@@ -73,18 +73,26 @@ pub fn build_landed(call: &Call) -> Res<()> {
     Ok(())
 }
 
-/// ("Run N", the first non-empty line after the last `## Run N` heading).
+/// ("Run N", a line of the section under the last `## Run N` heading, up to the next `## `
+/// line): its first line that starts `BLOCKED:` or `BLOCKED-ENV:`, else its first non-empty
+/// line.
 pub(crate) fn latest_run_line(text: &str) -> Option<(String, String)> {
     let lines: Vec<&str> = text.lines().collect();
     let (at, run) = lines.iter().enumerate().rev().find_map(|(i, line)| {
         let n = line.strip_prefix("## Run ")?.trim_end();
         (!n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())).then(|| (i, format!("Run {n}")))
     })?;
-    let first = lines[at + 1..]
+    let section: Vec<&str> = lines[at + 1..]
         .iter()
+        .take_while(|l| !l.starts_with("## "))
         .map(|l| l.trim())
-        .find(|l| !l.is_empty())?;
-    Some((run, first.to_string()))
+        .filter(|l| !l.is_empty())
+        .collect();
+    let line = section
+        .iter()
+        .find(|l| l.starts_with("BLOCKED:") || l.starts_with("BLOCKED-ENV:"))
+        .or(section.first())?;
+    Some((run, line.to_string()))
 }
 
 #[cfg(test)]
@@ -110,6 +118,36 @@ mod tests {
         assert_eq!(
             latest_run_line("## Run 1\n\nfirst\n\n## Run 2\n\n  \n"),
             None
+        );
+    }
+
+    #[test]
+    fn build_landed_finds_a_block_after_the_routing_line() {
+        let text = "## Run 1\n\nRouting: one.\n\n## Run 2\n\nRouting: two.\nBLOCKED-ENV: tool: cargo-clippy\n\n## Screenshots\n\nBLOCKED: later\n";
+        assert_eq!(
+            latest_run_line(text),
+            Some((
+                "Run 2".to_string(),
+                "BLOCKED-ENV: tool: cargo-clippy".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn build_landed_ignores_a_block_in_an_earlier_run() {
+        let text = "## Run 1\n\nBLOCKED: task 2: unclear.\n\n## Run 2\n\nRouting: two.\n";
+        assert_eq!(
+            latest_run_line(text),
+            Some(("Run 2".to_string(), "Routing: two.".to_string()))
+        );
+    }
+
+    #[test]
+    fn build_landed_ignores_a_quoted_block() {
+        let text = "## Run 2\n\nRouting: two.\n- Fixed `BLOCKED: task 2: unclear.` from run 1.\n";
+        assert_eq!(
+            latest_run_line(text),
+            Some(("Run 2".to_string(), "Routing: two.".to_string()))
         );
     }
 }

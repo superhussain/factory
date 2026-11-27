@@ -1,0 +1,2 @@
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "rev-parse", "--short", "refs/heads/factory/001-test"]}
+{"argv": ["-C", "{home}/worktrees/sample/001-test", "push", "-q", "origin", "refs/heads/factory/001-test:refs/heads/factory/001-test"]}

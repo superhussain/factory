@@ -5862,7 +5862,7 @@ fn stuck_in(home: &Path, args: &[String]) -> Res<()> {
             .iter()
             .rev()
             .find(|(id, _)| *id == agent)
-            .map_or(true, |(_, status)| status == "closed"))
+            .is_none_or(|(_, status)| status == "closed"))
     };
     let held = |job: &Value| {
         paused(job)

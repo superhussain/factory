@@ -145,7 +145,7 @@ fn thousands(n: i64) -> String {
     let digits = n.unsigned_abs().to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -1795,8 +1795,7 @@ fn bench_cases(path: &str) -> Res<Vec<Value>> {
                         let path = d.get("path").and_then(Value::as_str);
                         let lines = d.get("lines").and_then(Value::as_array);
                         let ints: Option<Vec<i64>> = lines
-                            .map(|l| l.iter().map(|x| int_of(Some(x))).collect::<Option<_>>())
-                            .flatten();
+                            .and_then(|l| l.iter().map(|x| int_of(Some(x))).collect::<Option<_>>());
                         if !path.is_some_and(|p| {
                             !p.is_empty()
                                 && !p.starts_with('/')

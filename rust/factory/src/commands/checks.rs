@@ -1386,6 +1386,7 @@ pub(crate) fn pr_reading(
 }
 
 /// The `while True` of pr-state: print one reading, re-reading every 30 seconds while next is wait or wait-base.
+#[allow(clippy::too_many_arguments)]
 fn pr_state_loop(
     h: &mut dyn Host,
     home: &Path,

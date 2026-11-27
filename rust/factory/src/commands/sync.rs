@@ -625,9 +625,9 @@ pub(crate) fn push_job(
         } else if remote.contains_key(&rel) {
             // First push after upgrading: adopt R2's copy if it matches.
             if reconcile(
-                &home,
-                &slug,
-                &job_id,
+                home,
+                slug,
+                job_id,
                 &folder,
                 &mut manifest,
                 &rel,
@@ -663,7 +663,7 @@ pub(crate) fn push_job(
             (None, _) => ("If-None-Match", "*".to_string()),
         };
         let r = api(
-            &home,
+            home,
             "PUT",
             &format!("/api/jobs/{slug}/{job_id}/{rel}"),
             Some(&data),
@@ -672,9 +672,9 @@ pub(crate) fn push_job(
         )?;
         if r.status == 412 {
             if reconcile(
-                &home,
-                &slug,
-                &job_id,
+                home,
+                slug,
+                job_id,
                 &folder,
                 &mut manifest,
                 &rel,
@@ -718,7 +718,7 @@ pub(crate) fn push_job(
         && !spec_stale
     {
         let text = read_text(&spec).map_err(|e| os_fail(e, &spec))?;
-        record_goal(&home, &slug, &job_id, spec_goal(&text), out)?;
+        record_goal(home, slug, job_id, spec_goal(&text), out)?;
         match fs::remove_file(&pending) {
             Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(os_fail(e, &pending)),
             _ => {}

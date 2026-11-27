@@ -130,6 +130,8 @@ jobs:
         run: cargo check --locked --target aarch64-apple-darwin
       - name: Check windows-x64
         run: cargo check --locked --tests --target x86_64-pc-windows-gnu
+      - name: Clippy linux-x64
+        run: cargo clippy --locked --all-targets -- -D warnings
   # CI's targets and browser jobs restore the provisioned Chrome for Testing and never save it.
   browser:
     if: github.ref == 'refs/heads/main'

@@ -173,7 +173,7 @@ fn fnmatch(name: &str, pat: &str) -> bool {
 }
 
 /// `statistics.median`.
-fn median(v: &mut Vec<f64>) -> f64 {
+fn median(v: &mut [f64]) -> f64 {
     v.sort_by(f64::total_cmp);
     let n = v.len();
     if n % 2 == 1 {
@@ -1119,7 +1119,9 @@ fn arm_metrics(arm_jobs: &Map<String, Value>, follow_ups: Value, jobs_root: &Pat
                 continue;
             };
             for (reviewer, verdict) in entry {
-                if verdict.as_str().is_some_and(|v| v != "" && v != "pending")
+                if verdict
+                    .as_str()
+                    .is_some_and(|v| !v.is_empty() && v != "pending")
                     && !folder
                         .join(format!("round-{}", i + 1))
                         .join(format!("review-{reviewer}.md"))
@@ -3208,6 +3210,7 @@ fn lead_value(j: &Value) -> Option<Value> {
         .map(|r| r.get("id").cloned().unwrap_or(Value::Null))
 }
 
+#[allow(clippy::needless_late_init, clippy::blocks_in_conditions)]
 fn pre_review(home: &Path, slug: &str, job_id: &str, o: &mut Out) -> Res<()> {
     let data = read_board(home)?;
     let Some(job) = data["jobs"]
@@ -5423,8 +5426,8 @@ mod tests {
 
     #[test]
     fn median_matches_statistics() {
-        assert_eq!(median(&mut vec![3.0, 1.0, 2.0]), 2.0);
-        assert_eq!(median(&mut vec![4.0, 1.0, 2.0, 3.0]), 2.5);
+        assert_eq!(median(&mut [3.0, 1.0, 2.0]), 2.0);
+        assert_eq!(median(&mut [4.0, 1.0, 2.0, 3.0]), 2.5);
     }
 
     #[test]
