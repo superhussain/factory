@@ -21,11 +21,11 @@ says to.
 
 | Command | Message | Next step |
 | --- | --- | --- |
-| `hold`, `board` | `<id> is held by <device> session <tag>` | Tell the user who holds the job and when it was last seen, then stop. Take over only when the user says so, with `hold <project>/<id> take`. |
-| `hold`, `board` | `<id> was moved to <host>` | Stop. Do not retry or take it. |
-| `hold`, `pull`, `push` | `conflict in <files>` | Settle each `.remote` as [Where things live](../SKILL.md#where-things-live) says. Else set `needs-human` with the message as note; `hold` holds it. |
+| `hold`, `board`, `build-landed` | `<id> is held by <device> session <tag>` | Tell the user who holds the job and when it was last seen, then stop. Take over only when the user says so, with `hold <project>/<id> take`. |
+| `hold`, `board`, `build-landed` | `<id> was moved to <host>` | Stop. Do not retry or take it. |
+| `hold`, `pull`, `push`, `build-landed` | `conflict in <files>` | Settle each `.remote` as [Where things live](../SKILL.md#where-things-live) says. Else set `needs-human` with the message as note; `hold` holds it. |
 | `sync` | `conflict in <project>/<id>/<file>, ...` | Tell the user which jobs conflict. They don't block a new job. |
-| `push`, `pull`, `sync`, `hold`, `handoff` | `<path> is a symlink or junction...` or `cannot inspect job paths under <folder>...` | Report the stop and do nothing to the paths: never remove links, change permissions, or `take` the job automatically. Mark the job `needs-human` with the message as the note only if this session owns the claim (`hold` may have already claimed it). Links, their targets, and local edits are left untouched. |
+| `push`, `pull`, `sync`, `hold`, `handoff`, `build-landed` | `<path> is a symlink or junction...` or `cannot inspect job paths under <folder>...` | Report the stop and do nothing to the paths: never remove links, change permissions, or `take` the job automatically. Mark the job `needs-human` with the message as the note only if this session owns the claim (`hold` may have already claimed it). Links, their targets, and local edits are left untouched. |
 | `worktree` | `<wt> is N ahead and M behind` | Set the job to `needs-human` with the message as the note, and stop. |
 | project `push`, `pull`, `where`, `init` | project file messages | See the table in [project settings](project-settings.md). |
 
