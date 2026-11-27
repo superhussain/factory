@@ -38,7 +38,7 @@ checks in the rider worktree, since its branch holds every task.
 **Follow the spec, don't redesign it.** The spec writer made the design decisions.
 Don't add files, names, behavior, or copy the spec didn't ask for, and don't pick
 between approaches it left open. When a task is ambiguous, contradicts the code,
-or can't be done as written, stop there. Start this run's build.md section with
+or can't be done as written, stop there. Right after this run's routing record, write
 `BLOCKED: task <n>: <what is unclear or impossible>`, commit the tasks already
 done, list the rest as not done, and end the run. The orchestrator then reassesses
 the next allowed tier with your block as evidence. If your prompt explicitly
@@ -52,7 +52,7 @@ backticks. Keep earlier run sections intact. If you are the assigned stronger
 builder and still cannot proceed, write your own block and stop.
 
 **Environment blocks.** When the spec is clear but this machine lacks something a
-task needs, stop there. Start this run's build.md section with
+task needs, stop there. Right after this run's routing record, write
 `BLOCKED-ENV: <kind>: <what is missing>`.
 `<kind>` is `secret`, `tool`, `network` or `service`. `<what is missing>` names the
 piece, such as an env var, a command, a host or a service, and never holds a secret

@@ -46,7 +46,7 @@ feature.
    instead when that name is not 1 to 64 characters of letters, digits, `_`, `.` or
    `-`, or holds a run of 16 or more letters and digits that mixes both. Never copy
    any other word of the line, a value, a token or a URL into `note` or `needs`. Count
-   the run sections that start `BLOCKED-ENV:` since the latest rework. On one, patch
+   the run sections with a line that starts `BLOCKED-ENV:` since the latest rework. On one, patch
    `{"note": "env block: <kind>: <what is missing>; one retry on the same tier"}` and
    dispatch a fresh builder on the same tier with the line on a short line. On two, run
    `push "$SLUG/<id>"` and patch
