@@ -38,6 +38,7 @@ const CATCH_UP_HOME_FILES: [&str; 6] = [
 static CHECKOUT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Flags::NONE);
 static REPO_PATH: Pattern = Pattern::new("[A-Za-z0-9_./-]{1,200}", Flags::ASCII);
 static GITHUB: Pattern = Pattern::new(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", Flags::NONE);
+static ANSI: Pattern = Pattern::new(r"\x1b\[[0-9;?]*[A-Za-z]", Flags::NONE);
 const TIMER_TIMEOUT: Duration = Duration::from_secs(120);
 
 macro_rules! outln {
@@ -1065,8 +1066,14 @@ fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) -> bool {
     updated
 }
 
-/// (returncode, output) of gh on the GitHub repository owner/name slug.
+/// gh output with ANSI escapes removed: a forced tty colors --json even through a pipe.
 fn catch_up_gh(slug: &str, args: &[&str]) -> (i32, String) {
+    let (code, text) = gh_reply(slug, args);
+    (code, ANSI.replace_all(&text, |_| String::new()))
+}
+
+/// (returncode, output) of gh on the GitHub repository owner/name slug.
+fn gh_reply(slug: &str, args: &[&str]) -> (i32, String) {
     #[cfg(test)]
     if let Some(f) = fake!(gh) {
         return f(slug, args);
@@ -3370,6 +3377,26 @@ mod tests {
                 1,
                 failed1,
             ),
+            (
+                vec![(
+                    0,
+                    format!(
+                        "\x1b[1;38m{}\x1b[m",
+                        deployed()
+                            .1
+                            .replace("\"success\"", "\x1b[32m\"success\"\x1b[m")
+                    ),
+                )],
+                format!("worker: deployed at {b7}"),
+                0,
+                nothing,
+            ),
+            (
+                vec![(1, "\x1b[31mHTTP 502\x1b[0m".into())],
+                "worker: HTTP 502".into(),
+                1,
+                failed1,
+            ),
         ];
         for (replies, line, exit_code, last) in cases {
             t.gh_calls.borrow_mut().clear();
@@ -3922,5 +3949,30 @@ esac
                     .to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn a_worker_failure_follows_the_retro_and_paseo_steps() {
+        let t = T::new("worker-last");
+        fs::write(t.home.join(pickup::RETRO_PROMPT_FILE), OLD_RETRO).unwrap();
+        fake_paseo(
+            &t,
+            &[(
+                "0a1b2c3d",
+                "Factory retro weekdays (example-host)",
+                OLD_RETRO,
+            )],
+        );
+        *t.gh_replies.borrow_mut() = vec![(1, "synthetic gh error".into())].into();
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1, "{lines:?}");
+        let at = |prefix: &str| lines.iter().position(|l| l.starts_with(prefix)).unwrap();
+        let (retro, paseo, worker) = (
+            at("retro prompt:"),
+            at("paseo schedules: 0a1b2c3d"),
+            at("worker: synthetic gh error"),
+        );
+        assert!(retro < paseo && paseo < worker, "{lines:?}");
+        assert_eq!(lines.last().unwrap(), "catch-up: 1 step(s) failed");
     }
 }

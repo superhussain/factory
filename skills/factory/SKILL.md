@@ -345,7 +345,7 @@ patch exits non-zero, or when you need a field's meaning.
   every PR for a person`. The orchestrator never merges it. Pickup, or an agent
   seeing it first, moves it to `merged` or `closed` ([sync](references/pickup.md#syncing-pr-state)).
   An agent that moves it runs `cleanup`.
-  When the job has `stack_base`, run `gh pr create -R "$REPO" --draft --head factory/<id> --base <stack_base>`
+  When the job has `stack_base`, set `STACK_BASE` to it, stop unless it is `factory/<job-id>`, and run `gh pr create -R "$REPO" --draft --head factory/<id> --base "$STACK_BASE"`
   and patch `draft` true and `automerge` false with stage `pr-open`, with no `needs` or
   `escalated`. Any draft PR ships with `draft` true, and whoever marks it ready patches
   `{"draft": null}`.
