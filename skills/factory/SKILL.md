@@ -266,19 +266,14 @@ patch exits non-zero, or when you need a field's meaning.
 - Run the agents in the background and act on each completion notification. Then
   read the agent's file. While an agent runs and nothing else can move, start
   `"$RUNTIME" watch "$SLUG/<id>" <artifact>... --timeout 7080` once, with the Bash
-  tool's `run_in_background` and its timeout at 7200000 ms, and act on its
-  completion notification. Run one watch per stage, never a second while one runs.
-  It accepts `spec.md`, `spec-evidence.md`, `build.md`,
-  `decision.md`, `walkthrough.html`, `build.walkthrough.html` and
-  `round-N/review-<reviewer>.md`. It refreshes this session's claim when given `--session`;
-  without a session tag it only reads. With a session tag it holds again every 600
-  seconds. It then prints one JSON line when every
-  named file has a valid first line, or after its `--timeout` with `"event": "timeout"`.
-  It prints `"event": "malformed"` once a named file keeps an invalid first line for
-  two checks; read that file and resume its agent to fix the first line.
-  On a timeout, start the same background watch again. Where the runtime has no
-  background commands, run the watch in the foreground with no `--timeout` and the
-  Bash tool timeout at 600000 ms. Only when a notification arrived without a valid file, run
+  tool's `run_in_background` and its timeout at 7200000 ms. Run one watch per
+  stage. With a session tag it holds the claim first and every 600 seconds;
+  without one it only reads. It prints one JSON line when every file has a
+  valid first line, after its `--timeout` with `"event": "timeout"`, or with
+  `"event": "malformed"` once a file keeps an invalid first line for two checks;
+  then resume that file's agent to fix it. On a timeout, start it
+  again. With no background commands, run the watch in the foreground with no
+  `--timeout` and the Bash tool timeout at 600000 ms. Only when a notification arrived without a valid file, run
   `"$RUNTIME" wait "$SLUG/<id>" <artifact>...` once, with the Bash tool timeout at
   600000 ms. Pass `--hold` to refresh
   this session's claim first, so a re-run during a long build needs no separate
