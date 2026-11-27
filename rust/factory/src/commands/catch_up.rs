@@ -16,6 +16,7 @@ use crate::cli::Call;
 use crate::commands::pickup;
 use crate::shared::build::{private_dir, rust_binary, Host, BINARY};
 use crate::shared::conf::{fm_get, frontmatter};
+use crate::shared::consts::NOTE_INVISIBLE;
 use crate::shared::exit::{exit, fail, Res};
 use crate::shared::fs::{is_link, read_text, resolve, temp_root, write_atomic};
 use crate::shared::home::factory_home;
@@ -1069,14 +1070,16 @@ fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) -> bool {
     updated
 }
 
-/// gh output with CSI and OSC escapes removed, then every control character but tab and newline, so no ESC, C1 or BEL byte reaches the terminal: a forced tty colors --json even through a pipe, and gh error text can carry OSC hyperlinks.
+/// gh output with CSI and OSC escapes removed, so no ESC, C1 or BEL byte reaches the terminal: a forced tty colors --json even through a pipe, and gh error text can carry OSC hyperlinks; then every control, bidirectional and zero-width character but tab and newline.
 fn catch_up_gh(slug: &str, args: &[&str]) -> (i32, String) {
     let (code, text) = gh_reply(slug, args);
     (
         code,
         ANSI.replace_all(&text, |_| String::new())
             .chars()
-            .filter(|c| !c.is_control() || matches!(c, '\t' | '\n'))
+            .filter(|&c| {
+                matches!(c, '\t' | '\n') || !NOTE_INVISIBLE.is_full(c.encode_utf8(&mut [0; 4]))
+            })
             .collect::<String>(),
     )
 }
@@ -3402,6 +3405,18 @@ mod tests {
             ),
             (
                 vec![(1, "\x1b[31mHTTP 502\x1b[0m".into())],
+                "worker: HTTP 502".into(),
+                1,
+                failed1,
+            ),
+            (
+                vec![(1, "HTTP\u{202e} 502\u{200b}".into())],
+                "worker: HTTP 502".into(),
+                1,
+                failed1,
+            ),
+            (
+                vec![(1, "\u{2066}HTTP 502\u{2069}\u{feff}".into())],
                 "worker: HTTP 502".into(),
                 1,
                 failed1,

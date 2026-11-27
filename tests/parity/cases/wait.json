@@ -1277,7 +1277,7 @@
     },
     {
       "id": "wait/round-bad-timeout",
-      "argv": ["--home", "{home}", "round-wait", "sample/050-round", "1", "--timeout", "541"],
+      "argv": ["--home", "{home}", "round-wait", "sample/050-round", "1", "--timeout", "7081"],
       "home": "wait-pr",
       "stubs": {},
       "routes": {

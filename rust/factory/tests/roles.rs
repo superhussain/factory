@@ -847,13 +847,15 @@ fn session_tag_is_exported_once_known() {
 
 #[test]
 fn round_wait_is_called_once_per_round() {
+    let skill_md = flat("SKILL.md");
     has(
-        &flat("SKILL.md"),
-        "Call `round-wait` once per round with no `--timeout`.",
+        &skill_md,
+        "Start `\"$RUNTIME\" round-wait \"$SLUG/<id>\" <N> --timeout 7080` once per round, with the Bash tool's `run_in_background`",
     );
+    lacks(&skill_md, "Its 540-second default");
     has(
         &flat("references/commands/feature.md"),
-        "no `--timeout`, never inside a shell loop",
+        "or in the foreground with no `--timeout` and the Bash tool timeout at 600000 ms",
     );
 }
 
