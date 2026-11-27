@@ -72,7 +72,7 @@ test("each warm job installs the same toolchain and compiles what its ci.yml job
     run(warm.jobs["rust-test"], "Build the tests"),
     run(ci.jobs["rust-test"], "Build the tests"),
   );
-  for (const name of ["Check darwin-arm64", "Check windows-x64"]) {
+  for (const name of ["Check darwin-arm64", "Check windows-x64", "Clippy linux-x64"]) {
     assert.equal(run(warm.jobs["rust-check"], name), run(ci.jobs["rust-check"], name));
   }
 });

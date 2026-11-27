@@ -444,6 +444,7 @@ test("the rust jobs build, test and check in parallel and shard parity over the 
     "cargo fmt --check",
     "cargo check --locked --target aarch64-apple-darwin",
     "cargo check --locked --tests --target x86_64-pc-windows-gnu",
+    "cargo clippy --locked --all-targets -- -D warnings",
   ]);
   assert.equal(parity.needs, "rust-build");
   assert.deepEqual(parity.strategy.matrix.shard, [1, 2, 3, 4, 5, 6]);
