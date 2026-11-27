@@ -18,6 +18,7 @@ fn skill_uses_watch() {
     assert!(skill.contains(
         "start `\"$RUNTIME\" watch \"$SLUG/<id>\" <artifact>... --timeout 7080` once, with the Bash tool's `run_in_background` and its timeout at 7200000 ms"
     ));
+    assert!(skill.contains("Run one watch per stage, never a second while one runs."));
     assert!(skill.contains(
         "run the watch in the foreground with no `--timeout` and the Bash tool timeout at 600000 ms"
     ));
