@@ -260,6 +260,56 @@ fn idle_finished(
     Ok(done)
 }
 
+/// Sync each needs-human job with a GitHub pr whose Paseo agent on this host's server is idle,
+/// closed or gone, through idle_finished, even when the project's pickup setting skips its PR sync.
+pub(super) fn needs_human_recheck_pass(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    dry: bool,
+) -> Res<()> {
+    let Some(server) = host_paseo_server() else {
+        return Ok(());
+    };
+    let due = |j: &Value| {
+        get_str(j, "stage") == Some("needs-human")
+            && get_str(j, "pr").is_some_and(|pr| GH_PR_PARTS.fullmatch(pr).is_some())
+            && j.get("paseo")
+                .filter(|l| l.is_object())
+                .and_then(|l| get_str(l, "server"))
+                == Some(server.as_str())
+            && claim_device(j).is_none_or(|d| d == device)
+            && !closing(j)
+            && lead_of(j).is_none()
+            && safe_id(j).is_some()
+            && get_str(j, "project").is_some_and(|p| SLUG.is_full(p))
+    };
+    let jobs: Vec<Value> = jobs_of(data).iter().filter(|j| due(j)).cloned().collect();
+    if jobs.is_empty() {
+        return Ok(());
+    }
+    let Some(statuses) = paseo_statuses() else {
+        errln!(
+            io,
+            "pickup skips the needs-human PR check: paseo did not answer"
+        );
+        return Ok(());
+    };
+    let quiet: Vec<Value> = jobs
+        .into_iter()
+        .filter(|j| {
+            let status = j["paseo"]
+                .get("agent")
+                .and_then(Value::as_str)
+                .and_then(|a| status_of(&statuses, a));
+            matches!(status.as_deref(), None | Some("idle" | "closed"))
+        })
+        .collect();
+    idle_finished(io, home, data, device, dry, &quiet)?;
+    Ok(())
+}
+
 /// Prompt the idle Paseo agent of each in-flight job claimed on this host once its worktree and
 /// board job sit unchanged for IDLE_NUDGE_MINUTES, once more IDLE_RECHECK_MINUTES after that, and
 /// move it to needs-human IDLE_ESCALATE_MINUTES after the last check. A job whose pull request
