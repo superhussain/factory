@@ -1909,13 +1909,13 @@ mod move_host_test {
             out,
             "stopped 042-sample-export alpha: moved to studio-mac\n"
         );
-        assert_eq!(mv.stops(), [mv.wt.clone()]);
+        assert_eq!(mv.stops(), std::slice::from_ref(&mv.wt));
         let m = mv.mv();
         assert!(is_stamp(&m["stopped"]));
         assert_eq!(m["at"], MOVE_AT);
         mv.clear_calls();
         assert_eq!(mv.pickup(&[]), out_err(0, "", ""));
-        assert_eq!(mv.stops(), [mv.wt.clone()]);
+        assert_eq!(mv.stops(), std::slice::from_ref(&mv.wt));
         assert!(mv.puts().is_empty());
     }
 
@@ -2012,7 +2012,7 @@ mod move_host_test {
         let (code, out, err) = mv.pickup(&[]);
         assert_eq!((code, err.as_str()), (0, ""));
         assert_eq!(out, "stopped 042-sample-export alpha: moved to cloud-box\n");
-        assert_eq!(mv.stops(), [mv.wt.clone()]);
+        assert_eq!(mv.stops(), std::slice::from_ref(&mv.wt));
         let m = mv.mv();
         assert!(m.get("stopped").is_none());
         let entry = &m["earlier"][0];

@@ -419,7 +419,7 @@ mod tests {
         refused();
         fs::remove_file(&state).unwrap();
         fs::write(&document, "x").unwrap();
-        fs::set_permissions(&document, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&document, fs::Permissions::from_mode(0o000)).unwrap();
         if !readable(&document) {
             refused();
         }

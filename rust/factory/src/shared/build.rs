@@ -308,7 +308,7 @@ fn store(
         .map(|p| (fs::metadata(&p).and_then(|m| m.modified()), p))
         .map(|(m, p)| m.map(|m| (m, p)).map_err(|e| os_error(&e, None)))
         .collect::<Result<_, _>>()?;
-    others.sort_by(|a, b| b.0.cmp(&a.0));
+    others.sort_by_key(|a| std::cmp::Reverse(a.0));
     for (_, old) in others.into_iter().skip(KEEP - 1) {
         fs::remove_dir_all(&old).map_err(|e| os_error(&e, Some(&old)))?;
     }

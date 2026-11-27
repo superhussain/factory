@@ -1948,7 +1948,7 @@ mod tests {
         adopt_home(&home, &pointer).unwrap();
         std::os::unix::fs::symlink(&home, dir.join("config/factory")).unwrap();
         adopt_home(&home, &pointer).unwrap();
-        fs::set_permissions(&pointer, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&pointer, fs::Permissions::from_mode(0o000)).unwrap();
         let e = resolve_home(None, Some(dir.join("config").as_os_str()), None).unwrap_err();
         fs::set_permissions(&pointer, fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(e.code, 2);
@@ -2020,13 +2020,13 @@ mod tests {
         let home = location_home(&dir, "existing");
         let pointer = dir.join("config/factory-location.json");
         let config = home.join("config.md");
-        fs::set_permissions(&config, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o000)).unwrap();
         let first = adopt_home(&home, &pointer);
         fs::set_permissions(&config, fs::Permissions::from_mode(0o644)).unwrap();
         assert_eq!(first.unwrap_err().code, 2);
         let folder = home.join("jobs");
         fs::create_dir(&folder).unwrap();
-        fs::set_permissions(&folder, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o000)).unwrap();
         let second = adopt_home(&home, &pointer);
         fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(second.unwrap_err().code, 2);
@@ -2293,7 +2293,7 @@ mod tests {
         fs::write(&env, "CLOUDFLARE_API_TOKEN=\nCLOUDFLARE_ACCOUNT_ID=acct\n").unwrap();
         refused(format!("CLOUDFLARE_API_TOKEN missing from {shown}. docs/cloudflare.md, Device token, shows how to store it."));
         fs::write(&env, "CLOUDFLARE_API_TOKEN=tok\n").unwrap();
-        fs::set_permissions(&env, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&env, fs::Permissions::from_mode(0o000)).unwrap();
         if fs::File::open(&env).is_err() {
             refused(format!(
                 "cannot read {shown}: check its permissions and that it is UTF-8 text."
@@ -2314,7 +2314,7 @@ mod tests {
         let dir = temp_dir("setup-cloudflare-unsearchable");
         let env = dir.join(".env");
         fs::write(&env, "CLOUDFLARE_API_TOKEN=tok\n").unwrap();
-        fs::set_permissions(&dir, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
         // root can still search a mode 0 folder, so only assert when the OS refuses.
         if fs::symlink_metadata(&env).is_err() {
             let e = cloudflare_env(&env).unwrap_err();

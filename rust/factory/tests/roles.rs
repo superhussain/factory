@@ -285,6 +285,7 @@ fn walkthrough_pages_and_visuals() {
     assert!(!headings.contains(&"Timeline"));
     let fence = Regex::new(r"(?s)```html\n(.*?)```").unwrap();
     let view_box = Regex::new(r#"viewBox="0 0 640 (\d+)""#).unwrap();
+    let label = Regex::new(r#"aria-label="[^"]+""#).unwrap();
     let mut svgs = 0;
     for cap in fence.captures_iter(&visuals) {
         let html = &cap[1];
@@ -297,7 +298,6 @@ fn walkthrough_pages_and_visuals() {
         svgs += 1;
         let tag = &html[..html.find('>').unwrap()];
         has(tag, r#"class="v""#);
-        let label = Regex::new(r#"aria-label="[^"]+""#).unwrap();
         assert!(label.is_match(tag), "aria-label in {tag}");
         let height: u32 = view_box.captures(tag).expect(tag)[1].parse().unwrap();
         assert!(height <= 180, "viewBox height {height}");

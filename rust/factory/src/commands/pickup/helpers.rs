@@ -160,7 +160,7 @@ pub(crate) fn local_offset(utc: i64) -> i64 {
         return 0;
     }
     // SAFETY: localtime_r filled tm, since it returned non-null.
-    i64::from(unsafe { tm.assume_init() }.gmtoff)
+    unsafe { tm.assume_init() }.gmtoff
 }
 
 #[cfg(windows)]

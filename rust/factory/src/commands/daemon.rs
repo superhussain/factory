@@ -319,8 +319,7 @@ fn retro_slot(local: &str, times: &[(u32, u32)]) -> Option<String> {
     times
         .iter()
         .map(|(hour, minute)| format!("{hour:02}:{minute:02}"))
-        .filter(|at| at.as_str() <= clock)
-        .last()
+        .rfind(|at| at.as_str() <= clock)
         .map(|at| format!("{date} {at}"))
 }
 
@@ -1066,6 +1065,7 @@ mod tests {
     /// socket runs `behave`. Each handshake's headers are recorded. Only a handshake counts as
     /// first: another test probing a port it freed, which this listener now holds, reaches the
     /// accept but not the handshake.
+    #[allow(clippy::result_large_err)]
     fn fake(
         reject: Option<u16>,
         behave: impl Fn(WebSocket<TcpStream>) + Send + Sync + 'static,

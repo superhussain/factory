@@ -340,9 +340,7 @@ fn cloudflare(
             .ok()
             .and_then(|v| v.get("errors")?.as_array()?.first().cloned())
             .unwrap_or(json!({}));
-        let code = first
-            .get("code")
-            .map_or(response.status.to_string(), |c| show(c));
+        let code = first.get("code").map_or(response.status.to_string(), show);
         let message = first
             .get("message")
             .map_or_else(|| "error".to_string(), show);

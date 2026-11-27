@@ -88,7 +88,7 @@ pub(crate) type RunGh = Box<dyn Fn(&[&str]) -> Option<GhOut> + Send + Sync>;
 /// and a GraphQL call must carry one of the wait commands' own queries.
 pub(crate) fn cacheable(args: &[&str]) -> bool {
     let pairs = |rest: &[&str], flags: &[&str]| {
-        rest.len() % 2 == 0
+        rest.len().is_multiple_of(2)
             && rest
                 .chunks(2)
                 .all(|p| flags.contains(&p[0]) && (p[0] != "--jq" || JQ_FILTERS.contains(&p[1])))

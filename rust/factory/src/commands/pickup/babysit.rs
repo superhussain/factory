@@ -176,6 +176,7 @@ pub(super) fn paseo_agent(j: &Value) -> Option<String> {
 /// Run at most one /factory babysit for a job the dashboard handed to one: in the job's own
 /// Paseo agent when it has one, else in a new session.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::unnecessary_unwrap)]
 pub(super) fn babysit_pass(
     io: &mut Io,
     home: &Path,

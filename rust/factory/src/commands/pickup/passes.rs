@@ -118,6 +118,7 @@ pub(super) fn given_entry(given: &Given) -> Entry {
 }
 
 /// The skip line shared by the one-launch passes: no project, no checkout, a gate, a fresh claim.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn one_launch_skip(
     io: &mut Io,
     home: &Path,

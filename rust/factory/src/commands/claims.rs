@@ -434,7 +434,7 @@ fn check_build(build: Option<&Value>) -> Res<()> {
     let good = build.as_object().is_some_and(|m| {
         m.keys().all(|k| k == "state" || k == "runs")
             && m.get("state")
-                .map_or(true, |s| is_one_of(Some(s), BUILD_STATES))
+                .is_none_or(|s| is_one_of(Some(s), BUILD_STATES))
             && match m.get("runs") {
                 None | Some(Value::Null) => true,
                 Some(Value::Array(runs)) => runs
@@ -810,6 +810,7 @@ enum Held {
 }
 
 /// Validate a board patch, then merge it into the job's row in one CAS write. Prints the job when opts.show.
+#[allow(clippy::if_same_then_else)]
 pub(crate) fn board_write(
     home: &Path,
     job_id: &str,
