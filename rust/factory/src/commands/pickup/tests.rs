@@ -2928,9 +2928,35 @@ pub(super) fn export_job(fx: &Fx, extra: Value) {
 mod idle_watch_test {
     use super::*;
 
-    const NUDGE: &str = "Factory job 042-sample-export shows no commit, file or board change for 20 minutes while this session sits idle. If work on it is still owed, continue with the next step now. If you are waiting on an agent or command that is still running, run factory hold for the job with your --session tag, then keep waiting.";
-    const NOTE: &str = "idle: no progress 20 minutes after a nudge to agent synthetic-agent";
-    const LINE: &str = "042-sample-export alpha: agent synthetic-agent";
+    const NUDGE: &str = "Factory daemon check 1 of 2: this session sits idle while these factory jobs it claims show no commit, file or board change: 042-sample-export (alpha, build). For each job, work out exactly what it needs, then act on the first case that fits. 1. Already done: its PR merged or closed, or its decision.md records the outcome. Record the terminal stage and clear any stale needs. 2. You can fix it: restart a wedged service (for Colima run colima stop --force, then colima start), rerun a flaky check, refresh a stale checkout, or resume after a usage limit, then continue the job. 3. Blocked on a permission or a command only the person can run: write each command as a Paseo sh run block, a one-line comment title and then the command, set needs to a one-line pointer to them, and stop. 4. Manual work only the person can do: write numbered steps that say what to do, where, and how you will know it is done, set needs to a one-line pointer to them, and stop. 5. A real choice between options: ask with the decisions-via-askuserquestion skill, recommended option first. If you wait on an agent or command that still runs, run factory hold for the job with your --session tag and keep waiting. Without a change, the daemon moves these jobs to needs-human after check 2.";
+    const NOTE: &str =
+        "idle: no progress 80 minutes after 2 diagnostic prompts to agent synthetic-agent";
+    const LINE: &str = "042-sample-export alpha: agent synthetic-agent (check 1 of 2)";
+    const LINE2: &str = "042-sample-export alpha: agent synthetic-agent (check 2 of 2)";
+    const PR7: &str = "https://github.com/sample/alpha/pull/7";
+
+    fn check2(prompt: &str) -> String {
+        prompt.replace("check 1 of 2", "check 2 of 2")
+    }
+
+    /// Point alpha at Sample/Alpha and fake GitHub's answer for each pull request number.
+    fn github(fx: &Fx, states: &[(u64, &'static str)]) {
+        fs::create_dir_all(fx.home.join("projects")).unwrap();
+        fs::write(
+            fx.home.join("projects/alpha.md"),
+            "---\nrepo: Sample/Alpha\n---\n",
+        )
+        .unwrap();
+        let states: BTreeMap<u64, &'static str> = states.iter().copied().collect();
+        fx.set_fakes(|f| {
+            f.pr_states = Some(Rc::new(move |_, numbers, _| {
+                Ok(numbers
+                    .iter()
+                    .filter_map(|n| Some((*n, (json!(states.get(n)?), Value::Null))))
+                    .collect())
+            }))
+        });
+    }
 
     fn setup() -> (Fx, Paseo) {
         let fx = Fx::new();
@@ -2948,16 +2974,23 @@ mod idle_watch_test {
         read_json(&fx.home.join("idle-watch.json")).unwrap()["jobs"].clone()
     }
 
-    fn age(fx: &Fx, fields: &[&str]) {
+    /// Move each field of every watched job to `minutes` ago.
+    fn age_by(fx: &Fx, fields: &[&str], minutes: i64) {
         let mut jobs = watch(fx);
-        for field in fields {
-            jobs["042-sample-export"][*field] = stamp(-21).into();
+        for entry in jobs.as_object_mut().unwrap().values_mut() {
+            for field in fields {
+                entry[*field] = stamp(-minutes).into();
+            }
         }
         fs::write(
             fx.home.join("idle-watch.json"),
             json!({"version": 1, "jobs": jobs}).to_string(),
         )
         .unwrap();
+    }
+
+    fn age(fx: &Fx, fields: &[&str]) {
+        age_by(fx, fields, 21);
     }
 
     fn nudged(fx: &Fx, p: &Paseo) {
@@ -2967,6 +3000,16 @@ mod idle_watch_test {
         assert_eq!(
             fx.pickup(&[]),
             out_err(0, &format!("nudged idle {LINE}\n"), "")
+        );
+        p.sent.borrow_mut().clear();
+    }
+
+    fn checked_twice(fx: &Fx, p: &Paseo) {
+        nudged(fx, p);
+        age_by(fx, &["nudged"], 41);
+        assert_eq!(
+            fx.pickup(&[]),
+            out_err(0, &format!("nudged idle {LINE2}\n"), "")
         );
         p.sent.borrow_mut().clear();
     }
@@ -3005,9 +3048,120 @@ mod idle_watch_test {
             [("synthetic-agent".to_string(), NUDGE.to_string())]
         );
         assert!(fx.puts().is_empty());
-        assert!(watch(&fx)["042-sample-export"].get("nudged").is_some());
+        let entry = watch(&fx)["042-sample-export"].clone();
+        assert!(is_stamp(&entry["nudged"]));
+        assert_eq!(entry["nudges"], 1);
         assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
         assert_eq!(p.sent().len(), 1);
+    }
+
+    #[test]
+    fn test_one_prompt_per_agent_lists_every_job() {
+        let (fx, p) = setup();
+        let job = |id: &str| {
+            json!({"id": id, "stage": "build", "project": "alpha", "updated": "2026-01-01T10:00:00Z",
+                "claim": {"device": DEVICE, "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"},
+                "paseo": {"server": "synthetic-server", "agent": "synthetic-agent"}})
+        };
+        fx.jobs(json!([job("042-sample-export"), job("043-sample-import")]));
+        fx.pickup(&[]);
+        age(&fx, &["since"]);
+        assert_eq!(
+            fx.pickup(&[]),
+            out_err(0, &format!("nudged idle {LINE}\nnudged idle 043-sample-import alpha: agent synthetic-agent (check 1 of 2)\n"), "")
+        );
+        assert_eq!(
+            p.sent(),
+            [(
+                "synthetic-agent".to_string(),
+                NUDGE.replace(
+                    "042-sample-export (alpha, build)",
+                    "042-sample-export (alpha, build), 043-sample-import (alpha, build)"
+                )
+            )]
+        );
+        assert_eq!(watch(&fx)["043-sample-import"]["nudges"], 1);
+    }
+
+    #[test]
+    fn test_second_check_after_forty_minutes() {
+        let (fx, p) = setup();
+        nudged(&fx, &p);
+        age_by(&fx, &["nudged"], 39);
+        assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+        assert!(p.sent().is_empty());
+        age_by(&fx, &["nudged"], 41);
+        assert_eq!(
+            fx.pickup(&[]),
+            out_err(0, &format!("nudged idle {LINE2}\n"), "")
+        );
+        assert_eq!(p.sent(), [("synthetic-agent".to_string(), check2(NUDGE))]);
+        assert_eq!(watch(&fx)["042-sample-export"]["nudges"], 2);
+        assert_eq!(fx.job("042-sample-export")["stage"], "build");
+    }
+
+    #[test]
+    fn test_legacy_entry_counts_as_one_check() {
+        let (fx, p) = setup();
+        export_job(&fx, json!({}));
+        fs::write(fx.home.join("idle-watch.json"), json!({"version": 1, "jobs": {"042-sample-export": {"agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z", "since": stamp(-61), "nudged": stamp(-41)}}}).to_string()).unwrap();
+        assert_eq!(
+            fx.pickup(&[]),
+            out_err(0, &format!("nudged idle {LINE2}\n"), "")
+        );
+        assert_eq!(p.sent(), [("synthetic-agent".to_string(), check2(NUDGE))]);
+        assert_eq!(watch(&fx)["042-sample-export"]["nudges"], 2);
+    }
+
+    #[test]
+    fn test_merged_pr_syncs_without_a_prompt() {
+        let (fx, p) = setup();
+        github(&fx, &[(7, "MERGED")]);
+        export_job(&fx, json!({"pr": PR7}));
+        fx.pickup(&[]);
+        age(&fx, &["since"]);
+        let line = "idle 042-sample-export alpha: merged on GitHub\n";
+        assert_eq!(
+            fx.pickup(&["--dry-run"]),
+            out_err(
+                0,
+                &format!("would sync {line}host {DEVICE}: would launch 0\n"),
+                ""
+            )
+        );
+        assert!(fx.puts().is_empty());
+        assert_eq!(fx.pickup(&[]), out_err(0, &format!("synced {line}"), ""));
+        assert!(p.sent().is_empty());
+        let job = fx.job("042-sample-export");
+        assert_eq!(
+            (&job["stage"], &job["note"]),
+            (&json!("merged"), &json!("merged on GitHub"))
+        );
+        assert!(job.get("claim").is_none());
+        assert_eq!(watch(&fx), json!({}));
+    }
+
+    #[test]
+    fn test_closed_pr_queues_a_close() {
+        let (fx, p) = setup();
+        github(&fx, &[(7, "CLOSED")]);
+        export_job(&fx, json!({"pr": PR7}));
+        fx.pickup(&[]);
+        age(&fx, &["since"]);
+        assert_eq!(
+            fx.pickup(&[]),
+            out_err(
+                0,
+                "synced idle 042-sample-export alpha: PR closed on GitHub\n",
+                ""
+            )
+        );
+        assert!(p.sent().is_empty());
+        let close = fx.job("042-sample-export")["close"].clone();
+        assert_eq!(
+            (&close["reason"], &close["via"]),
+            (&json!("PR closed on GitHub"), &json!("github"))
+        );
     }
 
     #[test]
@@ -3104,7 +3258,7 @@ mod idle_watch_test {
             )]);
             export_job(&fx, extra.clone());
             fx.pickup(&[]);
-            fs::write(fx.home.join("idle-watch.json"), json!({"version": 1, "jobs": {"042-sample-export": {"agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z", "since": stamp(-41), "nudged": stamp(-21)}}}).to_string()).unwrap();
+            fs::write(fx.home.join("idle-watch.json"), json!({"version": 1, "jobs": {"042-sample-export": {"agent": "synthetic-agent", "head": "", "tree": "", "updated": "2026-01-01T10:00:00Z", "since": stamp(-61), "nudged": stamp(-41)}}}).to_string()).unwrap();
             fx.clear_calls();
             assert_eq!(fx.pickup(&[]), out_err(0, "", ""), "{name}");
             assert!(p.sent().is_empty() && fx.puts().is_empty());
@@ -3118,8 +3272,8 @@ mod idle_watch_test {
     #[test]
     fn test_dry_run_prints_the_needs_human_move() {
         let (fx, p) = setup();
-        nudged(&fx, &p);
-        age(&fx, &["nudged"]);
+        checked_twice(&fx, &p);
+        age_by(&fx, &["nudged"], 81);
         let before = fs::read_to_string(fx.home.join("idle-watch.json")).unwrap();
         fx.clear_calls();
         assert_eq!(fx.pickup(&["--dry-run"]), out_err(0, &format!("would move needs-human 042-sample-export alpha: {NOTE}\nhost {DEVICE}: would launch 0\n"), ""));
@@ -3132,10 +3286,19 @@ mod idle_watch_test {
     }
 
     #[test]
-    fn test_needs_human_after_the_second_window() {
+    fn test_needs_human_after_two_checks() {
         let (fx, p) = setup();
         nudged(&fx, &p);
-        age(&fx, &["nudged"]);
+        age_by(&fx, &["nudged"], 81);
+        assert_eq!(
+            fx.pickup(&[]),
+            out_err(0, &format!("nudged idle {LINE2}\n"), "")
+        );
+        p.sent.borrow_mut().clear();
+        age_by(&fx, &["nudged"], 79);
+        assert_eq!(fx.pickup(&[]), out_err(0, "", ""));
+        assert_eq!(fx.job("042-sample-export")["stage"], "build");
+        age_by(&fx, &["nudged"], 81);
         assert_eq!(
             fx.pickup(&[]),
             out_err(
@@ -3169,8 +3332,8 @@ mod idle_watch_test {
     #[test]
     fn test_board_change_wins_over_escalation() {
         let (fx, p) = setup();
-        nudged(&fx, &p);
-        age(&fx, &["nudged"]);
+        checked_twice(&fx, &p);
+        age_by(&fx, &["nudged"], 81);
         let (state, statuses) = (fx.state.clone(), p.statuses.clone());
         fx.set_fakes(|f| {
             f.paseo_statuses = Some(Rc::new(move || {
@@ -8698,7 +8861,12 @@ mod permission_guard_test {
         build(&fx, claim("2026-01-01T10:00:00Z"));
         let (code, out, _) = fx.pickup(&[]);
         assert_eq!(code, 0);
-        assert!(out.starts_with("nudged idle 042-sample-export"), "{out}");
+        assert!(
+            out.starts_with(
+                "nudged idle 042-sample-export alpha: agent synthetic-agent (check 1 of 2)\n"
+            ),
+            "{out}"
+        );
         assert_eq!(p.sent().len(), 1);
     }
 
