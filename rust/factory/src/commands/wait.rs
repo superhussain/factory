@@ -878,6 +878,41 @@ mod tests {
     }
 
     #[test]
+    fn watch_without_session_never_holds() {
+        use crate::shared::http::tests::{home_for, serve};
+        let board =
+            json!({"updated": "", "jobs": [{"id": "042-sample-export", "project": "sample"}]})
+                .to_string();
+        let board: &'static str = Box::leak(board.into_boxed_str());
+        let (origin, _) = serve(vec![(200, board, vec![("ETag", "\"e1\"")])]);
+        let home = home_for("watch-no-session", &origin);
+        let clock = Cell::new(0.0);
+        let holds = RefCell::new(Vec::new());
+        let hold = |_: &str| {
+            holds.borrow_mut().push(clock.get());
+            Ok(())
+        };
+        let io = Io {
+            hold: &hold,
+            now: &|| clock.get(),
+            sleep: &|s| clock.set(clock.get() + s),
+        };
+        assert!(watch_run(
+            &home,
+            "sample",
+            "042-sample-export",
+            "sample/042-sample-export",
+            &strings(&["decision.md", "--timeout", "1300"]),
+            false,
+            &io,
+        )
+        .unwrap()
+        .starts_with("{\"event\": \"timeout\""));
+        assert!(holds.borrow().is_empty());
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
     fn round_wait_refuses_bad_round_and_timeout() {
         let (home, _) = home("round-args", "042-sample-export");
         let io = Io {
