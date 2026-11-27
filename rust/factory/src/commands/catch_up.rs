@@ -38,7 +38,10 @@ const CATCH_UP_HOME_FILES: [&str; 6] = [
 static CHECKOUT_SLUG: Pattern = Pattern::new("[A-Za-z0-9_-]+", Flags::NONE);
 static REPO_PATH: Pattern = Pattern::new("[A-Za-z0-9_./-]{1,200}", Flags::ASCII);
 static GITHUB: Pattern = Pattern::new(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", Flags::NONE);
-static ANSI: Pattern = Pattern::new(r"\x1b\[[0-9;?]*[A-Za-z]", Flags::NONE);
+static ANSI: Pattern = Pattern::new(
+    r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?",
+    Flags::NONE,
+);
 const TIMER_TIMEOUT: Duration = Duration::from_secs(120);
 
 macro_rules! outln {
@@ -1066,7 +1069,7 @@ fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) -> bool {
     updated
 }
 
-/// gh output with ANSI escapes removed: a forced tty colors --json even through a pipe.
+/// gh output with CSI and OSC escapes removed: a forced tty colors --json even through a pipe, and gh error text can carry OSC hyperlinks.
 fn catch_up_gh(slug: &str, args: &[&str]) -> (i32, String) {
     let (code, text) = gh_reply(slug, args);
     (code, ANSI.replace_all(&text, |_| String::new()))
@@ -3393,6 +3396,27 @@ mod tests {
             ),
             (
                 vec![(1, "\x1b[31mHTTP 502\x1b[0m".into())],
+                "worker: HTTP 502".into(),
+                1,
+                failed1,
+            ),
+            (
+                vec![(
+                    1,
+                    "\x1b]8;;https://github.com/example/factory/actions/runs/7\x1b\\run 7\x1b]8;;\x1b\\ failed".into(),
+                )],
+                "worker: run 7 failed".into(),
+                1,
+                failed1,
+            ),
+            (
+                vec![(1, "\x1b]0;gh\x07HTTP 502".into())],
+                "worker: HTTP 502".into(),
+                1,
+                failed1,
+            ),
+            (
+                vec![(1, "HTTP 502\x1b]8;;https://example.invalid".into())],
                 "worker: HTTP 502".into(),
                 1,
                 failed1,
