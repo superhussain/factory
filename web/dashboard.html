@@ -2514,6 +2514,7 @@ function card(j, inNeeds, archived = false) {
   const standIn = (id, label) => '<a class="ref-focus sr-only" href="#' + esc(id) + '" data-ref="' + esc(id) + '">' + esc(j.id + ': ' + label) + '</a>';
   const tags = (!archived && starred.has(j.id) ? '<span class="chip">Starred</span>' : '') +
     (inNeeds ? '<span class="chip">' + esc(j.stage) + '</span>' : '') +
+    (j.stage === 'pr-open' && j.draft === true ? '<span class="chip draft" title="Draft PR, not meant to merge yet. It skips Needs you until its draft flag is cleared.">Draft</span>' : '') +
     (j.paused?.at ? '<span class="chip">Paused</span>' : '') +
     (j.close?.at && !TERMINAL.includes(j.stage) ? '<span class="chip">Closing</span>' : '') +
     (j.priority?.at ? '<span class="chip">Prioritized</span>' : '') +
