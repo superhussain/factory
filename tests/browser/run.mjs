@@ -362,6 +362,16 @@ const CAPTURE_JOBS = [
       { note: "Keep the CSV header order the same as the old report.", at: "2026-01-02T14:00:00Z" },
     ],
   },
+  {
+    id: "300-proto-pacing",
+    project: "sample",
+    title: "Synthetic prototype pacing",
+    stage: "pr-open",
+    updated: "2026-01-02T13:00:00Z",
+    escalated: true,
+    draft: true,
+    needs: "review the prototype PR #70",
+  },
 ];
 // More merged rows than the slim board read carries, so the merged column loads the rest on demand.
 const CAPTURE_MERGED = Array.from({ length: 30 }, (_, n) => {
@@ -1403,6 +1413,7 @@ async function capture(outdir, referencePath) {
 
     await view("board-desktop", 1440, 900, "light", async () => {});
     await view("board-desktop-dark", 1440, 900, "dark", async () => {});
+    await view("board-draft-stack-1440", 1440, 900, "light", async () => {});
     await view("board-mobile", 390, 844, "dark", async () => {});
     const putHalt = (page, body) =>
       page.evaluate(

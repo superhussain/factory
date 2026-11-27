@@ -60,6 +60,15 @@
       "title": "Synthetic 048-sample-plain-pr",
       "stage": "pr-open",
       "updated": "2026-01-01T00:00:00Z"
+    },
+    {
+      "id": "049-sample-draft-stack",
+      "project": "sample",
+      "title": "Synthetic 049-sample-draft-stack",
+      "stage": "pr-open",
+      "updated": "2026-01-01T00:00:00Z",
+      "escalated": true,
+      "draft": true
     }
   ],
   "backlog": "# Backlog\n\n- [ ] sample: Cache the sample report\n  Recommend: approve\n\n  The sample report reloads on every visit.\n- [ ] sample: Trim the export columns\n- [x] sample: Ship the old report (040-sample-shipped)\n- [ ] café: Non-ASCII slug line\n- [ ]sample: missing space\n",

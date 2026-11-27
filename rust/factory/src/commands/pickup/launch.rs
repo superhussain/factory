@@ -295,6 +295,9 @@ pub(super) fn waits_on_you(j: &Value) -> bool {
     if stage.is_some_and(|s| TERMINAL.contains(&s)) {
         return false;
     }
+    if draft_pr(j) {
+        return false;
+    }
     stage == Some("needs-human")
         || get_str(j, "needs").is_some_and(|n| !strip(n).is_empty())
         || stage == Some("pr-open") && escalated(j)

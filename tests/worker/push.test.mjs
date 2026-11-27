@@ -96,6 +96,13 @@ test("boardPushes finds new waits and merges only", () => {
     ),
     [{ kind: "needs", id: "049-sample-esc", title: "Synthetic 049-sample-esc" }],
   );
+  assert.deepEqual(
+    boardPushes(
+      [row("050-sample-draft", "build")],
+      [row("050-sample-draft", "pr-open", { escalated: true, draft: true })],
+    ),
+    [],
+  );
 });
 
 const SEEN = "2026-11-17T05:40:00Z";

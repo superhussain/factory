@@ -100,6 +100,7 @@ const asks = (s) => typeof s === "string" && s.trim() !== "";
 // Ports the dashboard's waitsOnYou. Change both together.
 export function waitsOnYou(j) {
   if (TERMINAL.includes(j.stage)) return false;
+  if (j.stage === "pr-open" && j.draft === true) return false;
   return (
     j.stage === "needs-human" ||
     asks(j.needs) ||

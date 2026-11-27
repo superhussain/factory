@@ -41,6 +41,8 @@ When `<home>/tracer.json` lists the project, a patch that sets `stage` or `round
   "pr": "https://github.com/<owner>/<repo>/pull/44",
   "escalated": true,
   "automerge": true,
+  "draft": true,
+  "stack_base": "factory/<job-id> of the draft job this one stacks on; set by factory start",
   "checked_head": "40-hex head SHA; set by factory checks",
   "resumes": { "count": 1, "key": "000000000000" },
   "jira": "optional Jira key, read by the Tracer mirror",
@@ -81,7 +83,7 @@ A `board` patch cannot rewrite a recorded round: it may only keep the stored rou
 Set `port` when you assign one and clear it when you run `cleanup`, so other sessions can see
 which ports live jobs hold. Only `factory` writes `claim`.
 A `board` patch that would change only `updated` stamps, or only this session's `claim.seen` while the stored one is under 10 minutes old, sends no PUT and prints the stored row.
-`depends-on` holds an idea back from pickup, `ideas` and `batch` until the named job is merged, closed or off the board.
+`depends-on` holds an idea back from pickup, `ideas` and `batch` until the named job is merged, closed or off the board. Pickup and `ideas` also let it run when the named job is a `pr-open` job with `draft` true; `batch` still waits.
 Approving a backlog line turns each `Depends on: <slug>: <feature>` context line into this ref, and is refused while that line is unchecked. The dashboard's refusal links to that prerequisite's backlog item. `next` and `batch` skip such a line while its prerequisite is unchecked or still open, and add this ref to the job they make. `batch` allows a prerequisite that is the lead or one of its riders.
 `done` is when the job entered `merged` or `closed`, and only `factory` writes it.
 `started` is when the job first got a claim, and only `factory` writes it.
@@ -90,6 +92,8 @@ Approving a backlog line turns each `Depends on: <slug>: <feature>` context line
 `launch_failure` records failed pickup launches in a row, and only `factory pickup` writes it. `count` sets the next `not_before` delay, `reason` is the exit code or a path-free start error, and `at` is the last failure. A successful launch removes it. The fifth failure in a row moves the job to `needs-human` with a `needs` ask naming the host and last reason, and keeps the record. `board` refuses a `launch_failure` patch with exit 2.
 `repeated` holds the newest 20 review findings `factory repeats` saw again, and only it writes them. `board` refuses a `repeated` patch with exit 2.
 `escalated` is set when an ESCALATE PR ships, and marks a PR that waits on a human.
+`draft` (true, false or null) marks a `pr-open` job whose PR is a GitHub draft that is not meant to merge. Such a job never waits on you: pickup backpressure, the inbox and the Needs you column skip it. Whoever marks the PR ready patches `{"draft": null}`.
+`stack_base` is `factory/<job-id>` or null. `factory start` sets it when an idea depends on a draft `pr-open` job, and cuts the new worktree from that branch. `board` refuses any other value with `stack_base must be factory/<job-id> or null` (exit 2).
 `automerge` marks an APPROVE PR waiting to merge. `board` refuses `automerge` true
 unless the local decision.md opens with APPROVE, and refuses stage `approve` unless
 the last `rounds` entry is all PASS or SKIPPED; factory says it cannot move to

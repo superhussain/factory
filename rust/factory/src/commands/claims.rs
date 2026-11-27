@@ -842,11 +842,20 @@ pub(crate) fn board_write(
     {
         return Err(fail("only factory deny-notes sets backlog.notes_read", 2));
     }
-    for key in ["escalated", "automerge"] {
+    for key in ["escalated", "automerge", "draft"] {
         let v = or_null(patch.get(key));
         if !(v.is_null() || py_eq(v, &Value::Bool(true)) || py_eq(v, &Value::Bool(false))) {
             return Err(fail(format!("{key} must be true, false, or null"), 2));
         }
+    }
+    let base = or_null(patch.get("stack_base"));
+    if !base.is_null()
+        && !base
+            .as_str()
+            .and_then(|b| b.strip_prefix("factory/"))
+            .is_some_and(|id| JOB_ID.is_full(id) && !id.contains(".."))
+    {
+        return Err(fail("stack_base must be factory/<job-id> or null", 2));
     }
     if patch
         .get("needs")
@@ -1802,6 +1811,33 @@ mod tests {
             (e.code, e.stderr.as_str()),
             (2, "only factory agent and pickup set agents\n")
         );
+        fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn test_board_refuses_bad_stack_base() {
+        let home = refused_home("claims-refuses-stack-base");
+        let opts = WriteOpts {
+            show: false,
+            verdict: None,
+            rewrite_round: None,
+        };
+        for base in [
+            json!("main"),
+            json!("factory/../x"),
+            json!("factory/a b"),
+            json!(true),
+        ] {
+            let patch = json!({ "stack_base": base }).as_object().unwrap().clone();
+            let e = board_write(&home, "042-sample-export", patch, &opts).unwrap_err();
+            assert_eq!(
+                (e.code, e.stderr.as_str()),
+                (2, "stack_base must be factory/<job-id> or null\n")
+            );
+        }
+        let patch = json!({"draft": "yes"}).as_object().unwrap().clone();
+        let e = board_write(&home, "042-sample-export", patch, &opts).unwrap_err();
+        assert_eq!(e.stderr, "draft must be true, false, or null\n");
         fs::remove_dir_all(home).unwrap();
     }
 
