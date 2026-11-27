@@ -3950,4 +3950,29 @@ esac
             ]
         );
     }
+
+    #[test]
+    fn a_worker_failure_follows_the_retro_and_paseo_steps() {
+        let t = T::new("worker-last");
+        fs::write(t.home.join(pickup::RETRO_PROMPT_FILE), OLD_RETRO).unwrap();
+        fake_paseo(
+            &t,
+            &[(
+                "0a1b2c3d",
+                "Factory retro weekdays (example-host)",
+                OLD_RETRO,
+            )],
+        );
+        *t.gh_replies.borrow_mut() = vec![(1, "synthetic gh error".into())].into();
+        let (code, lines) = t.lines();
+        assert_eq!(code, 1, "{lines:?}");
+        let at = |prefix: &str| lines.iter().position(|l| l.starts_with(prefix)).unwrap();
+        let (retro, paseo, worker) = (
+            at("retro prompt:"),
+            at("paseo schedules: 0a1b2c3d"),
+            at("worker: synthetic gh error"),
+        );
+        assert!(retro < paseo && paseo < worker, "{lines:?}");
+        assert_eq!(lines.last().unwrap(), "catch-up: 1 step(s) failed");
+    }
 }
