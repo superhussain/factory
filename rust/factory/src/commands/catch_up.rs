@@ -1069,10 +1069,14 @@ fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) -> bool {
     updated
 }
 
-/// gh output with CSI and OSC escapes removed: a forced tty colors --json even through a pipe, and gh error text can carry OSC hyperlinks.
+/// gh output with CSI and OSC escapes removed, then any ESC byte left over so none can splice into a new escape: a forced tty colors --json even through a pipe, and gh error text can carry OSC hyperlinks.
 fn catch_up_gh(slug: &str, args: &[&str]) -> (i32, String) {
     let (code, text) = gh_reply(slug, args);
-    (code, ANSI.replace_all(&text, |_| String::new()))
+    (
+        code,
+        ANSI.replace_all(&text, |_| String::new())
+            .replace('\x1b', ""),
+    )
 }
 
 /// (returncode, output) of gh on the GitHub repository owner/name slug.
