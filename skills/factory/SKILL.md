@@ -267,7 +267,7 @@ patch exits non-zero, or when you need a field's meaning.
   read the agent's file. While an agent runs and nothing else can move, start
   `"$RUNTIME" watch "$SLUG/<id>" <artifact>... --timeout 7080` once, with the Bash
   tool's `run_in_background` and its timeout at 7200000 ms. Run one watch per
-  stage. With a session tag it holds the claim first and every 600 seconds;
+  stage, never a second while one runs. With a session tag it holds the claim first and every 600 seconds;
   without one it only reads. It prints one JSON line when every file has a
   valid first line, after its `--timeout` with `"event": "timeout"`, or with
   `"event": "malformed"` once a file keeps an invalid first line for two checks;
