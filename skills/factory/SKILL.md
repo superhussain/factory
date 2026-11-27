@@ -90,7 +90,7 @@ The factory runs on its own. A human sees a job only when it escalates, hits the
 round cap, repeats a finding or failing check, churns a file, fails twice, blocks twice on its environment, or its review findings need a person. Everything else specs,
 builds, reviews, merges, and waits in the build queue without asking.
 
-Read [feature](references/commands/feature.md) before step 1 of any loop run. It holds the numbered steps the other commands continue. `/factory idea` is the one exception. When `factory start` exits 0 with a numbered `== next` block, that block is step 2, so read feature.md after the spec writer returns and before step 3.
+Read [feature](references/commands/feature.md) before step 1 of any loop run. It holds the numbered steps the other commands continue. Except in `/factory idea`: when `factory start` exits 0, its `== next` block is step 2, so read feature.md after the spec writer returns.
 
 ## Where things live
 
