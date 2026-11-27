@@ -1069,13 +1069,15 @@ fn paseo_sweep(out: &mut dyn Write, home: &Path, skill: &Path) -> bool {
     updated
 }
 
-/// gh output with CSI and OSC escapes removed, then any ESC byte left over so none can splice into a new escape: a forced tty colors --json even through a pipe, and gh error text can carry OSC hyperlinks.
+/// gh output with CSI and OSC escapes removed, then every control character but tab and newline, so no ESC, C1 or BEL byte reaches the terminal: a forced tty colors --json even through a pipe, and gh error text can carry OSC hyperlinks.
 fn catch_up_gh(slug: &str, args: &[&str]) -> (i32, String) {
     let (code, text) = gh_reply(slug, args);
     (
         code,
         ANSI.replace_all(&text, |_| String::new())
-            .replace('\x1b', ""),
+            .chars()
+            .filter(|c| !c.is_control() || matches!(c, '\t' | '\n'))
+            .collect::<String>(),
     )
 }
 
@@ -3427,13 +3429,31 @@ mod tests {
             ),
             (
                 vec![(1, "\x1b\x1b[0m]8;;https://example.invalid\x07x".into())],
-                "worker: ]8;;https://example.invalid\x07x".into(),
+                "worker: ]8;;https://example.invalidx".into(),
                 1,
                 failed1,
             ),
             (
                 vec![(1, "HTTP 502\x1b".into())],
                 "worker: HTTP 502".into(),
+                1,
+                failed1,
+            ),
+            (
+                vec![(1, "\u{9b}2JHTTP 502".into())],
+                "worker: 2JHTTP 502".into(),
+                1,
+                failed1,
+            ),
+            (
+                vec![(1, "HTTP\x07 50\x002\x7f".into())],
+                "worker: HTTP 502".into(),
+                1,
+                failed1,
+            ),
+            (
+                vec![(1, "HTTP 502\tbad gateway".into())],
+                "worker: HTTP 502\tbad gateway".into(),
                 1,
                 failed1,
             ),
