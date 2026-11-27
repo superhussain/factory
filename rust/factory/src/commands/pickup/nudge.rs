@@ -153,12 +153,21 @@ fn idle_prompt(check: i64, jobs: &[Value]) -> String {
         .replace("{jobs}", &listed.join(", "))
 }
 
-/// Sync each job whose pull request GitHub reports merged or closed with the PR sync's patch, and
-/// return their ids. One gh api graphql call per repo; the write needs the same stage and a claim
-/// by this host. A dry run prints the syncs and returns their ids without writing.
+/// The device of the job's claim, None when it has no claim object.
+fn claim_device(j: &Value) -> Option<&str> {
+    j.get("claim")
+        .filter(|c| c.is_object())
+        .and_then(|c| get_str(c, "device"))
+}
+
+/// Sync each job whose pull request GitHub reports merged or closed with the PR sync's patch, swap
+/// the written rows into data and return their ids. One gh api graphql call per repo; the write
+/// needs the same stage, pr and claim device as the read row and no queued close. A dry run prints
+/// the syncs and returns their ids without writing.
 fn idle_finished(
     io: &mut Io,
     home: &Path,
+    data: &mut Value,
     device: &str,
     dry: bool,
     jobs: &[Value],
@@ -230,22 +239,23 @@ fn idle_finished(
             };
             if found.get("stage") != j.get("stage")
                 || found.get("pr") != j.get("pr")
-                || found
-                    .get("claim")
-                    .filter(|c| c.is_object())
-                    .and_then(|c| get_str(c, "device"))
-                    != Some(device)
+                || claim_device(found) != claim_device(j)
+                || closing(found)
             {
                 continue;
             }
-            patch_job(&mut board, job_id, patch);
-            synced.push((job_id.to_string(), line.clone()));
+            let row = patch_job(&mut board, job_id, patch);
+            synced.push((j.clone(), row, line.clone()));
         }
         Ok(((!synced.is_empty()).then(|| dump_board(&board)), synced))
     })?;
-    for (job_id, line) in synced {
+    for (j, row, line) in synced {
+        let jobs = data["jobs"].as_array_mut().unwrap();
+        if let Some(slot) = jobs.iter_mut().find(|x| **x == j) {
+            *slot = row;
+        }
         outln!(io, "synced {line}");
-        done.insert(job_id);
+        done.insert(text_of(j.get("id")));
     }
     Ok(done)
 }
@@ -348,7 +358,7 @@ pub(super) fn idle_watch_pass(
         }
         watch.insert(job_id.into(), prev);
     }
-    let finished = idle_finished(io, home, device, dry, &ready)?;
+    let finished = idle_finished(io, home, data, device, dry, &ready)?;
     let mut prompts: Vec<(String, Vec<Value>)> = Vec::new();
     for j in &ready {
         let (job_id, project) = (get_str(j, "id").unwrap(), get_str(j, "project").unwrap());
@@ -372,30 +382,30 @@ pub(super) fn idle_watch_pass(
             continue;
         }
         let (stage, updated) = (j.get("stage").cloned(), j.get("updated").cloned());
-        let done = cas(home, "/api/board", |text| {
+        let row = cas(home, "/api/board", |text| {
             let mut board = load_board(text)?;
             let Some(b) = job_index(&board, job_id) else {
-                return Ok((None, false));
+                return Ok((None, None));
             };
             let found = &board["jobs"][b];
             if found.get("stage").cloned() != stage
                 || found.get("updated").cloned() != updated
-                || found
-                    .get("claim")
-                    .filter(|c| c.is_object())
-                    .and_then(|c| get_str(c, "device"))
-                    != Some(device)
+                || claim_device(found) != Some(device)
             {
-                return Ok((None, false));
+                return Ok((None, None));
             }
-            patch_job(
+            let row = patch_job(
                 &mut board,
                 job_id,
                 &json!({"stage": "needs-human", "note": note, "claim": null}),
             );
-            Ok((Some(dump_board(&board)), true))
+            Ok((Some(dump_board(&board)), Some(row)))
         })?;
-        if done {
+        if let Some(row) = row {
+            let jobs = data["jobs"].as_array_mut().unwrap();
+            if let Some(slot) = jobs.iter_mut().find(|x| *x == j) {
+                *slot = row;
+            }
             outln!(io, "needs-human {job_id} {project}: {note}");
         }
         watch.shift_remove(job_id);
