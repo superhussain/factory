@@ -3397,6 +3397,27 @@ mod tests {
                 1,
                 failed1,
             ),
+            (
+                vec![(
+                    1,
+                    "\x1b]8;;https://github.com/example/factory/actions/runs/7\x1b\\run 7\x1b]8;;\x1b\\ failed".into(),
+                )],
+                "worker: run 7 failed".into(),
+                1,
+                failed1,
+            ),
+            (
+                vec![(1, "\x1b]0;gh\x07HTTP 502".into())],
+                "worker: HTTP 502".into(),
+                1,
+                failed1,
+            ),
+            (
+                vec![(1, "HTTP 502\x1b]8;;https://example.invalid".into())],
+                "worker: HTTP 502".into(),
+                1,
+                failed1,
+            ),
         ];
         for (replies, line, exit_code, last) in cases {
             t.gh_calls.borrow_mut().clear();
