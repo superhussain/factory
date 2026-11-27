@@ -3421,6 +3421,18 @@ mod tests {
                 1,
                 failed1,
             ),
+            (
+                vec![(1, "\x1b\x1b[0m]8;;https://example.invalid\x07x".into())],
+                "worker: ]8;;https://example.invalid\x07x".into(),
+                1,
+                failed1,
+            ),
+            (
+                vec![(1, "HTTP 502\x1b".into())],
+                "worker: HTTP 502".into(),
+                1,
+                failed1,
+            ),
         ];
         for (replies, line, exit_code, last) in cases {
             t.gh_calls.borrow_mut().clear();
