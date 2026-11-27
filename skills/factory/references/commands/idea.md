@@ -6,8 +6,10 @@ works from any directory.
 
 First run `<this skill's dir>/runtime/factory start <id> --session <tag>`. It
 does steps 1 to 4 in one call and prints step 5's candidates. On exit 0 with no
-`rework:` line, go to step 5's picks. On a non-zero exit, follow the step that
-the last `==` header names and continue by hand from there.
+`rework:` line, go to step 5's picks. Then follow the numbered `== next` lines.
+They carry loop step 2, so read feature.md only once spec.md lands. On a
+non-zero exit, follow the step that the last `==` header names and continue by
+hand from there.
 
 1. Run `<this skill's dir>/runtime/factory job <id>`. Immediately check
    `project`. If absent, null, or empty, report `Assign a registered project in the idea drawer before starting this idea`
@@ -72,8 +74,8 @@ the last `==` header names and continue by hand from there.
    refuses a patch that adds or removes a `batched-into` ref. The dashboard's
    Remove from batch drops one while this job is at `spec`. When the job's
    `priority.alone` is true, `batch` lists no candidates. Go on unbatched.
-6. Continue the loop from step 2 of `/factory <feature>`, with the `idea` field
-   as the feature text. When the job has pasted images, also give the spec writer
+6. Continue the loop from step 2 of `/factory <feature>`. After `factory start`,
+   its `== next` lines are that step. Use the `idea` field as the feature text. When the job has pasted images, also give the spec writer
    `$JOBS/<id>/idea-images.md` and its images, so the spec starts from the idea's
    image context. Keep the idea text exact; the images never rewrite it.
    Attached files reach the spec writer as `Idea file N:` lines in its prompt.
