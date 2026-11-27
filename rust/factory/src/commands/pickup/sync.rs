@@ -44,6 +44,21 @@ pub(super) fn pr_states(
     crate::commands::checks::pr_states(repo, numbers, device)
 }
 
+/// The board patch for a job whose pull request GitHub reports merged, or else closed.
+pub(super) fn pr_sync_patch(merged: bool, head: &Value) -> Value {
+    if merged {
+        let mut github = json!({"merged": now()});
+        if let Some(head) = head.as_str().filter(|h| COMMIT.is_full(h)) {
+            github["head"] = head.into();
+        }
+        json!({"stage": "merged", "needs": null, "automerge": null, "babysit": null,
+               "claim": null, "note": MERGED_NOTE, "github": github})
+    } else {
+        json!({"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "via": "github"},
+               "babysit": null})
+    }
+}
+
 /// Move each pr-open or needs-human job whose pull request GitHub reports merged to merged, and
 /// queue a close for each whose pull request GitHub reports closed. One gh api graphql call per
 /// repo, and one board write for the whole pass.
@@ -127,18 +142,7 @@ pub(super) fn pr_sync_pass(
                 outln!(io, "would sync {line}");
                 continue;
             }
-            let patch = if merged {
-                let mut github = json!({"merged": now()});
-                if let Some(head) = head.as_str().filter(|h| COMMIT.is_full(h)) {
-                    github["head"] = head.into();
-                }
-                json!({"stage": "merged", "needs": null, "automerge": null, "babysit": null,
-                       "claim": null, "note": MERGED_NOTE, "github": github})
-            } else {
-                json!({"close": {"reason": GITHUB_CLOSE_REASON, "at": now(), "via": "github"},
-                       "babysit": null})
-            };
-            pending.push((j, patch, line));
+            pending.push((j, pr_sync_patch(merged, head), line));
         }
     }
     if pending.is_empty() {
