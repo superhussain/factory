@@ -3165,6 +3165,28 @@ mod idle_watch_test {
     }
 
     #[test]
+    fn test_failed_pr_lookup_still_prompts() {
+        let (fx, p) = setup();
+        github(&fx, &[]);
+        fx.set_fakes(|f| f.pr_states = Some(Rc::new(|_, _, _| Err("synthetic".into()))));
+        export_job(&fx, json!({"pr": PR7}));
+        fx.pickup(&[]);
+        age(&fx, &["since"]);
+        assert_eq!(
+            fx.pickup(&[]),
+            out_err(
+                0,
+                &format!("nudged idle {LINE}\n"),
+                "pickup skips the idle PR check for sample/alpha: synthetic\n"
+            )
+        );
+        assert_eq!(
+            p.sent(),
+            [("synthetic-agent".to_string(), NUDGE.to_string())]
+        );
+    }
+
+    #[test]
     fn test_dry_run_writes_nothing() {
         let (fx, p) = setup();
         export_job(&fx, json!({}));
