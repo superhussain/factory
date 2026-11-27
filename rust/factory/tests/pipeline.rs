@@ -44,14 +44,8 @@ fn every_role_carries_the_preferences_sentence() {
 
 #[test]
 fn skill_rechecks_the_pipeline_before_every_merge() {
-    let text = read("SKILL.md");
-    let merge = text
-        .split("- Merging an APPROVE PR:")
-        .nth(1)
-        .unwrap()
-        .split(" - Jobs at `pr-open`")
-        .next()
-        .unwrap();
+    let text = read("references/execution.md");
+    let merge = text.split("## Merging an APPROVE PR").nth(1).unwrap();
     assert!(merge
         .contains("Immediately before every `pr-merge`, run `factory pipeline \"$SLUG\"` again"));
     assert!(merge.contains("When `$PIPELINE.merge` is `human`, patch `automerge` false"));
