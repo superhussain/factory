@@ -104,9 +104,6 @@ pub(crate) fn run_child(home: &Path) -> Res<()> {
     let mut out = Vec::new();
     let result = catch_up::catch_up_to(&mut out);
     let _ = io::stdout().write_all(&out);
-    if let Err(e) = &result {
-        let _ = io::stderr().write_all(e.stderr.as_bytes());
-    }
     let code = result.as_ref().err().map_or(0, |e| e.code);
     let out = String::from_utf8_lossy(&out);
     let last = result
