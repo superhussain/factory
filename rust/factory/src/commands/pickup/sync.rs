@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeSet;
 
 /// The PR URL parts of a job pickup may sync: pr-open or needs-human, not closing, not a rider.
 pub(super) fn sync_match(j: &Value) -> Option<(String, String)> {
@@ -61,7 +62,7 @@ pub(super) fn pr_sync_patch(merged: bool, head: &Value) -> Value {
 
 /// Move each pr-open or needs-human job whose pull request GitHub reports merged to merged, and
 /// queue a close for each whose pull request GitHub reports closed. One gh api graphql call per
-/// repo, and one board write for the whole pass.
+/// repo, and one board write for the whole pass. Returns the ids whose pull request it looked up.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn pr_sync_pass(
     io: &mut Io,
@@ -72,7 +73,7 @@ pub(super) fn pr_sync_pass(
     paths: &[(String, String)],
     settings: &mut Cache,
     dry: bool,
-) -> Res<()> {
+) -> Res<BTreeSet<String>> {
     let mut repos = HashMap::new();
     let mut groups: Vec<(String, Vec<(Value, u64)>)> = Vec::new();
     for j in ops::board_jobs(data)?.to_vec() {
@@ -101,6 +102,7 @@ pub(super) fn pr_sync_pass(
             None => groups.push((repo, vec![entry])),
         }
     }
+    let mut handled = BTreeSet::new();
     let mut pending: Vec<(Value, Value, String)> = Vec::new();
     for (repo, mut jobs) in groups {
         if jobs.len() > PR_SYNC_LIMIT {
@@ -119,6 +121,7 @@ pub(super) fn pr_sync_pass(
                 continue;
             }
         };
+        handled.extend(jobs.iter().map(|(j, _)| text_of(j.get("id"))));
         for (j, n) in jobs {
             let Some((state, head)) = states.get(&n) else {
                 continue;
@@ -146,7 +149,7 @@ pub(super) fn pr_sync_pass(
         }
     }
     if pending.is_empty() {
-        return Ok(());
+        return Ok(handled);
     }
     let rows = cas(home, "/api/board", |text| {
         let mut board = load_board(text)?;
@@ -176,7 +179,7 @@ pub(super) fn pr_sync_pass(
         }
         outln!(io, "synced {line}");
     }
-    Ok(())
+    Ok(handled)
 }
 
 /// The project file's auto_babysit as an int from 1 to 9, else 0.
