@@ -3509,6 +3509,117 @@ mod idle_watch_test {
     }
 
     #[test]
+    fn test_listed_host_dry_run_syncs_needs_human_once() {
+        let (fx, _p) = setup();
+        github(&fx, &[(7, "MERGED")]);
+        needs_human(&fx, json!({}));
+        let (code, out, _) = fx.pickup(&["--dry-run"]);
+        assert_eq!(code, 0);
+        assert!(out.contains("would sync 042-sample-export alpha: merged on GitHub\n"));
+        assert!(!out.contains("would sync idle"), "{out}");
+    }
+
+    #[test]
+    fn test_open_pr_is_looked_up_once() {
+        let (fx, _p) = setup();
+        github(&fx, &[(7, "OPEN")]);
+        let lookups = Rc::new(RefCell::new(0));
+        let counter = lookups.clone();
+        fx.set_fakes(|f| {
+            f.pr_states = Some(Rc::new(move |_, numbers, _| {
+                *counter.borrow_mut() += 1;
+                Ok(numbers
+                    .iter()
+                    .map(|n| (*n, (json!("OPEN"), Value::Null)))
+                    .collect())
+            }))
+        });
+        needs_human(&fx, json!({}));
+        let (code, _, _) = fx.pickup(&[]);
+        assert_eq!(code, 0);
+        assert_eq!(*lookups.borrow(), 1);
+    }
+
+    /// Write decision.md and check a dry run, then a real run, close the job from it.
+    fn closes_from_decision(fx: &Fx) {
+        let folder = fx.home.join("jobs/alpha/042-sample-export");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("decision.md"), "CLOSED: superseded by 043\n").unwrap();
+        let (code, out, _) = fx.pickup(&["--dry-run"]);
+        assert_eq!(code, 0);
+        assert!(
+            out.contains("would close idle 042-sample-export alpha: superseded by 043\n"),
+            "{out}"
+        );
+        assert!(fx.puts().is_empty());
+        let (code, out, _) = fx.pickup(&[]);
+        assert_eq!(code, 0);
+        assert!(
+            out.contains("closed idle 042-sample-export alpha: superseded by 043\n"),
+            "{out}"
+        );
+        let job = fx.job("042-sample-export");
+        assert_eq!(job["stage"], "closed");
+        assert_eq!(job["note"], "superseded by 043");
+        assert_eq!(job["decision"]["verdict"], "CLOSED");
+        assert!(is_stamp(&job["close"]["closed"]));
+        assert!(job.get("needs").is_none() && job.get("claim").is_none());
+    }
+
+    #[test]
+    fn test_needs_human_closed_decision_closes_job() {
+        let (fx, _p) = setup();
+        github(&fx, &[(7, "OPEN")]);
+        needs_human(&fx, json!({}));
+        closes_from_decision(&fx);
+    }
+
+    #[test]
+    fn test_needs_human_closed_decision_without_pr() {
+        let (fx, _p) = setup();
+        needs_human(&fx, json!({"pr": null}));
+        closes_from_decision(&fx);
+    }
+
+    #[test]
+    fn test_needs_human_closed_decision_leaves_other_jobs() {
+        let (fx, p) = setup();
+        github(&fx, &[(7, "OPEN")]);
+        let folder = fx.home.join("jobs/alpha/042-sample-export");
+        fs::create_dir_all(&folder).unwrap();
+        for (name, extra) in [
+            ("approve", json!({})),
+            ("running", json!({})),
+            (
+                "other claim",
+                json!({"claim": {"device": "other-host", "session": "a1b2c3", "since": "2026-01-01T10:00:00Z"}}),
+            ),
+            (
+                "other server",
+                json!({"paseo": {"server": "other-server", "agent": "synthetic-agent"}}),
+            ),
+            (
+                "queued close",
+                json!({"close": {"at": "2026-01-02T12:00:00Z"}}),
+            ),
+        ] {
+            let decision = if name == "approve" {
+                "APPROVE\n"
+            } else {
+                "CLOSED: superseded by 043\n"
+            };
+            fs::write(folder.join("decision.md"), decision).unwrap();
+            *p.statuses.borrow_mut() = agents(&[(
+                "synthetic-agent",
+                if name == "running" { "running" } else { "idle" },
+            )]);
+            needs_human(&fx, extra);
+            let (_, out, _) = fx.pickup(&[]);
+            assert!(!out.contains("closed idle"), "{name}: {out}");
+        }
+    }
+
+    #[test]
     fn test_idle_sync_refreshes_rows_for_later_passes() {
         let (fx, _p) = setup();
         set_cap(&fx);
@@ -12519,6 +12630,7 @@ mod board_jobs_test {
                 }
                 "PR state sync" => {
                     pr_sync_pass(io, home, &mut data, DEVICE, 120, &paths, settings, false)
+                        .map(drop)
                 }
                 _ => auto_babysit_pass(io, home, &mut data, DEVICE, 120, &paths, settings, false),
             };
