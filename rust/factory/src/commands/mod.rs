@@ -5,6 +5,7 @@ pub mod catch_up;
 pub mod checks;
 pub mod claims;
 pub mod daemon;
+pub mod daemon_catch_up;
 pub mod ghpoll;
 pub mod heartbeat;
 pub mod install;
