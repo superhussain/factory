@@ -1106,13 +1106,17 @@ fn check_path(value: &str) -> Option<&'static str> {
 }
 
 pub fn catch_up(_call: &Call) -> Res<()> {
+    catch_up_to(&mut io::stdout().lock())
+}
+
+/// `factory catch-up` with its output on out.
+pub(crate) fn catch_up_to(out: &mut dyn Write) -> Res<()> {
     let home = factory_home()?;
     let exe = std::env::current_exe()
         .and_then(|p| resolve(&p))
         .map_err(|e| fail(os_error(&e, None), 1))?;
     let here = exe.parent().unwrap_or(Path::new("/"));
-    let stdout = io::stdout();
-    catch_up_cmd(&mut stdout.lock(), &home, here)
+    catch_up_cmd(out, &home, here)
 }
 
 /// Bring this host to origin's skill, pickup timer and Worker, backing up before any local write.

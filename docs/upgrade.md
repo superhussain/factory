@@ -90,7 +90,7 @@ See [device.md](device.md) for the installer's lock and backup rules.
 Settings, Hosts flags a host whose `bundle_behind_since` is more than a day
 old. Reinstall that host first.
 
-Nothing runs catch-up on its own. Pickup and the daemon report `bundle_behind_since` in each heartbeat, but they never install. A host keeps its bundle until someone runs catch-up on that host, so run it on every pickup host after a merge to main.
+On macOS (launchd) and cron hosts the daemon runs catch-up on its own. After a pass that launched nothing, it starts `factory daemon catch-up` when the installed bundle has lacked a merge on origin's base for 30 minutes and no `factory <id>` or `babysit <id>` agent runs. It first records that origin commit in `<home>/logs/daemon/catch-up.json`, so each commit gets one try; delete the file to allow another. The run is detached, so catch-up's own daemon restart does not end it. Its output goes to the day log, and it appends `catch-up exited <code>: <last line>` to `<home>/logs/daemon.log`. On systemd and Windows hosts, run catch-up by hand after a merge to main.
 
 Install hooks are approved only for esbuild `0.28.2` and workerd `1.20261023.1`;
 fsevents `2.3.3` is denied. Do not broaden approval to repair an installation.
