@@ -1,4 +1,5 @@
 use super::*;
+use crate::shared::project::{safe_job_folder, valid_job_target};
 use std::collections::BTreeSet;
 
 /// The jobs dict of <home>/idle-watch.json, {} when the file is missing or malformed.
@@ -263,24 +264,17 @@ fn idle_finished(
 /// Close each job whose decision.md in this host's job folder starts with CLOSED:, with the
 /// reason from its first line, and swap the written rows into data. The write needs stage
 /// needs-human, the same claim device as the read row and no queued close. A dry run prints the
-/// closes without writing.
-fn close_decided(
-    io: &mut Io,
-    home: &Path,
-    data: &mut Value,
-    device: &str,
-    dry: bool,
-    jobs: &[Value],
-) -> Res<()> {
-    let _ = device;
+/// closes without writing. A job folder whose paths hold a link is skipped.
+fn close_decided(io: &mut Io, home: &Path, data: &mut Value, dry: bool, jobs: &[Value]) -> Res<()> {
     for j in jobs {
         let (job_id, project) = (get_str(j, "id").unwrap(), get_str(j, "project").unwrap());
-        let Ok(text) = fs::read_to_string(
-            home.join("jobs")
-                .join(project)
-                .join(job_id)
-                .join("decision.md"),
-        ) else {
+        if !valid_job_target(project, job_id) {
+            continue;
+        }
+        let Ok(folder) = safe_job_folder(home, project, job_id) else {
+            continue;
+        };
+        let Ok(text) = fs::read_to_string(folder.join("decision.md")) else {
             continue;
         };
         let Some(rest) = text.strip_prefix("CLOSED:") else {
@@ -401,7 +395,7 @@ pub(super) fn needs_human_recheck_pass(
         .into_iter()
         .filter(|j| !finished.contains(get_str(j, "id").unwrap()))
         .collect();
-    close_decided(io, home, data, device, dry, &rest)
+    close_decided(io, home, data, dry, &rest)
 }
 
 /// Prompt the idle Paseo agent of each in-flight job claimed on this host once its worktree and

@@ -3582,6 +3582,42 @@ mod idle_watch_test {
     }
 
     #[test]
+    fn test_needs_human_closed_decision_reason_fallback_and_cut() {
+        let (fx, _p) = setup();
+        let folder = fx.home.join("jobs/alpha/042-sample-export");
+        fs::create_dir_all(&folder).unwrap();
+        for (decision, reason) in [
+            ("CLOSED:\n".to_string(), "closed in decision.md".to_string()),
+            (format!("CLOSED: {}\n", "x".repeat(250)), "x".repeat(200)),
+        ] {
+            fs::write(folder.join("decision.md"), decision).unwrap();
+            needs_human(&fx, json!({"pr": null}));
+            let (code, out, _) = fx.pickup(&[]);
+            assert_eq!(code, 0);
+            assert!(
+                out.contains(&format!("closed idle 042-sample-export alpha: {reason}\n")),
+                "{out}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_needs_human_closed_decision_skips_linked_job_folder() {
+        let (fx, _p) = setup();
+        let target = fx.root.join("linked-job");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("decision.md"), "CLOSED: superseded by 043\n").unwrap();
+        fs::create_dir_all(fx.home.join("jobs/alpha")).unwrap();
+        std::os::unix::fs::symlink(&target, fx.home.join("jobs/alpha/042-sample-export")).unwrap();
+        needs_human(&fx, json!({"pr": null}));
+        let (code, out, _) = fx.pickup(&[]);
+        assert_eq!(code, 0);
+        assert!(!out.contains("closed idle"), "{out}");
+        assert_eq!(fx.job("042-sample-export")["stage"], "needs-human");
+    }
+
+    #[test]
     fn test_needs_human_closed_decision_leaves_other_jobs() {
         let (fx, p) = setup();
         github(&fx, &[(7, "OPEN")]);
