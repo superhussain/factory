@@ -90,6 +90,8 @@ See [device.md](device.md) for the installer's lock and backup rules.
 Settings, Hosts flags a host whose `bundle_behind_since` is more than a day
 old. Reinstall that host first.
 
+Nothing runs catch-up on its own. Pickup and the daemon report `bundle_behind_since` in each heartbeat, but they never install. A host keeps its bundle until someone runs catch-up on that host, so run it on every pickup host after a merge to main.
+
 Install hooks are approved only for esbuild `0.28.2` and workerd `1.20261023.1`;
 fsevents `2.3.3` is denied. Do not broaden approval to repair an installation.
 To roll back dependencies, return to the previous reviewed checkout, remove
