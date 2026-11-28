@@ -4,7 +4,8 @@
 //! no pass. It also keeps the board mirror (`mirror.rs`) current from the socket's rows frames and
 //! serves it to this host's commands, sends the host status heartbeat every 5 minutes, pushes
 //! the retro digest at the retro-push timer's times, in place of that timer, and syncs this host's
-//! active job folders with R2 as they change (`job_sync.rs`).
+//! active job folders with R2 as they change (`job_sync.rs`). After a pass that launched nothing,
+//! it may start a detached catch-up when the installed bundle is behind (`daemon_catch_up.rs`).
 
 use std::collections::hash_map::RandomState;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -25,6 +26,7 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{HandshakeError, Message, WebSocket};
 
 use crate::cli::Call;
+use crate::commands::daemon_catch_up;
 use crate::commands::job_sync;
 use crate::commands::mirror::{self, Mirror};
 use crate::shared::conf::read_conf;
@@ -166,8 +168,9 @@ pub fn daemon(call: &Call) -> Res<()> {
     match call.args.first().map(String::as_str) {
         None => run(&factory_home()?),
         Some("setup") => crate::commands::pickup::daemon_setup_cmd(&call.args[1..]),
+        Some("catch-up") if call.args.len() == 1 => daemon_catch_up::run_child(&factory_home()?),
         Some(_) => Err(fail(
-            "usage: daemon | daemon setup [--install | --uninstall]",
+            "usage: daemon | daemon setup [--install | --uninstall] | daemon catch-up",
             2,
         )),
     }
@@ -265,6 +268,14 @@ fn run(home: &Path) -> Res<()> {
             log_line(&home, &format!("pickup exited {code}"));
             if !terminal {
                 eprintln!("{} pickup exited {code}", now());
+            }
+            if !stopped && launched == 0 {
+                daemon_catch_up::maybe_start(&exe, &home, &running_agents, &|msg| {
+                    log_line(&home, msg);
+                    if !terminal {
+                        eprintln!("{} {msg}", now());
+                    }
+                });
             }
             if stopped {
                 ControlFlow::Break(())
@@ -1257,6 +1268,21 @@ mod tests {
             seen
         });
         (Driver { clock, lines }, serving)
+    }
+
+    #[test]
+    fn daemon_catch_up_takes_no_args() {
+        let call = Call {
+            args: vec!["catch-up".into(), "x".into()],
+            agents: None,
+            connection: None,
+        };
+        let e = daemon(&call).unwrap_err();
+        assert_eq!(e.code, 2);
+        assert_eq!(
+            e.stderr,
+            "usage: daemon | daemon setup [--install | --uninstall] | daemon catch-up\n"
+        );
     }
 
     /// A real SIGTERM to the daemon: it logs the stop line, sends the Worker a close frame and
