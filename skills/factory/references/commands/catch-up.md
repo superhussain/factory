@@ -14,6 +14,8 @@ CLICOLOR_FORCE, are stripped before the run JSON is read. A factory timer (cront
 `runtime/paseo_stalls.py` is rewritten to run the binary, with one `timers:` line each. The checkout is fast-forwarded only when it is clean and on its base branch.
 A run with nothing new writes nothing and ends `catch-up: nothing new`.
 
+Nothing runs catch-up on its own. Pickup and the daemon report `bundle_behind_since` in each heartbeat, but they never install. A host keeps its bundle until someone runs catch-up on that host, so run it on every pickup host after a merge to main.
+
 Exit 0 means done or nothing new, 1 a step failed, 2 bad usage or a run from the
 checkout itself, 5 the fetch failed.
 
