@@ -466,6 +466,15 @@ daemon is the host's only pickup scheduler and no pickup timer exists.
 - On a cron-only host the crontab's `@reboot` and `*/5` lines only start a dead
   daemon; they never run pickup. launchd, systemd and the Windows loop restart
   it themselves.
+- On macOS (launchd) and cron hosts the daemon runs catch-up on its own. After
+  a pass that launched nothing, it starts `factory daemon catch-up` when the
+  installed bundle has lacked a merge on origin's base for 30 minutes and no
+  `factory <id>` or `babysit <id>` agent runs. It first records that origin
+  commit in `<home>/logs/daemon/catch-up.json`, so each commit gets one try;
+  delete the file to allow another. The run is detached, so catch-up's own
+  daemon restart does not end it. Its output goes to the day log, and it
+  appends `catch-up exited <code>: <last line>` to `<home>/logs/daemon.log`. On
+  systemd and Windows hosts, run catch-up by hand after a merge to main.
 - The daemon also syncs the folders of active jobs (past idea, not merged or
   closed) that exist on this host. It scans them every 2 s and pushes a folder
   through `push`'s own code once it has been still for 3 s and differs from its

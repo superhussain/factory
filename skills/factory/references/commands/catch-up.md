@@ -14,7 +14,7 @@ CLICOLOR_FORCE, are stripped before the run JSON is read. A factory timer (cront
 `runtime/paseo_stalls.py` is rewritten to run the binary, with one `timers:` line each. The checkout is fast-forwarded only when it is clean and on its base branch.
 A run with nothing new writes nothing and ends `catch-up: nothing new`.
 
-Nothing runs catch-up on its own. Pickup and the daemon report `bundle_behind_since` in each heartbeat, but they never install. A host keeps its bundle until someone runs catch-up on that host, so run it on every pickup host after a merge to main.
+On macOS (launchd) and cron hosts the daemon runs catch-up on its own. After a pass that launched nothing, it starts `factory daemon catch-up` when the installed bundle has lacked a merge on origin's base for 30 minutes and no `factory <id>` or `babysit <id>` agent runs. It first records that origin commit in `<home>/logs/daemon/catch-up.json`, so each commit gets one try; delete the file to allow another. The run is detached, so catch-up's own daemon restart does not end it. Its output goes to the day log, and it appends `catch-up exited <code>: <last line>` to `<home>/logs/daemon.log`. On systemd and Windows hosts, run catch-up by hand after a merge to main.
 
 Exit 0 means done or nothing new, 1 a step failed, 2 bad usage or a run from the
 checkout itself, 5 the fetch failed.
