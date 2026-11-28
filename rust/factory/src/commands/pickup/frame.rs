@@ -529,7 +529,7 @@ pub(super) fn host_os() -> &'static str {
 }
 
 /// {commit, tree} from the bundle.json `factory install` writes beside the runtime, or None.
-pub(super) fn bundle_stamp() -> Option<Value> {
+pub(crate) fn bundle_stamp() -> Option<Value> {
     #[cfg(test)]
     if let Some(f) = fake!(bundle_stamp) {
         return f();
@@ -540,6 +540,11 @@ pub(super) fn bundle_stamp() -> Option<Value> {
 /// When the first merge on origin's base that commit lacks landed, from the first checkout
 /// holding commit. None when commit is current or no checkout holds it.
 pub(super) fn bundle_behind_since(home: &Path, commit: &str) -> Option<String> {
+    bundle_behind(home, commit).map(|(since, _)| since)
+}
+
+/// bundle_behind_since's stamp and the origin base's commit in that checkout.
+pub(crate) fn bundle_behind(home: &Path, commit: &str) -> Option<(String, String)> {
     let mut paths = paths_of(home).ok()?;
     paths.sort();
     for (slug, repo) in paths {
@@ -564,7 +569,7 @@ pub(super) fn bundle_behind_since(home: &Path, commit: &str) -> Option<String> {
         return words(&log)
             .last()
             .and_then(|t| t.parse::<i64>().ok())
-            .map(format_stamp);
+            .map(|t| (format_stamp(t), git(repo, &["rev-parse", &origin])));
     }
     None
 }

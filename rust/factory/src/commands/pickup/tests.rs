@@ -33,6 +33,61 @@ fn host_os_labels_each_platform() {
     assert_eq!(os, "Other");
 }
 
+#[test]
+fn bundle_behind_returns_origin_tip() {
+    let dir = crate::shared::fs::temp_dir("pickup-behind");
+    let repo = dir.join("studio");
+    fs::create_dir(&repo).unwrap();
+    let git = |args: &[&str], date: Option<&str>| {
+        let mut c = Command::new("git");
+        c.arg("-C")
+            .arg(&repo)
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+            ])
+            .args(args);
+        if let Some(date) = date {
+            c.env("GIT_COMMITTER_DATE", date);
+        }
+        let out = c.output().unwrap();
+        assert!(out.status.success(), "git {args:?}");
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+    git(&["init", "-q"], None);
+    let mut commits = Vec::new();
+    for date in [
+        "2025-12-29T16:00:00Z",
+        "2025-12-30T14:00:00Z",
+        "2026-01-01T06:00:00Z",
+    ] {
+        git(&["commit", "-q", "--allow-empty", "-m", date], Some(date));
+        commits.push(git(&["rev-parse", "HEAD"], None));
+    }
+    git(
+        &["update-ref", "refs/remotes/origin/main", &commits[2]],
+        None,
+    );
+    fs::write(
+        dir.join("paths.md"),
+        format!("---\nstudio: {}\n---\n", repo.display()),
+    )
+    .unwrap();
+    assert_eq!(
+        bundle_behind(&dir, &commits[0]),
+        Some(("2025-12-30T14:00:00Z".to_string(), commits[2].clone()))
+    );
+    assert_eq!(
+        bundle_behind_since(&dir, &commits[0]).as_deref(),
+        Some("2025-12-30T14:00:00Z")
+    );
+    assert_eq!(bundle_behind(&dir, &commits[2]), None);
+    assert_eq!(bundle_behind(&dir, &"0".repeat(40)), None);
+    fs::remove_dir_all(dir).unwrap();
+}
+
 const DEVICE: &str = "host-a";
 const IDEA_TEXT: &str = "$(touch pwned)";
 const PLACEHOLDERS: [&str; 10] = [

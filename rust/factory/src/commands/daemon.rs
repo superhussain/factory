@@ -879,7 +879,7 @@ fn wait_closed(rx: &Receiver<Event>, t: &Timing) {
 
 /// Today's log, `<home>/logs/daemon/<UTC date>.log`, opened for append and created 0600, and its
 /// path.
-fn day_log(home: &Path) -> io::Result<(File, std::path::PathBuf)> {
+pub(crate) fn day_log(home: &Path) -> io::Result<(File, std::path::PathBuf)> {
     let dir = home.join("logs").join("daemon");
     std::fs::create_dir_all(&dir)?;
     let mut options = OpenOptions::new();

@@ -47,7 +47,7 @@ pub(super) fn is_dir(p: &str) -> bool {
     Path::new(p).is_dir()
 }
 
-pub(super) fn read_json(p: &Path) -> Option<Value> {
+pub(crate) fn read_json(p: &Path) -> Option<Value> {
     loads(&read_text(p).ok()?).ok()
 }
 
@@ -254,7 +254,7 @@ pub(super) fn strerror(e: &io::Error) -> String {
 }
 
 /// Start cmd in its own session so it outlives pickup: `start_new_session=True`.
-pub(super) fn detach(cmd: &mut Command) {
+pub(crate) fn detach(cmd: &mut Command) {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
