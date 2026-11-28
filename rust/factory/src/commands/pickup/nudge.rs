@@ -260,21 +260,103 @@ fn idle_finished(
     Ok(done)
 }
 
-/// Sync each needs-human job with a GitHub pr whose Paseo agent on this host's server is idle,
-/// closed or gone, through idle_finished, even when the project's pickup setting skips its PR sync.
+/// Close each job whose decision.md in this host's job folder starts with CLOSED:, with the
+/// reason from its first line, and swap the written rows into data. The write needs stage
+/// needs-human, the same claim device as the read row and no queued close. A dry run prints the
+/// closes without writing.
+fn close_decided(
+    io: &mut Io,
+    home: &Path,
+    data: &mut Value,
+    device: &str,
+    dry: bool,
+    jobs: &[Value],
+) -> Res<()> {
+    let _ = device;
+    for j in jobs {
+        let (job_id, project) = (get_str(j, "id").unwrap(), get_str(j, "project").unwrap());
+        let Ok(text) = fs::read_to_string(
+            home.join("jobs")
+                .join(project)
+                .join(job_id)
+                .join("decision.md"),
+        ) else {
+            continue;
+        };
+        let Some(rest) = text.strip_prefix("CLOSED:") else {
+            continue;
+        };
+        let reason: String = rest
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .take(200)
+            .collect();
+        let reason = if reason.is_empty() {
+            "closed in decision.md".to_string()
+        } else {
+            reason
+        };
+        let line = format!("idle {job_id} {project}: {reason}");
+        if dry {
+            outln!(io, "would close {line}");
+            continue;
+        }
+        let decider =
+            crate::commands::pipeline::decision_verdict(&text).unwrap()["decider"].clone();
+        let row = cas(home, "/api/board", |text| {
+            let mut board = load_board(text)?;
+            let Some(b) = job_index(&board, job_id) else {
+                return Ok((None, None));
+            };
+            let found = &board["jobs"][b];
+            if get_str(found, "stage") != Some("needs-human")
+                || claim_device(found) != claim_device(j)
+                || closing(found)
+            {
+                return Ok((None, None));
+            }
+            board["jobs"][b]
+                .as_object_mut()
+                .unwrap()
+                .shift_remove("claim");
+            let row = patch_job(
+                &mut board,
+                job_id,
+                &json!({"stage": "closed", "note": reason, "needs": null, "close": {"closed": now()},
+                    "decision": {"verdict": "CLOSED", "decider": decider, "at": now()}}),
+            );
+            Ok((Some(dump_board(&board)), Some(row)))
+        })?;
+        if let Some(row) = row {
+            let jobs = data["jobs"].as_array_mut().unwrap();
+            if let Some(slot) = jobs.iter_mut().find(|x| *x == j) {
+                *slot = row;
+            }
+            outln!(io, "closed {line}");
+        }
+    }
+    Ok(())
+}
+
+/// For each needs-human job whose Paseo agent on this host's server is idle, closed or gone: sync
+/// one with a GitHub pr the PR sync did not look up in this run through idle_finished, even when
+/// the project's pickup setting skips its PR sync, then close the rest through close_decided.
 pub(super) fn needs_human_recheck_pass(
     io: &mut Io,
     home: &Path,
     data: &mut Value,
     device: &str,
     dry: bool,
+    handled: &BTreeSet<String>,
 ) -> Res<()> {
     let Some(server) = host_paseo_server() else {
         return Ok(());
     };
     let due = |j: &Value| {
         get_str(j, "stage") == Some("needs-human")
-            && get_str(j, "pr").is_some_and(|pr| GH_PR_PARTS.fullmatch(pr).is_some())
             && j.get("paseo")
                 .filter(|l| l.is_object())
                 .and_then(|l| get_str(l, "server"))
@@ -306,8 +388,20 @@ pub(super) fn needs_human_recheck_pass(
             matches!(status.as_deref(), None | Some("idle" | "closed"))
         })
         .collect();
-    idle_finished(io, home, data, device, dry, &quiet)?;
-    Ok(())
+    let unsynced: Vec<Value> = quiet
+        .iter()
+        .filter(|j| {
+            get_str(j, "pr").is_some_and(|pr| GH_PR_PARTS.fullmatch(pr).is_some())
+                && !handled.contains(get_str(j, "id").unwrap())
+        })
+        .cloned()
+        .collect();
+    let finished = idle_finished(io, home, data, device, dry, &unsynced)?;
+    let rest: Vec<Value> = quiet
+        .into_iter()
+        .filter(|j| !finished.contains(get_str(j, "id").unwrap()))
+        .collect();
+    close_decided(io, home, data, device, dry, &rest)
 }
 
 /// Prompt the idle Paseo agent of each in-flight job claimed on this host once its worktree and
